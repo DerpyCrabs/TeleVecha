@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { openReady } from './helpers';
+
 test('signs in an existing account with phone and code', async ({ page }) => {
   await page.goto('/?scenario=auth');
   await expect(page.getByRole('heading', { name: 'Your phone number' })).toBeVisible();
@@ -68,4 +70,40 @@ test('shows a useful connection failure and retries without a fake close button'
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByTestId('chat-list')).toBeVisible();
+});
+
+test('signs out, clears local account data, and returns to phone authentication', async ({
+  page,
+}) => {
+  await openReady(page);
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+  await settings.getByRole('button', { name: 'Sign out' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Your phone number' })).toBeVisible();
+  await expect(page.getByTestId('chat-list').locator('.chat-row')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const request = indexedDB.open('televecha-e2e');
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        const stores = ['dialogs', 'messages', 'drafts', 'outbox', 'files'];
+        const transaction = database.transaction(stores);
+        return Promise.all(
+          stores.map(
+            (name) =>
+              new Promise<number>((resolve, reject) => {
+                const count = transaction.objectStore(name).count();
+                count.onsuccess = () => resolve(count.result);
+                count.onerror = () => reject(count.error);
+              }),
+          ),
+        );
+      }),
+    )
+    .toEqual([0, 0, 0, 0, 0]);
 });

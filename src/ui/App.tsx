@@ -67,6 +67,7 @@ import { MessageActions } from './MessageActions';
 import { MessageBody } from './MessageBody';
 import { albumSafeMessageWindow } from './messageWindow';
 import { SearchPanel } from './SearchPanel';
+import { SettingsDialog } from './SettingsDialog';
 import { safeExternalUrl } from './safeUrl';
 import { SharedMediaPanel } from './SharedMediaPanel';
 import { stageAttachment, type StagedAttachment } from './outgoingAttachments';
@@ -288,6 +289,8 @@ export function App() {
   const [conversationLoadError, setConversationLoadError] = createSignal('');
   const [conversationRetrying, setConversationRetrying] = createSignal(false);
   const [syncRetrying, setSyncRetrying] = createSignal(false);
+  const [loggingOut, setLoggingOut] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [pendingActionId, setPendingActionId] = createSignal('');
   const [messageWindowStart, setMessageWindowStart] = createSignal(0);
   const [jumpToPresentVisible, setJumpToPresentVisible] = createSignal(false);
@@ -546,6 +549,20 @@ export function App() {
       });
     return reuseArray(previous, next) as ChatSummary[];
   }, []);
+
+  createEffect(() => {
+    const badgeNavigator = navigator as Navigator & {
+      setAppBadge?: (contents?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
+    const unread = snapshot().dialogs.reduce(
+      (total, dialog) => total + Math.max(0, dialog.unreadCount),
+      0,
+    );
+    const update =
+      unread > 0 ? badgeNavigator.setAppBadge?.(unread) : badgeNavigator.clearAppBadge?.();
+    if (update) runInBackground(update);
+  });
 
   const activeChat = createMemo(() => {
     const listed = visibleChats().find((chat) => chat.id === activeChatId());
@@ -1049,6 +1066,22 @@ export function App() {
       if (engine.snapshot().online) await engine.retryOutbox();
     } finally {
       setSyncRetrying(false);
+    }
+  };
+
+  const logOut = async () => {
+    if (loggingOut()) return;
+    setLoggingOut(true);
+    try {
+      await engine.logOut();
+      setActiveChatId('empty');
+      setDraft('');
+      setDraftFormats([]);
+      setComposerAttachments([]);
+      setMobileSidebarOpen(false);
+    } finally {
+      setLoggingOut(false);
+      setSettingsOpen(false);
     }
   };
 
@@ -1841,6 +1874,8 @@ export function App() {
         );
       }
       for (const url of avatarUrls) URL.revokeObjectURL(url);
+      const badgeNavigator = navigator as Navigator & { clearAppBadge?: () => Promise<void> };
+      if (badgeNavigator.clearAppBadge) runInBackground(badgeNavigator.clearAppBadge());
       if (!import.meta.hot) runInBackground(engine.stop());
     });
   });
@@ -2595,6 +2630,10 @@ export function App() {
             const chat = visibleChats().find(({ id }) => id === peerId);
             if (chat) setDeleteChatTarget(chat);
           }}
+          openSettings={() => {
+            setMobileSidebarOpen(false);
+            setSettingsOpen(true);
+          }}
           closeMobile={() => setMobileSidebarOpen(false)}
           startResize={startLeftSidebarResize}
           resizeWithKeyboard={resizeLeftSidebarWithKeyboard}
@@ -3115,6 +3154,7 @@ export function App() {
                               class="pending-message-actions"
                               aria-label="Failed message actions"
                             >
+                              <p>{pending().lastError}</p>
                               <button
                                 disabled={Boolean(pendingActionId())}
                                 onClick={() => void retryPendingSend(pending().id)}
@@ -3464,6 +3504,14 @@ export function App() {
               confirm={(options) => void acceptBotUrlAuth(options)}
             />
           )}
+        </Show>
+
+        <Show when={settingsOpen()}>
+          <SettingsDialog
+            loggingOut={loggingOut()}
+            close={() => !loggingOut() && setSettingsOpen(false)}
+            logOut={() => void logOut()}
+          />
         </Show>
 
         <DetailsPane

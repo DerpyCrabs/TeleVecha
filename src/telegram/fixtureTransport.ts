@@ -354,6 +354,9 @@ export class FixtureTelegramTransport implements TelegramTransport {
     }
   }
   async disconnect() {}
+  async logOut() {
+    this.authorized = false;
+  }
   async isAuthorized() {
     return this.authorized;
   }

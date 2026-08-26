@@ -77,3 +77,17 @@ test('reconnects automatically when focus returns after a background disconnect'
     .poll(async () => (await fixtureStats(page))?.connect ?? 0)
     .toBeGreaterThan(connectsBefore);
 });
+
+test('reconnects automatically while the tab remains focused', async ({ page }) => {
+  await openReady(page);
+  const connectsBefore = (await fixtureStats(page))?.connect ?? 0;
+
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({ type: 'connection-state', connected: false }),
+  );
+
+  await expect
+    .poll(async () => (await fixtureStats(page))?.connect ?? 0, { timeout: 5_000 })
+    .toBeGreaterThan(connectsBefore);
+  await expect(page.getByText(/Offline.*connection was lost/i)).toHaveCount(0);
+});

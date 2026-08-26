@@ -2,7 +2,7 @@
 
 A local-first Telegram web client built with SolidJS, Vite+, Tailwind CSS, and the MTProto code vendored from Telegram Web A.
 
-The current client handles production-account login, complete main and archived dialog lists, Telegram-wide peer search, paginated history and message search, focus-aware read receipts, live updates, formatted text, replies, reactions, forwarding, pinning, bot controls, multi-file/photo uploads with progress, media albums, and Telegram sticker formats. IndexedDB stores a bounded disposable cache, local-only drafts, the Telegram session, and an account-bound durable send queue.
+The current client handles production-account login and logout, complete main and archived dialog lists, Telegram-wide peer search, paginated history and message search, focus-aware read receipts, live updates, formatted text, replies, reactions, forwarding, pinning, bot controls, multi-file/photo uploads with progress, media albums, and Telegram sticker formats. IndexedDB stores a bounded disposable cache, local-only drafts, the Telegram session, and an account-bound durable send queue. Installed builds cache their application shell for offline startup and publish the total unread count through the browser application-badge API when it is available.
 
 ## Run it
 
@@ -43,6 +43,7 @@ TeleVecha does not replay every update since the last time it ran.
 - On later starts, it atomically reconciles a bounded global difference of at most 100 PTS events and reconciles channels with their own PTS cursors.
 - If Telegram reports a larger gap, TeleVecha starts a new cache epoch, records the current cursor, and fetches current dialogs plus the newest page when you open a chat. Channel gaps invalidate only that channel's cached history.
 - If the connection drops after startup, cached chats remain readable and the UI offers an explicit reconnect. Sending stays disabled until Telegram is online.
+- While the app remains open, failed reconnects retry with exponential backoff up to 30 seconds.
 - Incoming messages are marked read only when their conversation is active, the window is focused and visible, no modal or mobile drawer obscures it, and the user is at the present edge.
 - Drafts never use Telegram cloud drafts.
 - Every outgoing item enters IndexedDB before network delivery. Retries reuse the same Telegram `random_id`; failed entries can be retried or cancelled and are never delivered under a different account.
@@ -57,6 +58,8 @@ npm run test:e2e
 npm run test:all
 npm run build
 ```
+
+Playwright uses port 4174 by default. Set `TELEVECHA_E2E_PORT` when that port is already in use.
 
 The unit suite covers the messaging engine, IndexedDB migrations and bounds, tab lease, and Telegram adapter mappings. The Playwright suite runs against a deterministic transport and a separate `televecha-e2e` database. It tests login and offline states, desktop and phone navigation, drafts, sends and failed-outbox recovery, focus-aware read receipts, uploads, lazy media caching, live edits and deletions, history/search/shared-media pagination, scroll anchoring and render bounds, modal focus, reload persistence, layout containment, and the two-tab lock. It never opens a production Telegram session.
 

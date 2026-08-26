@@ -453,6 +453,7 @@ export interface TelegramCredentials {
 export interface TelegramTransport {
   connect(credentials: TelegramCredentials): Promise<void>;
   disconnect(): Promise<void>;
+  logOut(): Promise<void>;
   isAuthorized(): Promise<boolean>;
   getAuthorizedAccountId(): Promise<string>;
   requestCode(phoneNumber: string): Promise<{ isCodeViaApp: boolean }>;

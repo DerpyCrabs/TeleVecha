@@ -41,7 +41,11 @@ const MAX_ACTIVE_MESSAGES = 5_000;
 const MAX_MESSAGE_MUTATIONS = 5_000;
 const HISTORY_RETRY_BASE_MS = 1_000;
 const HISTORY_RETRY_MAX_MS = 30_000;
+const RECONNECT_RETRY_BASE_MS = 1_000;
+const RECONNECT_RETRY_MAX_MS = 30_000;
 const MAX_ALBUM_ATTACHMENTS = 10;
+const MAX_MESSAGE_TEXT_LENGTH = 4_096;
+const MAX_CAPTION_TEXT_LENGTH = 1_024;
 const EXPRESSION_INDEX_CACHE_KEYS = [
   'sticker-index:recent:v2',
   'sticker-index:packs:v2',
@@ -130,6 +134,8 @@ export class MessagingEngine {
   private retryingSync: Promise<void> | undefined;
   private flushingOutbox: Promise<void> | undefined;
   private disconnecting: Promise<void> | undefined;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private reconnectAttempts = 0;
   private credentials: TelegramCredentials | undefined;
   private accountId: string | undefined;
   private cachedAccountId: string | undefined;
@@ -448,6 +454,7 @@ export class MessagingEngine {
 
   private async stopSession() {
     this.quiescing = true;
+    this.clearReconnectTimer();
     this.lifecycleGeneration += 1;
     this.selectionVersion += 1;
     for (const peerId of new Set([
@@ -1577,6 +1584,56 @@ export class MessagingEngine {
     }
   }
 
+  async logOut() {
+    let remoteError: unknown;
+    try {
+      await this.transport.logOut();
+    } catch (error) {
+      remoteError = error;
+      this.reportFailure('auth', 'Telegram could not revoke the remote session.', error);
+    }
+    await this.stop();
+    await this.store.clearAccountData();
+    this.accountId = undefined;
+    this.cachedAccountId = undefined;
+    this.mayClaimLegacyAccount = false;
+    this.hasReachedReady = false;
+    this.epoch = 0;
+    this.loadedHistories.clear();
+    this.historyOffsets.clear();
+    this.historyGaps.clear();
+    this.historyIssues.clear();
+    this.patch({
+      phase: 'idle',
+      sync: 'stale',
+      online: false,
+      dialogs: [],
+      messages: [],
+      drafts: {},
+      pending: [],
+      activePeerId: undefined,
+      loadingMessages: false,
+      hasOlderMessages: false,
+      loadingOlderMessages: false,
+      sharedMediaCounts: undefined,
+      pinnedMessages: [],
+      historyGaps: [],
+      activities: [],
+      authStep: undefined,
+      codeViaApp: undefined,
+      historyError: undefined,
+      historyRetryAt: undefined,
+      operationError: undefined,
+      error: undefined,
+    });
+    if (this.credentials) await this.start(this.credentials);
+    if (remoteError && this.snapshotValue.phase === 'unauthorized') {
+      this.patch({
+        error: `Signed out on this device, but Telegram could not revoke the remote session. ${this.errorMessage(remoteError)}`,
+      });
+    }
+  }
+
   async sendDraft(
     peer: TelegramPeer,
     text: string,
@@ -1584,6 +1641,7 @@ export class MessagingEngine {
     formats?: TelegramTextFormat[],
   ) {
     if (!text.trim()) return;
+    this.validateTextLength(text, MAX_MESSAGE_TEXT_LENGTH, 'message');
     const pending = this.capturePending({
       id: crypto.randomUUID(),
       accountId: this.accountId ?? this.cachedAccountId,
@@ -1593,6 +1651,7 @@ export class MessagingEngine {
       createdAt: Date.now(),
       queueOrder: this.nextQueueOrder(peer.id),
       attempts: 0,
+      ...(this.peerDeliveryBlocks.has(peer.id) ? { lastError: this.blockedSendMessage() } : {}),
       reply,
       formats,
     });
@@ -1642,6 +1701,8 @@ export class MessagingEngine {
     formats?: TelegramTextFormat[],
     sendAs: OutgoingAttachmentMode = 'media',
   ) {
+    this.validateTextLength(caption, MAX_CAPTION_TEXT_LENGTH, 'caption');
+    this.validateAttachment(file);
     const pending = this.capturePending({
       id: crypto.randomUUID(),
       accountId: this.accountId ?? this.cachedAccountId,
@@ -1676,6 +1737,8 @@ export class MessagingEngine {
     formats?: TelegramTextFormat[],
   ) {
     if (attachments.length === 0) return;
+    this.validateTextLength(caption, MAX_CAPTION_TEXT_LENGTH, 'caption');
+    for (const { file } of attachments) this.validateAttachment(file);
     const pending: PendingSend[] = [];
     const createdAt = Date.now();
     const accountId = this.accountId ?? this.cachedAccountId;
@@ -2494,6 +2557,8 @@ export class MessagingEngine {
     claimLegacyAccount = false,
     generation = this.lifecycleGeneration,
   ) {
+    this.clearReconnectTimer();
+    this.reconnectAttempts = 0;
     if (!(await this.confirmAuthorizedAccount(claimLegacyAccount, generation))) return;
     const accountId = this.accountId;
     if (!this.isOperationCurrent(generation, accountId)) return;
@@ -3701,13 +3766,19 @@ export class MessagingEngine {
   }
 
   private enqueuePending(pending: PendingSend) {
+    const blockedBy = this.peerDeliveryBlocks.get(pending.peer.id);
+    if (blockedBy && blockedBy !== pending.id) {
+      pending = this.capturePending({ ...pending, lastError: this.blockedSendMessage() });
+    }
     const generation = this.lifecycleGeneration;
     const accountId = pending.accountId;
     let delivery: Promise<void> | undefined;
     const operation = this.queueOutboxWrite(pending.peer.id, async () => {
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
       try {
-        await this.store.putPending(pending);
+        await this.writeOutboxWithQuotaRecovery(this.pendingBlobBytes(pending), () =>
+          this.store.putPending(pending),
+        );
       } catch (error) {
         if (this.isPendingOperationCurrent(generation, accountId)) {
           this.fail('cache', 'The message could not be saved to the send queue.', error, false);
@@ -3730,6 +3801,14 @@ export class MessagingEngine {
     draftReservation?: { peerId: string; text: string; revision?: number },
   ) {
     if (pending.length === 0) return Promise.resolve();
+    const blockedBy = this.peerDeliveryBlocks.get(pending[0]!.peer.id);
+    if (blockedBy) {
+      pending = pending.map((send) =>
+        send.id === blockedBy
+          ? send
+          : this.capturePending({ ...send, lastError: this.blockedSendMessage() }),
+      );
+    }
     const generation = this.lifecycleGeneration;
     const accountId = pending[0]!.accountId;
     const peerId = pending[0]!.peer.id;
@@ -3737,11 +3816,12 @@ export class MessagingEngine {
     const operation = this.queueOutboxWrite(peerId, async () => {
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
       try {
-        if (draftReservation) {
-          await this.reserveDraftBatch(pending, draftReservation);
-        } else {
-          await this.store.putPendingBatch(pending);
-        }
+        const bytes = pending.reduce((total, send) => total + this.pendingBlobBytes(send), 0);
+        await this.writeOutboxWithQuotaRecovery(bytes, () =>
+          draftReservation
+            ? this.reserveDraftBatch(pending, draftReservation)
+            : this.store.putPendingBatch(pending),
+        );
       } catch (error) {
         if (this.isPendingOperationCurrent(generation, accountId)) {
           this.fail('cache', 'The messages could not be saved to the send queue.', error, false);
@@ -3947,6 +4027,7 @@ export class MessagingEngine {
         return;
       }
       this.peerDeliveryBlocks.set(attempting.peer.id, attempting.id);
+      await this.markPeerQueueBlocked(attempting.peer.id, attempting.id);
       failure = { pending: failed, error };
     } finally {
       this.deliveringPending.delete(pending.id);
@@ -3999,6 +4080,67 @@ export class MessagingEngine {
         : undefined,
       album: albumAttachments ? Object.freeze({ attachments: albumAttachments }) : undefined,
     });
+  }
+
+  private pendingBlobBytes(pending: PendingSend) {
+    if (pending.attachment) return pending.attachment.blob.size;
+    return (
+      pending.album?.attachments.reduce((total, attachment) => total + attachment.blob.size, 0) ?? 0
+    );
+  }
+
+  private async writeOutboxWithQuotaRecovery(bytes: number, write: () => Promise<void>) {
+    await this.store.prepareOutboxWrite(bytes);
+    try {
+      await write();
+    } catch (error) {
+      if (!this.isQuotaError(error)) throw error;
+      await this.store.prepareOutboxWrite(bytes, true);
+      await write();
+    }
+  }
+
+  private isQuotaError(error: unknown) {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'name' in error &&
+      error.name === 'QuotaExceededError'
+    );
+  }
+
+  private validateTextLength(text: string, limit: number, label: string) {
+    if (text.length <= limit) return;
+    const error = new Error(`The ${label} is ${text.length} characters; Telegram allows ${limit}.`);
+    this.fail('outbox', `The ${label} was not queued.`, error, false);
+    throw error;
+  }
+
+  private validateAttachment(file: File) {
+    if (file.size > 0) return;
+    const error = new Error(`${file.name || 'The attachment'} is empty.`);
+    this.fail('outbox', 'The attachment was not queued.', error, false);
+    throw error;
+  }
+
+  private async markPeerQueueBlocked(peerId: string, blockedBy: string) {
+    const message = this.blockedSendMessage();
+    const blocked = this.snapshotValue.pending.filter(
+      (pending) => pending.peer.id === peerId && pending.id !== blockedBy && !pending.lastError,
+    );
+    if (blocked.length === 0) return;
+    const replacements = blocked.map((pending) =>
+      this.capturePending({ ...pending, lastError: message }),
+    );
+    await Promise.all(replacements.map((pending) => this.store.putPending(pending)));
+    const byId = new Map(replacements.map((pending) => [pending.id, pending]));
+    this.patch({
+      pending: this.snapshotValue.pending.map((pending) => byId.get(pending.id) ?? pending),
+    });
+  }
+
+  private blockedSendMessage() {
+    return 'Waiting for an earlier failed message. Retry or cancel that message first.';
   }
 
   private updateUploadProgress(id: string, progress: number) {
@@ -4174,6 +4316,31 @@ export class MessagingEngine {
       error: 'Telegram connection was lost. Reconnect to continue.',
     });
     void this.disconnectTransport().catch(() => undefined);
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer || this.quiescing || !this.credentials) return;
+    const generation = this.lifecycleGeneration;
+    const delay = Math.min(
+      RECONNECT_RETRY_MAX_MS,
+      RECONNECT_RETRY_BASE_MS * 2 ** this.reconnectAttempts,
+    );
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      if (!this.isLifecycleCurrent(generation) || this.snapshotValue.online) return;
+      void this.retrySync().finally(() => {
+        if (this.isLifecycleCurrent(generation) && !this.snapshotValue.online) {
+          this.scheduleReconnect();
+        }
+      });
+    }, delay);
+  }
+
+  private clearReconnectTimer() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
   }
 
   private canMarkRead(peerId: string) {

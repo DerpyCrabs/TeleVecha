@@ -90,12 +90,29 @@ class MemoryStore implements CacheStore {
   outbox: PendingSend[] = [];
   blobs = new Map<string, Blob>();
   lastPeerId: string | undefined;
+  preparedOutboxBytes: number[] = [];
 
   async loadTransportSession() {
     return this.transportSession;
   }
   async saveTransportSession(session: unknown) {
     this.transportSession = session;
+  }
+  async clearAccountData() {
+    this.transportSession = undefined;
+    this.accountId = undefined;
+    this.cursor = undefined;
+    this.epoch = 0;
+    this.dialogs = [];
+    this.messages = [];
+    this.drafts = {};
+    this.draftRevisions = {};
+    this.outbox = [];
+    this.blobs.clear();
+    this.lastPeerId = undefined;
+  }
+  async prepareOutboxWrite(bytes: number, _forceEviction?: boolean) {
+    this.preparedOutboxBytes.push(bytes);
   }
   async loadAccountId() {
     return this.accountId;
@@ -310,6 +327,9 @@ class FakeTransport implements TelegramTransport {
   async connect(_credentials: TelegramCredentials) {}
   async disconnect() {
     this.disconnectCalls += 1;
+  }
+  async logOut() {
+    this.authorized = false;
   }
   async isAuthorized() {
     return this.authorized;
@@ -3905,6 +3925,75 @@ describe('MessagingEngine', () => {
     await engine.stop();
   });
 
+  it('reconnects automatically after a live connection loss', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = new FakeTransport();
+      const connect = vi.spyOn(transport, 'connect');
+      const engine = new MessagingEngine(transport, new MemoryStore());
+      await engine.start(credentials);
+
+      transport.emit({ type: 'connection-state', connected: false });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(engine.snapshot()).toMatchObject({ phase: 'ready', online: false });
+
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(engine.snapshot()).toMatchObject({ phase: 'ready', online: true });
+      await engine.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('logs out remotely, clears account data, and returns to phone authentication', async () => {
+    const store = new MemoryStore();
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+    await engine.setDraft(peer.id, 'Private draft');
+    store.blobs.set('private-file', new Blob(['private']));
+
+    await engine.logOut();
+
+    expect(engine.snapshot()).toMatchObject({
+      phase: 'unauthorized',
+      online: false,
+      dialogs: [],
+      drafts: {},
+      pending: [],
+      authStep: 'phone',
+    });
+    expect(store.transportSession).toBeUndefined();
+    expect(store.accountId).toBeUndefined();
+    expect(store.blobs.size).toBe(0);
+    await engine.stop();
+  });
+
+  it('rejects oversized text before it can poison the peer queue', async () => {
+    const engine = new MessagingEngine(new FakeTransport(), new MemoryStore());
+    await engine.start(credentials);
+
+    await expect(engine.sendDraft(peer, 'x'.repeat(4_097))).rejects.toThrow('Telegram allows 4096');
+    expect(engine.snapshot().pending).toEqual([]);
+    expect(engine.snapshot().operationError).toContain('was not queued');
+    await engine.stop();
+  });
+
+  it('reserves browser storage for attachment bytes before enqueueing', async () => {
+    const store = new MemoryStore();
+    const engine = new MessagingEngine(new FakeTransport(), store);
+    await engine.start(credentials);
+
+    await engine.sendAttachment(
+      peer,
+      new File(['attachment'], 'attachment.txt', { type: 'text/plain' }),
+    );
+
+    expect(store.preparedOutboxBytes).toContain(10);
+    await engine.stop();
+  });
+
   it('keeps the newest pagination frontier after opening a far older message', async () => {
     class FarJumpTransport extends FakeTransport {
       async getHistoryAround() {
@@ -4672,6 +4761,9 @@ describe('MessagingEngine', () => {
 
     expect(transport.texts).toEqual(['First']);
     expect(engine.snapshot().pending.map(({ text }) => text)).toEqual(['First', 'Second']);
+    expect(engine.snapshot().pending.find(({ text }) => text === 'Second')?.lastError).toContain(
+      'earlier failed message',
+    );
 
     await engine.retryPendingSend(failedId);
     await vi.waitFor(() => expect(transport.texts).toEqual(['First', 'First', 'Second']));

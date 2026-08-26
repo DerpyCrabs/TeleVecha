@@ -15,6 +15,7 @@ test('keeps chat navigation and details reachable on a phone', async ({ page }) 
     .toBeGreaterThanOrEqual(0);
   await expect(sidebar).toHaveAttribute('role', 'dialog');
   await expect(sidebar).toBeFocused();
+  await expect(sidebar.getByRole('button', { name: 'Close chat list' })).toHaveCount(0);
   await expect(page.locator('.conversation-pane')).toHaveAttribute('inert', '');
 
   await page.keyboard.press('Escape');

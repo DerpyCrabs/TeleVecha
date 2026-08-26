@@ -178,6 +178,24 @@ test('collapses an excessively narrow chat sidebar to avatar-only rows', async (
   await expect(
     page.getByTestId('chat-list').getByRole('button', { name: /Alice Fixture/ }),
   ).toBeVisible();
+  const bottomPanelHeights = await page.evaluate(() => ({
+    settingsPanel: document
+      .querySelector<HTMLElement>('.sidebar-settings-footer')!
+      .getBoundingClientRect().height,
+    composerPanel: document.querySelector<HTMLElement>('.chat-composer')!.getBoundingClientRect()
+      .height,
+    settingsButton: document
+      .querySelector<HTMLElement>('.sidebar-settings-footer button')!
+      .getBoundingClientRect().height,
+    composerPrompt: document.querySelector<HTMLElement>('.composer')!.getBoundingClientRect()
+      .height,
+  }));
+  expect(
+    Math.abs(bottomPanelHeights.settingsPanel - bottomPanelHeights.composerPanel),
+  ).toBeLessThan(1);
+  expect(
+    Math.abs(bottomPanelHeights.settingsButton - bottomPanelHeights.composerPrompt),
+  ).toBeLessThan(1);
   const selected = page.getByTestId('chat-list').getByRole('button', { name: /Alice Fixture/ });
   await selected.click();
   await expect(selected).toHaveCSS('border-radius', '0px');

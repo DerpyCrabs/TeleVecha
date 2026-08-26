@@ -42,4 +42,8 @@ test('serves the TeleVecha browser identity', async ({ page, request }) => {
     name: 'TeleVecha',
     short_name: 'TeleVecha',
   });
+
+  const serviceWorkerResponse = await request.get('/sw.js');
+  expect(serviceWorkerResponse.ok()).toBe(true);
+  expect(await serviceWorkerResponse.text()).toContain('televecha-shell-v1');
 });

@@ -41,3 +41,33 @@ test('keeps unread counts visible and accessible across dialog views', async ({ 
   await expect(archivedAlice.locator('.chat-unread-badge-compact')).toBeVisible();
   await expect(archivedAlice.locator('.chat-unread-badge-compact')).toHaveText('2');
 });
+
+test('publishes the total unread count to the application badge', async ({ page }) => {
+  await page.addInitScript(() => {
+    const values: number[] = [];
+    Object.defineProperty(window, '__badgeValues', { configurable: true, value: values });
+    Object.defineProperty(navigator, 'setAppBadge', {
+      configurable: true,
+      value: async (count?: number) => {
+        values.push(count ?? 0);
+      },
+    });
+    Object.defineProperty(navigator, 'clearAppBadge', {
+      configurable: true,
+      value: async () => {
+        values.push(0);
+      },
+    });
+  });
+  await page.reload();
+  await expect(page.getByTestId('chat-list')).toBeVisible();
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const values = (window as Window & { __badgeValues?: number[] }).__badgeValues ?? [];
+        return values.at(-1) ?? 0;
+      }),
+    )
+    .toBeGreaterThan(0);
+});

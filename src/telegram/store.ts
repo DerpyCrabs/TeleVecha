@@ -62,6 +62,8 @@ interface TeleVechaSchema extends DBSchema {
 export interface CacheStore {
   loadTransportSession(): Promise<unknown>;
   saveTransportSession(session: unknown): Promise<void>;
+  clearAccountData(): Promise<void>;
+  prepareOutboxWrite(bytes: number, forceEviction?: boolean): Promise<void>;
   loadAccountId(): Promise<string | undefined>;
   claimAccount(accountId: string): Promise<void>;
   resetForAccount(accountId: string): Promise<void>;
@@ -153,6 +155,44 @@ export class IndexedDbCacheStore implements CacheStore {
     } else {
       await database.put('meta', session, 'transport-session');
     }
+  }
+
+  async clearAccountData() {
+    const database = await this.database;
+    const transaction = database.transaction(
+      ['meta', 'dialogs', 'messages', 'drafts', 'outbox', 'files'],
+      'readwrite',
+    );
+    await Promise.all([
+      transaction.objectStore('meta').clear(),
+      transaction.objectStore('dialogs').clear(),
+      transaction.objectStore('messages').clear(),
+      transaction.objectStore('drafts').clear(),
+      transaction.objectStore('outbox').clear(),
+      transaction.objectStore('files').clear(),
+    ]);
+    await transaction.done;
+  }
+
+  async prepareOutboxWrite(bytes: number, forceEviction = false) {
+    if (bytes <= 0 || typeof navigator === 'undefined' || !navigator.storage?.estimate) return;
+    await navigator.storage.persist?.().catch(() => false);
+    const hasRoom = async () => {
+      const { quota, usage } = await navigator.storage.estimate();
+      if (quota === undefined || usage === undefined) return true;
+      const reserve = Math.max(16 * 1024 * 1024, Math.ceil(bytes * 0.05));
+      return quota - usage >= bytes + reserve;
+    };
+    if (!forceEviction && (await hasRoom())) return;
+    await Promise.all([
+      this.evictOldestBlobs(MAX_CACHED_BLOBS),
+      this.evictOldestMessages(MAX_CACHED_MESSAGES),
+    ]);
+    if (await hasRoom()) return;
+    throw new DOMException(
+      `This browser does not have enough storage for the ${this.formatBytes(bytes)} durable send queue entry.`,
+      'QuotaExceededError',
+    );
   }
 
   async loadAccountId() {
@@ -584,5 +624,11 @@ export class IndexedDbCacheStore implements CacheStore {
     }
     await Promise.all(removals.map((key) => transaction.store.delete(key)));
     await transaction.done;
+  }
+
+  private formatBytes(bytes: number) {
+    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    if (bytes >= 1024 * 1024) return `${Math.ceil(bytes / (1024 * 1024))} MB`;
+    return `${Math.ceil(bytes / 1024)} KB`;
   }
 }

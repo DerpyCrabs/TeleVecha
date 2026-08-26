@@ -6,8 +6,8 @@ import ArrowLeft from 'lucide-solid/icons/arrow-left';
 import Pin from 'lucide-solid/icons/pin';
 import PinOff from 'lucide-solid/icons/pin-off';
 import Search from 'lucide-solid/icons/search';
+import Settings from 'lucide-solid/icons/settings';
 import Trash2 from 'lucide-solid/icons/trash-2';
-import X from 'lucide-solid/icons/x';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 
 import type { ChatSummary } from '../domain/models';
@@ -69,6 +69,7 @@ interface ChatSidebarProps {
   setPinned: (peerId: string, pinned: boolean) => void;
   setArchived: (peerId: string, archived: boolean) => void;
   requestDelete: (peerId: string) => void;
+  openSettings: () => void;
   closeMobile: () => void;
   startResize: (event: PointerEvent & { currentTarget: HTMLDivElement }) => void;
   resizeWithKeyboard: (event: KeyboardEvent) => void;
@@ -272,13 +273,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
             aria-label="Search chats"
           />
         </label>
-        <button
-          class="mobile-sidebar-close icon-button"
-          onClick={props.closeMobile}
-          aria-label="Close chat list"
-        >
-          <X size={18} />
-        </button>
       </header>
 
       <div class="chat-filters flex items-center gap-2 px-4 pb-3 text-xs font-medium text-[var(--muted)]">
@@ -560,6 +554,12 @@ export function ChatSidebar(props: ChatSidebarProps) {
           }}
         </Show>
       </div>
+      <footer class="sidebar-settings-footer">
+        <button onClick={props.openSettings} aria-label="Open settings">
+          <Settings size={18} />
+          <span>Settings</span>
+        </button>
+      </footer>
       <div
         class="left-sidebar-resizer"
         role="separator"

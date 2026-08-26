@@ -11,3 +11,9 @@ if (!root) {
 }
 
 render(() => <App />, root);
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  void navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
+    console.warn('TeleVecha could not register its offline application shell.', error);
+  });
+}

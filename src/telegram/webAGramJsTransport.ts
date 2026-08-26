@@ -180,6 +180,12 @@ export class WebAGramJsTransport implements TelegramTransport {
     if (sessionError) throw sessionError;
   }
 
+  async logOut() {
+    const client = this.getClient();
+    await client.invoke(new Api.auth.LogOut());
+    await this.store.saveTransportSession(undefined);
+  }
+
   async isAuthorized() {
     try {
       await this.getClient().invoke(new Api.updates.GetState());
