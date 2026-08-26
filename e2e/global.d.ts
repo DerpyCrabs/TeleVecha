@@ -6,7 +6,7 @@ interface Window {
   __televechaRuntimes?: Map<
     string,
     {
-      engine: import('../src/telegram/engine').MessagingEngine;
+      engine: import('../src/telegram/core/engine').MessagingEngine;
       transport: import('../src/telegram/types').TelegramTransport;
     }
   >;

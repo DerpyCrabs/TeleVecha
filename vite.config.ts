@@ -20,8 +20,8 @@ export default defineConfig({
     include: ['src/**/*.test.ts'],
     exclude: ['src/vendor/**'],
     coverage: {
-      include: ['src/telegram/*.ts'],
-      exclude: ['src/telegram/*.test.ts', 'src/telegram/fixtureTransport.ts'],
+      include: ['src/telegram/**/*.ts'],
+      exclude: ['src/telegram/**/*.test.ts', 'src/telegram/transports/fixtureTransport.ts'],
       thresholds: {
         statements: 70,
         branches: 48,

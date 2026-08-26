@@ -23,6 +23,13 @@ export type MessageStatus = 'sending' | 'sent' | 'read' | 'failed';
 export interface ChatMessage {
   id: string;
   author: string;
+  senderId?: string | undefined;
+  senderHasAvatar?: boolean | undefined;
+  senderAvatarId?: string | undefined;
+  senderColor?: string | undefined;
+  senderColorVersion?: number | undefined;
+  senderRole?: string | undefined;
+  senderRoleKind?: 'owner' | 'admin' | undefined;
   body: string;
   time: string;
   date?: number | undefined;

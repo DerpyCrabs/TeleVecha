@@ -90,7 +90,7 @@ test('searches Telegram users, bots, public groups, and channels', async ({ page
   const bot = page.getByTestId('peer-search-result').filter({ hasText: 'Fixture Helper Bot' });
   await expect(bot).toContainText('@fixture_helper_bot · Bot');
   await bot.click();
-  await expect(page.locator('section > header')).toContainText('Fixture Helper Bot');
+  await expect(page.getByTestId('conversation-header')).toContainText('Fixture Helper Bot');
 
   await search.fill('public fixture group');
   await expect(page.getByTestId('peer-search-result')).toContainText(
@@ -125,7 +125,7 @@ test('does not let a slow Telegram search result steal newer navigation', async 
   await chatButton(page, /Alice Fixture/).click();
   await page.evaluate(() => window.__releaseFixtureAddPeer?.());
 
-  await expect(page.locator('section > header')).toContainText('Alice Fixture');
+  await expect(page.getByTestId('conversation-header')).toContainText('Alice Fixture');
   await expect(chatButton(page, /Remote Fixture User/)).toHaveCount(0);
 });
 
@@ -136,7 +136,7 @@ test('switches chats and updates messages, header, details, and global counts to
   await chatButton(page, /Release Channel/).click();
 
   await expect(page.getByTestId('message-scroller')).toContainText('Release notes are ready');
-  await expect(page.locator('section > header')).toContainText('Release Channel');
+  await expect(page.getByTestId('conversation-header')).toContainText('Release Channel');
   await expect(page.locator('aside.details-pane')).toContainText('Media7Files3Links12');
   await expect(page.getByTestId('message-scroller')).not.toContainText('Fixture message 79');
 });

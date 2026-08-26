@@ -28,6 +28,7 @@ test('shows incoming typing and uploading activity', async ({ page }) => {
 test('centers the single-line composer label with its controls', async ({ page }) => {
   const input = page.getByRole('textbox', { name: 'Message' });
   const emoji = page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' });
+  const send = page.getByRole('button', { name: 'Send message' });
   const textCenter = await input.evaluate((element) => {
     const box = element.getBoundingClientRect();
     const style = getComputedStyle(element);
@@ -37,7 +38,12 @@ test('centers the single-line composer label with its controls', async ({ page }
     const box = element.getBoundingClientRect();
     return box.top + box.height / 2;
   });
+  const sendCenter = await send.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return box.top + box.height / 2;
+  });
   expect(Math.abs(textCenter - controlCenter)).toBeLessThan(1);
+  expect(Math.abs(sendCenter - controlCenter)).toBeLessThan(1);
 });
 
 test('grows multiline drafts, caps their height, and collapses after clearing', async ({

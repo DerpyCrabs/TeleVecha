@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { openReady } from './helpers';
+import { fixtureStats, openReady } from './helpers';
 
 test('signs in an existing account with phone and code', async ({ page }) => {
   await page.goto('/?scenario=auth');
@@ -106,4 +106,21 @@ test('signs out, clears local account data, and returns to phone authentication'
       }),
     )
     .toEqual([0, 0, 0, 0, 0]);
+});
+
+test('clears local cache and reconnects without signing out', async ({ page }) => {
+  await openReady(page);
+  const connectsBefore = (await fixtureStats(page))?.connect ?? 0;
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page
+    .getByRole('dialog', { name: 'Settings' })
+    .getByRole('button', { name: 'Clear cache' })
+    .click();
+
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
+  await expect
+    .poll(async () => (await fixtureStats(page))?.connect ?? 0)
+    .toBeGreaterThan(connectsBefore);
+  await expect(page.getByTestId('chat-list')).toContainText('Alice Fixture');
+  await expect(page.getByRole('heading', { name: 'Your phone number' })).toHaveCount(0);
 });

@@ -38,8 +38,16 @@ test('keeps unread counts visible and accessible across dialog views', async ({ 
   const separator = page.getByRole('separator', { name: 'Resize chat list' });
   await separator.focus();
   await separator.press('Home');
-  await expect(archivedAlice.locator('.chat-unread-badge-compact')).toBeVisible();
-  await expect(archivedAlice.locator('.chat-unread-badge-compact')).toHaveText('2');
+  const compactBadge = archivedAlice.locator('.chat-unread-badge-compact');
+  await expect(compactBadge).toBeVisible();
+  await expect(compactBadge).toHaveText('2');
+  await expect(compactBadge).toHaveClass(/muted/);
+  await expect
+    .poll(async () => {
+      const box = await compactBadge.boundingBox();
+      return box ? Math.min(box.width, box.height) : 0;
+    })
+    .toBeGreaterThanOrEqual(24);
 });
 
 test('publishes the total unread count to the application badge', async ({ page }) => {

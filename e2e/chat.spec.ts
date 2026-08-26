@@ -106,8 +106,8 @@ test('uses global media totals and only renders working details controls', async
 });
 
 test('updates reused header and details avatars when switching chats', async ({ page }) => {
-  const headerAvatar = page.locator('section > header img');
-  const detailsAvatar = page.locator('aside.details-pane img');
+  const headerAvatar = page.getByTestId('conversation-header').locator('img');
+  const detailsAvatar = page.getByTestId('details-avatar').locator('img');
   await expect(headerAvatar).toBeVisible();
   await expect(detailsAvatar).toBeVisible();
   const aliceHeaderSource = await headerAvatar.getAttribute('src');
@@ -120,7 +120,7 @@ test('updates reused header and details avatars when switching chats', async ({ 
 
   await expect(headerAvatar).not.toHaveAttribute('src', aliceHeaderSource ?? '');
   await expect(detailsAvatar).not.toHaveAttribute('src', aliceDetailsSource ?? '');
-  await expect(page.locator('section > header')).toContainText('Release Channel');
+  await expect(page.getByTestId('conversation-header')).toContainText('Release Channel');
 });
 
 test('loads older messages automatically at the top and preserves the scroll anchor', async ({

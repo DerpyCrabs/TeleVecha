@@ -55,11 +55,30 @@ export interface TelegramUserDetails {
   blocked: boolean;
 }
 
+export interface TelegramGroupMember {
+  peer: TelegramPeer;
+  title: string;
+  initials: string;
+  color: string;
+  username?: string | undefined;
+  role?: string | undefined;
+  roleKind?: 'owner' | 'admin' | undefined;
+  hasAvatar: boolean;
+  avatarId?: string | undefined;
+  presence?: 'online' | 'recently' | 'offline' | undefined;
+}
+
 export interface TelegramMessage {
   id: number;
   peerId: string;
   senderId: string;
   senderName?: string | undefined;
+  senderHasAvatar?: boolean | undefined;
+  senderAvatarId?: string | undefined;
+  senderColor?: string | undefined;
+  senderColorVersion?: number | undefined;
+  senderRole?: string | undefined;
+  senderRoleKind?: 'owner' | 'admin' | undefined;
   text: string;
   date: number;
   outgoing: boolean;
@@ -492,6 +511,7 @@ export interface TelegramTransport {
   ): Promise<TelegramSearchPage>;
   getPinnedMessages(peer: TelegramPeer): Promise<TelegramMessage[]>;
   getUserDetails(peer: TelegramPeer): Promise<TelegramUserDetails>;
+  getGroupMembers?(peer: TelegramPeer, limit?: number): Promise<TelegramGroupMember[]>;
   setMuted(peer: TelegramPeer, muted: boolean): Promise<void>;
   setBlocked(peer: TelegramPeer, blocked: boolean): Promise<void>;
   setPinnedDialog(peer: TelegramPeer, pinned: boolean): Promise<void>;

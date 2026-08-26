@@ -1,0 +1,104 @@
+import type { ChatMessage } from '../../domain/models';
+import type { EngineSnapshot, PendingAttachment, PendingSend } from '../../telegram/types';
+import { presentMessage, presentPendingAttachment } from './presentation';
+
+export interface KeyedMessageView {
+  key: string;
+  message: ChatMessage;
+}
+
+function pendingMessage(
+  send: PendingSend,
+  messagesById: Map<number, EngineSnapshot['messages'][number]>,
+  id: string,
+  randomId: string,
+  attachment?: PendingAttachment,
+  index = 0,
+): KeyedMessageView {
+  const first = index === 0;
+  const media = send.sticker
+    ? {
+        kind: 'sticker' as const,
+        name: `sticker-${send.sticker.id}`,
+        mimeType: send.sticker.mimeType,
+      }
+    : attachment
+      ? presentPendingAttachment(attachment)
+      : undefined;
+  const value: ChatMessage = {
+    id,
+    author: 'You',
+    senderId: 'self',
+    body: first ? send.text : '',
+    time: new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(
+      new Date(send.createdAt),
+    ),
+    date: Math.floor(send.createdAt / 1000),
+    outgoing: true,
+    status: send.lastError ? 'failed' : 'sending',
+    ...(attachment ? { uploadProgress: send.uploadProgress ?? 0 } : {}),
+    ...(first
+      ? {
+          formats: send.formats?.filter(({ kind }) => kind !== 'textUrl'),
+          links: send.formats
+            ?.filter(({ kind }) => kind === 'textUrl')
+            .map(({ offset, length, url }) => ({ offset, length, url })),
+        }
+      : {}),
+    ...(media ? { media } : {}),
+    ...(send.album ? { groupedId: `pending:${send.id}` } : {}),
+    ...(first && send.reply
+      ? {
+          replyTo:
+            send.reply.quoteText || messagesById.get(send.reply.messageId)?.text || 'Message',
+          replyToId: send.reply.messageId,
+        }
+      : {}),
+  };
+  return { key: `${send.peer.id}:random:${randomId}`, message: value };
+}
+
+export function presentConversation(snapshot: EngineSnapshot, peerId: string): KeyedMessageView[] {
+  if (snapshot.activePeerId !== peerId) return [];
+  const readOutboxMaxId =
+    snapshot.dialogs.find(({ peer }) => peer.id === peerId)?.readOutboxMaxId ?? 0;
+  const messagesById = new Map(snapshot.messages.map((message) => [message.id, message]));
+  const confirmedRandomIds = new Set(
+    snapshot.messages
+      .map(({ randomId }) => randomId)
+      .filter((randomId): randomId is string => Boolean(randomId)),
+  );
+  const current = snapshot.messages.map((message) => ({
+    key: message.randomId
+      ? `${message.peerId}:random:${message.randomId}`
+      : `${message.peerId}:${message.id}`,
+    message: presentMessage(
+      message,
+      readOutboxMaxId,
+      message.replyToId ? messagesById.get(message.replyToId) : undefined,
+    ),
+  }));
+  const pending = snapshot.pending
+    .filter((send) => send.peer.id === peerId)
+    .flatMap((send): KeyedMessageView[] => {
+      if (send.album) {
+        return send.album.attachments.flatMap((attachment, index) =>
+          confirmedRandomIds.has(attachment.randomId)
+            ? []
+            : [
+                pendingMessage(
+                  send,
+                  messagesById,
+                  `${send.id}:${index}`,
+                  attachment.randomId,
+                  attachment,
+                  index,
+                ),
+              ],
+        );
+      }
+      if (confirmedRandomIds.has(send.randomId)) return [];
+      return [pendingMessage(send, messagesById, send.id, send.randomId, send.attachment)];
+    });
+  return [...current, ...pending];
+}

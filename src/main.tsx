@@ -1,6 +1,7 @@
 import { render } from 'solid-js/web';
 
-import { App } from './ui/App';
+import { App } from './ui/app/App';
+import { defaultAppEnvironment } from './ui/app/appRuntime';
 import './styles.css';
 import './bot.css';
 
@@ -10,7 +11,8 @@ if (!root) {
   throw new Error('TeleVecha could not find its root element.');
 }
 
-render(() => <App />, root);
+const environment = defaultAppEnvironment();
+render(() => <App environment={environment} />, root);
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   void navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {

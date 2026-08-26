@@ -5,7 +5,7 @@ test('shares the active-tab lease between app instances in the same document', a
   await expect(page.getByTestId('chat-list')).toBeVisible();
 
   const acquired = await page.evaluate(async () => {
-    const { acquireSingleTabLease } = await import('../src/telegram/tabLock');
+    const { acquireSingleTabLease } = await import('../src/telegram/session/tabLock');
     const first = await acquireSingleTabLease();
     const second = await acquireSingleTabLease();
     first?.release();

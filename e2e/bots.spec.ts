@@ -3,6 +3,152 @@ import { expect, test } from '@playwright/test';
 import type { TransportUpdate } from '../src/telegram/types';
 import { fixtureStats, openReady } from './helpers';
 
+test('does not treat channels as bot-command chats', async ({ page }) => {
+  await openReady(page);
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Release Channel/ })
+    .click();
+
+  await expect(page.getByRole('button', { name: 'Commands' })).toHaveCount(0);
+  await expect(page.locator('.bot-command-bar')).toHaveCount(0);
+  await expect(page.locator('.message-sender-avatar')).toHaveCount(1);
+  await expect(page.locator('.message-sender-avatar img')).toBeVisible();
+  const members = page.locator('.group-members');
+  await expect(members).toContainText('Fixture Author');
+  await expect(members).toContainText('Another Member');
+  await expect(members.locator('.member-role.owner')).toHaveText('owner');
+  await expect(members.locator('.member-role.admin')).toHaveText('moderator');
+  const owner = members.locator('.group-member').filter({ hasText: 'Fixture Author' });
+  await expect(owner.locator('small')).toHaveText('online');
+  await expect(owner.getByText('owner', { exact: true })).toHaveCount(1);
+  const detailsOrder = await page.locator('.details-pane').evaluate((details) => {
+    const links = [...details.querySelectorAll('.detail-row')].at(-1)?.getBoundingClientRect();
+    const membersBox = details.querySelector('.group-members')?.getBoundingClientRect();
+    if (!links || !membersBox) throw new Error('Details sections are missing');
+    return membersBox.top >= links.bottom;
+  });
+  expect(detailsOrder).toBe(true);
+  expect((await fixtureStats(page))?.getBotCommands).toBe(0);
+});
+
+test('groups channel posts by author and keeps the avatar on the last post', async ({ page }) => {
+  await openReady(page);
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Release Channel/ })
+    .click();
+
+  await page.evaluate(() => {
+    const fixture = window.__televechaFixture;
+    if (!fixture) throw new Error('Fixture transport is unavailable');
+    const date = 1_700_001_001;
+    fixture.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      channelScoped: true,
+      message: {
+        id: 6,
+        peerId: 'c:202',
+        senderId: 'u:404',
+        senderName: 'Release Author',
+        senderHasAvatar: true,
+        senderAvatarId: 'fixture-u:404',
+        senderColor: '#408acf',
+        senderColorVersion: 2,
+        senderRole: 'owner',
+        senderRoleKind: 'owner',
+        text: 'Follow-up one',
+        date,
+        outgoing: false,
+      },
+    } satisfies TransportUpdate);
+    fixture.emit({
+      type: 'new-message',
+      pts: 12,
+      ptsCount: 1,
+      channelScoped: true,
+      message: {
+        id: 7,
+        peerId: 'c:202',
+        senderId: 'u:404',
+        senderName: 'Release Author',
+        senderHasAvatar: true,
+        senderAvatarId: 'fixture-u:404',
+        senderColor: '#408acf',
+        senderColorVersion: 2,
+        senderRole: 'owner',
+        senderRoleKind: 'owner',
+        text: 'Follow-up two',
+        date: date + 1,
+        outgoing: false,
+      },
+    } satisfies TransportUpdate);
+    fixture.emit({
+      type: 'new-message',
+      pts: 13,
+      ptsCount: 1,
+      channelScoped: true,
+      message: {
+        id: 8,
+        peerId: 'c:202',
+        senderId: 'u:405',
+        senderName: 'Another Author',
+        senderColor: '#d95574',
+        senderColorVersion: 2,
+        senderRole: 'moderator',
+        senderRoleKind: 'admin',
+        text: 'Different author',
+        date: date + 2,
+        outgoing: false,
+      },
+    } satisfies TransportUpdate);
+  });
+
+  const first = page.locator('[data-message-id="6"]');
+  const last = page.locator('[data-message-id="7"]');
+  const different = page.locator('[data-message-id="8"]');
+  await expect(first).toHaveClass(/message-same-sender/);
+  await expect(last).toHaveClass(/message-same-sender/);
+  await expect(different).not.toHaveClass(/message-same-sender/);
+  await expect(first.locator('.message-sender-avatar')).toHaveCount(0);
+  await expect(last.locator('.message-sender-avatar')).toHaveCount(1);
+  await expect(different.locator('.message-sender-avatar')).toHaveCount(1);
+  await expect(last.locator('.message-sender-role.owner')).toHaveText('owner');
+  await expect(different.locator('.message-sender-role.admin')).toHaveText('moderator');
+  const roleAlignment = await last.evaluate((message) => {
+    const role = message.querySelector('.message-sender-role')?.getBoundingClientRect();
+    const name = message.querySelector('.message-author > span')?.getBoundingClientRect();
+    const bubble = message.getBoundingClientRect();
+    if (!role || !name) throw new Error('Message author header is missing');
+    return {
+      roleRightInset: bubble.right - role.right,
+      roleStartsAfterName: role.left > name.right,
+    };
+  });
+  expect(roleAlignment.roleRightInset).toBeLessThan(12);
+  expect(roleAlignment.roleStartsAfterName).toBe(true);
+  const authorColors = await Promise.all(
+    [last, different].map((message) =>
+      message.locator('.message-author').evaluate((element) => getComputedStyle(element).color),
+    ),
+  );
+  expect(authorColors[0]).not.toBe(authorColors[1]);
+  const gaps = await page.evaluate(() => {
+    const boxes = [6, 7, 8].map((id) =>
+      document.querySelector(`[data-message-id="${id}"]`)?.getBoundingClientRect(),
+    );
+    if (boxes.some((box) => !box)) throw new Error('Expected channel messages are missing');
+    return {
+      sameAuthor: boxes[1]!.top - boxes[0]!.bottom,
+      differentAuthor: boxes[2]!.top - boxes[1]!.bottom,
+    };
+  });
+  expect(gaps.sameAuthor).toBeGreaterThanOrEqual(3);
+  expect(gaps.differentAuthor).toBeGreaterThan(gaps.sameAuthor);
+});
+
 test('starts and restarts bots, sends commands, and handles bot keyboards', async ({ page }) => {
   await openReady(page);
   await page.getByRole('textbox', { name: 'Search chats' }).fill('helper');
