@@ -1,0 +1,218 @@
+import { expect, test } from '@playwright/test';
+
+import type { TransportUpdate } from '../src/telegram/types';
+import { openReady, selectAlice } from './helpers';
+
+test('renders voice notes, rectangular video messages, service events, and albums', async ({
+  page,
+}) => {
+  await openReady(page);
+  await selectAlice(page);
+
+  await page.evaluate(() => {
+    const fixture = (
+      window as typeof window & {
+        __televechaFixture?: { emit(update: TransportUpdate): void };
+      }
+    ).__televechaFixture;
+    if (!fixture) return;
+    const peerId = 'u:101';
+    const date = Math.floor(Date.now() / 1000);
+    const messages = [
+      {
+        id: 81,
+        text: '',
+        media: {
+          kind: 'voice' as const,
+          name: 'fixture-voice.ogg',
+          mimeType: 'audio/ogg',
+          duration: 12,
+        },
+      },
+      {
+        id: 82,
+        text: '',
+        media: {
+          kind: 'round-video' as const,
+          name: 'fixture-video-message.mp4',
+          mimeType: 'video/mp4',
+          width: 240,
+          height: 400,
+          duration: 8,
+        },
+      },
+      {
+        id: 83,
+        text: 'Three photos from Telegram',
+        groupedId: 'fixture-album',
+        media: {
+          kind: 'photo' as const,
+          name: 'album-one.jpg',
+          mimeType: 'image/jpeg',
+          width: 400,
+          height: 300,
+        },
+      },
+      {
+        id: 84,
+        text: '',
+        groupedId: 'fixture-album',
+        media: {
+          kind: 'photo' as const,
+          name: 'album-two.jpg',
+          mimeType: 'image/jpeg',
+          width: 300,
+          height: 400,
+        },
+      },
+      {
+        id: 85,
+        text: '',
+        groupedId: 'fixture-album',
+        media: {
+          kind: 'photo' as const,
+          name: 'album-three.jpg',
+          mimeType: 'image/jpeg',
+          width: 400,
+          height: 300,
+        },
+      },
+      {
+        id: 86,
+        text: 'Alice added Bob',
+        service: {
+          kind: 'users-added' as const,
+          text: 'Alice added Bob',
+          actorId: 'u:101',
+          targetUserIds: ['u:202'],
+        },
+      },
+      {
+        id: 87,
+        text: '',
+        groupedId: 'fixture-captionless-album',
+        media: {
+          kind: 'photo' as const,
+          name: 'album-frameless-one.jpg',
+          mimeType: 'image/jpeg',
+          width: 400,
+          height: 300,
+        },
+      },
+      {
+        id: 88,
+        text: '',
+        groupedId: 'fixture-captionless-album',
+        media: {
+          kind: 'photo' as const,
+          name: 'album-frameless-two.jpg',
+          mimeType: 'image/jpeg',
+          width: 300,
+          height: 400,
+        },
+      },
+    ];
+    messages.forEach((message, index) =>
+      fixture.emit({
+        type: 'new-message',
+        pts: 11 + index,
+        ptsCount: 1,
+        message: {
+          ...message,
+          peerId,
+          senderId: peerId,
+          date: date + index,
+          outgoing: false,
+        },
+      }),
+    );
+  });
+
+  const voice = page.locator('article[data-message-id="81"]');
+  await expect(voice.locator('audio[controls]')).toBeVisible();
+  await expect(voice).toHaveAttribute('data-media-kind', 'voice');
+
+  const videoMessage = page.locator('article[data-message-id="82"]');
+  const video = videoMessage.locator('video[controls]');
+  await expect(video).toBeVisible();
+  await expect(videoMessage).toHaveAttribute('data-media-kind', 'round-video');
+  await expect(videoMessage.locator('.media-round-video-visual')).not.toHaveCSS(
+    'border-radius',
+    '50%',
+  );
+
+  const album = page.locator('article[data-message-id="83"] .media-album');
+  await expect(album).toBeVisible();
+  await expect(album.locator('.media-album-item')).toHaveCount(3);
+  await expect
+    .poll(() =>
+      album.locator('.media-album-item').evaluateAll((items) =>
+        items.map((item) => {
+          const bounds = item.getBoundingClientRect();
+          return bounds.height > 0 ? Math.round((bounds.width / bounds.height) * 100) : 0;
+        }),
+      ),
+    )
+    .toEqual([133, 75, 133]);
+  await expect(album.locator('img').first()).toHaveCSS('object-fit', 'contain');
+  await expect(album.locator('.media-album-actions')).toHaveCount(0);
+  await expect(page.locator('article[data-message-id="83"]')).toContainText(
+    'Three photos from Telegram',
+  );
+  await expect(page.locator('article[data-message-id="84"]')).toBeHidden();
+  await expect(page.locator('article[data-message-id="85"]')).toBeHidden();
+  const captionedAlbumMessage = page.locator('article[data-message-id="83"]');
+  await expect(captionedAlbumMessage).toHaveClass(/message-has-album/u);
+  await expect(captionedAlbumMessage).toHaveClass(/message-captioned-media/u);
+  await expect(captionedAlbumMessage).not.toHaveClass(/message-media-surface/u);
+  const captionedAlbumGeometry = await captionedAlbumMessage.evaluate((element) => {
+    const albumElement = element.querySelector<HTMLElement>('.media-album')!;
+    const albumRect = albumElement.getBoundingClientRect();
+    const messageRect = element.getBoundingClientRect();
+    const captionRect = element
+      .querySelector<HTMLElement>('.message-body')!
+      .getBoundingClientRect();
+    return {
+      widthDelta: messageRect.width - albumRect.width,
+      topDelta: albumRect.top - messageRect.top,
+      captionBelowAlbum: captionRect.top >= albumRect.bottom,
+    };
+  });
+  expect(captionedAlbumGeometry.widthDelta).toBeCloseTo(0, 0);
+  expect(captionedAlbumGeometry.topDelta).toBeCloseTo(0, 0);
+  expect(captionedAlbumGeometry.captionBelowAlbum).toBe(true);
+
+  await album.locator('.media-album-item').nth(1).focus();
+  await page.keyboard.press('Shift+F10');
+  await page.getByRole('menuitem', { name: 'Reply' }).click();
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
+  await expect(page.getByTestId('composer-reply')).toContainText('album-two.jpg');
+  await expect(page.getByTestId('composer-reply')).not.toContainText('album-one.jpg');
+
+  const service = page.locator('article[data-message-id="86"]');
+  await expect(service).toHaveClass(/message-service/u);
+  await expect(service).toContainText('Alice added Bob');
+  await expect(service.locator('footer')).toBeHidden();
+  await expect(service.getByRole('button', { name: /Reply to message/u })).toHaveCount(0);
+
+  const captionlessAlbumMessage = page.locator('article[data-message-id="87"]');
+  const captionlessAlbum = captionlessAlbumMessage.locator('.media-album');
+  await expect(captionlessAlbum.locator('.media-album-item')).toHaveCount(2);
+  await expect(captionlessAlbumMessage).toHaveClass(/message-media-surface/u);
+  const captionlessStyles = await captionlessAlbumMessage.evaluate((element) => {
+    const albumElement = element.querySelector<HTMLElement>('.media-album')!;
+    return {
+      background: getComputedStyle(element).backgroundColor,
+      padding: getComputedStyle(element).padding,
+      footerPosition: getComputedStyle(element.querySelector('footer')!).position,
+      widthDelta:
+        element.getBoundingClientRect().width - albumElement.getBoundingClientRect().width,
+    };
+  });
+  expect(captionlessStyles).toEqual({
+    background: 'rgba(0, 0, 0, 0)',
+    padding: '0px',
+    footerPosition: 'absolute',
+    widthDelta: 0,
+  });
+});

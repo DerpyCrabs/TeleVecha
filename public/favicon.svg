@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>TeleVecha</title>
+  <rect width="64" height="64" rx="14" fill="#0d0f12" />
+  <path
+    fill="#6da9f7"
+    d="M10 15a8 8 0 0 1 8-8h28a8 8 0 0 1 8 8v24a8 8 0 0 1-8 8H31L18 57l2.8-10H18a8 8 0 0 1-8-8V15Z"
+  />
+  <path
+    d="M17 20h16M25 20v21M35 20l6 21 6-21"
+    fill="none"
+    stroke="#f0f2f5"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+    stroke-width="5"
+  />
+</svg>

@@ -1,0 +1,44 @@
+{
+  "name": "televecha",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "check": "vp check",
+    "check:e2e": "tsc --noEmit -p tsconfig.e2e.json",
+    "test": "vp test --run",
+    "test:coverage": "vp test --run --coverage",
+    "test:watch": "vp test",
+    "test:e2e": "playwright test",
+    "test:all": "npm run check && npm run check:e2e && npm test && npm run test:e2e && npm run build"
+  },
+  "dependencies": {
+    "@cryptography/aes": "^0.1.1",
+    "async-mutex": "^0.5.0",
+    "fflate": "^0.8.3",
+    "idb": "8.0.3",
+    "lottie-web": "^5.13.0",
+    "lucide-solid": "1.33.0",
+    "solid-js": "1.9.15"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "^26.2.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "@voidzero-dev/vite-plus-core": "0.2.9",
+    "fake-indexeddb": "^6.2.5",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite-plugin-solid": "2.11.14",
+    "vite-plus": "0.2.9"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

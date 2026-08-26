@@ -1,0 +1,17 @@
+{
+  "name": "TeleVecha",
+  "short_name": "TeleVecha",
+  "description": "An unofficial, local-first web client for Telegram.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0f12",
+  "theme_color": "#0d0f12",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,281 @@
+.bot-controls {
+  position: relative;
+  z-index: 12;
+  display: grid;
+  gap: 0.45rem;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  padding: 0.45rem max(0.75rem, calc((100% - 48rem) / 2));
+}
+
+.bot-start-button,
+.bot-command-bar > button {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid rgb(109 169 247 / 0.45);
+  border-radius: 0.55rem;
+  background: rgb(109 169 247 / 0.12);
+  padding: 0.45rem 0.8rem;
+  color: var(--accent);
+}
+
+.bot-start-button {
+  width: 100%;
+  font-weight: 700;
+}
+
+.bot-command-bar {
+  position: relative;
+}
+
+.bot-command-menu {
+  position: absolute;
+  bottom: calc(100% + 0.45rem);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  width: min(24rem, calc(100vw - 2rem));
+  max-height: 18rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: #1b1f25;
+  padding: 0.4rem;
+  box-shadow: 0 1rem 2rem rgb(0 0 0 / 0.35);
+}
+
+.bot-command-menu button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.1rem 0.5rem;
+  border-radius: 0.45rem;
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+}
+
+.bot-command-menu button:hover {
+  background: #252930;
+}
+
+.bot-command-menu button strong,
+.bot-command-menu button small {
+  grid-column: 2;
+}
+
+.bot-command-menu button svg {
+  grid-row: 1 / span 2;
+}
+
+.bot-command-menu small,
+.bot-command-menu > span {
+  color: var(--muted);
+}
+
+.bot-command-menu > span {
+  padding: 0.55rem 0.6rem;
+}
+
+.bot-keyboard {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.bot-keyboard-reply {
+  max-height: min(18rem, 35dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.15rem;
+  scrollbar-color: #414752 transparent;
+  scrollbar-width: thin;
+}
+
+.bot-keyboard-row {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.bot-keyboard-row button {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  border: 1px solid rgb(109 169 247 / 0.34);
+  border-radius: 0.45rem;
+  background: rgb(109 169 247 / 0.1);
+  padding: 0.42rem 0.55rem;
+  color: var(--text);
+}
+
+.bot-keyboard-row button:hover:not(:disabled) {
+  background: rgb(109 169 247 / 0.2);
+}
+
+.bot-keyboard-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.bot-keyboard-inline {
+  clear: both;
+  margin-top: 0.45rem;
+  min-width: min(20rem, 70vw);
+}
+
+.bot-callback-notice {
+  border-top: 1px solid var(--line);
+  background: #1b1f25;
+  padding: 0.45rem 0.75rem;
+  color: var(--text);
+  text-align: center;
+}
+
+.bot-url-auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: rgb(5 8 12 / 0.76);
+  padding: 1rem;
+  backdrop-filter: blur(0.35rem);
+}
+
+.bot-url-auth-dialog {
+  width: min(30rem, 100%);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--panel);
+  padding: 1rem;
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 0.5);
+}
+
+.bot-url-auth-dialog > header,
+.bot-url-auth-dialog > footer {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.bot-url-auth-dialog > header {
+  justify-content: space-between;
+}
+
+.bot-url-auth-dialog h2 {
+  min-width: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.bot-url-auth-dialog > header button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.5rem;
+  padding: 0.4rem;
+}
+
+.bot-url-auth-dialog > p {
+  margin-top: 0.8rem;
+  color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.bot-url-auth-dialog > p strong {
+  color: var(--text);
+}
+
+.bot-url-auth-verified {
+  color: var(--accent) !important;
+}
+
+.bot-url-auth-codes,
+.bot-url-auth-permissions {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+
+.bot-url-auth-codes {
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  padding: 0.75rem;
+}
+
+.bot-url-auth-codes legend {
+  padding-inline: 0.3rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.bot-url-auth-codes label,
+.bot-url-auth-permissions label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  border-radius: 0.5rem;
+  padding: 0.35rem;
+  line-height: 1.35;
+}
+
+.bot-url-auth-codes input,
+.bot-url-auth-permissions input {
+  flex: 0 0 auto;
+  margin-top: 0.15rem;
+  accent-color: var(--accent);
+}
+
+.bot-url-auth-dialog > footer {
+  justify-content: flex-end;
+  margin-top: 1.1rem;
+}
+
+.bot-url-auth-dialog > footer button {
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.bot-url-auth-dialog > footer button.primary {
+  border-color: rgb(109 169 247 / 0.55);
+  background: var(--accent);
+  color: #07111e;
+  font-weight: 700;
+}
+
+.bot-url-auth-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 650px) {
+  .bot-controls {
+    padding-inline: 0.65rem;
+  }
+
+  .bot-keyboard-inline {
+    min-width: min(17rem, 76vw);
+  }
+
+  .bot-url-auth-overlay {
+    align-items: end;
+    padding: 0.5rem;
+  }
+
+  .bot-url-auth-dialog {
+    max-height: calc(100dvh - 1rem);
+    border-radius: 1rem 1rem 0.65rem 0.65rem;
+  }
+
+  .bot-url-auth-dialog > footer {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+}

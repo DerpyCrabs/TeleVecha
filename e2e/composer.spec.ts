@@ -1,0 +1,219 @@
+import { expect, test } from '@playwright/test';
+
+import { fixtureStats, openReady, selectAlice } from './helpers';
+
+test.beforeEach(async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
+});
+
+test('shows incoming typing and uploading activity', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'activity',
+      activity: { peerId: 'u:101', senderId: 'u:101', kind: 'typing' },
+    }),
+  );
+  await expect(page.locator('.chat-header').getByRole('status')).toHaveText('typing…');
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'activity',
+      activity: { peerId: 'u:101', senderId: 'u:101', kind: 'uploading' },
+    }),
+  );
+  await expect(page.getByText('uploading…', { exact: true })).toBeVisible();
+  await expect(page.locator('.activity-bar')).toHaveCount(0);
+});
+
+test('centers the single-line composer label with its controls', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message' });
+  const emoji = page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' });
+  const textCenter = await input.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return box.top + Number.parseFloat(style.paddingTop) + Number.parseFloat(style.lineHeight) / 2;
+  });
+  const controlCenter = await emoji.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return box.top + box.height / 2;
+  });
+  expect(Math.abs(textCenter - controlCenter)).toBeLessThan(1);
+});
+
+test('grows multiline drafts, caps their height, and collapses after clearing', async ({
+  page,
+}) => {
+  const input = page.getByRole('textbox', { name: 'Message' });
+  const singleLineHeight = await input.evaluate((element) => element.clientHeight);
+
+  await input.fill(Array.from({ length: 6 }, (_, index) => `Line ${index + 1}`).join('\n'));
+  await expect
+    .poll(() => input.evaluate((element) => element.clientHeight))
+    .toBeGreaterThan(singleLineHeight);
+
+  await input.fill(Array.from({ length: 20 }, (_, index) => `Line ${index + 1}`).join('\n'));
+  const capped = await input.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    overflowY: getComputedStyle(element).overflowY,
+  }));
+  expect(capped.scrollHeight).toBeGreaterThan(capped.clientHeight);
+  expect(capped.overflowY).toBe('auto');
+
+  await input.clear();
+  await expect.poll(() => input.evaluate((element) => element.clientHeight)).toBe(singleLineHeight);
+});
+
+test('does not send whitespace or submit while an IME composition is active', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message' });
+  const sendsBefore = (await fixtureStats(page))?.sendText;
+  await input.fill('   ');
+  await input.press('Enter');
+  await expect(input).toHaveValue('   ');
+  expect((await fixtureStats(page))?.sendText).toBe(sendsBefore);
+
+  await input.fill('composing');
+  await input.evaluate((element) => {
+    const event = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      key: 'Enter',
+    });
+    Object.defineProperty(event, 'isComposing', { value: true });
+    element.dispatchEvent(event);
+  });
+  await expect(input).toHaveValue('composing');
+  expect((await fixtureStats(page))?.sendText).toBe(sendsBefore);
+});
+
+test('keeps the jump-to-present control above a growing composer', async ({ page }) => {
+  const scroller = page.getByTestId('message-scroller');
+  await scroller.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+    element.scrollTop = 0;
+  });
+  const jump = page.getByRole('button', { name: 'Jump to present' });
+  await expect(jump).toBeVisible();
+  await page
+    .getByRole('textbox', { name: 'Message' })
+    .fill(Array.from({ length: 6 }, (_, index) => `Line ${index + 1}`).join('\n'));
+
+  const positions = await page.locator('.message-scroll-shell').evaluate((shell) => {
+    const scrollerBox = shell
+      .querySelector('[data-testid="message-scroller"]')!
+      .getBoundingClientRect();
+    const jumpBox = shell.querySelector('.jump-to-present')!.getBoundingClientRect();
+    return { scrollerBottom: scrollerBox.bottom, jumpBottom: jumpBox.bottom };
+  });
+  expect(positions.jumpBottom).toBeLessThanOrEqual(positions.scrollerBottom);
+});
+
+test('throttles outgoing typing updates and sends a cancellation', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message' });
+  await input.pressSequentially('typing quickly', { delay: 5 });
+  expect((await fixtureStats(page))?.setTyping).toBe(1);
+  await input.clear();
+  expect((await fixtureStats(page))?.setTyping).toBe(2);
+});
+
+test('sends selected formatting, links, spoilers, and quotes', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message' });
+  await input.fill('bold link spoiler quote');
+  const select = async (start: number, end: number) =>
+    input.evaluate(
+      (element, range) => {
+        const textarea = element as HTMLTextAreaElement;
+        textarea.focus();
+        textarea.setSelectionRange(range.start, range.end);
+      },
+      { start, end },
+    );
+  const format = async (name: string) => {
+    await input.dispatchEvent('contextmenu', { clientX: 420, clientY: 520 });
+    await page
+      .getByRole('menu', { name: 'Message formatting' })
+      .getByRole('menuitem', { name })
+      .click();
+  };
+  await select(0, 4);
+  await format('Bold');
+  await select(5, 9);
+  page.once('dialog', (dialog) => void dialog.accept('https://example.com/formatted'));
+  await format('Create link');
+  await select(10, 17);
+  await format('Spoiler');
+  await select(18, 23);
+  await format('Quote');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  const sent = page.locator('article.message').last();
+  await expect(sent.locator('.bold')).toHaveText('bold');
+  await expect(sent.getByRole('link', { name: 'link' })).toHaveAttribute(
+    'href',
+    'https://example.com/formatted',
+  );
+  await expect(sent.locator('.spoiler')).toHaveText('spoiler');
+  await expect(sent.locator('.blockquote')).toHaveText('quote');
+});
+
+test('opens emoji, GIF, and sticker pickers and sends from each', async ({ page }) => {
+  const trigger = page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' });
+  await trigger.click();
+  await page.getByRole('button', { name: 'Insert 😀' }).click();
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('😀');
+  await trigger.click();
+  const picker = page.getByRole('dialog', { name: 'Emoji, GIFs and stickers' });
+  await picker.getByRole('button', { name: 'GIFs' }).click();
+  await page.getByLabel('GIFs').getByRole('button', { name: 'Send GIF' }).click();
+  expect((await fixtureStats(page))?.getSavedGifs).toBe(1);
+  await trigger.click();
+  await page
+    .getByRole('dialog', { name: 'Emoji, GIFs and stickers' })
+    .getByRole('button', { name: 'Stickers' })
+    .click();
+  await expect(page.getByLabel('Stickers', { exact: true })).toBeVisible();
+});
+
+test('moves keyboard focus into the expression picker and restores it on Escape', async ({
+  page,
+}) => {
+  const trigger = page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' });
+  await trigger.focus();
+  await trigger.press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Search expressions' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+});
+
+test('searches the full emoji set and sticker packs without redownloading cached assets', async ({
+  page,
+}) => {
+  const trigger = page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' });
+  await trigger.click();
+  const picker = page.getByRole('dialog', { name: 'Emoji, GIFs and stickers' });
+  await picker.getByPlaceholder('Search emoji').fill('animal');
+  await expect(picker.getByRole('button', { name: 'Insert 🐶' })).toBeVisible();
+  expect(await picker.locator('.emoji-grid button').count()).toBeGreaterThan(50);
+
+  await picker.getByRole('button', { name: 'Stickers' }).click();
+  await expect(picker.getByRole('button', { name: 'Fixture Animals' })).toBeVisible();
+  await picker.getByPlaceholder('Search stickers').fill('animated');
+  await expect(picker.getByRole('button', { name: 'Send ✨ sticker' })).toBeVisible();
+  await expect
+    .poll(async () => (await fixtureStats(page))?.downloadSticker ?? 0)
+    .toBeGreaterThan(0);
+  const downloads = (await fixtureStats(page))?.downloadSticker;
+  await page.keyboard.press('Escape');
+  await trigger.click();
+  await picker.getByRole('button', { name: 'Stickers' }).click();
+  await page.waitForTimeout(100);
+  expect((await fixtureStats(page))?.downloadSticker).toBe(downloads);
+});
+
+test('searches Telegram for GIFs instead of filtering saved GIF identifiers', async ({ page }) => {
+  await page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' }).click();
+  const picker = page.getByRole('dialog', { name: 'Emoji, GIFs and stickers' });
+  await picker.getByRole('button', { name: 'GIFs' }).click();
+  await picker.getByPlaceholder('Search gifs').fill('cat');
+  await expect(picker.getByRole('button', { name: 'Send GIF cat result' })).toBeVisible();
+  expect((await fixtureStats(page))?.searchGifs).toBe(1);
+});
