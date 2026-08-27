@@ -1,12 +1,13 @@
-import { createEffect, createSignal, onCleanup, type Accessor } from 'solid-js';
+import { createEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js';
 
-import type { MessagingEngine } from '../../telegram/core/engine';
+import type { Conversation } from '../../telegram/core/conversation';
 import type {
   EngineSnapshot,
   TelegramBotButton,
   TelegramBotCommand,
   TelegramDialog,
   TelegramPeer,
+  TelegramResourceInvalidation,
   TelegramUrlAuthAcceptOptions,
   TelegramUrlAuthResult,
 } from '../../telegram/types';
@@ -29,7 +30,7 @@ interface PendingInlineSwitch {
 }
 
 interface BotSessionOptions {
-  engine: MessagingEngine;
+  conversation: Accessor<Conversation | undefined>;
   snapshot: Accessor<EngineSnapshot>;
   activePeerId: Accessor<string>;
   activeDialog: Accessor<TelegramDialog | undefined>;
@@ -37,6 +38,9 @@ interface BotSessionOptions {
   setDraft: (value: string) => void;
   dismissSingleUseKeyboard: (owner: string) => void;
   focusComposer: () => void;
+  resources: {
+    subscribeResources(listener: (event: TelegramResourceInvalidation) => void): () => void;
+  };
 }
 
 export function createBotSession(options: BotSessionOptions) {
@@ -52,11 +56,14 @@ export function createBotSession(options: BotSessionOptions) {
   const [inlineSwitch, setInlineSwitch] = createSignal<PendingInlineSwitch>();
   let actionGeneration = 0;
   let commandsGeneration = 0;
-  let uiPeerId = '';
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
   const isCurrent = (peerId: string, generation: number) =>
     options.activePeerId() === peerId && actionGeneration === generation;
+  const currentConversation = (peerId: string) => {
+    const conversation = options.conversation();
+    return conversation?.peerId === peerId ? conversation : undefined;
+  };
   const focusComposer = () => queueMicrotask(options.focusComposer);
   const showNotice = (message: string) => {
     if (noticeTimer) clearTimeout(noticeTimer);
@@ -79,16 +86,22 @@ export function createBotSession(options: BotSessionOptions) {
   const loadCommands = async () => {
     const dialog = options.activeDialog();
     const supportsCommands = dialog?.bot || dialog?.peer.kind === 'group';
-    if (!dialog || !supportsCommands || commandsLoading() || commandsPeerId() === dialog.peer.id) {
+    if (
+      !dialog ||
+      !currentConversation(dialog.peer.id) ||
+      !supportsCommands ||
+      commandsLoading() ||
+      commandsPeerId() === dialog.peer.id
+    ) {
       return;
     }
     const peerId = dialog.peer.id;
     const generation = ++commandsGeneration;
     setCommandsLoading(true);
     try {
-      const next = await options.engine.getBotCommands(dialog.peer);
+      const next = await currentConversation(peerId)?.getBotCommands();
       if (options.activePeerId() !== peerId || generation !== commandsGeneration) return;
-      setCommands(next);
+      setCommands(next ?? []);
       setCommandsPeerId(peerId);
     } finally {
       if (options.activePeerId() === peerId && generation === commandsGeneration) {
@@ -97,42 +110,51 @@ export function createBotSession(options: BotSessionOptions) {
     }
   };
 
-  createEffect(() => {
-    const peerId = options.activePeerId();
-    if (uiPeerId === peerId) return;
-    uiPeerId = peerId;
-    actionGeneration += 1;
-    commandsGeneration += 1;
-    setCommands([]);
-    setCommandsPeerId('');
-    setCommandsLoading(false);
-    setMenuOpen(false);
-    setStarting(false);
-    setButtonBusy(undefined);
-    setNotice('');
-    setUrlAuth(undefined);
-    setUrlAuthBusy(false);
-    setInlineSwitch(undefined);
-    if (noticeTimer) clearTimeout(noticeTimer);
-    const dialog = options.activeDialog();
-    if (dialog?.peer.kind === 'group') void loadCommands().catch(() => undefined);
-  });
+  createEffect(
+    on(
+      () => `${options.activePeerId()}\0${options.conversation()?.peerId ?? ''}`,
+      () => {
+        const peerId = options.activePeerId();
+        const conversationPeerId = options.conversation()?.peerId ?? '';
+        actionGeneration += 1;
+        commandsGeneration += 1;
+        setCommands([]);
+        setCommandsPeerId('');
+        setCommandsLoading(false);
+        setMenuOpen(false);
+        setStarting(false);
+        setButtonBusy(undefined);
+        setNotice('');
+        setUrlAuth(undefined);
+        setUrlAuthBusy(false);
+        setInlineSwitch(undefined);
+        if (noticeTimer) clearTimeout(noticeTimer);
+        const dialog = options.activeDialog();
+        if (conversationPeerId === peerId && dialog?.peer.kind === 'group') {
+          void loadCommands().catch(() => undefined);
+        }
+      },
+    ),
+  );
 
-  let observedCommandsRevision = options.snapshot().botCommandsRevision;
-  createEffect(() => {
-    const revision = options.snapshot().botCommandsRevision;
-    if (revision === observedCommandsRevision) return;
-    observedCommandsRevision = revision;
-    const hadLoadedCommands = commandsPeerId() === options.activePeerId();
-    commandsGeneration += 1;
-    setCommands([]);
-    setCommandsPeerId('');
-    setCommandsLoading(false);
-    const dialog = options.activeDialog();
-    if ((dialog?.bot || dialog?.peer.kind === 'group') && (hadLoadedCommands || menuOpen())) {
-      void loadCommands().catch(() => undefined);
-    }
-  });
+  onCleanup(
+    options.resources.subscribeResources((event) => {
+      if (
+        event.kind !== 'bot-commands' ||
+        (event.peerId !== undefined && event.peerId !== options.activePeerId())
+      )
+        return;
+      const hadLoadedCommands = commandsPeerId() === options.activePeerId();
+      commandsGeneration += 1;
+      setCommands([]);
+      setCommandsPeerId('');
+      setCommandsLoading(false);
+      const dialog = options.activeDialog();
+      if ((dialog?.bot || dialog?.peer.kind === 'group') && (hadLoadedCommands || menuOpen())) {
+        void loadCommands().catch(() => undefined);
+      }
+    }),
+  );
 
   const toggleMenu = () => {
     const open = !menuOpen();
@@ -146,7 +168,7 @@ export function createBotSession(options: BotSessionOptions) {
     setStarting(true);
     setMenuOpen(false);
     try {
-      await options.engine.startBot(dialog.peer);
+      await currentConversation(peerId)?.startBot();
     } finally {
       if (options.activePeerId() === peerId) setStarting(false);
     }
@@ -156,8 +178,8 @@ export function createBotSession(options: BotSessionOptions) {
     if (!dialog) return;
     setMenuOpen(false);
     const suffix = dialog.bot || !command.botUsername ? '' : `@${command.botUsername}`;
-    void options.engine
-      .sendDraft(dialog.peer, `/${command.command}${suffix}`)
+    void currentConversation(dialog.peer.id)
+      ?.sendDraft(`/${command.command}${suffix}`)
       .catch(() => undefined);
   };
 
@@ -175,7 +197,7 @@ export function createBotSession(options: BotSessionOptions) {
     setButtonBusy({ owner, key });
     try {
       if (button.kind === 'text') {
-        await options.engine.sendDraft(peer, button.text);
+        await currentConversation(peerId)?.sendDraft(button.text);
         if (isCurrent(peerId, generation)) options.dismissSingleUseKeyboard(owner);
         return;
       }
@@ -193,7 +215,10 @@ export function createBotSession(options: BotSessionOptions) {
           }
           return;
         }
-        const result = await options.engine.requestUrlAuth(peer, messageId, button.buttonId);
+        const result = await currentConversation(peerId)?.requestUrlAuth(
+          messageId,
+          button.buttonId,
+        );
         if (!isCurrent(peerId, generation)) return;
         if (!result) {
           showNotice('Telegram sign-in is unavailable for this button.');
@@ -230,7 +255,7 @@ export function createBotSession(options: BotSessionOptions) {
           }
           return;
         }
-        const answer = await options.engine.answerBotCallback(peer, messageId, button.data);
+        const answer = await currentConversation(peerId)?.answerBotCallback(messageId, button.data);
         if (!isCurrent(peerId, generation)) return;
         if (answer?.url) openUrl(answer.url);
         if (answer?.message) showNotice(answer.message);
@@ -252,7 +277,7 @@ export function createBotSession(options: BotSessionOptions) {
         const nextDraft = `${prefix}${button.query ?? ''}`;
         if (!isCurrent(peerId, generation)) return;
         options.setDraft(nextDraft);
-        await options.engine.setDraft(peerId, nextDraft);
+        await currentConversation(peerId)?.setDraft(nextDraft);
         if (!isCurrent(peerId, generation)) return;
         options.dismissSingleUseKeyboard(owner);
         focusComposer();
@@ -279,7 +304,7 @@ export function createBotSession(options: BotSessionOptions) {
     const prefix = pending.botUsername ? `@${pending.botUsername} ` : '';
     const nextDraft = `${prefix}${pending.query}`;
     options.setDraft(nextDraft);
-    await options.engine.setDraft(peerId, nextDraft);
+    await currentConversation(peerId)?.setDraft(nextDraft);
     if (options.activePeerId() === peerId) focusComposer();
   };
 
@@ -288,8 +313,7 @@ export function createBotSession(options: BotSessionOptions) {
     if (!pending || urlAuthBusy()) return;
     setUrlAuthBusy(true);
     try {
-      const result = await options.engine.acceptUrlAuth(
-        pending.peer,
+      const result = await currentConversation(pending.peer.id)?.acceptUrlAuth(
         pending.messageId,
         pending.buttonId,
         acceptOptions,

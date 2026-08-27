@@ -929,9 +929,13 @@ describe('MessagingEngine', () => {
     const transport = new FakeTransport();
     const groupPeer: TelegramPeer = { id: 'group-1', kind: 'group' };
     const engine = new MessagingEngine(transport, store);
+    const invalidations: string[] = [];
+    const unsubscribe = engine.subscribeResources(({ kind, peerId }) =>
+      invalidations.push(`${kind}:${peerId ?? ''}`),
+    );
     await engine.start(credentials);
     await engine.getGroupMembers(groupPeer);
-    const revision = engine.snapshot().groupMembersRevision;
+    const invalidationCount = invalidations.length;
 
     transport.emit({
       type: 'new-message',
@@ -952,11 +956,11 @@ describe('MessagingEngine', () => {
       },
     });
 
-    await vi.waitFor(() =>
-      expect(engine.snapshot().groupMembersRevision).toBeGreaterThan(revision),
-    );
+    await vi.waitFor(() => expect(invalidations.length).toBeGreaterThan(invalidationCount));
+    expect(invalidations.at(-1)).toBe(`group-members:${groupPeer.id}`);
     await engine.getGroupMembers(groupPeer);
     expect(transport.groupMemberCalls).toBe(2);
+    unsubscribe();
     await engine.stop();
   });
 
@@ -1006,17 +1010,20 @@ describe('MessagingEngine', () => {
     store.blobs.set('sticker-index:gifs:v2', new Blob(['gifs']));
     const transport = new FakeTransport();
     const engine = new MessagingEngine(transport, store);
+    const invalidations: string[] = [];
+    const unsubscribe = engine.subscribeResources(({ kind }) => invalidations.push(kind));
     await engine.start(credentials);
 
     transport.emit({ type: 'expression-index-changed', kind: 'stickers' });
-    await vi.waitFor(() => expect(engine.snapshot().expressionRevision).toBe(1));
+    await vi.waitFor(() => expect(invalidations).toEqual(['expressions']));
     expect(store.blobs.has('sticker-index:recent:v2')).toBe(false);
     expect(store.blobs.has('sticker-index:packs:v2')).toBe(false);
     expect(store.blobs.has('sticker-index:gifs:v2')).toBe(true);
 
     transport.emit({ type: 'expression-index-changed', kind: 'gifs' });
-    await vi.waitFor(() => expect(engine.snapshot().expressionRevision).toBe(2));
+    await vi.waitFor(() => expect(invalidations).toEqual(['expressions', 'expressions']));
     expect(store.blobs.has('sticker-index:gifs:v2')).toBe(false);
+    unsubscribe();
     await engine.stop();
   });
 
@@ -1621,6 +1628,39 @@ describe('MessagingEngine', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(engine.snapshot().sharedMediaCounts).toEqual(latestCounts);
+    await engine.stop();
+  });
+
+  it('reloads shared-media counts when the latest-state count request fails', async () => {
+    const initialCounts = { ...sharedCounts(0), photos: 4 };
+    const refreshedCounts = { ...sharedCounts(0), photos: 14, videos: 6, files: 2 };
+    class FlakyLatestStateCountsTransport extends FakeTransport {
+      countRequests = 0;
+
+      override async getSharedMediaCounts() {
+        this.countRequests += 1;
+        if (this.countRequests === 2) throw new Error('latest-state count failure');
+        return this.countRequests === 1 ? initialCounts : refreshedCounts;
+      }
+    }
+
+    const store = new MemoryStore();
+    store.cursor = currentCursor;
+    const transport = new FlakyLatestStateCountsTransport();
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+    await engine.selectChat(peer.id);
+    await vi.waitFor(() => expect(engine.snapshot().sharedMediaCounts).toEqual(initialCounts));
+    transport.difference = {
+      type: 'complete',
+      cursor: { ...currentCursor, pts: currentCursor.pts + 101 },
+      updates: [],
+    };
+
+    await engine.refreshUpdates();
+
+    await vi.waitFor(() => expect(engine.snapshot().sharedMediaCounts).toEqual(refreshedCounts));
+    expect(transport.countRequests).toBe(3);
     await engine.stop();
   });
 
@@ -2350,6 +2390,33 @@ describe('MessagingEngine', () => {
     await engine.stop();
   });
 
+  it('loads shared-media counts for the restored active chat without reselecting it', async () => {
+    const cachedMessage: CachedMessage = {
+      ...dialog.topMessage!,
+      cacheEpoch: 0,
+    };
+    const store = new MemoryStore();
+    store.cursor = currentCursor;
+    store.dialogs = [{ ...dialog, topMessage: cachedMessage, cacheEpoch: 0 }];
+    store.messages = [cachedMessage];
+    store.lastPeerId = peer.id;
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, store);
+
+    await engine.start(credentials);
+
+    await vi.waitFor(() =>
+      expect(engine.snapshot().sharedMediaCounts).toEqual({
+        ...sharedCounts(0),
+        photos: 12,
+        files: 3,
+        links: 4,
+      }),
+    );
+    expect(transport.sharedMediaCalls).toBe(1);
+    await engine.stop();
+  });
+
   it('keeps remembered cached history pageable after startup reconciliation', async () => {
     const store = new MemoryStore();
     store.cursor = currentCursor;
@@ -2974,6 +3041,70 @@ describe('MessagingEngine', () => {
 
     await vi.waitFor(() => expect(engine.snapshot().sharedMediaCounts).toEqual(expectedCounts));
     await engine.stop();
+  });
+
+  it('retries shared-media counts without requiring the chat to be selected again', async () => {
+    vi.useFakeTimers();
+    try {
+      const expectedCounts = { ...sharedCounts(0), photos: 8, videos: 3, links: 5 };
+      class FlakyCountsTransport extends FakeTransport {
+        countRequests = 0;
+
+        override async getSharedMediaCounts() {
+          this.countRequests += 1;
+          if (this.countRequests === 1) throw new Error('temporary count failure');
+          return expectedCounts;
+        }
+      }
+
+      const transport = new FlakyCountsTransport();
+      const engine = new MessagingEngine(transport, new MemoryStore());
+      await engine.start(credentials);
+      await engine.selectChat(peer.id);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(transport.countRequests).toBe(1);
+      expect(engine.snapshot().sharedMediaCounts).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(transport.countRequests).toBe(2);
+      expect(engine.snapshot().sharedMediaCounts).toEqual(expectedCounts);
+      await engine.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a shared-media count request that never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const stuckRequest = deferred<SharedMediaCounts>();
+      const expectedCounts = { ...sharedCounts(0), photos: 21, voice: 7 };
+      class StuckCountsTransport extends FakeTransport {
+        countRequests = 0;
+
+        override getSharedMediaCounts() {
+          this.countRequests += 1;
+          return this.countRequests === 1 ? stuckRequest.promise : Promise.resolve(expectedCounts);
+        }
+      }
+
+      const transport = new StuckCountsTransport();
+      const engine = new MessagingEngine(transport, new MemoryStore());
+      await engine.start(credentials);
+      await engine.selectChat(peer.id);
+
+      expect(transport.countRequests).toBe(1);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      expect(transport.countRequests).toBe(2);
+      expect(engine.snapshot().sharedMediaCounts).toEqual(expectedCounts);
+      await engine.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('clears the message loading state after a history failure without killing the session', async () => {
@@ -4459,6 +4590,10 @@ describe('MessagingEngine', () => {
     const store = new MemoryStore();
     const transport = new FakeTransport();
     const engine = new MessagingEngine(transport, store);
+    const invalidations: string[] = [];
+    const unsubscribe = engine.subscribeResources(({ kind, peerId }) =>
+      invalidations.push(`${kind}:${peerId ?? ''}`),
+    );
     await engine.start(credentials);
     await engine.selectChat(peer.id);
 
@@ -4468,7 +4603,7 @@ describe('MessagingEngine', () => {
     await expect(engine.getBotCommands(peer)).resolves.toHaveLength(1);
     expect(transport.botCommandCalls).toBe(1);
     transport.emit({ type: 'bot-commands-changed', peerId: peer.id });
-    await vi.waitFor(() => expect(engine.snapshot().botCommandsRevision).toBe(1));
+    await vi.waitFor(() => expect(invalidations).toContain(`bot-commands:${peer.id}`));
     await expect(engine.getBotCommands(peer)).resolves.toHaveLength(1);
     expect(transport.botCommandCalls).toBe(2);
 
@@ -4478,6 +4613,7 @@ describe('MessagingEngine', () => {
     ]);
     expect(store.outbox).toEqual([]);
     expect(engine.snapshot().messages.at(-1)).toMatchObject({ text: '/start fixture' });
+    unsubscribe();
 
     await expect(engine.answerBotCallback(peer, 7, [1, 2])).resolves.toEqual({
       message: 'Done',

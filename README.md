@@ -68,3 +68,16 @@ The unit suite covers the messaging engine, IndexedDB migrations and bounds, tab
 Static WebP, video, and TGS/Lottie stickers render in chat; animated media plays only while hovered or focused. Voice notes and rectangular video messages play inline, grouped media albums render as grids, and Telegram service events appear in history. Attachments can be staged together, sent as compressed media or files, cropped and rotated before upload, and replaced while Telegram still permits editing. Bot commands, start/restart flows, reply keyboards, inline callbacks, links, and copy buttons are supported. Calls, stories, secret chats, threaded topics, and Telegram cloud drafts are outside the current scope.
 
 The files under `src/vendor/weba` come from Telegram Web A. See its `UPSTREAM.md` and `LICENSE` for the pinned revision and license. TeleVecha is licensed under GPL-3.0-or-later.
+
+## Module design
+
+`src/telegram/core/engine.ts` is the application messaging module. UI code observes its snapshot and enters a selected chat through `openConversation`. The returned conversation binds the peer identity and owns chat-scoped commands, so callers do not repeat peer parameters or rely on an undocumented selection order.
+
+The engine's external dependencies live at two seams:
+
+- `TelegramTransport` has production, deterministic fixture, and test adapters. It translates Telegram into TeleVecha's domain types.
+- `CacheStore` has IndexedDB and in-memory test adapters. Atomic latest-state and outbox operations keep persistence rules out of callers.
+
+Engine implementation details remain internal. `PendingSendQueue` owns durable per-peer ordering, `RetryScheduler` owns reconnect timing, and `ResourceCache` owns request coalescing, cached metadata, and stale-media versioning. UI workflow modules under `src/ui` own composer and expression state, bot and reply-keyboard behavior, contact details, conversation headers, responsive drawers, viewport layout, and global or chat-specific appearance. `App.tsx` composes those modules and renders the application shell. Tests should exercise the modules through their interfaces rather than their internal maps or timers.
+
+Solid state follows ownership. Signals hold writable interaction state, memos and derived accessors calculate values, and resources own reactive async reads. Effects are reserved for browser side effects, subscriptions, cleanup, and explicit invalidation workflows; `on` names the intended dependency when the effect also reads incidental state.

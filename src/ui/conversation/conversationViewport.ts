@@ -1,16 +1,13 @@
-import { onCleanup, type Accessor, type Setter } from 'solid-js';
+import { createSignal, onCleanup, type Accessor } from 'solid-js';
 
 const PRESENT_SCROLL_EPSILON = 0.5;
 
 interface ConversationViewportOptions {
+  state: ConversationWindowState;
   scroller: Accessor<HTMLDivElement | undefined>;
   activePeerId: Accessor<string>;
   messageCount: Accessor<number>;
   windowIncludesPresent: Accessor<boolean>;
-  windowStart: Accessor<number>;
-  setWindowStart: Setter<number>;
-  setJumpVisible: Setter<boolean>;
-  setReady: Setter<boolean>;
   maxRenderedMessages: number;
   reportVisibility: () => void;
   loadOlder: (scroller: HTMLDivElement) => void;
@@ -18,12 +15,23 @@ interface ConversationViewportOptions {
   cancelMessageOpen: () => void;
 }
 
+export function createConversationWindowState() {
+  const [windowStart, setWindowStart] = createSignal(0);
+  const [jumpVisible, setJumpVisible] = createSignal(false);
+  const [ready, setReady] = createSignal(true);
+  return { windowStart, setWindowStart, jumpVisible, setJumpVisible, ready, setReady };
+}
+
+type ConversationWindowState = ReturnType<typeof createConversationWindowState>;
+
 interface HistoryAnchor {
   messageId: string;
   top: number;
 }
 
 export function createConversationViewport(options: ConversationViewportOptions) {
+  const { windowStart, setWindowStart, jumpVisible, setJumpVisible, ready, setReady } =
+    options.state;
   let followingPresent = true;
   let positioningPresent = false;
   let positionGeneration = 0;
@@ -90,7 +98,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
         scrollWriteActive = false;
         scrollFrame = undefined;
         if (followingPresent) {
-          options.setJumpVisible(false);
+          setJumpVisible(false);
           options.reportVisibility();
         }
         settled?.();
@@ -112,7 +120,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
       followingPresent = false;
       anchor = visibleAnchor(scroller);
     }
-    options.setJumpVisible(!options.windowIncludesPresent() || distance > 160);
+    setJumpVisible(!options.windowIncludesPresent() || distance > 160);
     options.reportVisibility();
   };
 
@@ -122,9 +130,9 @@ export function createConversationViewport(options: ConversationViewportOptions)
     options.invalidateHistoryRestore();
     followingPresent = false;
     anchor = visibleAnchor(scroller);
-    options.setReady(true);
+    setReady(true);
     const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-    options.setJumpVisible(!options.windowIncludesPresent() || distance > 160);
+    setJumpVisible(!options.windowIncludesPresent() || distance > 160);
     options.reportVisibility();
   };
 
@@ -184,9 +192,9 @@ export function createConversationViewport(options: ConversationViewportOptions)
     options.invalidateHistoryRestore();
     followingPresent = true;
     anchor = undefined;
-    options.setWindowStart(0);
-    options.setJumpVisible(false);
-    options.setReady(false);
+    setWindowStart(0);
+    setJumpVisible(false);
+    setReady(false);
   };
 
   const positionAtPresent = (peerId: string, messageCount: number, stillCurrent: () => boolean) => {
@@ -194,7 +202,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
     const generation = positionGeneration;
     positioningPresent = true;
     followingPresent = true;
-    options.setWindowStart(Math.max(0, messageCount - options.maxRenderedMessages));
+    setWindowStart(Math.max(0, messageCount - options.maxRenderedMessages));
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         if (
@@ -206,7 +214,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
         const scroller = options.scroller();
         if (!scroller) {
           positioningPresent = false;
-          options.setReady(true);
+          setReady(true);
           return;
         }
         alignToPresent(scroller, () => {
@@ -217,8 +225,8 @@ export function createConversationViewport(options: ConversationViewportOptions)
           )
             return;
           positioningPresent = false;
-          options.setJumpVisible(false);
-          options.setReady(true);
+          setJumpVisible(false);
+          setReady(true);
           options.reportVisibility();
         });
       }),
@@ -233,7 +241,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
     const generation = positionGeneration;
     followingPresent = true;
     anchor = undefined;
-    options.setWindowStart(Math.max(0, options.messageCount() - options.maxRenderedMessages));
+    setWindowStart(Math.max(0, options.messageCount() - options.maxRenderedMessages));
     requestAnimationFrame(() => {
       if (
         generation !== positionGeneration ||
@@ -244,7 +252,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
         return;
       alignToPresent(scroller, () => {
         if (generation !== positionGeneration || options.activePeerId() !== peerId) return;
-        options.setJumpVisible(false);
+        setJumpVisible(false);
         options.reportVisibility();
       });
     });
@@ -339,5 +347,12 @@ export function createConversationViewport(options: ConversationViewportOptions)
     stopFollowing,
     updateJump,
     visibleAnchor,
+    windowStart,
+    setWindowStart,
+    jumpVisible,
+    ready,
+    setReady,
   };
 }
+
+export type ConversationViewport = ReturnType<typeof createConversationViewport>;

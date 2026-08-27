@@ -1,7 +1,7 @@
 import { createSignal, onCleanup, type Accessor } from 'solid-js';
 
 import type { ChatMessage } from '../../domain/models';
-import type { MessagingEngine } from '../../telegram/core/engine';
+import type { Conversation } from '../../telegram/core/conversation';
 import type {
   EngineSnapshot,
   TelegramDialog,
@@ -24,7 +24,7 @@ interface EditRestore {
 }
 
 interface ComposerSessionOptions {
-  engine: MessagingEngine;
+  conversation: Accessor<Conversation | undefined>;
   snapshot: Accessor<EngineSnapshot>;
   activePeerId: Accessor<string>;
   activeDialog: Accessor<TelegramDialog | undefined>;
@@ -48,6 +48,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
   let editVersion = 0;
   let typingTimer: ReturnType<typeof setTimeout> | undefined;
   let typingPeerId = '';
+  let typingConversation: Conversation | undefined;
 
   const rememberAttachments = (peerId: string, next: readonly StagedAttachment[]) => {
     if (!peerId || peerId === 'empty') return;
@@ -57,10 +58,10 @@ export function createComposerSession(options: ComposerSessionOptions) {
   const stopTyping = () => {
     if (typingTimer) clearTimeout(typingTimer);
     typingTimer = undefined;
-    if (!typingPeerId) return;
-    const dialog = options.snapshot().dialogs.find(({ peer }) => peer.id === typingPeerId);
+    const conversation = typingConversation;
     typingPeerId = '';
-    if (dialog) void options.engine.setTyping(dialog.peer);
+    typingConversation = undefined;
+    if (conversation) void conversation.setTyping();
   };
   const replaceDraft = (value: string) => {
     editVersion += 1;
@@ -72,22 +73,27 @@ export function createComposerSession(options: ComposerSessionOptions) {
     if (editing()) return;
     const peerId = options.activePeerId();
     if (peerId === 'empty') return;
-    void options.engine.setDraft(peerId, value).catch(() => undefined);
+    const conversation = options.conversation();
+    if (!conversation || conversation.peerId !== peerId) return;
+    void conversation.setDraft(value).catch(() => undefined);
     const dialog = options.activeDialog();
     if (!dialog || !options.snapshot().online) return;
     if (typingTimer) clearTimeout(typingTimer);
     if (value && typingPeerId !== dialog.peer.id) {
       typingPeerId = dialog.peer.id;
-      void options.engine.setTyping(dialog.peer, 'typing');
+      typingConversation = conversation;
+      void conversation.setTyping('typing');
     }
     if (!value && typingPeerId === dialog.peer.id) {
       typingPeerId = '';
-      void options.engine.setTyping(dialog.peer);
+      typingConversation = undefined;
+      void conversation.setTyping();
     }
     typingTimer = setTimeout(() => {
       if (typingPeerId === dialog.peer.id) {
         typingPeerId = '';
-        void options.engine.setTyping(dialog.peer);
+        typingConversation = undefined;
+        void conversation.setTyping();
       }
     }, 4_500);
   };
@@ -116,8 +122,11 @@ export function createComposerSession(options: ComposerSessionOptions) {
     const capturedRestore = editRestore;
     if (!body.trim() && capturedAttachments.length === 0 && !capturedEditing?.media) return;
     const dialog = options.activeDialog();
-    if (!dialog || !options.canSend()) return;
-    const peer = { ...dialog.peer };
+    const conversation = options.conversation();
+    if (!dialog || !conversation || conversation.peerId !== dialog.peer.id || !options.canSend()) {
+      return;
+    }
+    const peerId = dialog.peer.id;
     const capturedReply = reply() ? { ...reply()! } : undefined;
     const telegramReply: TelegramReplyTarget | undefined = capturedReply
       ? {
@@ -132,48 +141,46 @@ export function createComposerSession(options: ComposerSessionOptions) {
     setDraft('');
     setReply(undefined);
     setAttachments([]);
-    if (!capturedEditing) rememberAttachments(peer.id, []);
+    if (!capturedEditing) rememberAttachments(peerId, []);
     setEditing(undefined);
     setFormats([]);
     try {
       if (capturedEditing) {
         const replacement = capturedAttachments[0];
-        await options.engine.editMessage(
-          peer,
+        await conversation.editMessage(
           Number(capturedEditing.id),
           body,
           capturedFormats,
           replacement ? { file: replacement.file, sendAs: replacement.sendAs } : undefined,
         );
         const restore =
-          capturedRestore?.peerId === peer.id
+          capturedRestore?.peerId === peerId
             ? capturedRestore
-            : { peerId: peer.id, text: '', formats: [], attachments: [] };
+            : { peerId, text: '', formats: [], attachments: [] };
         if (editRestore === capturedRestore) editRestore = undefined;
-        if (options.activePeerId() === peer.id && editVersion === capturedVersion) {
+        if (options.activePeerId() === peerId && editVersion === capturedVersion) {
           setDraft(restore.text);
           setFormats(restore.formats);
           setAttachments(cloneAttachments(restore.attachments));
-          rememberAttachments(peer.id, restore.attachments);
+          rememberAttachments(peerId, restore.attachments);
         }
         return;
       }
       if (capturedAttachments.length > 0) {
-        void options.engine.setTyping(peer, 'uploading');
-        await options.engine.sendAttachments(
-          peer,
+        void conversation.setTyping('uploading');
+        await conversation.sendAttachments(
           capturedAttachments.map(({ file, sendAs }) => ({ file, sendAs })),
           body,
           telegramReply,
           capturedFormats,
         );
-        void options.engine.setTyping(peer);
+        void conversation.setTyping();
       } else {
-        await options.engine.sendDraft(peer, body, telegramReply, capturedFormats);
+        await conversation.sendDraft(body, telegramReply, capturedFormats);
       }
     } catch {
       const hasNewerState =
-        options.activePeerId() !== peer.id ||
+        options.activePeerId() !== peerId ||
         editVersion !== capturedVersion ||
         draft() !== '' ||
         formats().length > 0 ||
@@ -187,11 +194,11 @@ export function createComposerSession(options: ComposerSessionOptions) {
         setEditing(capturedEditing);
         setFormats(capturedFormats);
         if (!capturedEditing) {
-          rememberAttachments(peer.id, capturedAttachments);
-          await options.engine.setDraft(peer.id, body).catch(() => undefined);
+          rememberAttachments(peerId, capturedAttachments);
+          await conversation.setDraft(body).catch(() => undefined);
         }
-      } else if (!capturedEditing && options.activePeerId() !== peer.id) {
-        rememberAttachments(peer.id, capturedAttachments);
+      } else if (!capturedEditing && options.activePeerId() !== peerId) {
+        rememberAttachments(peerId, capturedAttachments);
       }
     }
   };
@@ -307,3 +314,5 @@ export function createComposerSession(options: ComposerSessionOptions) {
     reset,
   };
 }
+
+export type ComposerSession = ReturnType<typeof createComposerSession>;

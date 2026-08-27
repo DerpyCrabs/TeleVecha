@@ -9,6 +9,7 @@ export interface ChatSummary {
   color: string;
   preview: string;
   time: string;
+  lastMessageStatus?: 'sent' | 'read' | undefined;
   unread: number;
   muted?: boolean;
   pinned?: boolean;
@@ -104,6 +105,7 @@ export interface ChatMessage {
         title?: string | undefined;
         description?: string | undefined;
         hasPhoto?: boolean | undefined;
+        photoSize?: 'small' | 'large' | undefined;
       }
     | undefined;
   formats?:

@@ -7,6 +7,7 @@ import { Portal } from 'solid-js/web';
 import type { TelegramWallpaper } from '../../telegram/types';
 import { useModalDialog } from '../shared/useModalDialog';
 import { AppearanceSettings } from '../theme/AppearanceSettings';
+import { panelCloseButtonClass, panelHeaderClass } from '../shared/panelStyles';
 import type { ThemePreferences, ThemePresetId } from '../theme/themePreferences';
 
 export function SettingsDialog(props: {
@@ -45,21 +46,26 @@ export function SettingsDialog(props: {
         }
       >
         <section
-          class="settings-dialog"
+          class="settings-dialog flex w-[min(42rem,calc(100vw-2rem))] max-h-[min(48rem,calc(100dvh-2rem))] flex-col overflow-hidden rounded-2xl border border-[var(--line-strong)] bg-panel shadow-[0_24px_80px_var(--shadow)]"
           role="dialog"
           aria-modal="true"
           aria-labelledby="settings-title"
         >
-          <header>
-            <span>
+          <header class={panelHeaderClass}>
+            <span class="flex items-center gap-[0.55rem]">
               <Settings size={18} />
               <strong id="settings-title">Settings</strong>
             </span>
-            <button disabled={props.loggingOut} onClick={props.close} aria-label="Close settings">
+            <button
+              class={panelCloseButtonClass}
+              disabled={props.loggingOut}
+              onClick={props.close}
+              aria-label="Close settings"
+            >
               <X size={18} />
             </button>
           </header>
-          <div class="settings-dialog-content scroll-area">
+          <div class="settings-dialog-content scroll-area min-h-0 overflow-y-auto overscroll-contain">
             <AppearanceSettings
               preferences={props.appearance}
               telegramWallpapers={props.telegramWallpapers}
@@ -73,7 +79,7 @@ export function SettingsDialog(props: {
               setEffects={props.setWallpaperEffects}
               uploadWallpaper={props.uploadWallpaper}
             />
-            <div class="settings-section">
+            <div class="settings-section flex items-center justify-between gap-4 p-4 [&_p]:mt-[0.35rem] [&_p]:mb-0 [&_p]:max-w-76 [&_p]:text-[0.78rem] [&_p]:leading-[1.2rem] [&_p]:text-muted">
               <div>
                 <strong>Local cache</strong>
                 <p>
@@ -82,7 +88,7 @@ export function SettingsDialog(props: {
                 </p>
               </div>
               <button
-                class="settings-cache-action"
+                class="settings-cache-action flex shrink-0 items-center gap-[0.45rem] rounded-[0.6rem] border border-blue-400/25 bg-blue-800/15 px-3 py-[0.6rem] text-blue-300 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={props.loggingOut || props.clearingCache}
                 onClick={props.clearCache}
               >
@@ -90,7 +96,7 @@ export function SettingsDialog(props: {
                 {props.clearingCache ? 'Clearing…' : 'Clear cache'}
               </button>
             </div>
-            <div class="settings-section">
+            <div class="settings-section flex items-center justify-between gap-4 border-t border-line p-4 [&_p]:mt-[0.35rem] [&_p]:mb-0 [&_p]:max-w-76 [&_p]:text-[0.78rem] [&_p]:leading-[1.2rem] [&_p]:text-muted">
               <div>
                 <strong>Telegram account</strong>
                 <p>
@@ -99,7 +105,7 @@ export function SettingsDialog(props: {
                 </p>
               </div>
               <button
-                class="settings-danger-action"
+                class="settings-danger-action flex shrink-0 items-center gap-[0.45rem] rounded-[0.6rem] border border-red-400/25 bg-red-900/15 px-3 py-[0.6rem] text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={props.loggingOut || props.clearingCache}
                 onClick={props.logOut}
               >

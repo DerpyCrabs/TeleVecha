@@ -1,12 +1,12 @@
 import { gunzipSync, strFromU8 } from 'fflate';
-import { createEffect, createSignal, onCleanup } from 'solid-js';
+import { createEffect, onCleanup } from 'solid-js';
 
 export function TgsPlayer(props: { source: string; label: string }) {
-  const [container, setContainer] = createSignal<HTMLDivElement>();
+  let container: HTMLDivElement | undefined;
   let generation = 0;
 
   createEffect(() => {
-    const element = container();
+    const element = container;
     const source = props.source;
     if (!element || !source) return;
     const currentGeneration = ++generation;
@@ -56,5 +56,12 @@ export function TgsPlayer(props: { source: string; label: string }) {
     });
   });
 
-  return <div ref={setContainer} class="tgs-player" role="img" aria-label={props.label} />;
+  return (
+    <div
+      ref={(element) => (container = element)}
+      class="tgs-player"
+      role="img"
+      aria-label={props.label}
+    />
+  );
 }

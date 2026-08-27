@@ -4,6 +4,13 @@ import { For, Show, createSignal } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
 import type { TelegramDialog, TelegramMessage, TelegramSearchPage } from '../../telegram/types';
+import {
+  panelClass,
+  panelCloseButtonClass,
+  panelErrorClass,
+  panelHeaderClass,
+  panelLoadMoreClass,
+} from '../shared/panelStyles';
 import { useModalDialog } from '../shared/useModalDialog';
 
 interface SearchPanelProps {
@@ -100,30 +107,42 @@ export function SearchPanel(props: SearchPanelProps) {
         tabIndex={-1}
         onPointerDown={(event) => event.target === event.currentTarget && props.close()}
       >
-        <section class="search-panel" role="dialog" aria-modal="true" aria-label="Message search">
-          <header>
+        <section
+          class={`search-panel ${panelClass}`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Message search"
+        >
+          <header class={panelHeaderClass}>
             <strong>Search messages</strong>
-            <button onClick={props.close} aria-label="Close search">
+            <button class={panelCloseButtonClass} onClick={props.close} aria-label="Close search">
               <X size={18} />
             </button>
           </header>
-          <div class="search-scope" role="group" aria-label="Search scope">
+          <div
+            class="search-scope flex gap-[0.3rem] px-[0.8rem] pt-[0.6rem]"
+            role="group"
+            aria-label="Search scope"
+          >
             <button
+              class="flex items-center gap-[0.35rem] rounded-[0.55rem] border-0 bg-transparent px-[0.7rem] py-[0.45rem] text-muted"
               aria-pressed={!global()}
-              classList={{ active: !global() }}
+              classList={{ 'active !bg-[var(--accent-soft)] !text-ink': !global() }}
               onClick={() => changeScope(false)}
             >
               This chat
             </button>
             <button
+              class="flex items-center gap-[0.35rem] rounded-[0.55rem] border-0 bg-transparent px-[0.7rem] py-[0.45rem] text-muted"
               aria-pressed={global()}
-              classList={{ active: global() }}
+              classList={{ 'active !bg-[var(--accent-soft)] !text-ink': global() }}
               onClick={() => changeScope(true)}
             >
               All chats
             </button>
           </div>
           <form
+            class="mx-[0.8rem] my-[0.7rem] flex items-center gap-[0.55rem] rounded-[0.65rem] border border-[#30343d] bg-[#101216] px-[0.7rem] focus-within:border-[color-mix(in_srgb,var(--accent)_70%,transparent)] focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent)_20%,transparent)]"
             onSubmit={(event) => {
               event.preventDefault();
               void runSearch(false);
@@ -131,6 +150,7 @@ export function SearchPanel(props: SearchPanelProps) {
           >
             <Search size={17} />
             <input
+              class="w-full border-0 bg-transparent py-[0.7rem] text-ink outline-0"
               value={query()}
               onInput={(event) => changeQuery(event.currentTarget.value)}
               placeholder={global() ? 'Search all Telegram messages' : 'Search this chat'}
@@ -138,16 +158,23 @@ export function SearchPanel(props: SearchPanelProps) {
               autofocus
             />
           </form>
-          <div class="search-results">
-            <Show when={!loading()} fallback={<p>Searching Telegram…</p>}>
+          <div class="search-results min-h-40 overflow-y-auto px-[0.8rem] pt-[0.4rem] pb-[0.8rem]">
+            <Show
+              when={!loading()}
+              fallback={<p class="text-[0.78rem] text-muted">Searching Telegram…</p>}
+            >
               <For
                 each={results()}
                 fallback={
                   <Show
                     when={error()}
-                    fallback={<p>{query().trim() ? 'No messages found' : 'Enter a search term'}</p>}
+                    fallback={
+                      <p class="text-[0.78rem] text-muted">
+                        {query().trim() ? 'No messages found' : 'Enter a search term'}
+                      </p>
+                    }
                   >
-                    <div class="panel-error" role="alert">
+                    <div class={`panel-error ${panelErrorClass}`} role="alert">
                       <p>{error()}</p>
                       <button onClick={() => void runSearch(false)}>Retry search</button>
                     </div>
@@ -155,21 +182,24 @@ export function SearchPanel(props: SearchPanelProps) {
                 }
               >
                 {(message) => (
-                  <button onClick={() => props.openResult(message)}>
+                  <button
+                    class="grid w-full gap-[0.2rem] rounded-[0.6rem] border-0 bg-transparent p-[0.65rem] text-left text-ink hover:bg-white/5 [&>span]:text-[0.78rem] [&>span]:text-muted"
+                    onClick={() => props.openResult(message)}
+                  >
                     <strong>{title(message.peerId)}</strong>
                     <span>{message.text || message.media?.name || 'Message'}</span>
                   </button>
                 )}
               </For>
               <Show when={results().length > 0 && error()}>
-                <div class="panel-error" role="alert">
+                <div class={`panel-error ${panelErrorClass}`} role="alert">
                   <p>{error()}</p>
                   <button onClick={() => void runSearch(true)}>Retry loading more</button>
                 </div>
               </Show>
               <Show when={hasMore() && !error()}>
                 <button
-                  class="panel-load-more"
+                  class={`panel-load-more ${panelLoadMoreClass}`}
                   disabled={loadingMore()}
                   onClick={() => void runSearch(true)}
                 >

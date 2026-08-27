@@ -1,6 +1,6 @@
 import Reply from 'lucide-solid/icons/reply';
 import SmilePlus from 'lucide-solid/icons/smile-plus';
-import { For, Show, createEffect, createSignal } from 'solid-js';
+import { For, Show, createResource } from 'solid-js';
 
 import type { ChatMessage } from '../../domain/models';
 import { TgsPlayer } from '../media/TgsPlayer';
@@ -24,14 +24,10 @@ function CustomReaction(props: {
   documentId: string;
   load?: ((documentId: string) => Promise<CustomEmojiAsset>) | undefined;
 }) {
-  const [asset, setAsset] = createSignal<CustomEmojiAsset>();
-  createEffect(() => {
-    const documentId = props.documentId;
-    const load = props.load;
-    setAsset(undefined);
-    if (!load) return;
-    void load(documentId).then(setAsset, () => undefined);
-  });
+  const [asset] = createResource(
+    () => (props.load ? props.documentId : false),
+    (documentId) => props.load?.(documentId).catch(() => undefined),
+  );
   return (
     <Show when={asset()} fallback={<span class="custom-reaction-placeholder" />}>
       {(loaded) => (

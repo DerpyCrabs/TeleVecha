@@ -70,5 +70,6 @@ interface Window {
     releaseSend(): void;
     releaseUpload(): void;
     releaseHistoryAround(): void;
+    releaseSharedMediaCounts(): void;
   };
 }

@@ -21,6 +21,8 @@ test('keeps unread counts visible and accessible across dialog views', async ({ 
   await alice.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Mute' }).click();
   await expect(alice.locator('.chat-unread-badge-trailing')).toHaveClass(/muted/);
+  await expect(alice.locator('.chat-muted-icon')).toHaveCSS('width', '12px');
+  await expect(alice.locator('.chat-muted-icon')).toHaveCSS('height', '12px');
   await expect(alice).toHaveAccessibleName(/2 unread messages, muted$/);
 
   await alice.click({ button: 'right' });

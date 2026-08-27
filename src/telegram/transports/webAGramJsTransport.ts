@@ -2639,6 +2639,11 @@ export class WebAGramJsTransport implements TelegramTransport {
         title: media.webpage.title,
         description: media.webpage.description,
         hasPhoto: media.webpage.photo instanceof Api.Photo,
+        ...(media.forceLargeMedia
+          ? { photoSize: 'large' as const }
+          : media.forceSmallMedia
+            ? { photoSize: 'small' as const }
+            : {}),
       };
     }
     return undefined;

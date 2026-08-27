@@ -79,6 +79,22 @@ test('resizes the chat sidebar and restores its width after reload', async ({ pa
     .toBe(250);
 });
 
+test('switches compact content while the resize pointer is still down', async ({ page }) => {
+  const sidebar = page.getByTestId('chat-sidebar');
+  const separator = page.getByRole('separator', { name: 'Resize chat list' });
+  const handle = await separator.boundingBox();
+  if (!handle) throw new Error('Chat-list resize handle is not visible');
+
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(handle.x - 260, handle.y + 100);
+
+  await expect(sidebar).toHaveAttribute('data-compact', 'true');
+  await expect(page.getByRole('textbox', { name: 'Search chats' })).not.toBeVisible();
+
+  await page.mouse.up();
+});
+
 test('marks the open dialog with a blue tile at every sidebar width', async ({ page }) => {
   const sidebar = page.getByTestId('chat-sidebar');
   const chatList = page.getByTestId('chat-list');

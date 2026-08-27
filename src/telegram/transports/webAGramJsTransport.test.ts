@@ -1311,6 +1311,7 @@ describe('WebAGramJsTransport mapping', () => {
       }),
       replyTo: new Api.MessageReplyHeader({ replyToMsgId: 7, quoteText: 'quoted' }),
       media: new Api.MessageMediaWebPage({
+        forceSmallMedia: true,
         webpage: new Api.WebPage({
           id: 1n,
           url: 'https://example.com',
@@ -1354,6 +1355,7 @@ describe('WebAGramJsTransport mapping', () => {
         title: 'Preview title',
         description: 'Preview description',
         hasPhoto: true,
+        photoSize: 'small',
       },
     });
   });

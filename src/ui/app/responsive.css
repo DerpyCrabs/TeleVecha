@@ -1,0 +1,154 @@
+@media (max-width: 1100px) {
+  .app-grid,
+  .app-grid.details-visible {
+    grid-template-columns: clamp(
+        72px,
+        var(--left-sidebar-width, 280px),
+        calc(100vw - 360px)
+      ) minmax(0, 1fr);
+  }
+  .details-pane {
+    position: fixed;
+    z-index: 55;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: block;
+    width: min(22rem, 88vw);
+    border-left: 1px solid var(--line);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(100%);
+    transition:
+      transform 180ms ease,
+      opacity 120ms ease;
+  }
+  .details-visible .details-pane {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+  }
+  .mobile-drawer-backdrop {
+    position: fixed;
+    z-index: 50;
+    inset: 0;
+    display: block;
+    border: 0;
+    background: rgb(0 0 0 / 0.48);
+  }
+}
+
+@media (max-width: 650px) {
+  .desktop-theme-grid {
+    gap: 0.35rem;
+  }
+  .accent-color-list {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .wallpaper-option-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .wallpaper-effects {
+    grid-template-columns: 1fr;
+  }
+  .app-grid,
+  .app-grid.details-visible {
+    grid-template-columns: 1fr;
+  }
+  .chat-sidebar {
+    position: fixed;
+    z-index: 55;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(21rem, 88vw);
+    max-width: none;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform 180ms ease,
+      visibility 180ms step-end;
+  }
+  .chat-sidebar.mobile-open,
+  .mobile-sidebar-visible .chat-sidebar {
+    transform: translateX(0);
+    visibility: visible;
+    transition:
+      transform 180ms ease,
+      visibility 0ms;
+  }
+  .icon-button.mobile-sidebar-trigger {
+    display: grid;
+  }
+  .left-sidebar-resizer {
+    display: none;
+  }
+  .chat-header {
+    padding-right: 0.55rem;
+    padding-left: 0.55rem;
+  }
+  .message-scroller {
+    padding-right: 0.65rem;
+    padding-left: 0.65rem;
+  }
+  .message {
+    max-width: 88%;
+  }
+  .composer-attachment {
+    grid-template-columns: 2.6rem minmax(0, 1fr) auto auto auto;
+    gap: 0.4rem;
+  }
+  .composer-attachment img {
+    width: 2.6rem;
+    height: 2.6rem;
+  }
+  .composer-attachment .composer-attachment-mode button {
+    padding: 0 0.3rem;
+  }
+  .image-editor-overlay {
+    place-items: end center;
+    padding: 0;
+  }
+  .image-editor {
+    width: 100%;
+    max-height: 94dvh;
+    border-radius: 0.9rem 0.9rem 0 0;
+  }
+  .image-editor-preview {
+    min-height: 10rem;
+    max-height: 42dvh;
+  }
+  .image-editor-preview img {
+    max-height: 42dvh;
+  }
+  .image-editor-controls,
+  .image-editor-crops {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .image-editor-crops {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .image-editor-crops > span {
+    grid-column: 1 / -1;
+  }
+  .sync-state-banner {
+    justify-content: space-between;
+  }
+  .shared-items.shared-media {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

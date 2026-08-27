@@ -228,6 +228,7 @@ export interface TelegramLinkPreview {
   title?: string | undefined;
   description?: string | undefined;
   hasPhoto?: boolean | undefined;
+  photoSize?: 'small' | 'large' | undefined;
 }
 
 export interface TelegramTextFormat {
@@ -268,6 +269,11 @@ export interface TelegramSearchOffset {
 }
 
 export type SharedMediaKind = 'photos' | 'videos' | 'files' | 'audio' | 'links' | 'voice' | 'gifs';
+export type TelegramResourceKind = 'expressions' | 'bot-commands' | 'group-members';
+export interface TelegramResourceInvalidation {
+  kind: TelegramResourceKind;
+  peerId?: string | undefined;
+}
 export type TelegramActivityKind = 'typing' | 'uploading' | 'recording' | 'choosing-sticker';
 
 export interface TelegramActivity {
@@ -787,9 +793,6 @@ export interface EngineSnapshot {
   pinnedMessages: TelegramMessage[];
   historyGaps: TelegramHistoryGap[];
   activities: TelegramActivity[];
-  expressionRevision: number;
-  botCommandsRevision: number;
-  groupMembersRevision: number;
   authStep?: 'phone' | 'code' | 'password' | undefined;
   codeViaApp?: boolean | undefined;
   historyError?: string | undefined;

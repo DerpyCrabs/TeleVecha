@@ -1,5 +1,5 @@
 import X from 'lucide-solid/icons/x';
-import { For, Show, createEffect, createSignal } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
 import type { TelegramUrlAuthAcceptOptions, TelegramUrlAuthResult } from '../../telegram/types';
@@ -19,15 +19,6 @@ export function BotUrlAuthDialog(props: BotUrlAuthDialogProps) {
   const [sharePhoneNumber, setSharePhoneNumber] = createSignal(false);
   const [matchCode, setMatchCode] = createSignal('');
   let overlay: HTMLDivElement | undefined;
-  let previousRequest = props.request;
-  createEffect(() => {
-    const request = props.request;
-    if (request === previousRequest) return;
-    previousRequest = request;
-    setWriteAllowed(false);
-    setSharePhoneNumber(false);
-    setMatchCode('');
-  });
   const close = () => {
     if (!props.busy) props.close();
   };

@@ -1,10 +1,38 @@
 import type { ChatMessage, ChatSummary } from '../../domain/models';
+import { richBlocksToPlainText } from '../../domain/messageText';
 import type { PendingAttachment, TelegramDialog, TelegramMessage } from '../../telegram/types';
 
 function formatMessageTime(timestamp: number) {
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(
     new Date(timestamp * 1000),
   );
+}
+
+function mediaPreview(message: TelegramMessage) {
+  const media = message.media;
+  if (!media) return '';
+  const labels: Record<NonNullable<TelegramMessage['media']>['kind'], string> = {
+    photo: 'Photo',
+    video: 'Video',
+    'round-video': 'Video message',
+    voice: 'Voice message',
+    animation: 'GIF',
+    sticker: 'Sticker',
+    file: media.name || 'File',
+  };
+  return labels[media.kind];
+}
+
+export function dialogMessagePreview(message: TelegramMessage) {
+  const text = message.text.trim();
+  if (text) return text;
+  if (message.service?.text) return message.service.text;
+  const media = mediaPreview(message);
+  if (media) return media;
+  if (message.richMessage) {
+    return richBlocksToPlainText(message.richMessage.blocks).split('\n').find(Boolean) ?? 'Message';
+  }
+  return 'Message';
 }
 
 export function presentPendingAttachment(
@@ -30,13 +58,24 @@ export function presentPendingAttachment(
 }
 
 export function presentDialog(dialog: TelegramDialog): ChatSummary {
+  const topMessage = dialog.topMessage;
   return {
     id: dialog.peer.id,
     title: dialog.title,
     initials: dialog.initials,
     color: dialog.color,
-    preview: dialog.topMessage?.text || 'No messages yet',
-    time: dialog.topMessage ? formatMessageTime(dialog.topMessage.date) : '',
+    preview: topMessage
+      ? dialogMessagePreview(topMessage)
+      : dialog.topMessageId > 0
+        ? 'Message'
+        : 'No messages yet',
+    time: topMessage ? formatMessageTime(topMessage.date) : '',
+    ...(topMessage?.outgoing
+      ? {
+          lastMessageStatus:
+            topMessage.id <= dialog.readOutboxMaxId ? ('read' as const) : ('sent' as const),
+        }
+      : {}),
     unread: dialog.unreadCount,
     muted: dialog.muted,
     pinned: dialog.pinned,

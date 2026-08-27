@@ -7,13 +7,29 @@ import type {
 } from '../../telegram/types';
 import { cachedAssetUrl, loadAssetUrl, rememberAssetUrl } from './assetUrls';
 
+export interface MediaAsset {
+  readonly revision: string;
+  cached(): string | undefined;
+  load(): Promise<string>;
+}
+
+type MediaSource = Pick<
+  MessagingEngine,
+  | 'loadCachedAvatar'
+  | 'downloadAvatar'
+  | 'mediaAssetKey'
+  | 'downloadMedia'
+  | 'downloadSticker'
+  | 'downloadCustomEmoji'
+>;
+
 export class MediaAssets {
   private readonly avatarLoads = new Map<string, Promise<string | undefined>>();
   private readonly customEmojiLoads = new Map<string, Promise<{ url: string; mimeType: string }>>();
   private readonly avatarUrls = new Set<string>();
 
   constructor(
-    private readonly engine: MessagingEngine,
+    private readonly engine: MediaSource,
     private readonly dialogs: () => TelegramDialog[],
   ) {}
 
@@ -58,14 +74,33 @@ export class MediaAssets {
     return `${peerId}:${dialog?.avatarId ?? 'none'}`;
   }
 
+  private asset(revision: string, load: () => Promise<Blob>): MediaAsset {
+    return {
+      revision,
+      cached: () => cachedAssetUrl(revision),
+      load: () => loadAssetUrl(revision, load),
+    };
+  }
+
+  message(message: TelegramMessage) {
+    return this.asset(this.engine.mediaAssetKey(message), () => this.engine.downloadMedia(message));
+  }
+
+  pending(peerId: string, messageId: string, blob: Blob) {
+    const revision = `pending-media:${peerId}:${messageId}`;
+    return this.asset(revision, () => Promise.resolve(blob));
+  }
+
+  sticker(sticker: TelegramSticker) {
+    return this.asset(`sticker:${sticker.id}`, () => this.engine.downloadSticker(sticker));
+  }
+
   loadMedia(message: TelegramMessage) {
-    return loadAssetUrl(this.engine.mediaAssetKey(message), () =>
-      this.engine.downloadMedia(message),
-    );
+    return this.message(message).load();
   }
 
   loadSticker(sticker: TelegramSticker) {
-    return loadAssetUrl(`sticker:${sticker.id}`, () => this.engine.downloadSticker(sticker));
+    return this.sticker(sticker).load();
   }
 
   loadCustomEmoji(documentId: string) {

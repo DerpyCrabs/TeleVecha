@@ -13,39 +13,29 @@ import Trash2 from 'lucide-solid/icons/trash-2';
 import { For, Show } from 'solid-js';
 
 import type { ChatSummary } from '../../domain/models';
-import type {
-  SharedMediaCounts,
-  SharedMediaKind,
-  TelegramGroupMember,
-  TelegramUserDetails,
-} from '../../telegram/types';
+import type { SharedMediaCounts, SharedMediaKind, TelegramGroupMember } from '../../telegram/types';
+import { MediaAssets } from '../media/mediaAssets';
 import { AutoLinkText } from '../shared/AutoLinkText';
 import { Avatar } from '../shared/Avatar';
+import type { ContactDetailsSession } from './contactDetailsSession';
 
 interface DetailsPaneProps {
   chat: ChatSummary;
   counts?: SharedMediaCounts | undefined;
-  userDetails?: TelegramUserDetails | undefined;
-  members: TelegramGroupMember[];
-  membersLoading: boolean;
   online: boolean;
   modal: boolean;
-  avatarIdentity: string;
-  loadCachedAvatar: () => Promise<string | undefined>;
-  loadAvatar: () => Promise<string | undefined>;
-  loadCachedMemberAvatar: (member: TelegramGroupMember) => Promise<string | undefined>;
-  loadMemberAvatar: (member: TelegramGroupMember) => Promise<string | undefined>;
+  media: MediaAssets;
+  details: ContactDetailsSession;
   close: () => void;
   openShared: (kind: SharedMediaKind) => void;
-  shareContact: () => void;
-  editContact: () => void;
-  deleteContact: () => void;
   setBlocked: (blocked: boolean) => void;
 }
 
 export function DetailsPane(props: DetailsPaneProps) {
+  const detailRowClass =
+    'detail-row grid w-full grid-cols-[1.4rem_1fr_auto] items-center gap-2 rounded-[0.45rem] border-0 bg-transparent px-3 py-3 text-left text-[0.82rem] text-muted hover:bg-[var(--surface-subtle)] [&>span]:text-ink [&>b]:font-medium [&>b]:text-muted';
   const phone = () => {
-    const value = props.userDetails?.phone;
+    const value = props.details.userDetails()?.phone;
     return value && !value.startsWith('+') ? `+${value}` : value;
   };
   const status = () => {
@@ -68,7 +58,7 @@ export function DetailsPane(props: DetailsPaneProps) {
     return 'offline';
   };
   const birthday = () => {
-    const value = props.userDetails?.birthday;
+    const value = props.details.userDetails()?.birthday;
     if (!value) return undefined;
     return new Intl.DateTimeFormat(undefined, {
       month: 'long',
@@ -95,39 +85,39 @@ export function DetailsPane(props: DetailsPaneProps) {
         <section class="flex flex-col items-center border-b border-line px-6 py-7 text-center">
           <div data-testid="details-avatar">
             <Avatar
-              identity={props.avatarIdentity}
+              identity={props.media.avatarIdentity(props.chat.id)}
               initials={props.chat.initials}
               color={props.chat.color}
               size="lg"
               online={props.chat.presence === 'online'}
-              loadCached={props.loadCachedAvatar}
-              load={props.online ? props.loadAvatar : undefined}
+              loadCached={() => props.media.loadAvatar(props.chat.id, true)}
+              load={props.online ? () => props.media.loadAvatar(props.chat.id) : undefined}
             />
           </div>
           <h2 class="mt-4 font-semibold">{props.chat.title}</h2>
           <p class="mt-1 text-xs text-[var(--muted)]">{status()}</p>
         </section>
-        <Show when={props.chat.kind === 'user' && props.userDetails}>
-          <section class="profile-fields">
+        <Show when={props.chat.kind === 'user' && props.details.userDetails()}>
+          <section class="grid gap-4 border-b border-line px-5 py-4 [&_a]:grid [&_a]:gap-1 [&_a]:text-ink [&_a]:no-underline [&_a>span]:text-[#65bff0] [&_div]:grid [&_div]:gap-1 [&_small]:text-xs [&_small]:text-muted [&_.autolink-text]:whitespace-pre-wrap [&_.autolink-text]:[overflow-wrap:anywhere] [&_.autolink-text_a]:inline [&_.autolink-text_a]:text-[#65bff0]">
             <Show when={phone()}>
               <div>
                 <span>{phone()}</span>
                 <small>Mobile</small>
               </div>
             </Show>
-            <Show when={props.userDetails?.bio}>
+            <Show when={props.details.userDetails()?.bio}>
               <div>
-                <AutoLinkText text={props.userDetails!.bio!} />
+                <AutoLinkText text={props.details.userDetails()!.bio!} />
                 <small>Bio</small>
               </div>
             </Show>
-            <Show when={props.userDetails?.username}>
+            <Show when={props.details.userDetails()?.username}>
               <a
-                href={`https://t.me/${props.userDetails!.username}`}
+                href={`https://t.me/${props.details.userDetails()!.username}`}
                 target="_blank"
                 rel="noreferrer"
               >
-                <span>@{props.userDetails!.username}</span>
+                <span>@{props.details.userDetails()!.username}</span>
                 <small>Username</small>
               </a>
             </Show>
@@ -140,80 +130,86 @@ export function DetailsPane(props: DetailsPaneProps) {
           </section>
         </Show>
         <section class="p-2">
-          <button class="detail-row" onClick={() => props.openShared('photos')}>
+          <button class={detailRowClass} onClick={() => props.openShared('photos')}>
             <Image size={17} />
             <span>Photos</span>
             <b>{props.counts?.photos ?? '…'}</b>
           </button>
-          <button class="detail-row" onClick={() => props.openShared('videos')}>
+          <button class={detailRowClass} onClick={() => props.openShared('videos')}>
             <Video size={17} />
             <span>Videos</span>
             <b>{props.counts?.videos ?? '…'}</b>
           </button>
-          <button class="detail-row" onClick={() => props.openShared('files')}>
+          <button class={detailRowClass} onClick={() => props.openShared('files')}>
             <FileText size={17} />
             <span>Files</span>
             <b>{props.counts?.files ?? '…'}</b>
           </button>
-          <button class="detail-row" onClick={() => props.openShared('audio')}>
+          <button class={detailRowClass} onClick={() => props.openShared('audio')}>
             <Headphones size={17} />
             <span>Audio files</span>
             <b>{props.counts?.audio ?? '…'}</b>
           </button>
-          <button class="detail-row" onClick={() => props.openShared('links')}>
+          <button class={detailRowClass} onClick={() => props.openShared('links')}>
             <Link size={17} />
             <span>Links</span>
             <b>{props.counts?.links ?? '…'}</b>
           </button>
-          <button class="detail-row" onClick={() => props.openShared('voice')}>
+          <button class={detailRowClass} onClick={() => props.openShared('voice')}>
             <Mic size={17} />
             <span>Voice messages</span>
             <b>{props.counts?.voice ?? '…'}</b>
           </button>
-          <button class="detail-row" onClick={() => props.openShared('gifs')}>
+          <button class={detailRowClass} onClick={() => props.openShared('gifs')}>
             <FileImage size={17} />
             <span>GIFs</span>
             <b>{props.counts?.gifs ?? '…'}</b>
           </button>
         </section>
-        <Show when={props.chat.kind === 'user' && props.userDetails}>
-          <section class="contact-actions" aria-label="Contact actions">
-            <button onClick={props.shareContact}>
+        <Show when={props.chat.kind === 'user' && props.details.userDetails()}>
+          <section
+            class="grid border-y border-line px-2 py-2 [&>button]:grid [&>button]:w-full [&>button]:grid-cols-[1.4rem_minmax(0,1fr)] [&>button]:items-center [&>button]:gap-2 [&>button]:rounded-[0.45rem] [&>button]:border-0 [&>button]:bg-transparent [&>button]:px-3 [&>button]:py-2.5 [&>button]:text-left [&>button]:text-[0.82rem] [&>button]:text-ink [&>button:hover]:bg-[var(--surface-subtle)]"
+            aria-label="Contact actions"
+          >
+            <button onClick={() => void props.details.share()}>
               <Share2 size={17} />
               <span>Share this contact</span>
             </button>
-            <Show when={props.userDetails?.isContact}>
-              <button onClick={props.editContact}>
+            <Show when={props.details.userDetails()?.isContact}>
+              <button onClick={props.details.edit}>
                 <Pencil size={17} />
                 <span>Edit contact</span>
               </button>
-              <button onClick={props.deleteContact}>
+              <button onClick={props.details.remove}>
                 <Trash2 size={17} />
                 <span>Delete contact</span>
               </button>
             </Show>
-            <button class="danger" onClick={() => props.setBlocked(!props.userDetails?.blocked)}>
+            <button
+              class="!text-red-400"
+              onClick={() => props.setBlocked(!props.details.userDetails()?.blocked)}
+            >
               <Hand size={17} />
-              <span>{props.userDetails?.blocked ? 'Unblock user' : 'Block user'}</span>
+              <span>{props.details.userDetails()?.blocked ? 'Unblock user' : 'Block user'}</span>
             </button>
           </section>
         </Show>
         <Show when={props.chat.kind !== 'user'}>
-          <section class="group-members" aria-label="Members">
-            <header>
+          <section class="group-members border-b border-line px-2.5 py-3" aria-label="Members">
+            <header class="flex items-center justify-between px-2 py-1 pb-2.5 text-xs [&>span]:text-muted">
               <strong>Members</strong>
-              <span>{props.membersLoading ? '…' : props.members.length}</span>
+              <span>{props.details.membersLoading() ? '…' : props.details.members().length}</span>
             </header>
             <Show
-              when={!props.membersLoading}
-              fallback={<p class="group-members-state">Loading members…</p>}
+              when={!props.details.membersLoading()}
+              fallback={<p class="m-0 px-2 py-3 text-xs text-muted">Loading members…</p>}
             >
               <For
-                each={props.members}
-                fallback={<p class="group-members-state">Members are unavailable.</p>}
+                each={props.details.members()}
+                fallback={<p class="m-0 px-2 py-3 text-xs text-muted">Members are unavailable.</p>}
               >
                 {(member) => (
-                  <div class="group-member">
+                  <div class="group-member grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] px-2 py-2 hover:bg-[var(--surface-subtle)]">
                     <Avatar
                       identity={`${member.peer.id}:${member.avatarId ?? 'none'}`}
                       initials={member.initials}
@@ -221,20 +217,44 @@ export function DetailsPane(props: DetailsPaneProps) {
                       size="sm"
                       online={member.presence === 'online'}
                       loadCached={
-                        member.hasAvatar ? () => props.loadCachedMemberAvatar(member) : undefined
+                        member.hasAvatar
+                          ? () =>
+                              props.media.loadPeerAvatar(
+                                member.peer,
+                                member.hasAvatar,
+                                member.avatarId,
+                                true,
+                              )
+                          : undefined
                       }
                       load={
                         props.online && member.hasAvatar
-                          ? () => props.loadMemberAvatar(member)
+                          ? () =>
+                              props.media.loadPeerAvatar(
+                                member.peer,
+                                member.hasAvatar,
+                                member.avatarId,
+                              )
                           : undefined
                       }
                     />
-                    <span>
-                      <strong>{member.title}</strong>
-                      <small>{memberStatus(member)}</small>
+                    <span class="grid min-w-0">
+                      <strong class="truncate text-[0.8rem]">{member.title}</strong>
+                      <small class="truncate text-[0.68rem] text-muted">
+                        {memberStatus(member)}
+                      </small>
                     </span>
                     <Show when={member.role}>
-                      <b class={`member-role ${member.roleKind ?? 'admin'}`}>{member.role}</b>
+                      <b
+                        class="member-role rounded-full bg-[rgb(101_185_135/0.14)] px-1.5 py-0.5 text-[0.62rem] font-semibold text-[#65b987]"
+                        classList={{
+                          owner: member.roleKind === 'owner',
+                          admin: member.roleKind === 'admin',
+                          'bg-[rgb(168_121_232/0.14)] text-[#a879e8]': member.roleKind === 'owner',
+                        }}
+                      >
+                        {member.role}
+                      </b>
                     </Show>
                   </div>
                 )}

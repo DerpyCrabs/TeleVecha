@@ -1,5 +1,7 @@
 import { reportDiagnostic } from './diagnostics';
+import { Conversation } from './conversation';
 import { PendingSendQueue } from './pendingQueue';
+import { ResourceCache } from './resourceCache';
 import { RetryScheduler } from './retryScheduler';
 import type { CacheStore, TimedCacheValue } from '../persistence/store';
 import { acquireSingleTabLease, TabLockUnsupportedError, type TabLease } from '../session/tabLock';
@@ -22,6 +24,7 @@ import type {
   TelegramPeer,
   TelegramPeerSearchResult,
   TelegramReaction,
+  TelegramResourceInvalidation,
   TelegramReplyTarget,
   TelegramSticker,
   TelegramStickerPack,
@@ -45,6 +48,7 @@ const MAX_ACTIVE_MESSAGES = 5_000;
 const MAX_MESSAGE_MUTATIONS = 5_000;
 const HISTORY_RETRY_BASE_MS = 1_000;
 const HISTORY_RETRY_MAX_MS = 30_000;
+const SHARED_MEDIA_COUNT_TIMEOUT_MS = 5_000;
 const MAX_ALBUM_ATTACHMENTS = 10;
 const MAX_MESSAGE_TEXT_LENGTH = 4_096;
 const MAX_CAPTION_TEXT_LENGTH = 1_024;
@@ -56,6 +60,7 @@ const EXPRESSION_INDEX_CACHE_KEYS = [
 const PEER_METADATA_CACHE_TTL_MS = 5 * 60 * 1_000;
 
 type Listener = (snapshot: EngineSnapshot) => void;
+type ResourceListener = (event: TelegramResourceInvalidation) => void;
 
 export class MessagingEngine {
   private snapshotValue: EngineSnapshot = {
@@ -72,11 +77,9 @@ export class MessagingEngine {
     pinnedMessages: [],
     historyGaps: [],
     activities: [],
-    expressionRevision: 0,
-    botCommandsRevision: 0,
-    groupMembersRevision: 0,
   };
   private readonly listeners = new Set<Listener>();
+  private readonly resourceListeners = new Set<ResourceListener>();
   private readonly lifecycleTasks = new Set<Promise<unknown>>();
   private readonly reactionQueues = new Map<string, Promise<void>>();
   private readonly reactionVersions = new Map<string, number>();
@@ -90,18 +93,7 @@ export class MessagingEngine {
   private updateQueue = Promise.resolve();
   private selectionVersion = 0;
   private lastPeerWrite = Promise.resolve();
-  private readonly mediaDownloads = new Map<string, Promise<Blob>>();
-  private readonly mediaVersions = new Map<string, number>();
-  private readonly avatarDownloads = new Map<string, Promise<Blob | undefined>>();
-  private readonly stickerDownloads = new Map<string, Promise<Blob>>();
-  private readonly customEmojiDownloads = new Map<string, Promise<Blob>>();
-  private readonly wallpaperDownloads = new Map<string, Promise<Blob>>();
-  private readonly chatAppearanceRequests = new Map<
-    string,
-    Promise<TelegramChatAppearance | undefined>
-  >();
-  private readonly chatAppearanceCache = new Map<string, TelegramChatAppearance | undefined>();
-  private readonly botCommandRequests = new Map<string, Promise<TelegramBotCommand[]>>();
+  private readonly resources = new ResourceCache();
   private readonly mutationVersions = new Map<string, number>();
   private mutationSequence = 0;
   private readonly mutationTails = new Map<string, Promise<void>>();
@@ -145,19 +137,14 @@ export class MessagingEngine {
   private readonly historyAnchors = new Map<string, number>();
   private readonly pendingInboxReadMax = new Map<string, number>();
   private readonly inboxReadRequests = new Map<string, Promise<void>>();
-  private readonly deliveringPending = new Set<string>();
-  private readonly pendingDeliveries = new Map<string, Promise<void>>();
-  private readonly peerDeliveryTails = new Map<string, Promise<void>>();
-  private readonly peerDeliveryBlocks = new Map<string, string>();
-  private readonly outboxWriteTails = new Map<string, Promise<void>>();
   private readonly pendingQueue: PendingSendQueue;
-  private readonly cancelledPending = new Set<string>();
   private readonly channelRefreshes = new Map<string, Promise<void>>();
   private refreshingUpdates: Promise<void> | undefined;
   private retryingSync: Promise<void> | undefined;
   private flushingOutbox: Promise<void> | undefined;
   private disconnecting: Promise<void> | undefined;
   private readonly reconnect = new RetryScheduler(1_000, 30_000);
+  private readonly sharedMediaCountRetry = new RetryScheduler(500, 30_000);
   private credentials: TelegramCredentials | undefined;
   private accountId: string | undefined;
   private cachedAccountId: string | undefined;
@@ -169,6 +156,7 @@ export class MessagingEngine {
   private snapshotNotificationPending = false;
   private metadataGeneration = 0;
   private readonly sharedMediaCountVersions = new Map<string, number>();
+  private sharedMediaCountRequest: { peerId: string; request: Promise<void> } | undefined;
   private operationErrorArea: 'auth' | 'sync' | 'transport' | 'cache' | 'outbox' | undefined;
   private readViewport: {
     peerId?: string | undefined;
@@ -264,6 +252,15 @@ export class MessagingEngine {
     this.listeners.add(listener);
     listener(this.snapshotValue);
     return () => this.listeners.delete(listener);
+  }
+
+  subscribeResources(listener: ResourceListener) {
+    this.resourceListeners.add(listener);
+    return () => this.resourceListeners.delete(listener);
+  }
+
+  private invalidateResource(event: TelegramResourceInvalidation) {
+    for (const listener of this.resourceListeners) listener(event);
   }
 
   async start(credentials: TelegramCredentials) {
@@ -505,7 +502,7 @@ export class MessagingEngine {
         this.dialogStateTail,
         this.metadataWriteTail,
         ...this.draftWrites.values(),
-        ...this.outboxWriteTails.values(),
+        ...this.pendingQueue.pendingWrites(),
         ...this.inboxReadRequests.values(),
         ...this.readReceiptRefreshes.values(),
         ...this.channelRefreshes.values(),
@@ -526,7 +523,7 @@ export class MessagingEngine {
         this.tabLease = undefined;
         this.reactionQueues.clear();
         this.reactionVersions.clear();
-        this.botCommandRequests.clear();
+        this.resources.clear();
         this.mutationVersions.clear();
         this.mutationSequence = 0;
         this.mutationTails.clear();
@@ -538,19 +535,9 @@ export class MessagingEngine {
         this.groupMemberCache.clear();
         this.groupMemberCacheLoaded.clear();
         this.groupMemberRequests.clear();
-        this.mediaVersions.clear();
-        this.mediaDownloads.clear();
-        this.avatarDownloads.clear();
-        this.stickerDownloads.clear();
-        this.customEmojiDownloads.clear();
-        this.wallpaperDownloads.clear();
-        this.chatAppearanceRequests.clear();
-        this.chatAppearanceCache.clear();
         this.sharedMediaCountVersions.clear();
-        this.pendingDeliveries.clear();
-        this.peerDeliveryTails.clear();
-        this.peerDeliveryBlocks.clear();
-        this.outboxWriteTails.clear();
+        this.sharedMediaCountRequest = undefined;
+        this.sharedMediaCountRetry.reset();
         this.pendingQueue.clear();
       }
     }
@@ -778,32 +765,102 @@ export class MessagingEngine {
     }
   }
 
-  private async loadSharedMediaCounts(dialog: TelegramDialog) {
-    if (!this.snapshotValue.online) return;
+  async openConversation(peerId: string) {
+    await this.selectChat(peerId);
+    if (this.snapshotValue.activePeerId !== peerId) {
+      throw new Error('Could not select the requested conversation.');
+    }
+    return new Conversation(this, peerId);
+  }
+
+  ensureSharedMediaCounts(peerId = this.snapshotValue.activePeerId) {
+    if (
+      !peerId ||
+      !this.snapshotValue.online ||
+      this.snapshotValue.activePeerId !== peerId ||
+      this.snapshotValue.sharedMediaCounts
+    ) {
+      return Promise.resolve();
+    }
+    const dialog = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
+    return dialog ? this.loadSharedMediaCounts(dialog) : Promise.resolve();
+  }
+
+  private loadSharedMediaCounts(dialog: TelegramDialog) {
+    const current = this.sharedMediaCountRequest;
+    if (current?.peerId === dialog.peer.id) return current.request;
+    this.sharedMediaCountRetry.reset();
+    const request = Promise.resolve()
+      .then(() => this.fetchSharedMediaCounts(dialog))
+      .then((retry) => {
+        if (retry) this.scheduleSharedMediaCountRetry(dialog);
+      })
+      .finally(() => {
+        if (this.sharedMediaCountRequest?.request === request) {
+          this.sharedMediaCountRequest = undefined;
+        }
+      });
+    this.sharedMediaCountRequest = { peerId: dialog.peer.id, request };
+    return request;
+  }
+
+  private scheduleSharedMediaCountRetry(dialog: TelegramDialog) {
+    this.sharedMediaCountRetry.schedule(async () => {
+      if (
+        !this.snapshotValue.online ||
+        this.snapshotValue.activePeerId !== dialog.peer.id ||
+        !this.snapshotValue.dialogs.some(({ peer }) => peer.id === dialog.peer.id)
+      ) {
+        return false;
+      }
+      return this.fetchSharedMediaCounts(dialog);
+    });
+  }
+
+  private async fetchSharedMediaCounts(dialog: TelegramDialog) {
+    if (!this.snapshotValue.online) return false;
     const generation = this.lifecycleGeneration;
     const accountId = this.accountId;
-    const metadataGeneration = this.metadataGeneration;
     const requestVersion = (this.sharedMediaCountVersions.get(dialog.peer.id) ?? 0) + 1;
     this.sharedMediaCountVersions.set(dialog.peer.id, requestVersion);
     this.patch({ sharedMediaCounts: undefined });
     try {
-      const counts = await this.transport.getSharedMediaCounts(dialog.peer);
+      const counts = await this.getSharedMediaCountsWithDeadline(dialog.peer);
       if (
         this.isOperationCurrent(generation, accountId) &&
-        metadataGeneration === this.metadataGeneration &&
         this.sharedMediaCountVersions.get(dialog.peer.id) === requestVersion &&
         this.snapshotValue.activePeerId === dialog.peer.id
       ) {
         this.patch({ sharedMediaCounts: counts });
+        this.sharedMediaCountRetry.reset();
       }
+      return false;
     } catch (error) {
       if (
         this.isOperationCurrent(generation, accountId) &&
-        metadataGeneration === this.metadataGeneration &&
-        this.sharedMediaCountVersions.get(dialog.peer.id) === requestVersion
+        this.sharedMediaCountVersions.get(dialog.peer.id) === requestVersion &&
+        this.snapshotValue.activePeerId === dialog.peer.id
       ) {
         this.fail('sync', `Could not load shared-media counts for ${dialog.title}.`, error, false);
+        return true;
       }
+      return false;
+    }
+  }
+
+  private async getSharedMediaCountsWithDeadline(peer: TelegramPeer) {
+    const request = this.transport.getSharedMediaCounts(peer);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error('Shared-media counts timed out after 5 seconds.')),
+        SHARED_MEDIA_COUNT_TIMEOUT_MS,
+      );
+    });
+    try {
+      return await Promise.race([request, timeout]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 
@@ -1206,7 +1263,7 @@ export class MessagingEngine {
           return this.groupMemberCache.get(peer.id)?.value.slice(0, limit) ?? [];
         }
         await this.rememberGroupMembers(peer.id, members);
-        this.patch({ groupMembersRevision: this.snapshotValue.groupMembersRevision + 1 });
+        this.invalidateResource({ kind: 'group-members', peerId: peer.id });
         return members;
       })
       .finally(() => {
@@ -1442,7 +1499,7 @@ export class MessagingEngine {
               (dialog) => dialog.peer.id !== peer.id,
             );
             const pending = this.snapshotValue.pending.filter((send) => send.peer.id === peer.id);
-            for (const send of pending) this.cancelledPending.add(send.id);
+            for (const send of pending) this.pendingQueue.cancel(send.id);
             await Promise.all([
               this.store.replaceDialogs(
                 dialogs
@@ -1456,9 +1513,9 @@ export class MessagingEngine {
               ...pending.map((send) => this.store.deletePending(send.id)),
             ]);
             for (const send of pending) {
-              if (!this.pendingDeliveries.has(send.id)) this.cancelledPending.delete(send.id);
+              this.pendingQueue.finishCancellation(send.id);
             }
-            this.peerDeliveryBlocks.delete(peer.id);
+            this.pendingQueue.releaseBlock(peer.id);
             if (!this.isOperationCurrent(generation, accountId)) return false;
             this.invalidateHistory(peer.id, false);
             this.userDetails.delete(peer.id);
@@ -1822,7 +1879,7 @@ export class MessagingEngine {
       randomId: this.randomId(),
       createdAt: Date.now(),
       attempts: 0,
-      ...(this.peerDeliveryBlocks.has(peer.id) ? { lastError: this.blockedSendMessage() } : {}),
+      ...(this.pendingQueue.blockedBy(peer.id) ? { lastError: this.blockedSendMessage() } : {}),
       reply,
       formats,
     });
@@ -1835,7 +1892,7 @@ export class MessagingEngine {
     const generation = this.lifecycleGeneration;
     const accountId = pending.accountId;
     let delivery: Promise<void> | undefined;
-    const reservation = this.queueOutboxWrite(peer.id, async () => {
+    const reservation = this.pendingQueue.queueWrite(peer.id, async () => {
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
       await this.reserveDraftSend(pending, text, draftVersion);
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
@@ -1994,24 +2051,11 @@ export class MessagingEngine {
     const generation = this.lifecycleGeneration;
     const accountId = this.accountId;
     const cacheKey = this.mediaAssetKey(message);
-    const current = this.mediaDownloads.get(cacheKey);
-    if (current) return current;
     const mediaSlot = `${message.peerId}:${message.id}`;
-    const mediaVersion = this.mediaVersions.get(mediaSlot) ?? 0;
-    const loading = this.downloadAndCacheMedia(
-      cacheKey,
-      message,
-      mediaSlot,
-      mediaVersion,
-      generation,
-      accountId,
+    const mediaVersion = this.resources.version(mediaSlot);
+    return this.resources.load(`media:${cacheKey}`, () =>
+      this.downloadAndCacheMedia(cacheKey, message, mediaSlot, mediaVersion, generation, accountId),
     );
-    this.mediaDownloads.set(cacheKey, loading);
-    try {
-      return await loading;
-    } finally {
-      if (this.mediaDownloads.get(cacheKey) === loading) this.mediaDownloads.delete(cacheKey);
-    }
   }
 
   mediaAssetKey(message: TelegramMessage) {
@@ -2048,7 +2092,7 @@ export class MessagingEngine {
       const blob = await this.transport.downloadMedia(message);
       if (
         this.isOperationCurrent(generation, accountId) &&
-        (this.mediaVersions.get(mediaSlot) ?? 0) === mediaVersion
+        this.resources.version(mediaSlot) === mediaVersion
       ) {
         await this.store.saveBlob(cacheKey, blob);
       }
@@ -2065,7 +2109,7 @@ export class MessagingEngine {
       const blob = await this.transport.downloadMedia(refreshed);
       if (
         this.isOperationCurrent(generation, accountId) &&
-        (this.mediaVersions.get(mediaSlot) ?? 0) === mediaVersion
+        this.resources.version(mediaSlot) === mediaVersion
       ) {
         await this.store.saveBlob(cacheKey, blob);
       }
@@ -2075,15 +2119,7 @@ export class MessagingEngine {
 
   async downloadAvatar(peer: TelegramPeer, avatarId?: string) {
     const cacheKey = `avatar:${peer.id}:${avatarId ?? 'unknown'}`;
-    const current = this.avatarDownloads.get(cacheKey);
-    if (current) return current;
-    const loading = this.downloadAndCacheAvatar(cacheKey, peer);
-    this.avatarDownloads.set(cacheKey, loading);
-    try {
-      return await loading;
-    } finally {
-      if (this.avatarDownloads.get(cacheKey) === loading) this.avatarDownloads.delete(cacheKey);
-    }
+    return this.resources.load(cacheKey, () => this.downloadAndCacheAvatar(cacheKey, peer));
   }
 
   async loadCachedAvatar(peer: TelegramPeer, avatarId?: string) {
@@ -2105,12 +2141,7 @@ export class MessagingEngine {
   async getChatAppearance(peer: TelegramPeer) {
     if (!this.transport.getChatAppearance) return undefined;
     const cacheKey = `chat-appearance:${peer.id}`;
-    if (this.chatAppearanceCache.has(cacheKey)) {
-      return this.chatAppearanceCache.get(cacheKey);
-    }
-    const current = this.chatAppearanceRequests.get(cacheKey);
-    if (current) return current;
-    const loading = (async () => {
+    return this.resources.cached<TelegramChatAppearance | undefined>(cacheKey, async () => {
       const cached = await this.store.loadBlob(cacheKey);
       if (cached) {
         try {
@@ -2120,7 +2151,6 @@ export class MessagingEngine {
           };
           if (Date.now() - entry.savedAt < 60 * 60 * 1000) {
             const value = entry.value ?? undefined;
-            this.chatAppearanceCache.set(cacheKey, value);
             return value;
           }
         } catch {
@@ -2134,17 +2164,8 @@ export class MessagingEngine {
           type: 'application/json',
         }),
       );
-      this.chatAppearanceCache.set(cacheKey, value);
       return value;
-    })();
-    this.chatAppearanceRequests.set(cacheKey, loading);
-    try {
-      return await loading;
-    } finally {
-      if (this.chatAppearanceRequests.get(cacheKey) === loading) {
-        this.chatAppearanceRequests.delete(cacheKey);
-      }
-    }
+    });
   }
 
   async downloadWallpaper(wallpaperId: string) {
@@ -2152,23 +2173,13 @@ export class MessagingEngine {
       throw new Error('This Telegram transport cannot download backgrounds.');
     }
     const cacheKey = `wallpaper:${wallpaperId}`;
-    const current = this.wallpaperDownloads.get(cacheKey);
-    if (current) return current;
-    const loading = (async () => {
+    return this.resources.load(cacheKey, async () => {
       const cached = await this.store.loadBlob(cacheKey);
       if (cached) return cached;
       const blob = await this.transport.downloadWallpaper!(wallpaperId);
       await this.store.saveBlob(cacheKey, blob);
       return blob;
-    })();
-    this.wallpaperDownloads.set(cacheKey, loading);
-    try {
-      return await loading;
-    } finally {
-      if (this.wallpaperDownloads.get(cacheKey) === loading) {
-        this.wallpaperDownloads.delete(cacheKey);
-      }
-    }
+    });
   }
 
   async getRecentStickers() {
@@ -2336,28 +2347,18 @@ export class MessagingEngine {
 
   async downloadSticker(sticker: TelegramSticker) {
     const cacheKey = `sticker:${sticker.id}`;
-    const current = this.stickerDownloads.get(cacheKey);
-    if (current) return current;
-    const loading = (async () => {
+    return this.resources.load(cacheKey, async () => {
       const cached = await this.store.loadBlob(cacheKey);
       if (cached) return cached;
       const blob = await this.transport.downloadSticker(sticker);
       await this.store.saveBlob(cacheKey, blob);
       return blob;
-    })();
-    this.stickerDownloads.set(cacheKey, loading);
-    try {
-      return await loading;
-    } finally {
-      if (this.stickerDownloads.get(cacheKey) === loading) this.stickerDownloads.delete(cacheKey);
-    }
+    });
   }
 
   async downloadCustomEmoji(documentId: string) {
     const cacheKey = `custom-emoji:${documentId}`;
-    const current = this.customEmojiDownloads.get(cacheKey);
-    if (current) return current;
-    const loading = (async () => {
+    return this.resources.load(cacheKey, async () => {
       const cached = await this.store.loadBlob(cacheKey);
       if (cached) return cached;
       if (!this.transport.downloadCustomEmoji) {
@@ -2366,48 +2367,37 @@ export class MessagingEngine {
       const blob = await this.transport.downloadCustomEmoji(documentId);
       await this.store.saveBlob(cacheKey, blob);
       return blob;
-    })();
-    this.customEmojiDownloads.set(cacheKey, loading);
-    try {
-      return await loading;
-    } finally {
-      if (this.customEmojiDownloads.get(cacheKey) === loading) {
-        this.customEmojiDownloads.delete(cacheKey);
-      }
-    }
+    });
   }
 
   async getBotCommands(peer: TelegramPeer): Promise<TelegramBotCommand[]> {
     if (!this.transport.getBotCommands) return [];
-    const current = this.botCommandRequests.get(peer.id);
-    if (current) return current;
+    const cacheKey = `bot-commands:${peer.id}`;
     const generation = this.lifecycleGeneration;
     const accountId = this.accountId;
     const metadataGeneration = this.metadataGeneration;
-    const request = this.trackLifecycleTask(
-      this.transport
-        .getBotCommands({ ...peer })
-        .then((commands) =>
-          this.isOperationCurrent(generation, accountId) &&
-          metadataGeneration === this.metadataGeneration
-            ? commands
-            : [],
-        )
-        .catch((error: unknown) => {
-          if (this.botCommandRequests.get(peer.id) === request) {
-            this.botCommandRequests.delete(peer.id);
-          }
-          if (
-            this.isOperationCurrent(generation, accountId) &&
-            metadataGeneration === this.metadataGeneration
-          ) {
-            this.fail('sync', "Could not load this bot's commands.", error, false);
-          }
-          throw error;
-        }),
+    return this.resources.cached(cacheKey, () =>
+      this.trackLifecycleTask(
+        this.transport.getBotCommands!({ ...peer })
+          .then((commands) => {
+            const current =
+              this.isOperationCurrent(generation, accountId) &&
+              metadataGeneration === this.metadataGeneration
+                ? commands
+                : [];
+            return current;
+          })
+          .catch((error: unknown) => {
+            if (
+              this.isOperationCurrent(generation, accountId) &&
+              metadataGeneration === this.metadataGeneration
+            ) {
+              this.fail('sync', "Could not load this bot's commands.", error, false);
+            }
+            throw error;
+          }),
+      ),
     );
-    this.botCommandRequests.set(peer.id, request);
-    return request;
   }
 
   async startBot(peer: TelegramPeer, startParam = '') {
@@ -2836,13 +2826,15 @@ export class MessagingEngine {
   ) {
     const peerId = this.snapshotValue.activePeerId;
     if (!peerId || !this.snapshotValue.online) return;
+    const dialog = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
+    if (!dialog) return;
+    void this.loadSharedMediaCounts(dialog);
+    void this.loadPinnedMessages(dialog);
     try {
       if (this.snapshotValue.messages.length === 0) {
         await this.reloadActiveConversation(generation);
         return;
       }
-      const dialog = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
-      if (!dialog) return;
       const requestRevision = this.messageRevision;
       const page = await this.transport.getHistory(dialog.peer, HISTORY_LIMIT);
       if (
@@ -2934,8 +2926,10 @@ export class MessagingEngine {
       this.draftWrites.clear();
       this.draftVersions.clear();
       this.userDetails.clear();
-      this.botCommandRequests.clear();
+      this.resources.clear();
       this.metadataGeneration += 1;
+      this.sharedMediaCountRequest = undefined;
+      this.sharedMediaCountRetry.reset();
       this.reactionQueues.clear();
       this.reactionVersions.clear();
       this.mutationVersions.clear();
@@ -2949,23 +2943,10 @@ export class MessagingEngine {
       this.groupMemberCache.clear();
       this.groupMemberCacheLoaded.clear();
       this.groupMemberRequests.clear();
-      this.mediaVersions.clear();
-      this.mediaDownloads.clear();
-      this.avatarDownloads.clear();
-      this.stickerDownloads.clear();
-      this.customEmojiDownloads.clear();
-      this.wallpaperDownloads.clear();
-      this.chatAppearanceRequests.clear();
-      this.chatAppearanceCache.clear();
       this.sharedMediaCountVersions.clear();
       this.unreadVersions.clear();
-      this.pendingDeliveries.clear();
-      this.peerDeliveryTails.clear();
-      this.outboxWriteTails.clear();
       this.duplicateDraftSends.clear();
       this.pendingQueue.clear();
-      this.peerDeliveryBlocks.clear();
-      this.cancelledPending.clear();
       this.patch({
         dialogs: [],
         messages: [],
@@ -3102,7 +3083,7 @@ export class MessagingEngine {
           this.selectionVersion === stagedSelectionVersion
         ) {
           const [counts, pins] = await Promise.allSettled([
-            this.transport.getSharedMediaCounts(stagedActiveDialog.peer),
+            this.getSharedMediaCountsWithDeadline(stagedActiveDialog.peer),
             this.transport.getPinnedMessages(stagedActiveDialog.peer),
           ]);
           if (!this.isOperationCurrent(generation, accountId)) return undefined;
@@ -3119,11 +3100,16 @@ export class MessagingEngine {
       for (const peerId of peersBeforeCommit) {
         this.historyVersions.set(peerId, this.historyVersion(peerId) + 1);
         this.pinnedMessageVersions.set(peerId, (this.pinnedMessageVersions.get(peerId) ?? 0) + 1);
+        this.sharedMediaCountVersions.set(
+          peerId,
+          (this.sharedMediaCountVersions.get(peerId) ?? 0) + 1,
+        );
       }
       this.metadataGeneration += 1;
-      this.sharedMediaCountVersions.clear();
+      this.sharedMediaCountRequest = undefined;
+      this.sharedMediaCountRetry.reset();
       this.userDetails.clear();
-      this.botCommandRequests.clear();
+      this.resources.clear();
 
       const epoch = await this.queueMetadataWrite(async () => {
         if (!this.isOperationCurrent(generation, accountId)) return undefined;
@@ -3215,9 +3201,12 @@ export class MessagingEngine {
         sharedMediaCounts: stagedActiveStillCurrent ? sharedMediaCounts : undefined,
         pinnedMessages: stagedActiveStillCurrent ? pinnedMessages : [],
         activities: [],
-        expressionRevision: this.snapshotValue.expressionRevision + 1,
-        botCommandsRevision: this.snapshotValue.botCommandsRevision + 1,
       });
+      if (stagedActiveStillCurrent && sharedMediaCounts === undefined && stagedActiveDialog) {
+        void this.loadSharedMediaCounts(stagedActiveDialog);
+      }
+      this.invalidateResource({ kind: 'expressions' });
+      this.invalidateResource({ kind: 'bot-commands' });
       return stagedActiveStillCurrent ? undefined : retainedActivePeerId;
     });
 
@@ -3788,12 +3777,12 @@ export class MessagingEngine {
             ? ['sticker-index:recent:v2', 'sticker-index:packs:v2']
             : ['sticker-index:recent:v2', 'sticker-index:packs:v2', 'sticker-index:gifs:v2'];
       await Promise.all(keys.map((key) => this.store.deleteBlob(key)));
-      this.patch({ expressionRevision: this.snapshotValue.expressionRevision + 1 });
+      this.invalidateResource({ kind: 'expressions' });
       return;
     }
     if (update.type === 'bot-commands-changed') {
-      this.botCommandRequests.delete(update.peerId);
-      this.patch({ botCommandsRevision: this.snapshotValue.botCommandsRevision + 1 });
+      this.resources.forget(`bot-commands:${update.peerId}`);
+      this.invalidateResource({ kind: 'bot-commands', peerId: update.peerId });
       return;
     }
     if (update.type === 'dialog-folders-changed') {
@@ -3956,7 +3945,7 @@ export class MessagingEngine {
   async retryPendingSend(id: string) {
     let pending = this.snapshotValue.pending.find((candidate) => candidate.id === id);
     if (!pending) return;
-    const activeDelivery = this.pendingDeliveries.get(id);
+    const activeDelivery = this.pendingQueue.delivery(id);
     if (activeDelivery) {
       await activeDelivery;
       pending = this.snapshotValue.pending.find((candidate) => candidate.id === id);
@@ -3971,7 +3960,7 @@ export class MessagingEngine {
   async cancelPendingSend(id: string) {
     const pending = this.snapshotValue.pending.find((candidate) => candidate.id === id);
     if (!pending) return false;
-    this.cancelledPending.add(id);
+    this.pendingQueue.cancel(id);
     await this.store.deletePending(id);
     const remaining = this.snapshotValue.pending.filter((candidate) => candidate.id !== id);
     const clearOutboxError =
@@ -3981,7 +3970,7 @@ export class MessagingEngine {
       pending: remaining,
       ...(clearOutboxError ? { operationError: undefined } : {}),
     });
-    if (!this.pendingDeliveries.has(id)) this.cancelledPending.delete(id);
+    this.pendingQueue.finishCancellation(id);
     this.releasePeerDeliveryBlock(pending.peer.id, id);
     return true;
   }
@@ -4092,29 +4081,15 @@ export class MessagingEngine {
     ]);
   }
 
-  private queueOutboxWrite<T>(peerId: string, work: () => Promise<T>) {
-    const previous = this.outboxWriteTails.get(peerId) ?? Promise.resolve();
-    const operation = previous.catch(() => undefined).then(work);
-    const tail = operation.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.outboxWriteTails.set(peerId, tail);
-    void tail.then(() => {
-      if (this.outboxWriteTails.get(peerId) === tail) this.outboxWriteTails.delete(peerId);
-    });
-    return operation;
-  }
-
   private enqueuePending(pending: PendingSend) {
-    const blockedBy = this.peerDeliveryBlocks.get(pending.peer.id);
+    const blockedBy = this.pendingQueue.blockedBy(pending.peer.id);
     if (blockedBy && blockedBy !== pending.id) {
       pending = this.pendingQueue.capture({ ...pending, lastError: this.blockedSendMessage() });
     }
     const generation = this.lifecycleGeneration;
     const accountId = pending.accountId;
     let delivery: Promise<void> | undefined;
-    const operation = this.queueOutboxWrite(pending.peer.id, async () => {
+    const operation = this.pendingQueue.queueWrite(pending.peer.id, async () => {
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
       try {
         await this.writeOutboxWithQuotaRecovery(this.pendingQueue.blobBytes(pending), () =>
@@ -4142,7 +4117,7 @@ export class MessagingEngine {
     draftReservation?: { peerId: string; text: string; revision?: number },
   ) {
     if (pending.length === 0) return Promise.resolve();
-    const blockedBy = this.peerDeliveryBlocks.get(pending[0]!.peer.id);
+    const blockedBy = this.pendingQueue.blockedBy(pending[0]!.peer.id);
     if (blockedBy) {
       pending = pending.map((send) =>
         send.id === blockedBy
@@ -4154,7 +4129,7 @@ export class MessagingEngine {
     const accountId = pending[0]!.accountId;
     const peerId = pending[0]!.peer.id;
     let deliveries: Promise<void>[] = [];
-    const operation = this.queueOutboxWrite(peerId, async () => {
+    const operation = this.pendingQueue.queueWrite(peerId, async () => {
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
       try {
         const bytes = pending.reduce((total, send) => total + this.pendingQueue.blobBytes(send), 0);
@@ -4192,38 +4167,16 @@ export class MessagingEngine {
   }
 
   private deliver(pending: PendingSend) {
-    const existing = this.pendingDeliveries.get(pending.id);
-    if (existing) return existing;
     const generation = this.lifecycleGeneration;
-    const peerId = pending.peer.id;
-    const previous = this.peerDeliveryTails.get(peerId) ?? Promise.resolve();
-    const running = previous
-      .catch(() => undefined)
-      .then(() => this.deliverCurrent(pending, generation));
-    let delivery!: Promise<void>;
-    delivery = running.finally(() => {
-      if (this.pendingDeliveries.get(pending.id) === delivery) {
-        this.pendingDeliveries.delete(pending.id);
-      }
-      this.cancelledPending.delete(pending.id);
-    });
-    const tail = delivery.then(
-      () => undefined,
-      () => undefined,
+    return this.trackLifecycleTask(
+      this.pendingQueue.scheduleDelivery(pending, () => this.deliverCurrent(pending, generation)),
     );
-    this.pendingDeliveries.set(pending.id, delivery);
-    this.peerDeliveryTails.set(peerId, tail);
-    void tail.then(() => {
-      if (this.peerDeliveryTails.get(peerId) === tail) this.peerDeliveryTails.delete(peerId);
-    });
-    return this.trackLifecycleTask(delivery);
   }
 
   private async deliverCurrent(pending: PendingSend, generation: number) {
     const accountId = pending.accountId;
     if (!this.isOperationCurrent(generation, accountId)) return;
-    if (!this.canDeliver(pending) || this.deliveringPending.has(pending.id)) return;
-    this.deliveringPending.add(pending.id);
+    if (!this.canDeliver(pending) || !this.pendingQueue.beginAttempt(pending.id)) return;
     const attempting = this.pendingQueue.capture({
       ...pending,
       attempts: pending.attempts + 1,
@@ -4233,7 +4186,7 @@ export class MessagingEngine {
     let failure: { pending: PendingSend; error: unknown } | undefined;
     try {
       await this.store.commitOutbox(attempting);
-      if (this.cancelledPending.has(attempting.id)) {
+      if (this.pendingQueue.isCancelled(attempting.id)) {
         await this.store.deletePending(attempting.id);
         return;
       }
@@ -4324,10 +4277,10 @@ export class MessagingEngine {
       }
       if (sentMessages.length === 0) throw new Error('Telegram returned no sent messages.');
       if (!this.isOperationCurrent(generation, accountId)) return;
-      if (this.cancelledPending.has(attempting.id)) return;
+      if (this.pendingQueue.isCancelled(attempting.id)) return;
       await this.acceptMutationUpdateBatches(updateBatches, generation, accountId);
       if (!this.isOperationCurrent(generation, accountId)) return;
-      if (this.cancelledPending.has(attempting.id)) return;
+      if (this.pendingQueue.isCancelled(attempting.id)) return;
       // Mutation envelopes can omit the caller-known random ID. Merge the RPC
       // result before deleting the durable outbox record so correlation
       // survives a crash between confirmation and cleanup.
@@ -4343,7 +4296,7 @@ export class MessagingEngine {
         { accountId },
       );
       if (!this.isOperationCurrent(generation, accountId)) return;
-      if (this.cancelledPending.has(attempting.id)) return;
+      if (this.pendingQueue.isCancelled(attempting.id)) return;
       await this.store.deletePending(attempting.id);
       if (!this.isOperationCurrent(generation, accountId)) return;
       const remaining = this.snapshotValue.pending.filter(({ id }) => id !== attempting.id);
@@ -4357,21 +4310,21 @@ export class MessagingEngine {
       this.releasePeerDeliveryBlock(attempting.peer.id, attempting.id);
     } catch (error) {
       if (!this.isOperationCurrent(generation, accountId)) return;
-      if (this.cancelledPending.has(attempting.id)) return;
+      if (this.pendingQueue.isCancelled(attempting.id)) return;
       const current =
         this.snapshotValue.pending.find(({ id }) => id === attempting.id) ?? attempting;
       const failed = this.pendingQueue.capture({ ...current, lastError: this.errorMessage(error) });
       await this.store.commitOutbox(failed);
       if (!this.isOperationCurrent(generation, accountId)) return;
-      if (this.cancelledPending.has(attempting.id)) {
+      if (this.pendingQueue.isCancelled(attempting.id)) {
         await this.store.deletePending(attempting.id);
         return;
       }
-      this.peerDeliveryBlocks.set(attempting.peer.id, attempting.id);
+      this.pendingQueue.block(attempting.peer.id, attempting.id);
       await this.markPeerQueueBlocked(attempting.peer.id, attempting.id);
       failure = { pending: failed, error };
     } finally {
-      this.deliveringPending.delete(pending.id);
+      this.pendingQueue.endAttempt(pending.id);
     }
     if (failure) {
       this.replacePending(failure.pending);
@@ -4639,19 +4592,18 @@ export class MessagingEngine {
   }
 
   private canDeliver(pending: PendingSend) {
-    const blockedBy = this.peerDeliveryBlocks.get(pending.peer.id);
+    const blockedBy = this.pendingQueue.blockedBy(pending.peer.id);
     return (
       this.snapshotValue.online &&
       !!this.accountId &&
       pending.accountId === this.accountId &&
       (blockedBy === undefined || blockedBy === pending.id) &&
-      !this.cancelledPending.has(pending.id)
+      !this.pendingQueue.isCancelled(pending.id)
     );
   }
 
   private releasePeerDeliveryBlock(peerId: string, pendingId: string) {
-    if (this.peerDeliveryBlocks.get(peerId) !== pendingId) return;
-    this.peerDeliveryBlocks.delete(peerId);
+    if (!this.pendingQueue.releaseBlock(peerId, pendingId)) return;
     void this.flushPeerOutbox(peerId);
   }
 
@@ -5044,7 +4996,7 @@ export class MessagingEngine {
     } catch (error) {
       this.reportFailure('cache', 'Could not invalidate cached group members.', error);
     }
-    this.patch({ groupMembersRevision: this.snapshotValue.groupMembersRevision + 1 });
+    this.invalidateResource({ kind: 'group-members', peerId });
   }
 
   private isLifecycleCurrent(generation: number) {
@@ -5142,9 +5094,7 @@ export class MessagingEngine {
     const nextKey = this.mediaAssetKey(next);
     if (previousKey === nextKey && previousKey !== legacyKey) return;
     const mediaSlot = `${next.peerId}:${next.id}`;
-    this.mediaVersions.set(mediaSlot, (this.mediaVersions.get(mediaSlot) ?? 0) + 1);
-    this.mediaDownloads.delete(previousKey);
-    this.mediaDownloads.delete(legacyKey);
+    this.resources.invalidate(mediaSlot, `media:${previousKey}`, `media:${legacyKey}`);
     await Promise.all([
       this.store.deleteBlob(previousKey),
       ...(previousKey === legacyKey ? [] : [this.store.deleteBlob(legacyKey)]),

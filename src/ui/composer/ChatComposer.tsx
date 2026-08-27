@@ -14,55 +14,23 @@ import Underline from 'lucide-solid/icons/underline';
 import X from 'lucide-solid/icons/x';
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 
-import type {
-  TelegramSticker,
-  TelegramStickerPack,
-  TelegramTextFormat,
-} from '../../telegram/types';
+import type { TelegramSticker, TelegramTextFormat } from '../../telegram/types';
+import type { ComposerSession } from './composerSession';
+import type { ExpressionSession } from './expressionSession';
 import { ExpressionPicker, type ExpressionTab } from './ExpressionPicker';
 import { ImageAttachmentEditor } from './ImageAttachmentEditor';
-import { canTransformImage, type StagedAttachment } from './outgoingAttachments';
-
-interface ReplyTarget {
-  messageId: number;
-  preview: string;
-  quoteText?: string | undefined;
-}
+import { canTransformImage } from './outgoingAttachments';
 
 interface ChatComposerProps {
   conversationId: string;
-  draft: string;
   enabled: boolean;
-  stickerPickerOpen: boolean;
-  stickerPickerLoading: boolean;
-  gifPickerOpen: boolean;
-  gifPickerLoading: boolean;
-  gifs: TelegramSticker[];
-  stickerPacks: TelegramStickerPack[];
-  reply?: ReplyTarget | undefined;
-  editing?: { body: string; mediaName?: string | undefined; hasMedia: boolean } | undefined;
-  attachments: StagedAttachment[];
-  formats: TelegramTextFormat[];
   placeholder?: string | undefined;
-  onDraft: (value: string) => void;
-  onFormats: (formats: TelegramTextFormat[]) => void;
-  onSend: () => void;
-  onAttach: (files: File[]) => void;
-  onUpdateAttachment: (
-    id: string,
-    update: Partial<Pick<StagedAttachment, 'file' | 'sendAs'>>,
-  ) => void;
-  onRemoveAttachment: (id: string) => void;
-  onToggleStickers: () => void;
-  onToggleGifs: () => void;
-  onLoadSticker: (sticker: TelegramSticker) => Promise<string>;
-  stickerUrl: (sticker: TelegramSticker) => string | undefined;
-  onSendSticker: (sticker: TelegramSticker) => void;
-  onSendGif: (gif: TelegramSticker) => void;
-  onSearchGifs: (query: string) => Promise<TelegramSticker[]>;
-  onCancelReply: () => void;
-  onCancelEdit: () => void;
-  onExpressionOpenChange: (open: boolean) => void;
+  composer: ComposerSession;
+  expressions: ExpressionSession;
+  media: {
+    loadSticker(sticker: TelegramSticker): Promise<string>;
+    stickerUrl(sticker: TelegramSticker): string | undefined;
+  };
 }
 
 function AttachmentThumbnail(props: { file: File }) {
@@ -85,20 +53,26 @@ function AttachmentThumbnail(props: { file: File }) {
 }
 
 export function ChatComposer(props: ChatComposerProps) {
-  const [fileInput, setFileInput] = createSignal<HTMLInputElement>();
-  const [textarea, setTextarea] = createSignal<HTMLTextAreaElement>();
+  let fileInput: HTMLInputElement | undefined;
+  let textarea: HTMLTextAreaElement | undefined;
   const [editingAttachmentId, setEditingAttachmentId] = createSignal('');
-  const [expressionOpen, setExpressionOpen] = createSignal(false);
+  const [expressionOpen, setExpressionOpenState] = createSignal(false);
   const [expressionTab, setExpressionTab] = createSignal<ExpressionTab>('emoji');
   const [formatMenu, setFormatMenu] = createSignal<{ x: number; y: number }>();
   let expressionRoot: HTMLDivElement | undefined;
   let expressionButton: HTMLButtonElement | undefined;
   let expressionPointerType = '';
 
-  const editingAttachment = () => props.attachments.find(({ id }) => id === editingAttachmentId());
+  const setExpressionOpen = (open: boolean) => {
+    setExpressionOpenState(open);
+    props.expressions.setVisible(open);
+  };
+
+  const editingAttachment = () =>
+    props.composer.attachments().find(({ id }) => id === editingAttachmentId());
 
   const resizeTextarea = () => {
-    const input = textarea();
+    const input = textarea;
     if (!input) return;
     input.style.height = '0px';
     const style = getComputedStyle(input);
@@ -122,10 +96,7 @@ export function ChatComposer(props: ChatComposerProps) {
     closeExpression();
   });
   createEffect(() => {
-    props.onExpressionOpenChange(expressionOpen());
-  });
-  createEffect(() => {
-    void props.draft;
+    void props.composer.draft();
     queueMicrotask(resizeTextarea);
   });
   onMount(() => {
@@ -162,13 +133,13 @@ export function ChatComposer(props: ChatComposerProps) {
     });
   });
   onCleanup(() => {
-    props.onExpressionOpenChange(false);
+    props.expressions.setVisible(false);
   });
 
   const attachTransferredFiles = (files: FileList | null, fallbackName: string) => {
     const sources = [...(files ?? [])];
     if (sources.length === 0) return;
-    props.onAttach(
+    props.composer.attach(
       sources.map((source, index) =>
         source.name
           ? source
@@ -182,30 +153,34 @@ export function ChatComposer(props: ChatComposerProps) {
   };
 
   const applyFormat = (kind: TelegramTextFormat['kind']) => {
-    const input = textarea();
+    const input = textarea;
     if (!input) return;
     const offset = input.selectionStart;
     const length = input.selectionEnd - offset;
     if (length <= 0) return;
     const url = kind === 'textUrl' ? window.prompt('Link URL', 'https://')?.trim() : undefined;
     if (kind === 'textUrl' && !url) return;
-    props.onFormats([
-      ...props.formats.filter(
-        (format) => !(format.offset === offset && format.length === length && format.kind === kind),
-      ),
+    props.composer.setFormats([
+      ...props.composer
+        .formats()
+        .filter(
+          (format) =>
+            !(format.offset === offset && format.length === length && format.kind === kind),
+        ),
       { offset, length, kind, ...(url ? { url } : {}) },
     ]);
     input.focus();
   };
 
   const insertEmoji = (emoji: string) => {
-    const input = textarea();
-    const offset = input?.selectionStart ?? props.draft.length;
-    props.onDraft(`${props.draft.slice(0, offset)}${emoji}${props.draft.slice(offset)}`);
-    props.onFormats([]);
+    const input = textarea;
+    const draft = props.composer.draft();
+    const offset = input?.selectionStart ?? draft.length;
+    props.composer.changeDraft(`${draft.slice(0, offset)}${emoji}${draft.slice(offset)}`);
+    props.composer.setFormats([]);
     closeExpression();
     queueMicrotask(() => {
-      const nextInput = textarea();
+      const nextInput = textarea;
       if (!nextInput) return;
       const nextOffset = offset + emoji.length;
       nextInput.focus();
@@ -216,8 +191,10 @@ export function ChatComposer(props: ChatComposerProps) {
 
   const selectExpressionTab = (tab: ExpressionTab) => {
     setExpressionTab(tab);
-    if (tab === 'stickers' && !props.stickerPickerOpen) props.onToggleStickers();
-    if (tab === 'gifs' && !props.gifPickerOpen) props.onToggleGifs();
+    if (tab === 'stickers' && !props.expressions.stickerOpen()) {
+      void props.expressions.toggleStickers();
+    }
+    if (tab === 'gifs' && !props.expressions.gifOpen()) void props.expressions.toggleGifs();
   };
 
   return (
@@ -227,54 +204,54 @@ export function ChatComposer(props: ChatComposerProps) {
           <ExpressionPicker
             tab={expressionTab()}
             setTab={selectExpressionTab}
-            stickersLoading={props.stickerPickerLoading}
-            gifsLoading={props.gifPickerLoading}
-            gifs={props.gifs}
-            packs={props.stickerPacks}
+            stickersLoading={props.expressions.stickerLoading()}
+            gifsLoading={props.expressions.gifLoading()}
+            gifs={props.expressions.gifs()}
+            packs={props.expressions.stickerPacks()}
             insertEmoji={insertEmoji}
-            load={props.onLoadSticker}
-            stickerUrl={props.stickerUrl}
+            load={(sticker) => props.media.loadSticker(sticker)}
+            stickerUrl={(sticker) => props.media.stickerUrl(sticker)}
             sendSticker={(sticker) => {
               closeExpression();
-              props.onSendSticker(sticker);
+              void props.expressions.sendSticker(sticker);
             }}
             sendGif={(gif) => {
               closeExpression();
-              props.onSendGif(gif);
+              void props.expressions.sendGif(gif);
             }}
-            searchGifs={props.onSearchGifs}
+            searchGifs={props.expressions.searchGifs}
           />
         </div>
       </Show>
-      <Show when={props.reply}>
+      <Show when={props.composer.reply()}>
         {(reply) => (
           <div class="composer-reply" data-testid="composer-reply">
             <span>
               <strong>{reply().quoteText ? 'Reply with quote' : 'Reply'}</strong>
               <small>{reply().preview}</small>
             </span>
-            <button onClick={props.onCancelReply} aria-label="Cancel reply">
+            <button onClick={props.composer.clearReply} aria-label="Cancel reply">
               <X size={16} />
             </button>
           </div>
         )}
       </Show>
-      <Show when={props.editing}>
+      <Show when={props.composer.editing()}>
         {(editing) => (
           <div class="composer-reply" data-testid="composer-edit">
             <span>
               <strong>Editing message</strong>
-              <small>{editing().body || editing().mediaName || 'Media message'}</small>
+              <small>{editing().body || editing().media?.name || 'Media message'}</small>
             </span>
-            <button type="button" onClick={props.onCancelEdit} aria-label="Cancel edit">
+            <button type="button" onClick={props.composer.cancelEdit} aria-label="Cancel edit">
               <X size={16} />
             </button>
           </div>
         )}
       </Show>
-      <Show when={props.attachments.length > 0}>
+      <Show when={props.composer.attachments().length > 0}>
         <div class="composer-attachments" aria-label="Staged attachments">
-          <For each={props.attachments}>
+          <For each={props.composer.attachments()}>
             {(attachment, index) => (
               <div
                 class="composer-attachment"
@@ -285,7 +262,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 <span>
                   <strong>{attachment.file.name}</strong>
                   <small>
-                    {index() + 1} of {props.attachments.length} ·{' '}
+                    {index() + 1} of {props.composer.attachments().length} ·{' '}
                     {attachment.file.type || 'application/octet-stream'}
                   </small>
                 </span>
@@ -297,14 +274,18 @@ export function ChatComposer(props: ChatComposerProps) {
                   <button
                     type="button"
                     aria-pressed={attachment.sendAs === 'media'}
-                    onClick={() => props.onUpdateAttachment(attachment.id, { sendAs: 'media' })}
+                    onClick={() =>
+                      props.composer.updateAttachment(attachment.id, { sendAs: 'media' })
+                    }
                   >
                     Media
                   </button>
                   <button
                     type="button"
                     aria-pressed={attachment.sendAs === 'file'}
-                    onClick={() => props.onUpdateAttachment(attachment.id, { sendAs: 'file' })}
+                    onClick={() =>
+                      props.composer.updateAttachment(attachment.id, { sendAs: 'file' })
+                    }
                   >
                     File
                   </button>
@@ -321,7 +302,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </Show>
                 <button
                   type="button"
-                  onClick={() => props.onRemoveAttachment(attachment.id)}
+                  onClick={() => props.composer.removeAttachment(attachment.id)}
                   aria-label={`Remove attachment ${attachment.file.name}`}
                 >
                   <X size={16} />
@@ -336,19 +317,19 @@ export function ChatComposer(props: ChatComposerProps) {
           <ImageAttachmentEditor
             attachment={attachment()}
             close={() => setEditingAttachmentId('')}
-            apply={(file) => props.onUpdateAttachment(attachment().id, { file })}
+            apply={(file) => props.composer.updateAttachment(attachment().id, { file })}
           />
         )}
       </Show>
       <div class="mx-auto flex max-w-3xl items-center gap-2">
         <input
-          ref={setFileInput}
+          ref={(element) => (fileInput = element)}
           class="sr-only"
           type="file"
-          multiple={!props.editing}
+          multiple={!props.composer.editing()}
           onChange={(event) => {
             const files = event.currentTarget.files;
-            if (files?.length) props.onAttach([...files]);
+            if (files?.length) props.composer.attach([...files]);
             event.currentTarget.value = '';
           }}
         />
@@ -427,12 +408,12 @@ export function ChatComposer(props: ChatComposerProps) {
             )}
           </Show>
           <textarea
-            ref={setTextarea}
+            ref={(element) => (textarea = element)}
             rows="1"
-            value={props.draft}
+            value={props.composer.draft()}
             onInput={(event) => {
-              props.onDraft(event.currentTarget.value);
-              if (props.formats.length > 0) props.onFormats([]);
+              props.composer.changeDraft(event.currentTarget.value);
+              if (props.composer.formats().length > 0) props.composer.setFormats([]);
               resizeTextarea();
             }}
             onKeyDown={(event) => {
@@ -443,7 +424,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 event.keyCode !== 229
               ) {
                 event.preventDefault();
-                props.onSend();
+                void props.composer.send();
               }
             }}
             onPaste={(event) => {
@@ -466,18 +447,20 @@ export function ChatComposer(props: ChatComposerProps) {
           />
           <button
             class="composer-icon-button"
-            onClick={() => fileInput()?.click()}
+            onClick={() => fileInput?.click()}
             disabled={!props.enabled}
-            aria-label={props.editing ? 'Replace media' : 'Attach files'}
+            aria-label={props.composer.editing() ? 'Replace media' : 'Attach files'}
           >
             <Paperclip size={20} />
           </button>
         </div>
         <button
           class="send-button"
-          onClick={props.onSend}
+          onClick={() => void props.composer.send()}
           disabled={
-            (!props.draft.trim() && props.attachments.length === 0 && !props.editing?.hasMedia) ||
+            (!props.composer.draft().trim() &&
+              props.composer.attachments().length === 0 &&
+              !props.composer.editing()?.media) ||
             !props.enabled
           }
           aria-label="Send message"

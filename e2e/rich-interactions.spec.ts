@@ -280,6 +280,24 @@ test('renders mentions, links, previews, wrapping, formatting, and spoilers', as
     'Telegram supplied this preview description.',
   );
   await expect(message.locator('.link-preview img')).toBeVisible();
+  const previewLayout = await message.evaluate((element) => {
+    const preview = element.querySelector<HTMLElement>('.link-preview')!;
+    const photo = element.querySelector<HTMLElement>('.link-preview-photo')!;
+    const bodyLink = element.querySelector<HTMLElement>('.message-body a')!;
+    return {
+      previewHeight: preview.getBoundingClientRect().height,
+      photoWidth: photo.getBoundingClientRect().width,
+      photoHeight: photo.getBoundingClientRect().height,
+      messageColor: getComputedStyle(element).color,
+      linkColor: getComputedStyle(bodyLink).color,
+    };
+  });
+  expect(previewLayout).toMatchObject({
+    photoWidth: 92,
+    photoHeight: 92,
+    messageColor: previewLayout.linkColor,
+  });
+  expect(previewLayout.previewHeight).toBeLessThanOrEqual(96);
   await expect(page.locator('article[data-message-id="77"] .message-reply')).not.toHaveCSS(
     'color',
     'rgb(139, 144, 154)',

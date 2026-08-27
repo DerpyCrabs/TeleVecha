@@ -50,6 +50,92 @@ test('renders real previews, avatars, a contained layout, and a visible composer
     .toBeLessThan(3);
 });
 
+test('shows top-message delivery state and labels media dialogs as non-empty', async ({ page }) => {
+  const alice = page.getByTestId('chat-list').getByRole('button', { name: /Alice Fixture/ });
+  await expect(alice.locator('.chat-delivery-status')).toHaveAttribute(
+    'aria-label',
+    'Last message sent',
+  );
+
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'read-history',
+      pts: 11,
+      ptsCount: 1,
+      peerId: 'u:101',
+      maxMessageId: 80,
+      direction: 'outbox',
+    }),
+  );
+  await expect(alice.locator('.chat-delivery-status')).toHaveAttribute(
+    'aria-label',
+    'Last message read',
+  );
+
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 12,
+      ptsCount: 1,
+      message: {
+        id: 181,
+        peerId: 'u:101',
+        senderId: 'self',
+        text: '',
+        date: 1_700_003_181,
+        outgoing: true,
+        media: { kind: 'photo', name: 'new-photo.jpg', mimeType: 'image/jpeg' },
+      },
+    }),
+  );
+  await expect(alice).toContainText('Photo');
+  await expect(alice).not.toContainText('No messages yet');
+  await expect(alice.locator('.chat-delivery-status')).toHaveAttribute(
+    'aria-label',
+    'Last message sent',
+  );
+});
+
+test('fills a one-message first page automatically and keeps the newest message at the bottom', async ({
+  page,
+}) => {
+  await page.goto('/?scenario=single-message-first-page');
+  const alice = page.locator('[data-testid="chat-list"]').getByRole('button', {
+    name: /Alice Fixture/,
+  });
+  await expect(alice).toBeVisible();
+  await alice.click();
+
+  const scroller = page.getByTestId('message-scroller');
+  await expect(scroller.getByText('Newest message from fixture')).toBeVisible();
+  await expect.poll(() => page.locator('article.message').count()).toBeGreaterThan(1);
+  await expect
+    .poll(() =>
+      scroller.evaluate(
+        (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+      ),
+    )
+    .toBeLessThan(3);
+});
+
+test('bottom-aligns a conversation that is shorter than the viewport', async ({ page }) => {
+  await page
+    .locator('[data-testid="chat-list"]')
+    .getByRole('button', { name: /Release Channel/ })
+    .click();
+  const scroller = page.getByTestId('message-scroller');
+  await expect(scroller.getByText('Release notes are ready')).toBeVisible();
+  await expect
+    .poll(() =>
+      scroller.evaluate((element) => {
+        const lastMessage = element.querySelector<HTMLElement>('article.message:last-of-type');
+        if (!lastMessage) return Number.POSITIVE_INFINITY;
+        return element.getBoundingClientRect().bottom - lastMessage.getBoundingClientRect().bottom;
+      }),
+    )
+    .toBeLessThan(40);
+});
+
 test('keeps the last bubble above the composer when the composer grows', async ({ page }) => {
   await page.getByRole('button', { name: 'Reply to message 79' }).click();
   await expect(page.getByTestId('composer-reply')).toBeVisible();
@@ -103,6 +189,33 @@ test('uses global media totals and only renders working details controls', async
 
   await page.getByRole('button', { name: 'Close details' }).click();
   await expect(page.getByRole('button', { name: 'Open details' })).toBeVisible();
+});
+
+test('updates shared-media totals in the mounted details pane', async ({ page }) => {
+  await page.goto('/?scenario=held-shared-media-counts');
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Alice Fixture/ })
+    .click();
+  const details = page.locator('aside.details-pane');
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture?.stats.getSharedMediaCounts))
+    .toBeGreaterThanOrEqual(1);
+
+  await page.evaluate(() => window.__televechaFixture?.releaseSharedMediaCounts());
+
+  await expect(details.getByRole('button', { name: 'Photos 128' })).toBeVisible();
+});
+
+test('loads shared-media totals for the restored dialog without switching dialogs', async ({
+  page,
+}) => {
+  await page.reload();
+
+  await expect(page.getByTestId('conversation-header')).toContainText('Alice Fixture');
+  await expect(
+    page.locator('aside.details-pane').getByRole('button', { name: 'Photos 128' }),
+  ).toBeVisible();
 });
 
 test('updates reused header and details avatars when switching chats', async ({ page }) => {

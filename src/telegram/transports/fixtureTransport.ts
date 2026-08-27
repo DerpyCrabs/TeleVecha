@@ -307,6 +307,7 @@ declare global {
       releaseSend(): void;
       releaseUpload(): void;
       releaseHistoryAround(): void;
+      releaseSharedMediaCounts(): void;
     };
   }
 }
@@ -372,6 +373,8 @@ export class FixtureTelegramTransport implements TelegramTransport {
   private releasePendingSend: (() => void) | undefined;
   private releasePendingUpload: (() => void) | undefined;
   private releasePendingHistoryAround: (() => void) | undefined;
+  private sharedMediaCountsReleased = false;
+  private readonly pendingSharedMediaCountReleases = new Set<() => void>();
   private fixtureMediaFailures = 0;
   private fixturePts = cursor.pts;
   private readonly stats: FixtureStats = {
@@ -435,6 +438,11 @@ export class FixtureTelegramTransport implements TelegramTransport {
       releaseSend: () => this.releasePendingSend?.(),
       releaseUpload: () => this.releasePendingUpload?.(),
       releaseHistoryAround: () => this.releasePendingHistoryAround?.(),
+      releaseSharedMediaCounts: () => {
+        this.sharedMediaCountsReleased = true;
+        for (const release of this.pendingSharedMediaCountReleases) release();
+        this.pendingSharedMediaCountReleases.clear();
+      },
     };
   }
 
@@ -516,7 +524,13 @@ export class FixtureTelegramTransport implements TelegramTransport {
     this.stats.getHistory += 1;
     const history = messages.get(peer.id) ?? [];
     const eligible = beforeMessageId ? history.filter(({ id }) => id < beforeMessageId) : history;
-    const page = eligible.slice(-limit);
+    const pageLimit =
+      this.scenario === 'single-message-first-page' &&
+      peer.id === peers[0]!.id &&
+      beforeMessageId === undefined
+        ? 1
+        : limit;
+    const page = eligible.slice(-pageLimit);
     const renderedPage =
       (this.scenario === 'delayed-media' && peer.id === peers[0]!.id) ||
       (this.scenario === 'delayed-history-media' && peer.id === peers[3]!.id)
@@ -570,6 +584,11 @@ export class FixtureTelegramTransport implements TelegramTransport {
   }
   async getSharedMediaCounts(peer: TelegramPeer) {
     this.stats.getSharedMediaCounts += 1;
+    if (this.scenario === 'held-shared-media-counts' && !this.sharedMediaCountsReleased) {
+      await new Promise<void>((resolve) => {
+        this.pendingSharedMediaCountReleases.add(resolve);
+      });
+    }
     return peer.id === peers[0]!.id
       ? { photos: 128, videos: 9, files: 16, audio: 5, links: 44, voice: 11, gifs: 6 }
       : { photos: 7, videos: 2, files: 3, audio: 1, links: 12, voice: 4, gifs: 2 };

@@ -18,141 +18,72 @@ import Trash2 from 'lucide-solid/icons/trash-2';
 import {
   For,
   Show,
-  batch,
   createEffect,
   createMemo,
   createSignal,
+  on,
   onCleanup,
   onMount,
-  untrack,
 } from 'solid-js';
 import { createStore, reconcile, type SetStoreFunction } from 'solid-js/store';
 
 import type { ChatMessage, ChatSummary } from '../../domain/models';
 import { messageTextForClipboard } from '../../domain/messageText';
 import { telegramPeerColor } from '../../domain/peerColor';
+import type { Conversation } from '../../telegram/core/conversation';
 import type {
   EngineSnapshot,
-  TelegramChatAppearance,
-  TelegramGroupMember,
-  TelegramHistoryGap,
   TelegramMessage,
   TelegramPeer,
   SharedMediaKind,
-  TelegramSticker,
-  TelegramStickerPack,
-  TelegramWallpaper,
 } from '../../telegram/types';
 import type { AppEnvironment } from './appRuntime';
 import { BotControls } from '../bots/BotControls';
 import { BotKeyboard } from '../bots/BotKeyboard';
 import { BotUrlAuthDialog } from '../bots/BotUrlAuthDialog';
 import { createBotSession } from '../bots/botSession';
+import { createReplyKeyboardSession } from '../bots/replyKeyboardSession';
 import { ChatSidebar } from '../chat/ChatSidebar';
+import { ChatDirectory } from '../chat/chatDirectory';
+import { createContactDetailsSession } from '../chat/contactDetailsSession';
 import { DeleteChatDialog } from '../chat/DeleteChatDialog';
 import { DetailsPane } from '../chat/DetailsPane';
 import { SearchPanel } from '../chat/SearchPanel';
 import { SharedMediaPanel } from '../chat/SharedMediaPanel';
 import { ChatComposer } from '../composer/ChatComposer';
 import { createComposerSession } from '../composer/composerSession';
+import { createExpressionSession } from '../composer/expressionSession';
 import { DeleteMessageDialog } from '../conversation/DeleteMessageDialog';
 import { ForwardMessageDialog } from '../conversation/ForwardMessageDialog';
 import { MessageActions } from '../conversation/MessageActions';
 import { MessageAlbum } from '../conversation/MessageAlbum';
 import { MessageBody } from '../conversation/MessageBody';
+import { createConversationHeaderSession } from '../conversation/conversationHeaderSession';
+import { createConversationHistorySession } from '../conversation/conversationHistorySession';
 import {
   presentConversation,
   type KeyedMessageView,
 } from '../conversation/conversationPresentation';
-import { createConversationViewport } from '../conversation/conversationViewport';
+import {
+  createConversationViewport,
+  createConversationWindowState,
+} from '../conversation/conversationViewport';
 import { layoutMessages } from '../conversation/messageLayout';
 import { albumSafeMessageWindow } from '../conversation/messageWindow';
 import { presentDialog } from '../conversation/presentation';
 import { MediaAttachment } from '../media/MediaAttachment';
-import { cachedAssetUrl, pruneAssetUrls, rememberAssetUrl } from '../media/assetUrls';
-import { MediaAssets } from '../media/mediaAssets';
+import { MediaAssets, type MediaAsset } from '../media/mediaAssets';
 import { Avatar } from '../shared/Avatar';
-import { loadCustomWallpaper, saveCustomWallpaper } from '../theme/customWallpaperStore';
-import {
-  applyThemePreferences,
-  normalizeThemePreferences,
-  readableTextColor,
-  readThemePreferences,
-  saveThemePreferences,
-  telegramWallpaperBackground,
-  type ThemePreferences,
-  type ThemePresetId,
-} from '../theme/themePreferences';
+import { modalVisible } from '../shared/focusScope';
+import { createAppearanceSession } from '../theme/appearanceSession';
+import { createChatAppearanceSession } from '../theme/chatAppearanceSession';
 import { AuthOverlay } from './AuthOverlay';
+import { createDrawerFocusSession } from './drawerFocusSession';
 import { SettingsDialog } from './SettingsDialog';
+import { createSidebarLayout } from './sidebarLayout';
 
-const LEFT_SIDEBAR_STORAGE_KEY = 'televecha:left-sidebar-width';
-const DETAILS_OPEN_STORAGE_KEY = 'televecha:details-open';
-const LEFT_SIDEBAR_DEFAULT_WIDTH = 320;
-const LEFT_SIDEBAR_MIN_WIDTH = 72;
-const LEFT_SIDEBAR_MAX_WIDTH = 480;
-const LEFT_SIDEBAR_COMPACT_WIDTH = 128;
 const MAX_RENDERED_MESSAGES = 400;
 const MAX_CACHED_MESSAGE_VIEWS = MAX_RENDERED_MESSAGES * 2;
-
-function chatThemeSettings(
-  chatAppearance: TelegramChatAppearance | undefined,
-  preferences: ThemePreferences,
-) {
-  const preferredBase =
-    preferences.theme === 'day' || preferences.theme === 'classic'
-      ? preferences.theme
-      : preferences.theme === 'tinted'
-        ? 'tinted'
-        : 'night';
-  const settings = chatAppearance?.theme?.settings;
-  return (
-    settings?.find(({ baseTheme }) => baseTheme === preferredBase) ??
-    (preferredBase === 'night' || preferredBase === 'tinted'
-      ? settings?.find(({ baseTheme }) => baseTheme === 'tinted' || baseTheme === 'night')
-      : undefined) ??
-    settings?.[0]
-  );
-}
-
-function debugChatAppearance(
-  peer: TelegramPeer,
-  chatAppearance: TelegramChatAppearance | undefined,
-  preferences: ThemePreferences,
-) {
-  const settings = chatThemeSettings(chatAppearance, preferences);
-  const wallpaper = chatAppearance?.wallpaper ?? settings?.wallpaper;
-  const patternMode = wallpaper?.pattern
-    ? wallpaper.dark ||
-      (wallpaper.settings.intensity ?? 50) < 0 ||
-      settings?.baseTheme === 'night' ||
-      settings?.baseTheme === 'tinted'
-      ? 'inverted'
-      : 'normal'
-    : 'none';
-  console.debug(
-    '%c TELEVECHA · TELEGRAM APPEARANCE ',
-    'background:#229ed9;color:#fff;font-weight:800;padding:5px 9px;border-radius:6px;',
-    {
-      peer: { id: peer.id, kind: peer.kind },
-      telegram: {
-        chatTheme: chatAppearance?.theme,
-        directChatWallpaper: chatAppearance?.wallpaper,
-      },
-      resolvedByTeleVecha: {
-        appTheme: preferences.theme,
-        selectedThemeSettings: settings,
-        selectedWallpaperSource: chatAppearance?.wallpaper
-          ? 'chat'
-          : settings?.wallpaper
-            ? 'theme'
-            : 'none',
-        selectedWallpaper: wallpaper,
-        patternMode,
-      },
-    },
-  );
-}
 
 function peerFromId(peerId: string): TelegramPeer {
   return {
@@ -173,29 +104,6 @@ function messageSenderColor(message: ChatMessage) {
   return message.senderColorVersion === 2 && message.senderColor
     ? message.senderColor
     : telegramPeerColor(message.senderId ?? '');
-}
-
-function clampLeftSidebarWidth(width: number) {
-  return Math.min(LEFT_SIDEBAR_MAX_WIDTH, Math.max(LEFT_SIDEBAR_MIN_WIDTH, Math.round(width)));
-}
-
-function storedLeftSidebarWidth() {
-  try {
-    const stored = Number(localStorage.getItem(LEFT_SIDEBAR_STORAGE_KEY));
-    return Number.isFinite(stored) && stored > 0
-      ? clampLeftSidebarWidth(stored)
-      : LEFT_SIDEBAR_DEFAULT_WIDTH;
-  } catch {
-    return LEFT_SIDEBAR_DEFAULT_WIDTH;
-  }
-}
-
-function storedDetailsOpen() {
-  try {
-    return localStorage.getItem(DETAILS_OPEN_STORAGE_KEY) !== 'false';
-  } catch {
-    return true;
-  }
 }
 
 function reuseArray<T>(previous: readonly T[], next: T[]) {
@@ -269,41 +177,49 @@ export function App(props: AppProps) {
   const [snapshot, setSnapshot] = createSignal<EngineSnapshot>(engine.snapshot());
   const [authOpen, setAuthOpen] = createSignal(engine.snapshot().phase !== 'ready');
   const [activeChatId, setActiveChatId] = createSignal('empty');
-  const [detailsOpen, setDetailsOpen] = createSignal(
-    window.innerWidth > 1100 && storedDetailsOpen(),
-  );
-  const [viewportWidth, setViewportWidth] = createSignal(window.innerWidth);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = createSignal(false);
-  const [leftSidebarWidth, setLeftSidebarWidth] = createSignal(storedLeftSidebarWidth());
-  const [resizingLeftSidebar, setResizingLeftSidebar] = createSignal(false);
-  const [messageScroller, setMessageScroller] = createSignal<HTMLDivElement>();
-  const [messageContent, setMessageContent] = createSignal<HTMLDivElement>();
-  const [conversationReady, setConversationReady] = createSignal(true);
+  const [activeConversation, setActiveConversation] = createSignal<Conversation>();
+  const historyWindow = createConversationWindowState();
+  const sidebarLayout = createSidebarLayout({
+    captureConversationAnchor: () => viewport.captureAnchor(),
+  });
+  const {
+    detailsOpen,
+    setDetailsOpen,
+    viewportWidth,
+    setViewportWidth,
+    mobileOpen: mobileSidebarOpen,
+    setMobileOpen: setMobileSidebarOpen,
+    resizing: resizingLeftSidebar,
+    effectiveWidth: effectiveLeftSidebarWidth,
+    updateDetailsOpen,
+    toggleMobile: toggleMobileSidebar,
+  } = sidebarLayout;
+  let messageScroller: HTMLDivElement | undefined;
+  let messageContent: HTMLDivElement | undefined;
   const [conversationLoadError, setConversationLoadError] = createSignal('');
   const [conversationRetrying, setConversationRetrying] = createSignal(false);
   const [syncRetrying, setSyncRetrying] = createSignal(false);
   const [loggingOut, setLoggingOut] = createSignal(false);
   const [clearingCache, setClearingCache] = createSignal(false);
-  const [groupMembers, setGroupMembers] = createSignal<TelegramGroupMember[]>([]);
-  const [groupMembersLoading, setGroupMembersLoading] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
-  const [appearance, setAppearance] = createSignal(readThemePreferences());
-  const [telegramWallpapers, setTelegramWallpapers] = createSignal<TelegramWallpaper[]>([]);
-  const [activeChatAppearance, setActiveChatAppearance] = createSignal<TelegramChatAppearance>();
-  const [activeChatWallpaperAsset, setActiveChatWallpaperAsset] = createSignal('');
-  const [appearanceCatalogLoading, setAppearanceCatalogLoading] = createSignal(false);
-  const [wallpaperBusy, setWallpaperBusy] = createSignal(false);
-  const [wallpaperError, setWallpaperError] = createSignal('');
+  const appearanceSession = createAppearanceSession({
+    getWallpapers: () => engine.getWallpapers(),
+    downloadWallpaper: (wallpaperId) => engine.downloadWallpaper(wallpaperId),
+  });
+  const {
+    appearance,
+    telegramWallpapers,
+    catalogLoading: appearanceCatalogLoading,
+    wallpaperBusy,
+    wallpaperError,
+    selectTheme,
+    selectAccentColor,
+    selectSystemAccent,
+    selectWallpaper,
+    selectTelegramWallpaper,
+    uploadWallpaper,
+  } = appearanceSession;
   const [pendingActionId, setPendingActionId] = createSignal('');
-  const [messageWindowStart, setMessageWindowStart] = createSignal(0);
-  const [jumpToPresentVisible, setJumpToPresentVisible] = createSignal(false);
-  const [stickerPickerOpen, setStickerPickerOpen] = createSignal(false);
-  const [stickerPickerLoading, setStickerPickerLoading] = createSignal(false);
-  const [gifPickerOpen, setGifPickerOpen] = createSignal(false);
-  const [gifPickerLoading, setGifPickerLoading] = createSignal(false);
-  const [expressionPickerVisible, setExpressionPickerVisible] = createSignal(false);
-  const [savedGifs, setSavedGifs] = createSignal<TelegramSticker[]>([]);
-  const [stickerPacks, setStickerPacks] = createSignal<TelegramStickerPack[]>([]);
   const [reactionPickerMessageId, setReactionPickerMessageId] = createSignal('');
   const [messageContextMenu, setMessageContextMenu] = createSignal<
     { messageId: string; x: number; y: number } | undefined
@@ -313,198 +229,32 @@ export function App(props: AppProps) {
   const [sharedMediaKind, setSharedMediaKind] = createSignal<SharedMediaKind>();
   const [deleteTarget, setDeleteTarget] = createSignal<ChatMessage>();
   const [deleteChatTarget, setDeleteChatTarget] = createSignal<ChatSummary>();
-  const [pinnedMessageIndex, setPinnedMessageIndex] = createSignal(0);
-  const [replyKeyboardRevision, setReplyKeyboardRevision] = createSignal(0);
   const mediaAssets = new MediaAssets(engine, () => snapshot().dialogs);
   const dialogViews = new Map<string, StoredView<ChatSummary>>();
   const messageViews = new Map<string, StoredView<ChatMessage>>();
-  const dismissedReplyKeyboards = new Set<string>();
-  const handledForceReplies = new Set<string>();
   let appGridElement: HTMLDivElement | undefined;
   let conversationPaneElement: HTMLElement | undefined;
   let mobileSidebarTriggerElement: HTMLButtonElement | undefined;
-  let stopSidebarResize: (() => void) | undefined;
-  let olderLoadRunning = false;
-  let olderLoadQueued = false;
   let openingMessage = false;
-  let historyRestoreGeneration = 0;
   let visibilityFrame: number | undefined;
   let selectionGeneration = 0;
-  let historyLoadGeneration = 0;
   let openMessageGeneration = 0;
-  let peerOpenGeneration = 0;
-  let wallpaperLoadGeneration = 0;
-  let wallpaperObjectUrl: string | undefined;
-  let chatAppearanceLoadGeneration = 0;
-  const chatAppearances = new Map<string, TelegramChatAppearance>();
-  const chatWallpaperObjectUrls = new Map<string, string>();
   let viewport!: ReturnType<typeof createConversationViewport>;
+  let history!: ReturnType<typeof createConversationHistorySession>;
 
   onCleanup(() => {
     selectionGeneration += 1;
-    historyLoadGeneration += 1;
-    historyRestoreGeneration += 1;
     openMessageGeneration += 1;
-    olderLoadRunning = false;
-    olderLoadQueued = false;
-    wallpaperLoadGeneration += 1;
-    chatAppearanceLoadGeneration += 1;
-    if (wallpaperObjectUrl) URL.revokeObjectURL(wallpaperObjectUrl);
-    for (const objectUrl of chatWallpaperObjectUrls.values()) URL.revokeObjectURL(objectUrl);
-    chatWallpaperObjectUrls.clear();
   });
-
-  const showWallpaperAsset = (blob?: Blob) => {
-    if (wallpaperObjectUrl) URL.revokeObjectURL(wallpaperObjectUrl);
-    wallpaperObjectUrl = blob ? URL.createObjectURL(blob) : undefined;
-    if (wallpaperObjectUrl) {
-      document.documentElement.style.setProperty(
-        '--wallpaper-asset',
-        `url("${wallpaperObjectUrl}")`,
-      );
-    } else {
-      document.documentElement.style.removeProperty('--wallpaper-asset');
-    }
-  };
-
-  const loadStoredWallpaper = async (preferences = appearance()) => {
-    const generation = ++wallpaperLoadGeneration;
-    try {
-      const blob =
-        preferences.wallpaper === 'custom'
-          ? await loadCustomWallpaper()
-          : preferences.wallpaper === 'telegram' && preferences.telegramWallpaper?.hasFile
-            ? await engine.downloadWallpaper(preferences.telegramWallpaper.id)
-            : undefined;
-      if (generation === wallpaperLoadGeneration) showWallpaperAsset(blob);
-    } catch (cause) {
-      if (generation !== wallpaperLoadGeneration) return;
-      showWallpaperAsset();
-      setWallpaperError(
-        cause instanceof Error ? cause.message : 'Could not load the saved background.',
-      );
-    }
-  };
-
-  const commitAppearance = (next: ThemePreferences) => {
-    const normalized = normalizeThemePreferences(next);
-    setAppearance(normalized);
-    applyThemePreferences(normalized);
-    try {
-      saveThemePreferences(normalized);
-    } catch {
-      // Appearance still changes for this tab when persistent storage is unavailable.
-    }
-    if (normalized.wallpaper !== 'custom' && normalized.wallpaper !== 'telegram') {
-      wallpaperLoadGeneration += 1;
-      showWallpaperAsset();
-    }
-  };
-
-  const loadAppearanceCatalog = async () => {
-    if (appearanceCatalogLoading()) return;
-    setAppearanceCatalogLoading(true);
-    try {
-      setTelegramWallpapers(await engine.getWallpapers());
-    } catch {
-      setTelegramWallpapers([]);
-    } finally {
-      setAppearanceCatalogLoading(false);
-    }
-  };
-
-  const selectTheme = (theme: ThemePresetId) => {
-    commitAppearance({ ...appearance(), theme });
-  };
-
-  const selectAccentColor = (accentColor: string) => {
-    commitAppearance({ ...appearance(), accentColor, systemAccent: false });
-  };
-
-  const selectSystemAccent = (systemAccent: boolean) => {
-    commitAppearance({ ...appearance(), systemAccent });
-  };
-
-  const selectWallpaper = (wallpaper: ThemePreferences['wallpaper']) => {
-    const next = { ...appearance(), wallpaper };
-    commitAppearance(next);
-    if (wallpaper === 'custom' || wallpaper === 'telegram') void loadStoredWallpaper(next);
-  };
-
-  const selectTelegramWallpaper = async (wallpaper: TelegramWallpaper) => {
-    if (wallpaperBusy()) return;
-    setWallpaperBusy(true);
-    setWallpaperError('');
-    try {
-      let blob: Blob | undefined;
-      if (wallpaper.hasFile) {
-        blob = await engine.downloadWallpaper(wallpaper.id);
-      }
-      const next: ThemePreferences = {
-        ...appearance(),
-        wallpaper: 'telegram',
-        wallpaperBlur: wallpaper.settings.blur ? 8 : appearance().wallpaperBlur,
-        telegramWallpaper: {
-          id: wallpaper.id,
-          label: wallpaper.slug || `Telegram ${wallpaper.id}`,
-          backgroundColors: wallpaper.settings.backgroundColors,
-          rotation: wallpaper.settings.rotation ?? 135,
-          hasFile: wallpaper.hasFile,
-          pattern: wallpaper.pattern,
-          dark: wallpaper.dark,
-          ...(wallpaper.settings.intensity !== undefined
-            ? { intensity: wallpaper.settings.intensity }
-            : {}),
-        },
-      };
-      commitAppearance(next);
-      showWallpaperAsset(blob);
-    } catch (cause) {
-      setWallpaperError(cause instanceof Error ? cause.message : 'Could not load the background.');
-    } finally {
-      setWallpaperBusy(false);
-    }
-  };
-
-  const uploadWallpaper = async (file: File) => {
-    if (wallpaperBusy()) return;
-    setWallpaperBusy(true);
-    setWallpaperError('');
-    try {
-      await saveCustomWallpaper(file);
-      const next = { ...appearance(), wallpaper: 'custom' as const };
-      commitAppearance(next);
-      showWallpaperAsset(file);
-    } catch (cause) {
-      setWallpaperError(cause instanceof Error ? cause.message : 'Could not save the background.');
-    } finally {
-      setWallpaperBusy(false);
-    }
-  };
 
   const openSettings = () => {
     setMobileSidebarOpen(false);
     setSettingsOpen(true);
-    if (!telegramWallpapers().length && !appearanceCatalogLoading()) void loadAppearanceCatalog();
+    if (!telegramWallpapers().length && !appearanceCatalogLoading()) {
+      void appearanceSession.loadCatalog();
+    }
   };
 
-  onMount(() => {
-    const preferences = appearance();
-    if (
-      preferences.wallpaper === 'custom' ||
-      (preferences.wallpaper === 'telegram' && preferences.telegramWallpaper?.hasFile)
-    ) {
-      void loadStoredWallpaper(preferences);
-    }
-  });
-
-  const responsiveLeftSidebarMaxWidth = () =>
-    viewportWidth() <= 1100 && viewportWidth() > 650
-      ? Math.max(LEFT_SIDEBAR_MIN_WIDTH, viewportWidth() - 360)
-      : LEFT_SIDEBAR_MAX_WIDTH;
-  const effectiveLeftSidebarWidth = () =>
-    Math.min(leftSidebarWidth(), responsiveLeftSidebarMaxWidth());
-  const leftSidebarCompact = () => effectiveLeftSidebarWidth() <= LEFT_SIDEBAR_COMPACT_WIDTH;
   const online = () => {
     const current = snapshot() as EngineSnapshot & { online?: boolean };
     return current.phase === 'ready' && current.online !== false;
@@ -515,85 +265,6 @@ export function App(props: AppProps) {
   };
   const hasCachedWorkspace = () => snapshot().dialogs.length > 0;
   const canSend = () => online() && activePeerMatches();
-  const updateDetailsOpen = (open: boolean) => {
-    viewport.captureAnchor();
-    setDetailsOpen(open);
-    if (open) setMobileSidebarOpen(false);
-    try {
-      localStorage.setItem(DETAILS_OPEN_STORAGE_KEY, String(open));
-    } catch {
-      // The pane still opens and closes when persistent storage is blocked.
-    }
-  };
-  const toggleMobileSidebar = () => {
-    setMobileSidebarOpen((open) => !open);
-    setDetailsOpen(false);
-  };
-  const saveLeftSidebarWidth = (width: number) => {
-    const next = Math.min(clampLeftSidebarWidth(width), responsiveLeftSidebarMaxWidth());
-    setLeftSidebarWidth(next);
-    try {
-      localStorage.setItem(LEFT_SIDEBAR_STORAGE_KEY, String(next));
-    } catch {
-      // Resizing remains available when persistent storage is blocked.
-    }
-  };
-
-  const startLeftSidebarResize = (event: PointerEvent & { currentTarget: HTMLDivElement }) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    const startX = event.clientX;
-    viewport.captureAnchor();
-    const startWidth = effectiveLeftSidebarWidth();
-    let pendingWidth = startWidth;
-    let frame: number | undefined;
-    setResizingLeftSidebar(true);
-
-    const renderWidth = () => {
-      frame = undefined;
-      appGridElement?.style.setProperty('--left-sidebar-width', `${pendingWidth}px`);
-      const sidebar = appGridElement?.querySelector<HTMLElement>('[data-testid="chat-sidebar"]');
-      const compact = pendingWidth <= LEFT_SIDEBAR_COMPACT_WIDTH;
-      sidebar?.classList.toggle('compact', compact);
-      if (sidebar) sidebar.dataset.compact = String(compact);
-    };
-    const move = (moveEvent: PointerEvent) => {
-      pendingWidth = Math.min(
-        clampLeftSidebarWidth(startWidth + moveEvent.clientX - startX),
-        responsiveLeftSidebarMaxWidth(),
-      );
-      if (frame === undefined) frame = requestAnimationFrame(renderWidth);
-    };
-    const finish = () => {
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      renderWidth();
-      saveLeftSidebarWidth(pendingWidth);
-      setResizingLeftSidebar(false);
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('pointercancel', finish);
-      stopSidebarResize = undefined;
-    };
-    stopSidebarResize = finish;
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', finish);
-    window.addEventListener('pointercancel', finish);
-  };
-
-  const resizeLeftSidebarWithKeyboard = (event: KeyboardEvent) => {
-    const width = effectiveLeftSidebarWidth();
-    const changes: Record<string, number> = {
-      ArrowLeft: width - 16,
-      ArrowRight: width + 16,
-      Home: LEFT_SIDEBAR_MIN_WIDTH,
-      End: responsiveLeftSidebarMaxWidth(),
-    };
-    const nextWidth = changes[event.key];
-    if (nextWidth === undefined) return;
-    event.preventDefault();
-    viewport.captureAnchor();
-    saveLeftSidebarWidth(nextWidth);
-  };
 
   const visibleChats = createMemo<ChatSummary[]>((previous) => {
     const next = snapshot()
@@ -637,254 +308,91 @@ export function App(props: AppProps) {
     };
   });
   const activeSharedCounts = createMemo(() => snapshot().sharedMediaCounts);
+  createEffect(() => {
+    const peerId = activeChatId();
+    const current = snapshot();
+    if (
+      peerId !== 'empty' &&
+      current.online &&
+      current.activePeerId === peerId &&
+      !current.sharedMediaCounts
+    ) {
+      runInBackground(engine.ensureSharedMediaCounts(peerId));
+    }
+  });
   const activeDialog = createMemo(() =>
     snapshot().dialogs.find(({ peer }) => peer.id === activeChatId()),
   );
-  const activeChatThemeSettings = createMemo(() =>
-    chatThemeSettings(activeChatAppearance(), appearance()),
-  );
-  const activeChatWallpaper = createMemo(
-    () => activeChatAppearance()?.wallpaper ?? activeChatThemeSettings()?.wallpaper,
-  );
-  const activeChatPatternMode = createMemo(() => {
-    const wallpaper = activeChatWallpaper();
-    if (!wallpaper?.pattern) return undefined;
-    const baseTheme = activeChatThemeSettings()?.baseTheme;
-    return wallpaper.dark ||
-      (wallpaper.settings.intensity ?? 50) < 0 ||
-      baseTheme === 'night' ||
-      baseTheme === 'tinted'
-      ? 'inverted'
-      : 'normal';
-  });
-  const activeChatWallpaperStyle = createMemo(() => {
-    const settings = activeChatThemeSettings();
-    const wallpaper = activeChatWallpaper();
-    const colors = wallpaper?.settings.backgroundColors.length
-      ? wallpaper.settings.backgroundColors
-      : undefined;
-    return {
-      ...(activeChatWallpaperAsset()
-        ? { '--chat-wallpaper-asset': `url("${activeChatWallpaperAsset()}")` }
-        : {}),
-      ...(colors
-        ? {
-            '--chat-wallpaper-gradient': telegramWallpaperBackground(
-              colors,
-              wallpaper?.settings.rotation ?? 135,
-            ),
-          }
-        : {}),
-      ...(settings
-        ? {
-            '--chat-accent': settings.accentColor,
-            '--chat-outbox-accent': settings.outboxAccentColor ?? settings.accentColor,
-            '--chat-message-1':
-              settings.messageColors[0] ?? settings.outboxAccentColor ?? settings.accentColor,
-            '--chat-message-2':
-              settings.messageColors[1] ??
-              settings.messageColors[0] ??
-              settings.outboxAccentColor ??
-              settings.accentColor,
-            '--chat-message-text': readableTextColor(
-              settings.messageColors[0] ?? settings.outboxAccentColor ?? settings.accentColor,
-            ),
-          }
-        : {}),
-      ...(wallpaper?.settings.blur ? { '--chat-wallpaper-blur': '8px' } : {}),
-      ...(wallpaper?.pattern
-        ? {
-            '--chat-wallpaper-intensity': `${Math.abs(wallpaper.settings.intensity ?? 50) / 100}`,
-          }
-        : {}),
-    };
-  });
-  createEffect(() => {
-    const dialog = activeDialog();
-    const generation = ++chatAppearanceLoadGeneration;
-    if (!dialog || dialog.transient) {
-      batch(() => {
-        setActiveChatAppearance(undefined);
-        setActiveChatWallpaperAsset('');
-      });
-      return;
-    }
-    const cachedAppearance = chatAppearances.get(dialog.peer.id);
-    const cachedSettings = chatThemeSettings(cachedAppearance, appearance());
-    const cachedWallpaper = cachedAppearance?.wallpaper ?? cachedSettings?.wallpaper;
-    batch(() => {
-      setActiveChatAppearance(cachedAppearance);
-      setActiveChatWallpaperAsset(
-        cachedWallpaper ? (chatWallpaperObjectUrls.get(cachedWallpaper.id) ?? '') : '',
-      );
-    });
-    void engine
-      .getChatAppearance(dialog.peer)
-      .then(async (chatAppearance) => {
-        if (!chatAppearance) return;
-        chatAppearances.set(dialog.peer.id, chatAppearance);
-        if (generation === chatAppearanceLoadGeneration) {
-          debugChatAppearance(dialog.peer, chatAppearance, appearance());
-        }
-        const settings = chatThemeSettings(chatAppearance, appearance());
-        const wallpaper = chatAppearance.wallpaper ?? settings?.wallpaper;
-        if (!wallpaper?.hasFile) {
-          if (generation === chatAppearanceLoadGeneration) setActiveChatAppearance(chatAppearance);
-          return;
-        }
-        const cachedObjectUrl = chatWallpaperObjectUrls.get(wallpaper.id);
-        if (cachedObjectUrl) {
-          if (generation === chatAppearanceLoadGeneration) {
-            batch(() => {
-              setActiveChatWallpaperAsset(cachedObjectUrl);
-              setActiveChatAppearance(chatAppearance);
-            });
-          }
-          return;
-        }
-        if (generation === chatAppearanceLoadGeneration) setActiveChatAppearance(chatAppearance);
-        const blob = await engine.downloadWallpaper(wallpaper.id);
-        let objectUrl = chatWallpaperObjectUrls.get(wallpaper.id);
-        if (!objectUrl) {
-          objectUrl = URL.createObjectURL(blob);
-          chatWallpaperObjectUrls.set(wallpaper.id, objectUrl);
-        }
-        if (generation === chatAppearanceLoadGeneration) setActiveChatWallpaperAsset(objectUrl);
-      })
-      .catch(() => undefined);
+  const chatAppearance = createChatAppearanceSession({
+    source: engine,
+    activeDialog,
+    preferences: appearance,
   });
   const composer = createComposerSession({
-    engine,
+    conversation: activeConversation,
     snapshot,
     activePeerId: activeChatId,
     activeDialog,
     canSend,
     beforeUiChange: () => {
-      const scroller = messageScroller();
+      const scroller = messageScroller;
       if (!scroller) return;
       viewport.preserveReadingPosition(scroller);
     },
     focus: () =>
       document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.focus(),
   });
-  const activeUserDetails = createMemo(
-    () => snapshot().dialogs.find(({ peer }) => peer.id === activeChatId())?.userDetails,
+  const expressions = createExpressionSession({
+    source: engine,
+    conversation: activeConversation,
+    online,
+    reply: composer.reply,
+    clearReply: composer.clearReply,
+  });
+  const expressionPickerVisible = expressions.visible;
+  const contactDetails = createContactDetailsSession({
+    source: engine,
+    dialog: activeDialog,
+    detailsOpen,
+  });
+  const replyKeyboard = createReplyKeyboardSession({
+    snapshot,
+    activePeerId: activeChatId,
+    reply: composer.reply,
+    editing: composer.editing,
+    forceReply: composer.forceReply,
+  });
+  const {
+    visible: visibleReplyKeyboard,
+    botStarted,
+    dismissSingleUse: dismissSingleUseReplyKeyboard,
+  } = replyKeyboard;
+  createEffect(
+    on(
+      () => {
+        const dialog = activeDialog();
+        return snapshot().phase === 'ready' && dialog?.peer.kind === 'user' && !dialog.userDetails
+          ? dialog.peer.id
+          : '';
+      },
+      (peerId) => {
+        if (!peerId) return;
+        const dialog = activeDialog();
+        if (dialog?.peer.id === peerId)
+          void engine.getUserDetails(dialog.peer).catch(() => undefined);
+      },
+    ),
   );
-  const shareActiveContact = async () => {
-    const chat = activeChat();
-    const details = activeUserDetails();
-    const url = details?.username ? `https://t.me/${details.username}` : undefined;
-    const text = [chat.title, details?.phone, url].filter(Boolean).join('\n');
-    if (navigator.share) {
-      await navigator.share({ title: chat.title, text, ...(url ? { url } : {}) });
-      return;
-    }
-    await navigator.clipboard.writeText(text);
-  };
-  const editActiveContact = () => {
-    const dialog = activeDialog();
-    const details = activeUserDetails();
-    if (!dialog || dialog.peer.kind !== 'user' || !details) return;
-    const firstName = window.prompt('First name', details.firstName ?? dialog.title)?.trim();
-    if (firstName === undefined || firstName === '') return;
-    const lastName = window.prompt('Last name', details.lastName ?? '')?.trim();
-    if (lastName === undefined) return;
-    const phone = window.prompt('Phone', details.phone ?? '')?.trim();
-    if (phone === undefined) return;
-    runInBackground(engine.updateContact(dialog.peer, firstName, lastName, phone));
-  };
-  const deleteActiveContact = () => {
-    const dialog = activeDialog();
-    if (!dialog || dialog.peer.kind !== 'user') return;
-    if (!window.confirm(`Delete ${dialog.title} from your contacts?`)) return;
-    runInBackground(engine.deleteContact(dialog.peer));
-  };
-  let groupMembersLoadGeneration = 0;
-  createEffect(() => {
-    void snapshot().groupMembersRevision;
-    const open = detailsOpen();
-    const peerId = activeChatId();
-    const kind = activeChat().kind;
-    const generation = ++groupMembersLoadGeneration;
-    setGroupMembers([]);
-    setGroupMembersLoading(false);
-    if (!open || !peerId || peerId === 'empty' || kind === 'user' || !kind) return;
-    const dialog = untrack(() => activeDialog());
-    if (!dialog) return;
-    setGroupMembersLoading(true);
-    void engine
-      .getGroupMembers(dialog.peer)
-      .then((members) => {
-        if (generation === groupMembersLoadGeneration) setGroupMembers(members);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (generation === groupMembersLoadGeneration) setGroupMembersLoading(false);
-      });
-  });
-  const activeReplyKeyboard = createMemo(() => {
-    if (!activePeerMatches()) return undefined;
-    for (let index = snapshot().messages.length - 1; index >= 0; index -= 1) {
-      const message = snapshot().messages[index];
-      if (message?.botKeyboard?.kind === 'reply') {
-        return { message, messageId: message.id, keyboard: message.botKeyboard };
-      }
-    }
-    return undefined;
-  });
-  const visibleReplyKeyboard = createMemo(() => {
-    void replyKeyboardRevision();
-    const current = activeReplyKeyboard();
-    if (!current || current.keyboard.hidden) return undefined;
-    const key = `${activeChatId()}:${current.messageId}`;
-    return dismissedReplyKeyboards.has(key) ? undefined : current;
-  });
-  const botStarted = createMemo(
-    () =>
-      snapshot().messages.some(({ outgoing }) => outgoing) ||
-      snapshot().pending.some(
-        ({ peer, botStart }) => peer.id === activeChatId() && Boolean(botStart),
-      ),
-  );
-  const dismissSingleUseReplyKeyboard = (owner: string) => {
-    if (owner !== 'reply') return;
-    const current = visibleReplyKeyboard();
-    if (!current?.keyboard.singleUse) return;
-    dismissedReplyKeyboards.add(`${activeChatId()}:${current.messageId}`);
-    setReplyKeyboardRevision((revision) => revision + 1);
-  };
-  createEffect(() => {
-    const current = visibleReplyKeyboard();
-    if (!current?.keyboard.forceReply) return;
-    const key = `${activeChatId()}:${current.messageId}`;
-    if (handledForceReplies.has(key)) return;
-    if (composer.reply() || composer.editing()) return;
-    handledForceReplies.add(key);
-    composer.forceReply(
-      current.messageId,
-      current.message.text || current.message.media?.name || 'The bot requested a reply',
-    );
-  });
-  createEffect(() => {
-    if (snapshot().phase !== 'ready') return;
-    const dialog = snapshot().dialogs.find(({ peer }) => peer.id === activeChatId());
-    if (dialog?.peer.kind === 'user' && !dialog.userDetails) {
-      void engine.getUserDetails(dialog.peer).catch(() => undefined);
-    }
-  });
   const activeMessageEntries = createMemo<KeyedMessageView[]>(() => {
     return presentConversation(snapshot(), activeChatId());
   });
-  let observedMessages = snapshot().messages;
-  let observedMessageLayoutRevision = messageLayoutRevision(observedMessages);
-  createEffect(() => {
-    const messages = snapshot().messages;
-    if (messages === observedMessages) return;
-    observedMessages = messages;
-    const revision = messageLayoutRevision(messages);
-    if (revision !== observedMessageLayoutRevision) setMessageContextMenu(undefined);
-    observedMessageLayoutRevision = revision;
-  });
+  createEffect(
+    on(
+      () => messageLayoutRevision(snapshot().messages),
+      () => setMessageContextMenu(undefined),
+      { defer: true },
+    ),
+  );
   const activeMessages = createMemo(() => activeMessageEntries().map(({ message }) => message));
   const pendingSendForMessage = (messageId: string) =>
     snapshot().pending.find(
@@ -903,27 +411,20 @@ export function App(props: AppProps) {
     );
     return index >= 0 ? send.album.attachments[index] : undefined;
   };
-  const pendingMediaAssetKey = (messageId: string) =>
-    `pending-media:${activeChatId()}:${messageId}`;
   const messageWindowBounds = createMemo(() =>
-    albumSafeMessageWindow(activeMessages(), messageWindowStart(), MAX_RENDERED_MESSAGES),
+    albumSafeMessageWindow(activeMessages(), historyWindow.windowStart(), MAX_RENDERED_MESSAGES),
   );
   let reportConversationVisibility = () => {};
   viewport = createConversationViewport({
-    scroller: messageScroller,
+    state: historyWindow,
+    scroller: () => messageScroller,
     activePeerId: activeChatId,
     messageCount: () => activeMessages().length,
     windowIncludesPresent: () => messageWindowBounds().end >= activeMessages().length,
-    windowStart: messageWindowStart,
-    setWindowStart: setMessageWindowStart,
-    setJumpVisible: setJumpToPresentVisible,
-    setReady: setConversationReady,
     maxRenderedMessages: MAX_RENDERED_MESSAGES,
     reportVisibility: () => reportConversationVisibility(),
-    loadOlder: (scroller) => void loadOlderAtTop(scroller),
-    invalidateHistoryRestore: () => {
-      historyRestoreGeneration += 1;
-    },
+    loadOlder: (scroller) => void history.loadOlder(scroller),
+    invalidateHistoryRestore: () => history.invalidateRestore(),
     cancelMessageOpen: () => {
       openMessageGeneration += 1;
       openingMessage = false;
@@ -951,68 +452,32 @@ export function App(props: AppProps) {
     const messageCount = activeMessages().length;
     void peerId;
     if (viewport.followingPresent()) {
-      setMessageWindowStart(Math.max(0, messageCount - MAX_RENDERED_MESSAGES));
+      viewport.setWindowStart(Math.max(0, messageCount - MAX_RENDERED_MESSAGES));
     } else {
-      setMessageWindowStart((start) => Math.min(start, Math.max(0, messageCount - 1)));
+      viewport.setWindowStart((start) => Math.min(start, Math.max(0, messageCount - 1)));
       queueMicrotask(() => {
         if (activeChatId() !== peerId || viewport.followingPresent()) return;
         if (messageWindowBounds().end < activeMessages().length) {
-          setJumpToPresentVisible(true);
+          const scroller = messageScroller;
+          if (scroller) viewport.updateJump(scroller);
           reportConversationVisibility();
         }
       });
     }
-    queueMicrotask(pruneAssetUrls);
   });
-  const activeActivity = createMemo(() =>
-    snapshot().activities.find(({ peerId }) => peerId === activeChatId()),
-  );
-  const activeStatus = createMemo(() => {
-    const chat = activeChat();
-    if (chat.id === 'empty') return 'Choose a chat';
-    if (snapshot().phase === 'connecting') return 'connecting…';
-    if (snapshot().phase === 'syncing') return 'syncing…';
-    if (!online()) return 'offline · cached conversation';
-    const activity = activeActivity();
-    if (activity?.kind === 'typing') return 'typing…';
-    if (activity?.kind === 'uploading') return 'uploading…';
-    if (activity?.kind === 'recording') return 'recording…';
-    if (activity?.kind === 'choosing-sticker') return 'choosing a sticker…';
-    if (chat.kind === 'channel') return 'channel';
-    if (chat.kind === 'group') return 'group';
-    if (chat.presence === 'online') return 'online';
-    if (chat.lastSeenAt) {
-      const seen = new Date(chat.lastSeenAt * 1000);
-      const today = new Date();
-      const yesterday = new Date(today);
-      yesterday.setDate(today.getDate() - 1);
-      const time = new Intl.DateTimeFormat(undefined, {
-        hour: '2-digit',
-        minute: '2-digit',
-      }).format(seen);
-      if (seen.toDateString() === today.toDateString()) return `last seen today at ${time}`;
-      if (seen.toDateString() === yesterday.toDateString()) return `last seen yesterday at ${time}`;
-      return `last seen ${new Intl.DateTimeFormat(undefined, {
-        month: 'short',
-        day: 'numeric',
-      }).format(seen)}`;
-    }
-    if (chat.presence === 'recently') return 'last seen recently';
-    if (chat.presence === 'offline') return 'offline';
-    return chat.kind === 'user' ? 'status unavailable' : '';
+  const conversationHeader = createConversationHeaderSession({
+    snapshot,
+    chat: activeChat,
+    activePeerId: activeChatId,
+    activePeerMatches,
+    online,
   });
-  const activePinnedMessage = createMemo(() =>
-    activePeerMatches() ? snapshot().pinnedMessages[pinnedMessageIndex()] : undefined,
-  );
-  let pinnedMessageSetKey = '';
-  createEffect(() => {
-    const key = `${activeChatId()}:${snapshot()
-      .pinnedMessages.map(({ id }) => id)
-      .join(',')}`;
-    if (key === pinnedMessageSetKey) return;
-    pinnedMessageSetKey = key;
-    setPinnedMessageIndex(0);
-  });
+  const {
+    status: activeStatus,
+    pinnedMessage: activePinnedMessage,
+    pinnedIndex: pinnedMessageIndex,
+    setPinnedIndex: setPinnedMessageIndex,
+  } = conversationHeader;
   const activeConversationLoaded = createMemo(() => {
     const current = snapshot();
     return (
@@ -1020,17 +485,24 @@ export function App(props: AppProps) {
       (!current.loadingMessages || current.messages.length > 0)
     );
   });
+  history = createConversationHistorySession({
+    snapshot,
+    activePeerId: activeChatId,
+    conversation: activeConversation,
+    messages: activeMessages,
+    loaded: activeConversationLoaded,
+    online,
+    openingMessage: () => openingMessage,
+    scroller: () => messageScroller,
+    viewport: () => viewport,
+    maxRenderedMessages: MAX_RENDERED_MESSAGES,
+    cancelMessageOpen: () => {
+      openMessageGeneration += 1;
+      openingMessage = false;
+    },
+  });
 
-  const selectChat = async (
-    id: string,
-    linkedOpenGeneration?: number,
-    linkedPeerOpenGeneration?: number,
-  ) => {
-    if (linkedPeerOpenGeneration === undefined) {
-      peerOpenGeneration += 1;
-    } else if (linkedPeerOpenGeneration !== peerOpenGeneration) {
-      return false;
-    }
+  const selectChat = async (id: string, linkedOpenGeneration?: number) => {
     if (linkedOpenGeneration === undefined) {
       openMessageGeneration += 1;
       openingMessage = false;
@@ -1039,6 +511,7 @@ export function App(props: AppProps) {
     }
     if (
       id === activeChatId() &&
+      activeConversation()?.peerId === id &&
       activePeerMatches() &&
       !snapshot().loadingMessages &&
       snapshot().messages.length > 0 &&
@@ -1050,22 +523,21 @@ export function App(props: AppProps) {
     const previousPeerId = activeChatId();
     const changingPeer = id !== previousPeerId;
     if (changingPeer) {
+      setActiveConversation(undefined);
       viewport.resetForPeer();
-      historyLoadGeneration += 1;
-      olderLoadRunning = false;
-      olderLoadQueued = false;
+      history.reset();
     }
     setConversationLoadError('');
     setActiveChatId(id);
     setMobileSidebarOpen(false);
-    setStickerPickerOpen(false);
-    setGifPickerOpen(false);
+    expressions.close();
     setSearchOpen(false);
     setReactionPickerMessageId('');
     composer.switchPeer(previousPeerId, id, changingPeer);
     try {
-      await engine.selectChat(id);
+      const conversation = await engine.openConversation(id);
       if (generation !== selectionGeneration || activeChatId() !== id) return false;
+      setActiveConversation(conversation);
       const current = engine.snapshot();
       if (
         current.activePeerId === id &&
@@ -1082,9 +554,10 @@ export function App(props: AppProps) {
       return false;
     }
   };
+  const chatDirectory = new ChatDirectory(engine, () => snapshot().dialogs, selectChat);
 
   const bot = createBotSession({
-    engine,
+    conversation: activeConversation,
     snapshot,
     activePeerId: activeChatId,
     activeDialog,
@@ -1093,16 +566,17 @@ export function App(props: AppProps) {
     dismissSingleUseKeyboard: dismissSingleUseReplyKeyboard,
     focusComposer: () =>
       document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.focus(),
+    resources: engine,
   });
 
   const retryConversation = async () => {
     if (conversationRetrying() || activeChatId() === 'empty') return;
     setConversationRetrying(true);
     setConversationLoadError('');
-    setConversationReady(false);
+    viewport.setReady(false);
     try {
       if (!engine.snapshot().online) await engine.retrySync();
-      await engine.retryHistory();
+      await activeConversation()?.retryHistory();
       const current = engine.snapshot();
       if (!current.loadingMessages && current.messages.length === 0 && current.historyError) {
         setConversationLoadError(current.historyError);
@@ -1111,7 +585,7 @@ export function App(props: AppProps) {
       setConversationLoadError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setConversationRetrying(false);
-      setConversationReady(true);
+      viewport.setReady(true);
     }
   };
 
@@ -1132,6 +606,7 @@ export function App(props: AppProps) {
     try {
       await engine.logOut();
       setActiveChatId('empty');
+      setActiveConversation(undefined);
       composer.reset();
       setMobileSidebarOpen(false);
     } finally {
@@ -1147,6 +622,7 @@ export function App(props: AppProps) {
       mediaAssets.dispose();
       await engine.clearCache();
       setActiveChatId('empty');
+      setActiveConversation(undefined);
       setSettingsOpen(false);
     } finally {
       setClearingCache(false);
@@ -1179,7 +655,7 @@ export function App(props: AppProps) {
       visibilityFrame = undefined;
       const peerId = activeChatId();
       if (!peerId || peerId === 'empty') return;
-      const scroller = messageScroller();
+      const scroller = messageScroller;
       const windowIncludesPresent = messageWindowBounds().end >= activeMessages().length;
       const atBottom = scroller
         ? windowIncludesPresent &&
@@ -1197,7 +673,7 @@ export function App(props: AppProps) {
         expressionPickerVisible() ||
         bot.menuOpen() ||
         authOpen() ||
-        Boolean(document.querySelector('[aria-modal="true"]'));
+        modalVisible();
       runInBackground(
         Promise.resolve(
           engine.setActiveConversationVisibility(peerId, {
@@ -1209,302 +685,56 @@ export function App(props: AppProps) {
     });
   };
 
-  createEffect(() => {
-    void activeChatId();
-    void mobileSidebarOpen();
-    void detailsOpen();
-    void searchOpen();
-    void sharedMediaKind();
-    void forwardingMessage();
-    void deleteTarget();
-    void deleteChatTarget();
-    void bot.inlineSwitch();
-    void expressionPickerVisible();
-    void bot.menuOpen();
-    void authOpen();
-    reportConversationVisibility();
-  });
+  createEffect(
+    on(
+      () => [
+        activeChatId(),
+        mobileSidebarOpen(),
+        detailsOpen(),
+        searchOpen(),
+        sharedMediaKind(),
+        forwardingMessage(),
+        deleteTarget(),
+        deleteChatTarget(),
+        bot.inlineSwitch(),
+        expressionPickerVisible(),
+        bot.menuOpen(),
+        authOpen(),
+        modalVisible(),
+      ],
+      reportConversationVisibility,
+    ),
+  );
 
-  createEffect(() => {
-    const sidebarModal = mobileSidebarOpen() && viewportWidth() <= 650;
-    const detailsModal = detailsOpen() && viewportWidth() <= 1100;
-    if (!sidebarModal && !detailsModal) return;
-
-    const previouslyFocused =
-      document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    const sidebar = appGridElement?.querySelector<HTMLElement>('[data-testid="chat-sidebar"]');
-    const details = appGridElement?.querySelector<HTMLElement>('.details-pane');
-    const panel = sidebarModal ? sidebar : details;
-    const inerted: Array<{ element: HTMLElement; previous: boolean }> = [];
-    const makeInert = (element: HTMLElement | null | undefined) => {
-      if (!element) return;
-      inerted.push({ element, previous: element.inert });
-      element.inert = true;
-    };
-    makeInert(conversationPaneElement);
-    if (detailsModal) makeInert(sidebar);
-
-    const focusableSelector =
-      'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
-    const focusableElements = () =>
-      [...(panel?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])].filter(
-        (element) => !element.hidden && element.getClientRects().length > 0,
-      );
-    const handleDrawerKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        if (sidebarModal) setMobileSidebarOpen(false);
-        else updateDetailsOpen(false);
-        return;
-      }
-      if (event.key !== 'Tab' || !panel) return;
-      const focusable = focusableElements();
-      if (focusable.length === 0) {
-        event.preventDefault();
-        panel.focus();
-        return;
-      }
-      const first = focusable[0]!;
-      const last = focusable.at(-1)!;
-      if (
-        event.shiftKey &&
-        (document.activeElement === first || !panel.contains(document.activeElement))
-      ) {
-        event.preventDefault();
-        last.focus();
-      } else if (
-        !event.shiftKey &&
-        (document.activeElement === last || !panel.contains(document.activeElement))
-      ) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    let active = true;
-    document.addEventListener('keydown', handleDrawerKeyDown, true);
-    const focusFrame = requestAnimationFrame(() => {
-      if (!active) return;
-      const target = panel?.querySelector<HTMLElement>('button[aria-label^="Close"]');
-      target?.focus();
-      if (panel && document.activeElement !== target) panel.focus();
-    });
-
-    onCleanup(() => {
-      active = false;
-      cancelAnimationFrame(focusFrame);
-      document.removeEventListener('keydown', handleDrawerKeyDown, true);
-      for (const { element, previous } of inerted) element.inert = previous;
-      requestAnimationFrame(() => {
-        const fallback = sidebarModal
-          ? mobileSidebarTriggerElement
-          : document.querySelector<HTMLElement>('button[aria-label="Open details"]');
-        const target = fallback ?? (previouslyFocused?.isConnected ? previouslyFocused : undefined);
-        target?.focus();
-      });
-    });
+  createDrawerFocusSession({
+    root: () => appGridElement,
+    conversationPane: () => conversationPaneElement,
+    mobileTrigger: () => mobileSidebarTriggerElement,
+    mobileOpen: mobileSidebarOpen,
+    detailsOpen,
+    viewportWidth,
+    closeMobile: () => setMobileSidebarOpen(false),
+    closeDetails: () => updateDetailsOpen(false),
   });
 
   const mediaSourceFor = (messageId: string | number) =>
     snapshot().messages.find((candidate) => String(candidate.id) === String(messageId));
-
-  createEffect(() => {
-    const peerId = activeChatId();
-    if (!peerId || !activeConversationLoaded()) return;
-    if (openingMessage) {
-      viewport.invalidateAlignment();
-      setConversationReady(true);
-      return;
-    }
-    const messageCount = untrack(() => activeMessages().length);
-    viewport.positionAtPresent(peerId, messageCount, activeConversationLoaded);
-  });
+  const mediaAssetFor = (messageId: string | number): MediaAsset | undefined => {
+    const id = String(messageId);
+    const source = mediaSourceFor(id);
+    if (source) return mediaAssets.message(source);
+    const pending = pendingAttachmentForMessage(id);
+    if (pending) return mediaAssets.pending(activeChatId(), id, pending.blob);
+    const sticker = pendingSendForMessage(id)?.sticker;
+    return sticker ? mediaAssets.sticker(sticker) : undefined;
+  };
 
   const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-  const shiftMessageWindow = (direction: -1 | 1) => {
-    const scroller = messageScroller();
-    if (!scroller) return;
-    viewport.invalidateAlignment();
-    openMessageGeneration += 1;
-    openingMessage = false;
-    viewport.pauseAtHistory();
-    const restoreAnchor = viewport.visibleAnchor(scroller);
-    viewport.setAnchor(restoreAnchor);
-    const peerId = activeChatId();
-    const restoreGeneration = ++historyRestoreGeneration;
-    const maxStart = Math.max(0, activeMessages().length - MAX_RENDERED_MESSAGES);
-    const nextStart = Math.max(
-      0,
-      Math.min(maxStart, messageWindowStart() + direction * (MAX_RENDERED_MESSAGES / 2)),
-    );
-    setMessageWindowStart(nextStart);
-    requestAnimationFrame(() => {
-      if (
-        restoreGeneration !== historyRestoreGeneration ||
-        activeChatId() !== peerId ||
-        messageScroller() !== scroller
-      ) {
-        return;
-      }
-      viewport.setAnchor(restoreAnchor);
-      viewport.restoreAnchor(scroller, restoreAnchor);
-      requestAnimationFrame(() => {
-        if (
-          restoreGeneration !== historyRestoreGeneration ||
-          activeChatId() !== peerId ||
-          messageScroller() !== scroller
-        ) {
-          return;
-        }
-        viewport.setAnchor(restoreAnchor);
-        viewport.restoreAnchor(scroller, restoreAnchor);
-        viewport.updateJump(scroller);
-      });
-    });
-  };
-
-  const loadOlderAtTop = async (scroller: HTMLDivElement) => {
-    if (scroller.scrollTop <= 120 && messageWindowStart() > 0) {
-      shiftMessageWindow(-1);
-      return;
-    }
-    if (
-      scroller.scrollTop > 120 ||
-      !snapshot().hasOlderMessages ||
-      snapshot().historyError ||
-      !activePeerMatches()
-    ) {
-      return;
-    }
-    viewport.pauseAtHistory();
-    if (olderLoadRunning || snapshot().loadingOlderMessages) {
-      olderLoadQueued = true;
-      return;
-    }
-
-    const generation = ++historyLoadGeneration;
-    const peerId = activeChatId();
-    const restoreGeneration = ++historyRestoreGeneration;
-    olderLoadRunning = true;
-    try {
-      let pagesLoaded = 0;
-      do {
-        if (generation !== historyLoadGeneration || activeChatId() !== peerId) break;
-        olderLoadQueued = false;
-        const pageAnchor = viewport.visibleAnchor(scroller);
-        viewport.setAnchor(pageAnchor);
-        const before = snapshot();
-        const beforeCount = before.messages.length;
-        const beforeOldestId = before.messages[0]?.id;
-        const beforeHasOlder = before.hasOlderMessages;
-        await engine.loadOlderMessages();
-        pagesLoaded += 1;
-        if (generation !== historyLoadGeneration || activeChatId() !== peerId) break;
-        const after = snapshot();
-        const madeProgress =
-          after.messages.length !== beforeCount ||
-          after.messages[0]?.id !== beforeOldestId ||
-          after.hasOlderMessages !== beforeHasOlder;
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => {
-            if (
-              generation === historyLoadGeneration &&
-              restoreGeneration === historyRestoreGeneration &&
-              activeChatId() === peerId &&
-              messageScroller() === scroller
-            ) {
-              viewport.setAnchor(pageAnchor);
-              viewport.restoreAnchor(scroller, pageAnchor);
-            }
-            requestAnimationFrame(() => {
-              if (
-                generation === historyLoadGeneration &&
-                restoreGeneration === historyRestoreGeneration &&
-                activeChatId() === peerId &&
-                messageScroller() === scroller
-              ) {
-                viewport.setAnchor(pageAnchor);
-                viewport.restoreAnchor(scroller, pageAnchor);
-              }
-              resolve();
-            });
-          });
-        });
-        if (!madeProgress || after.historyError || !online() || pagesLoaded >= 8) break;
-      } while (
-        generation === historyLoadGeneration &&
-        activeChatId() === peerId &&
-        snapshot().hasOlderMessages &&
-        (olderLoadQueued || scroller.scrollHeight <= scroller.clientHeight + 120)
-      );
-    } finally {
-      if (generation === historyLoadGeneration) {
-        olderLoadRunning = false;
-        olderLoadQueued = false;
-      }
-    }
-  };
-
-  const loadHistoryGap = async (gap: TelegramHistoryGap) => {
-    const scroller = messageScroller();
-    if (!scroller || olderLoadRunning || snapshot().loadingOlderMessages) return;
-    viewport.pauseAtHistory();
-    setConversationReady(true);
-    const generation = ++historyLoadGeneration;
-    const peerId = activeChatId();
-    const restoreGeneration = ++historyRestoreGeneration;
-    olderLoadRunning = true;
-    olderLoadQueued = false;
-    const restoreAnchor = viewport.visibleAnchor(scroller);
-    viewport.setAnchor(restoreAnchor);
-    try {
-      await engine.loadHistoryGap(gap);
-      if (generation !== historyLoadGeneration || activeChatId() !== peerId) return;
-      await nextFrame();
-      if (
-        generation !== historyLoadGeneration ||
-        restoreGeneration !== historyRestoreGeneration ||
-        activeChatId() !== peerId ||
-        messageScroller() !== scroller
-      ) {
-        return;
-      }
-      viewport.setAnchor(restoreAnchor);
-      viewport.restoreAnchor(scroller, restoreAnchor);
-      await nextFrame();
-      if (
-        generation !== historyLoadGeneration ||
-        restoreGeneration !== historyRestoreGeneration ||
-        activeChatId() !== peerId ||
-        messageScroller() !== scroller
-      ) {
-        return;
-      }
-      viewport.setAnchor(restoreAnchor);
-      viewport.restoreAnchor(scroller, restoreAnchor);
-      viewport.updateJump(scroller);
-    } finally {
-      if (generation === historyLoadGeneration) {
-        olderLoadRunning = false;
-        olderLoadQueued = false;
-      }
-    }
-  };
-
-  const gapBefore = (message: ChatMessage) => {
-    const messageId = Number(message.id);
-    if (!Number.isSafeInteger(messageId)) return undefined;
-    return (snapshot().historyGaps ?? []).find(
-      ({ newerMinMessageId }) => newerMinMessageId === messageId,
-    );
-  };
-
   onMount(() => {
     let narrowLayout = window.innerWidth <= 1100;
-    const scroller = messageScroller();
-    const content = messageContent();
+    const scroller = messageScroller;
+    const content = messageContent;
     const resizeObserver =
       scroller && content
         ? new ResizeObserver(() => {
@@ -1512,10 +742,7 @@ export function App(props: AppProps) {
             else {
               viewport.restoreAnchor(scroller);
               viewport.ensureAnchor();
-              const distanceFromPresent =
-                scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-              const windowIncludesPresent = messageWindowBounds().end >= activeMessages().length;
-              setJumpToPresentVisible(!windowIncludesPresent || distanceFromPresent > 160);
+              viewport.updateJump(scroller);
             }
             reportConversationVisibility();
           })
@@ -1614,7 +841,6 @@ export function App(props: AppProps) {
     window.addEventListener('resize', handleResize);
     window.addEventListener('online', recoverOnlineConnection);
     document.addEventListener('visibilitychange', refreshVisibleTelegramState);
-    document.addEventListener('televecha:modal-visibility-change', reportConversationVisibility);
 
     const unsubscribe = engine.subscribe((next) => {
       setSnapshot(next);
@@ -1641,10 +867,9 @@ export function App(props: AppProps) {
         if (currentPeerId !== 'empty') {
           viewport.resetForPeer();
           selectionGeneration += 1;
-          historyLoadGeneration += 1;
-          olderLoadRunning = false;
-          olderLoadQueued = false;
+          history.reset();
           setActiveChatId('empty');
+          setActiveConversation(undefined);
           composer.reset();
           setSearchOpen(false);
           setSharedMediaKind(undefined);
@@ -1658,7 +883,6 @@ export function App(props: AppProps) {
     if (credentials && engine.snapshot().phase === 'idle') void engine.start(credentials);
 
     onCleanup(() => {
-      stopSidebarResize?.();
       unsubscribe();
       resizeObserver?.disconnect();
       scroller?.removeEventListener('pointerdown', viewport.handlePointerDown, true);
@@ -1672,10 +896,6 @@ export function App(props: AppProps) {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('online', recoverOnlineConnection);
       document.removeEventListener('visibilitychange', refreshVisibleTelegramState);
-      document.removeEventListener(
-        'televecha:modal-visibility-change',
-        reportConversationVisibility,
-      );
       if (visibilityFrame !== undefined) cancelAnimationFrame(visibilityFrame);
       const peerId = activeChatId();
       if (peerId && peerId !== 'empty') {
@@ -1692,84 +912,12 @@ export function App(props: AppProps) {
     });
   });
 
-  const loadStickerIndexes = async () => {
-    if (stickerPickerLoading()) return;
-    setStickerPickerLoading(true);
-    try {
-      const [recent, installed] = await Promise.all([
-        engine.getRecentStickers(),
-        engine.getStickerPacks(),
-      ]);
-      setStickerPacks([
-        ...(recent.length > 0 ? [{ id: 'recent', title: 'Recent', stickers: recent }] : []),
-        ...installed,
-      ]);
-    } finally {
-      setStickerPickerLoading(false);
-    }
-  };
-
-  const loadGifIndex = async () => {
-    if (gifPickerLoading()) return;
-    setGifPickerLoading(true);
-    try {
-      setSavedGifs(await engine.getSavedGifs());
-    } finally {
-      setGifPickerLoading(false);
-    }
-  };
-
-  const toggleStickerPicker = async () => {
-    const open = !stickerPickerOpen();
-    setStickerPickerOpen(open);
-    if (open) setGifPickerOpen(false);
-    if (open && stickerPacks().length === 0) await loadStickerIndexes();
-  };
-
-  const toggleGifPicker = async () => {
-    const open = !gifPickerOpen();
-    setGifPickerOpen(open);
-    if (open) setStickerPickerOpen(false);
-    if (open && savedGifs().length === 0) await loadGifIndex();
-  };
-
-  let observedExpressionRevision = snapshot().expressionRevision;
-  createEffect(() => {
-    const revision = snapshot().expressionRevision;
-    if (revision === observedExpressionRevision) return;
-    observedExpressionRevision = revision;
-    setStickerPacks([]);
-    setSavedGifs([]);
-    if (stickerPickerOpen()) runInBackground(loadStickerIndexes());
-    if (gifPickerOpen()) runInBackground(loadGifIndex());
-  });
-
-  const sendSticker = async (sticker: TelegramSticker) => {
-    const dialog = snapshot().dialogs.find(({ peer }) => peer.id === activeChatId());
-    if (!dialog || !online()) return;
-    const reply = composer.reply();
-    setStickerPickerOpen(false);
-    composer.clearReply();
-    await engine.sendSticker(
-      dialog.peer,
-      sticker,
-      reply
-        ? { messageId: reply.messageId, ...(reply.quoteText ? { quoteText: reply.quoteText } : {}) }
-        : undefined,
-    );
-  };
-
-  const sendGif = async (gif: TelegramSticker) => {
-    setGifPickerOpen(false);
-    await sendSticker(gif);
-  };
-
   const reactToMessage = async (messageId: string, emoji: string) => {
     const id = Number(messageId);
     const dialog = snapshot().dialogs.find(({ peer }) => peer.id === activeChatId());
     if (!Number.isSafeInteger(id) || !dialog || !online()) return;
     setReactionPickerMessageId('');
-    await engine.toggleReaction(dialog.peer, id, emoji);
+    await activeConversation()?.toggleReaction(id, emoji);
   };
 
   const deleteMessage = async (messageId: string, revoke: boolean) => {
@@ -1777,23 +925,23 @@ export function App(props: AppProps) {
     const dialog = snapshot().dialogs.find(({ peer }) => peer.id === activeChatId());
     if (!Number.isSafeInteger(id) || !dialog || !online()) return;
     setMessageContextMenu(undefined);
-    await engine.deleteMessage(dialog.peer, id, revoke);
+    await activeConversation()?.deleteMessage(id, revoke);
   };
 
   const forwardMessage = async (targetPeerId: string) => {
     const message = forwardingMessage();
-    const from = snapshot().dialogs.find(({ peer }) => peer.id === activeChatId());
     const to = snapshot().dialogs.find(({ peer }) => peer.id === targetPeerId);
-    if (!message || !from || !to || !online()) return;
+    const conversation = activeConversation();
+    if (!message || !conversation || !to || !online()) return;
     setForwardingMessage(undefined);
-    await engine.forwardMessage(from.peer, to.peer, Number(message.id));
+    await conversation.forwardTo(to.peer, Number(message.id));
   };
 
   const centerMessageWindow = (messageId: number) => {
     const index = activeMessages().findIndex(({ id }) => id === String(messageId));
     if (index < 0) return;
     const maxStart = Math.max(0, activeMessages().length - MAX_RENDERED_MESSAGES);
-    setMessageWindowStart(Math.min(maxStart, Math.max(0, index - MAX_RENDERED_MESSAGES / 2)));
+    viewport.setWindowStart(Math.min(maxStart, Math.max(0, index - MAX_RENDERED_MESSAGES / 2)));
   };
 
   const revealMessage = async (
@@ -1821,7 +969,7 @@ export function App(props: AppProps) {
       ) {
         return false;
       }
-      const scroller = messageScroller();
+      const scroller = messageScroller;
       const target = scroller?.querySelector<HTMLElement>(
         `:is(article.message, .media-album-item)[data-message-id="${messageId}"]`,
       );
@@ -1862,7 +1010,7 @@ export function App(props: AppProps) {
       if (!selected || generation !== openMessageGeneration || activeChatId() !== message.peerId)
         return;
       viewport.pauseAtHistory();
-      if (!(await engine.openMessage(message))) return;
+      if (!(await activeConversation()?.openMessage(message))) return;
       if (
         generation !== openMessageGeneration ||
         selection !== selectionGeneration ||
@@ -1876,7 +1024,7 @@ export function App(props: AppProps) {
       if (generation === openMessageGeneration) {
         openingMessage = false;
         if (!revealed) {
-          const scroller = messageScroller();
+          const scroller = messageScroller;
           if (scroller) viewport.updateJump(scroller, true);
         }
       }
@@ -1887,8 +1035,7 @@ export function App(props: AppProps) {
     if (message.service || !Number.isSafeInteger(Number(message.id))) return;
     event.preventDefault();
     event.stopPropagation();
-    setStickerPickerOpen(false);
-    setGifPickerOpen(false);
+    expressions.close();
     setReactionPickerMessageId('');
     const anchor =
       event.currentTarget instanceof Element
@@ -1935,57 +1082,15 @@ export function App(props: AppProps) {
         <ChatSidebar
           chats={visibleChats()}
           activeChatId={activeChatId()}
-          compact={leftSidebarCompact() && !mobileSidebarOpen()}
-          width={effectiveLeftSidebarWidth()}
-          minWidth={LEFT_SIDEBAR_MIN_WIDTH}
-          maxWidth={responsiveLeftSidebarMaxWidth()}
           online={online()}
-          mobileOpen={mobileSidebarOpen()}
-          modal={mobileSidebarOpen() && viewportWidth() <= 650}
-          avatarIdentity={(peerId) => mediaAssets.avatarIdentity(peerId)}
-          loadCachedAvatar={(peerId) => mediaAssets.loadAvatar(peerId, true)}
-          loadAvatar={(peerId) => mediaAssets.loadAvatar(peerId)}
-          loadPeerAvatar={(result, cachedOnly) =>
-            mediaAssets.loadPeerAvatar(result.peer, result.hasAvatar, result.avatarId, cachedOnly)
-          }
-          select={(peerId) => runInBackground(selectChat(peerId))}
-          searchPeers={(query) => engine.searchPeers(query)}
-          openPeer={(result) => {
-            const generation = ++peerOpenGeneration;
-            runInBackground(
-              engine.addPeer(result).then(() => selectChat(result.peer.id, undefined, generation)),
-            );
-          }}
-          setMuted={(peerId, muted) => {
-            const dialog = snapshot().dialogs.find(({ peer }) => peer.id === peerId);
-            if (dialog) void engine.setMuted(dialog.peer, muted);
-          }}
-          getUserDetails={(peerId) => {
-            const dialog = snapshot().dialogs.find(({ peer }) => peer.id === peerId);
-            return dialog
-              ? engine.getUserDetails(dialog.peer)
-              : Promise.reject(new Error('Chat is no longer available.'));
-          }}
-          setBlocked={(peerId, blocked) => {
-            const dialog = snapshot().dialogs.find(({ peer }) => peer.id === peerId);
-            if (dialog) void engine.setBlocked(dialog.peer, blocked);
-          }}
-          setPinned={(peerId, pinned) => {
-            const dialog = snapshot().dialogs.find(({ peer }) => peer.id === peerId);
-            if (dialog) void engine.setPinnedDialog(dialog.peer, pinned);
-          }}
-          setArchived={(peerId, archived) => {
-            const dialog = snapshot().dialogs.find(({ peer }) => peer.id === peerId);
-            if (dialog) void engine.setArchived(dialog.peer, archived);
-          }}
+          layout={sidebarLayout}
+          media={mediaAssets}
+          directory={chatDirectory}
           requestDelete={(peerId) => {
             const chat = visibleChats().find(({ id }) => id === peerId);
             if (chat) setDeleteChatTarget(chat);
           }}
           openSettings={openSettings}
-          closeMobile={() => setMobileSidebarOpen(false)}
-          startResize={startLeftSidebarResize}
-          resizeWithKeyboard={resizeLeftSidebarWithKeyboard}
         />
 
         <Show when={mobileSidebarOpen() || detailsOpen()}>
@@ -2133,14 +1238,14 @@ export function App(props: AppProps) {
           </Show>
           <div
             class="message-scroll-shell relative min-h-0 flex-1"
-            data-chat-theme={activeChatThemeSettings() ? 'telegram' : undefined}
-            data-chat-wallpaper={activeChatWallpaper() ? 'telegram' : undefined}
-            data-chat-pattern={activeChatPatternMode()}
-            style={activeChatWallpaperStyle()}
+            data-chat-theme={chatAppearance.settings() ? 'telegram' : undefined}
+            data-chat-wallpaper={chatAppearance.wallpaper() ? 'telegram' : undefined}
+            data-chat-pattern={chatAppearance.pattern()}
+            style={chatAppearance.style()}
           >
             <div class="chat-wallpaper" aria-hidden="true" />
             <div
-              ref={setMessageScroller}
+              ref={(element) => (messageScroller = element)}
               class={`message-scroller scroll-area relative h-full min-h-0 overflow-y-auto overscroll-contain px-5 py-6${activeChat().kind === 'channel' ? ' channel-messages' : ''}`}
               data-testid="message-scroller"
               onKeyDown={viewport.handleKeyDown}
@@ -2148,9 +1253,9 @@ export function App(props: AppProps) {
               onWheel={viewport.handleWheel}
             >
               <div
-                ref={setMessageContent}
+                ref={(element) => (messageContent = element)}
                 class="conversation-content relative mx-auto flex max-w-3xl flex-col gap-2"
-                classList={{ 'conversation-ready': conversationReady() }}
+                classList={{ 'conversation-ready': viewport.ready() }}
               >
                 <Show
                   when={snapshot().loadingMessages && snapshot().activePeerId === activeChatId()}
@@ -2181,8 +1286,8 @@ export function App(props: AppProps) {
                     Loading older messages…
                   </div>
                 </Show>
-                <Show when={messageWindowStart() > 0}>
-                  <button class="message-window-control" onClick={() => shiftMessageWindow(-1)}>
+                <Show when={viewport.windowStart() > 0}>
+                  <button class="message-window-control" onClick={() => history.shiftWindow(-1)}>
                     Show earlier loaded messages
                   </button>
                 </Show>
@@ -2205,6 +1310,7 @@ export function App(props: AppProps) {
                         !snapshot().loadingMessages &&
                         !conversationLoadError() &&
                         !snapshot().historyError &&
+                        activeMessages().length === 0 &&
                         activeChatId() !== 'empty'
                       }
                     >
@@ -2224,12 +1330,12 @@ export function App(props: AppProps) {
                     const layout = () => messageLayouts()[index()]!;
                     return (
                       <>
-                        <Show when={gapBefore(message)}>
+                        <Show when={history.gapBefore(message)}>
                           {(gap) => (
                             <button
                               class="message-window-control history-gap-control"
                               disabled={snapshot().loadingOlderMessages}
-                              onClick={() => void loadHistoryGap(gap())}
+                              onClick={() => void history.loadGap(gap())}
                             >
                               {snapshot().loadingOlderMessages
                                 ? 'Loading missing messages…'
@@ -2346,23 +1452,14 @@ export function App(props: AppProps) {
                                 <span class="reply-media-preview">
                                   <MediaAttachment
                                     media={message.replyMedia!}
-                                    revision={
-                                      mediaSourceFor(message.replyToId!)
-                                        ? engine.mediaAssetKey(mediaSourceFor(message.replyToId!)!)
-                                        : undefined
-                                    }
+                                    revision={mediaAssetFor(message.replyToId!)?.revision}
                                     load={() => {
-                                      const source = mediaSourceFor(message.replyToId!);
-                                      return source
-                                        ? mediaAssets.loadMedia(source)
+                                      const asset = mediaAssetFor(message.replyToId!);
+                                      return asset
+                                        ? asset.load()
                                         : Promise.reject(new Error('Reply media is unavailable.'));
                                     }}
-                                    cachedUrl={() => {
-                                      const source = mediaSourceFor(message.replyToId!);
-                                      return source
-                                        ? cachedAssetUrl(engine.mediaAssetKey(source))
-                                        : undefined;
-                                    }}
+                                    cachedUrl={() => mediaAssetFor(message.replyToId!)?.cached()}
                                     compact
                                     decorative
                                   />
@@ -2374,33 +1471,13 @@ export function App(props: AppProps) {
                           <Show when={layout().album.length > 1}>
                             <MessageAlbum
                               messages={layout().album}
-                              revision={(albumMessage) => {
-                                const source = mediaSourceFor(albumMessage.id);
-                                return source
-                                  ? engine.mediaAssetKey(source)
-                                  : pendingAttachmentForMessage(albumMessage.id)
-                                    ? pendingMediaAssetKey(albumMessage.id)
-                                    : undefined;
-                              }}
+                              revision={(albumMessage) => mediaAssetFor(albumMessage.id)?.revision}
                               progress={(albumMessage) => albumMessage.uploadProgress}
-                              cachedUrl={(albumMessage) => {
-                                const source = mediaSourceFor(albumMessage.id);
-                                if (source) return cachedAssetUrl(engine.mediaAssetKey(source));
-                                return pendingAttachmentForMessage(albumMessage.id)
-                                  ? cachedAssetUrl(pendingMediaAssetKey(albumMessage.id))
-                                  : undefined;
-                              }}
+                              cachedUrl={(albumMessage) => mediaAssetFor(albumMessage.id)?.cached()}
                               load={(albumMessage) => {
-                                const source = mediaSourceFor(albumMessage.id);
-                                if (source) return mediaAssets.loadMedia(source);
-                                const pending = pendingAttachmentForMessage(albumMessage.id);
-                                return pending
-                                  ? Promise.resolve(
-                                      rememberAssetUrl(
-                                        pendingMediaAssetKey(albumMessage.id),
-                                        pending.blob,
-                                      ),
-                                    )
+                                const asset = mediaAssetFor(albumMessage.id);
+                                return asset
+                                  ? asset.load()
                                   : Promise.reject(new Error('Album media is unavailable.'));
                               }}
                               openActions={(albumMessage, event) =>
@@ -2432,29 +1509,12 @@ export function App(props: AppProps) {
                               >
                                 <MediaAttachment
                                   media={media()}
-                                  revision={
-                                    mediaSourceFor(message.id)
-                                      ? engine.mediaAssetKey(mediaSourceFor(message.id)!)
-                                      : undefined
-                                  }
-                                  cachedUrl={() => {
-                                    const source = mediaSourceFor(message.id);
-                                    if (source) return cachedAssetUrl(engine.mediaAssetKey(source));
-                                    const sticker = snapshot().pending.find(
-                                      (send) => send.id === message.id,
-                                    )?.sticker;
-                                    return sticker
-                                      ? cachedAssetUrl(`sticker:${sticker.id}`)
-                                      : undefined;
-                                  }}
+                                  revision={mediaAssetFor(message.id)?.revision}
+                                  cachedUrl={() => mediaAssetFor(message.id)?.cached()}
                                   load={() => {
-                                    const source = mediaSourceFor(message.id);
-                                    if (source) return mediaAssets.loadMedia(source);
-                                    const pendingSticker = snapshot().pending.find(
-                                      (send) => send.id === message.id,
-                                    )?.sticker;
-                                    return pendingSticker
-                                      ? mediaAssets.loadSticker(pendingSticker)
+                                    const asset = mediaAssetFor(message.id);
+                                    return asset
+                                      ? asset.load()
                                       : Promise.reject(
                                           new Error('Attachment data is unavailable.'),
                                         );
@@ -2638,10 +1698,7 @@ export function App(props: AppProps) {
                             onClick={() => {
                               const message = target();
                               setMessageContextMenu(undefined);
-                              const dialog = activeDialog();
-                              if (!dialog) return;
-                              void engine.setPinnedMessage(
-                                dialog.peer,
+                              void activeConversation()?.setPinnedMessage(
                                 Number(message.id),
                                 !snapshot().pinnedMessages.some(
                                   ({ id }) => id === Number(message.id),
@@ -2683,7 +1740,7 @@ export function App(props: AppProps) {
                   )}
                 </Show>
                 <Show when={messageWindowBounds().end < activeMessages().length}>
-                  <button class="message-window-control" onClick={() => shiftMessageWindow(1)}>
+                  <button class="message-window-control" onClick={() => history.shiftWindow(1)}>
                     Show newer loaded messages
                   </button>
                 </Show>
@@ -2691,7 +1748,7 @@ export function App(props: AppProps) {
               </div>
             </div>
 
-            <Show when={jumpToPresentVisible()}>
+            <Show when={viewport.jumpVisible()}>
               <button
                 class="jump-to-present"
                 type="button"
@@ -2743,43 +1800,14 @@ export function App(props: AppProps) {
           </Show>
           <ChatComposer
             conversationId={activeChatId()}
-            draft={composer.draft()}
             placeholder={visibleReplyKeyboard()?.keyboard.placeholder}
             enabled={canSend()}
-            stickerPickerOpen={stickerPickerOpen()}
-            stickerPickerLoading={stickerPickerLoading()}
-            gifPickerOpen={gifPickerOpen()}
-            gifPickerLoading={gifPickerLoading()}
-            gifs={savedGifs()}
-            stickerPacks={stickerPacks()}
-            reply={composer.reply()}
-            editing={
-              composer.editing()
-                ? {
-                    body: composer.editing()!.body,
-                    mediaName: composer.editing()!.media?.name,
-                    hasMedia: Boolean(composer.editing()!.media),
-                  }
-                : undefined
-            }
-            attachments={composer.attachments()}
-            formats={composer.formats()}
-            onDraft={composer.changeDraft}
-            onFormats={composer.setFormats}
-            onSend={() => void composer.send()}
-            onAttach={composer.attach}
-            onUpdateAttachment={composer.updateAttachment}
-            onRemoveAttachment={composer.removeAttachment}
-            onToggleStickers={() => runInBackground(toggleStickerPicker())}
-            onToggleGifs={() => runInBackground(toggleGifPicker())}
-            onLoadSticker={(sticker) => mediaAssets.loadSticker(sticker)}
-            stickerUrl={(sticker) => cachedAssetUrl(`sticker:${sticker.id}`)}
-            onSendSticker={(sticker) => void sendSticker(sticker)}
-            onSendGif={(gif) => void sendGif(gif)}
-            onSearchGifs={(query) => engine.searchGifs(query)}
-            onCancelReply={composer.clearReply}
-            onCancelEdit={composer.cancelEdit}
-            onExpressionOpenChange={setExpressionPickerVisible}
+            composer={composer}
+            expressions={expressions}
+            media={{
+              loadSticker: (sticker) => mediaAssets.loadSticker(sticker),
+              stickerUrl: (sticker) => mediaAssets.sticker(sticker).cached(),
+            }}
           />
         </section>
 
@@ -2806,7 +1834,7 @@ export function App(props: AppProps) {
           <SearchPanel
             dialogs={snapshot().dialogs}
             activePeerId={activeChatId()}
-            search={(term, global, offset) => engine.searchMessages(term, global, offset)}
+            search={(term, global, offset) => activeConversation()!.search(term, global, offset)}
             openResult={(message) => {
               setSearchOpen(false);
               runInBackground(openMessage(message));
@@ -2815,13 +1843,13 @@ export function App(props: AppProps) {
           />
         </Show>
 
-        <Show when={sharedMediaKind()}>
+        <Show when={sharedMediaKind()} keyed>
           {(kind) => (
             <SharedMediaPanel
-              initialKind={kind()}
-              loadItems={(selected, offset) => engine.getSharedMedia(selected, offset)}
+              initialKind={kind}
+              loadItems={(selected, offset) => activeConversation()!.sharedMedia(selected, offset)}
               loadMedia={(message) => mediaAssets.loadMedia(message)}
-              cachedMedia={(message) => cachedAssetUrl(engine.mediaAssetKey(message))}
+              cachedMedia={(message) => mediaAssets.message(message).cached()}
               openMessage={(message) => {
                 setSharedMediaKind(undefined);
                 runInBackground(openMessage(message));
@@ -2852,19 +1880,17 @@ export function App(props: AppProps) {
               close={() => setDeleteChatTarget(undefined)}
               confirm={() => {
                 const peerId = chat().id;
-                const dialog = snapshot().dialogs.find(({ peer }) => peer.id === peerId);
                 setDeleteChatTarget(undefined);
-                if (!dialog) return;
-                runInBackground(engine.deleteDialog(dialog.peer));
+                runInBackground(chatDirectory.delete(peerId));
               }}
             />
           )}
         </Show>
 
-        <Show when={bot.urlAuth()}>
+        <Show when={bot.urlAuth()} keyed>
           {(pending) => (
             <BotUrlAuthDialog
-              request={pending().request}
+              request={pending.request}
               busy={bot.urlAuthBusy()}
               close={bot.closeUrlAuth}
               confirm={(options) => void bot.acceptUrlAuth(options)}
@@ -2888,7 +1914,7 @@ export function App(props: AppProps) {
             setSystemAccent={selectSystemAccent}
             setWallpaper={selectWallpaper}
             setTelegramWallpaper={(wallpaper) => void selectTelegramWallpaper(wallpaper)}
-            setWallpaperEffects={(effects) => commitAppearance({ ...appearance(), ...effects })}
+            setWallpaperEffects={appearanceSession.update}
             uploadWallpaper={(file) => void uploadWallpaper(file)}
           />
         </Show>
@@ -2896,29 +1922,15 @@ export function App(props: AppProps) {
         <DetailsPane
           chat={activeChat()}
           counts={activeSharedCounts()}
-          userDetails={activeUserDetails()}
-          members={groupMembers()}
-          membersLoading={groupMembersLoading()}
           online={online()}
           modal={detailsOpen() && viewportWidth() <= 1100}
-          avatarIdentity={mediaAssets.avatarIdentity(activeChat().id)}
-          loadCachedAvatar={() => mediaAssets.loadAvatar(activeChat().id, true)}
-          loadAvatar={() => mediaAssets.loadAvatar(activeChat().id)}
-          loadCachedMemberAvatar={(member) =>
-            mediaAssets.loadPeerAvatar(member.peer, member.hasAvatar, member.avatarId, true)
-          }
-          loadMemberAvatar={(member) =>
-            mediaAssets.loadPeerAvatar(member.peer, member.hasAvatar, member.avatarId)
-          }
+          media={mediaAssets}
+          details={contactDetails}
           close={() => updateDetailsOpen(false)}
           openShared={setSharedMediaKind}
-          shareContact={() => runInBackground(shareActiveContact())}
-          editContact={editActiveContact}
-          deleteContact={deleteActiveContact}
           setBlocked={(blocked) => {
-            const dialog = activeDialog();
-            if (dialog?.peer.kind === 'user')
-              runInBackground(engine.setBlocked(dialog.peer, blocked));
+            if (activeDialog()?.peer.kind === 'user')
+              runInBackground(activeConversation()!.setBlocked(blocked));
           }}
         />
       </div>

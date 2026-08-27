@@ -1,0 +1,82 @@
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+}
+.composer textarea {
+  height: auto;
+  max-height: 9rem;
+  min-height: 2.3rem;
+  flex: 1;
+  resize: none;
+  overflow-y: hidden;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  padding: 0.525rem 0.15rem;
+  color: var(--text);
+  font-size: 0.9375rem;
+  line-height: 1.25rem;
+}
+.send-button {
+  display: grid;
+  width: 2.55rem;
+  height: 2.55rem;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  transition: 120ms ease;
+}
+.send-button:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+.chat-composer {
+  border-top-color: var(--line);
+  background: var(--panel);
+  padding: 0.55rem 0.75rem;
+}
+.message-scroller {
+  padding: 1rem 1.25rem 0.8rem;
+  scrollbar-color: var(--scrollbar) transparent;
+  scrollbar-width: thin;
+}
+.message-scroller::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+}
+.message-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+.message-scroller::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar);
+  background-clip: padding-box;
+}
+.jump-to-present {
+  position: absolute;
+  z-index: 15;
+  right: 1.1rem;
+  bottom: 1rem;
+  display: grid;
+  width: 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface-raised);
+  box-shadow: 0 5px 18px var(--shadow);
+  color: var(--text);
+  transition:
+    background 120ms ease,
+    transform 120ms ease;
+}
+.jump-to-present:hover {
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+}
+.conversation-content {
+  gap: 0.34rem;
+}

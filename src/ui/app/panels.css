@@ -1,0 +1,290 @@
+.appearance-settings {
+  border-bottom: 1px solid var(--line);
+}
+.appearance-group {
+  padding: 1rem;
+}
+.appearance-group + .appearance-group {
+  border-top: 1px solid var(--line);
+}
+.appearance-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.appearance-heading p,
+.appearance-empty,
+.appearance-error {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.05rem;
+}
+.desktop-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+.desktop-theme-option {
+  display: grid;
+  min-width: 0;
+  gap: 0.4rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: center;
+}
+.desktop-theme-option:hover,
+.desktop-theme-option.selected {
+  color: var(--accent);
+}
+.desktop-theme-preview {
+  --preview-incoming: #fff;
+  --preview-outgoing: #dfffc8;
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 0.65rem;
+  background: #9ed694;
+}
+.desktop-theme-option.selected .desktop-theme-preview {
+  border-color: var(--accent);
+}
+.desktop-theme-preview.preview-day {
+  --preview-outgoing: #e5f4ff;
+  background: #79bee2;
+}
+.desktop-theme-preview.preview-tinted {
+  --preview-incoming: #6d8290;
+  --preview-outgoing: #58a9dc;
+  background: #465966;
+}
+.desktop-theme-preview.preview-night {
+  --preview-incoming: #6b808d;
+  --preview-outgoing: #657b89;
+  background: #465966;
+}
+.desktop-theme-preview i {
+  position: absolute;
+  height: 16%;
+  border-radius: 0.18rem;
+}
+.desktop-theme-preview i:nth-child(1) {
+  top: 12%;
+  left: 8%;
+  width: 50%;
+  background: var(--preview-incoming);
+}
+.desktop-theme-preview i:nth-child(2) {
+  top: 38%;
+  right: 8%;
+  width: 50%;
+  background: var(--preview-outgoing);
+}
+.desktop-theme-preview i:nth-child(3) {
+  bottom: 12%;
+  left: 50%;
+  width: 24%;
+  height: 24%;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  background: transparent;
+  transform: translateX(-50%);
+}
+.accent-color-list {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+.accent-color-option {
+  width: 1.8rem;
+  height: 1.8rem;
+  flex: 0 0 auto;
+  border: 3px solid transparent;
+  border-radius: 50%;
+  background: var(--option-accent);
+}
+.accent-color-option.selected {
+  border-color: var(--panel);
+  outline: 3px solid var(--option-accent);
+}
+.system-accent-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+  color: var(--text);
+  font-size: 0.76rem;
+}
+.system-accent-option input {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+.telegram-theme-option {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface-subtle);
+  padding: 0.55rem;
+  color: var(--text);
+  text-align: left;
+}
+.telegram-theme-option:hover,
+.appearance-refresh:hover {
+  background: var(--surface-hover);
+}
+.telegram-theme-option.selected,
+.wallpaper-option.selected,
+.telegram-wallpaper-option.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.telegram-theme-option > span:last-child {
+  display: grid;
+  min-width: 0;
+}
+.telegram-theme-option strong {
+  overflow: hidden;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.telegram-theme-option small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.telegram-catalog-heading {
+  align-items: center;
+  margin-top: 1rem;
+}
+.appearance-refresh {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: var(--surface-subtle);
+  padding: 0.38rem 0.55rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+.telegram-theme-list,
+.telegram-wallpaper-list {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding: 0.15rem 0 0.35rem;
+}
+.telegram-theme-option {
+  min-width: 9.5rem;
+}
+.telegram-theme-accent {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  color: white;
+}
+.wallpaper-option-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+.wallpaper-option,
+.telegram-wallpaper-option {
+  position: relative;
+  display: flex;
+  min-height: 4.6rem;
+  align-items: flex-end;
+  justify-content: space-between;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  padding: 0.4rem;
+  color: white;
+  font-size: 0.62rem;
+  font-weight: 650;
+  text-align: left;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.65);
+}
+.wallpaper-option::after {
+  position: absolute;
+  inset: 45% 0 0;
+  z-index: 0;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.58));
+  content: '';
+}
+.wallpaper-option > * {
+  z-index: 1;
+}
+.wallpaper-doodles {
+  background:
+    radial-gradient(circle at 10px 10px, #ffffff55 0 2px, transparent 2.5px) 0 0 / 24px 24px,
+    #4c788d;
+}
+.wallpaper-aurora {
+  background: linear-gradient(145deg, #4fc0b4, #4c3e99 70%);
+}
+.wallpaper-sunset {
+  background: linear-gradient(145deg, #f2b880, #b95e72 50%, #345a78);
+}
+.wallpaper-graphite {
+  background: linear-gradient(145deg, #4c535e, #15181d);
+}
+.wallpaper-none {
+  background: var(--chat);
+  color: var(--text);
+  text-shadow: none;
+}
+.wallpaper-custom {
+  background: var(--surface-raised);
+  color: var(--text);
+  text-shadow: none;
+}
+.telegram-wallpaper-list {
+  margin-top: 0.6rem;
+}
+.telegram-wallpaper-option {
+  min-width: 4.6rem;
+  align-items: center;
+  justify-content: center;
+}
+.wallpaper-effects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 0.8rem;
+}
+.wallpaper-effects label > span {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+.wallpaper-effects input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.appearance-error {
+  border-radius: 0.45rem;
+  background: rgb(127 29 29 / 0.15);
+  padding: 0.45rem 0.55rem;
+  color: #fca5a5;
+}

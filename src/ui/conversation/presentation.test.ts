@@ -55,6 +55,53 @@ describe('presentation', () => {
     });
   });
 
+  it('presents media and outgoing delivery state without claiming the dialog is empty', () => {
+    const dialog: TelegramDialog = {
+      peer,
+      title: 'Alice',
+      initials: 'A',
+      color: '#123456',
+      unreadCount: 0,
+      muted: true,
+      pinned: false,
+      topMessageId: 8,
+      readInboxMaxId: 0,
+      readOutboxMaxId: 8,
+      hasAvatar: false,
+      topMessage: message({
+        id: 8,
+        text: '',
+        outgoing: true,
+        media: { kind: 'photo', name: 'photo.jpg', mimeType: 'image/jpeg' },
+      }),
+    };
+
+    expect(presentDialog(dialog)).toMatchObject({
+      preview: 'Photo',
+      lastMessageStatus: 'read',
+      muted: true,
+    });
+  });
+
+  it('distinguishes an uncached top message from a genuinely empty dialog', () => {
+    const base: TelegramDialog = {
+      peer,
+      title: 'Alice',
+      initials: 'A',
+      color: '#123456',
+      unreadCount: 0,
+      muted: false,
+      pinned: false,
+      topMessageId: 9,
+      readInboxMaxId: 0,
+      readOutboxMaxId: 0,
+      hasAvatar: false,
+    };
+
+    expect(presentDialog(base).preview).toBe('Message');
+    expect(presentDialog({ ...base, topMessageId: 0 }).preview).toBe('No messages yet');
+  });
+
   it('keeps the forwarded message source', () => {
     expect(
       presentMessage(

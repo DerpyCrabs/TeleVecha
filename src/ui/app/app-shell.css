@@ -1,0 +1,88 @@
+.app-grid {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: var(--left-sidebar-width, 320px) minmax(0, 1fr) 0;
+  transition: grid-template-columns 180ms ease;
+}
+.app-grid.details-visible {
+  grid-template-columns: var(--left-sidebar-width, 320px) minmax(0, 1fr) minmax(250px, 288px);
+}
+.app-grid.resizing-left-sidebar {
+  cursor: col-resize;
+  user-select: none;
+  transition: none;
+}
+.left-sidebar-resizer {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: -5px;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.left-sidebar-resizer::after {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  content: '';
+  transition: background 120ms ease;
+}
+.left-sidebar-resizer:hover::after,
+.left-sidebar-resizer:focus-visible::after,
+.resizing-left-sidebar .left-sidebar-resizer::after {
+  background: var(--accent);
+}
+.details-pane {
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 120ms ease;
+}
+.details-visible .details-pane {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+.icon-button.mobile-sidebar-trigger,
+.mobile-drawer-backdrop {
+  display: none;
+}
+.chat-header,
+.details-header {
+  height: 3.6rem;
+}
+
+.scroll-area {
+  min-height: 0;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--scrollbar) transparent;
+  scrollbar-width: thin;
+}
+.scroll-area[data-testid='chat-list'] {
+  scrollbar-width: none;
+}
+.scroll-area[data-testid='chat-list']::-webkit-scrollbar {
+  display: none;
+}
+.icon-button {
+  display: grid;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  transition: 120ms ease;
+}
+.icon-button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}

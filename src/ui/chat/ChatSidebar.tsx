@@ -3,16 +3,30 @@ import Ban from 'lucide-solid/icons/ban';
 import Archive from 'lucide-solid/icons/archive';
 import ArchiveRestore from 'lucide-solid/icons/archive-restore';
 import ArrowLeft from 'lucide-solid/icons/arrow-left';
+import Check from 'lucide-solid/icons/check';
+import CheckCheck from 'lucide-solid/icons/check-check';
 import Pin from 'lucide-solid/icons/pin';
 import PinOff from 'lucide-solid/icons/pin-off';
 import Search from 'lucide-solid/icons/search';
 import Settings from 'lucide-solid/icons/settings';
 import Trash2 from 'lucide-solid/icons/trash-2';
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  on,
+  onCleanup,
+  onMount,
+} from 'solid-js';
 
 import type { ChatSummary } from '../../domain/models';
 import type { TelegramPeerSearchResult, TelegramUserDetails } from '../../telegram/types';
+import type { SidebarLayout } from '../app/sidebarLayout';
+import { MediaAssets } from '../media/mediaAssets';
 import { Avatar } from '../shared/Avatar';
+import { ChatDirectory } from './chatDirectory';
 import { describeUnreadCount, formatUnreadCount, normalizeUnreadCount } from './unreadCount';
 
 type ChatFilter = 'all' | 'unread' | 'groups';
@@ -32,8 +46,15 @@ function UnreadBadge(props: UnreadBadgeProps) {
   return (
     <Show when={count() > 0}>
       <span
-        class={`chat-unread-badge chat-unread-badge-${props.compact ? 'compact' : 'trailing'}`}
-        classList={{ muted: Boolean(props.muted) }}
+        class="chat-unread-badge grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-accent px-1.5 text-[10px] leading-none font-bold text-white"
+        classList={{
+          'chat-unread-badge-compact': Boolean(props.compact),
+          'chat-unread-badge-trailing': !props.compact,
+          muted: Boolean(props.muted),
+          'absolute top-[0.2rem] right-[0.2rem] z-[2] h-6 min-w-6 border-2 border-panel px-[0.3rem] text-xs':
+            Boolean(props.compact),
+          'bg-[#626873]': Boolean(props.muted),
+        }}
         aria-hidden="true"
         title={describeUnreadCount(count())}
       >
@@ -43,39 +64,23 @@ function UnreadBadge(props: UnreadBadgeProps) {
   );
 }
 
+function MutedIcon() {
+  return <BellOff size={12} class="chat-muted-icon size-3 shrink-0" aria-label="Muted" />;
+}
+
 interface ChatSidebarProps {
   chats: ChatSummary[];
   activeChatId: string;
-  compact: boolean;
-  width: number;
-  minWidth: number;
-  maxWidth: number;
   online: boolean;
-  mobileOpen: boolean;
-  modal: boolean;
-  avatarIdentity: (peerId: string) => string;
-  loadCachedAvatar: (peerId: string) => Promise<string | undefined>;
-  loadAvatar: (peerId: string) => Promise<string | undefined>;
-  loadPeerAvatar: (
-    result: TelegramPeerSearchResult,
-    cachedOnly: boolean,
-  ) => Promise<string | undefined>;
-  select: (peerId: string) => void;
-  searchPeers: (query: string) => Promise<TelegramPeerSearchResult[]>;
-  openPeer: (result: TelegramPeerSearchResult) => void;
-  setMuted: (peerId: string, muted: boolean) => void;
-  getUserDetails: (peerId: string) => Promise<TelegramUserDetails>;
-  setBlocked: (peerId: string, blocked: boolean) => void;
-  setPinned: (peerId: string, pinned: boolean) => void;
-  setArchived: (peerId: string, archived: boolean) => void;
+  layout: SidebarLayout;
+  media: MediaAssets;
+  directory: ChatDirectory;
   requestDelete: (peerId: string) => void;
   openSettings: () => void;
-  closeMobile: () => void;
-  startResize: (event: PointerEvent & { currentTarget: HTMLDivElement }) => void;
-  resizeWithKeyboard: (event: KeyboardEvent) => void;
 }
 
 export function ChatSidebar(props: ChatSidebarProps) {
+  const compact = () => props.layout.compact() && !props.layout.mobileOpen();
   const [query, setQuery] = createSignal('');
   const [filter, setFilter] = createSignal<ChatFilter>('all');
   const [archiveOpen, setArchiveOpen] = createSignal(false);
@@ -92,7 +97,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
   const [contextUser, setContextUser] = createSignal<TelegramUserDetails>();
   let peerSearchGeneration = 0;
   let chatListElement: HTMLDivElement | undefined;
-  let observedActiveChatId = '';
   const archivedChats = createMemo(() => props.chats.filter((chat) => chat.archived));
   const archivedUnreadCount = createMemo(() =>
     archivedChats().reduce((total, chat) => total + normalizeUnreadCount(chat.unread), 0),
@@ -144,74 +148,83 @@ export function ChatSidebar(props: ChatSidebarProps) {
     return filteredChats().slice(start, end);
   });
 
-  createEffect(() => {
-    void query();
-    void filter();
-    void archiveOpen();
-    queueMicrotask(() => {
-      if (!chatListElement) return;
-      chatListElement.scrollTop = 0;
-      setListScrollTop(0);
-    });
-  });
+  createEffect(
+    on(
+      () => [query(), filter(), archiveOpen()] as const,
+      () => {
+        queueMicrotask(() => {
+          if (!chatListElement) return;
+          chatListElement.scrollTop = 0;
+          setListScrollTop(0);
+        });
+      },
+    ),
+  );
 
-  createEffect(() => {
-    const activeChatId = props.activeChatId;
-    if (!activeChatId || activeChatId === observedActiveChatId) return;
-    observedActiveChatId = activeChatId;
-    const index = filteredChats().findIndex(({ id }) => id === activeChatId);
-    if (index < 0) return;
-    queueMicrotask(() => {
-      if (!chatListElement) return;
-      const rendered = chatListElement.querySelector<HTMLElement>(
-        `.chat-row[aria-posinset="${index + 1}"]`,
-      );
-      if (rendered) {
-        rendered.scrollIntoView({ block: 'nearest' });
-        return;
-      }
-      const archiveOffset =
-        !archiveOpen() && !query().trim() && filter() === 'all' && archivedChats().length > 0
-          ? CHAT_ROW_HEIGHT
-          : 0;
-      const centeredTop =
-        archiveOffset +
-        index * CHAT_ROW_HEIGHT -
-        Math.max(0, (chatListElement.clientHeight - CHAT_ROW_HEIGHT) / 2);
-      chatListElement.scrollTop = Math.max(0, centeredTop);
-      setListScrollTop(chatListElement.scrollTop);
-    });
-  });
+  createEffect(
+    on(
+      () => props.activeChatId,
+      (activeChatId) => {
+        if (!activeChatId) return;
+        const index = filteredChats().findIndex(({ id }) => id === activeChatId);
+        if (index < 0) return;
+        queueMicrotask(() => {
+          if (!chatListElement) return;
+          const rendered = chatListElement.querySelector<HTMLElement>(
+            `.chat-row[aria-posinset="${index + 1}"]`,
+          );
+          if (rendered) {
+            rendered.scrollIntoView({ block: 'nearest' });
+            return;
+          }
+          const archiveOffset =
+            !archiveOpen() && !query().trim() && filter() === 'all' && archivedChats().length > 0
+              ? CHAT_ROW_HEIGHT
+              : 0;
+          const centeredTop =
+            archiveOffset +
+            index * CHAT_ROW_HEIGHT -
+            Math.max(0, (chatListElement.clientHeight - CHAT_ROW_HEIGHT) / 2);
+          chatListElement.scrollTop = Math.max(0, centeredTop);
+          setListScrollTop(chatListElement.scrollTop);
+        });
+      },
+    ),
+  );
 
-  createEffect(() => {
-    const term = query().trim();
-    const generation = ++peerSearchGeneration;
-    setPeerResults([]);
-    setPeerSearchFailed(false);
-    if (!term || !props.online || archiveOpen() || filter() === 'unread') {
-      setSearchingPeers(false);
-      return;
-    }
-    setSearchingPeers(true);
-    const timer = window.setTimeout(() => {
-      void props.searchPeers(term).then(
-        (results) => {
-          if (generation !== peerSearchGeneration) return;
-          setPeerResults(results);
+  createEffect(
+    on(
+      () => [query().trim(), props.online, archiveOpen(), filter()] as const,
+      ([term, online, archived, selectedFilter]) => {
+        const generation = ++peerSearchGeneration;
+        setPeerResults([]);
+        setPeerSearchFailed(false);
+        if (!term || !online || archived || selectedFilter === 'unread') {
           setSearchingPeers(false);
-        },
-        () => {
-          if (generation !== peerSearchGeneration) return;
-          setPeerSearchFailed(true);
-          setSearchingPeers(false);
-        },
-      );
-    }, 250);
-    onCleanup(() => {
-      window.clearTimeout(timer);
-      if (generation === peerSearchGeneration) peerSearchGeneration += 1;
-    });
-  });
+          return;
+        }
+        setSearchingPeers(true);
+        const timer = window.setTimeout(() => {
+          void props.directory.search(term).then(
+            (results) => {
+              if (generation !== peerSearchGeneration) return;
+              setPeerResults(results);
+              setSearchingPeers(false);
+            },
+            () => {
+              if (generation !== peerSearchGeneration) return;
+              setPeerSearchFailed(true);
+              setSearchingPeers(false);
+            },
+          );
+        }, 250);
+        onCleanup(() => {
+          window.clearTimeout(timer);
+          if (generation === peerSearchGeneration) peerSearchGeneration += 1;
+        });
+      },
+    ),
+  );
 
   onMount(() => {
     const listResizeObserver = chatListElement
@@ -240,18 +253,28 @@ export function ChatSidebar(props: ChatSidebarProps) {
     <aside
       class="chat-sidebar relative flex min-h-0 min-w-0 flex-col border-r border-line bg-panel"
       classList={{
-        compact: props.compact,
-        'mobile-open': props.mobileOpen,
+        compact: compact(),
+        'mobile-open': props.layout.mobileOpen(),
         'archive-open': archiveOpen(),
       }}
       data-testid="chat-sidebar"
-      data-compact={props.compact ? 'true' : 'false'}
-      role={props.modal ? 'dialog' : undefined}
-      aria-modal={props.modal ? 'true' : undefined}
-      aria-label={props.modal ? 'Chat list' : undefined}
-      tabIndex={props.modal ? -1 : undefined}
+      data-compact={compact() ? 'true' : 'false'}
+      role={props.layout.mobileOpen() && props.layout.viewportWidth() <= 650 ? 'dialog' : undefined}
+      aria-modal={
+        props.layout.mobileOpen() && props.layout.viewportWidth() <= 650 ? 'true' : undefined
+      }
+      aria-label={
+        props.layout.mobileOpen() && props.layout.viewportWidth() <= 650 ? 'Chat list' : undefined
+      }
+      tabIndex={props.layout.mobileOpen() && props.layout.viewportWidth() <= 650 ? -1 : undefined}
     >
-      <header class="sidebar-header flex h-16 items-center gap-3 px-4">
+      <header
+        class="sidebar-header flex h-[3.6rem] items-center gap-3 px-4"
+        classList={{
+          hidden: compact() && !archiveOpen(),
+          '!justify-center !px-0': compact() && archiveOpen(),
+        }}
+      >
         <Show when={archiveOpen()}>
           <button
             class="icon-button shrink-0"
@@ -264,7 +287,10 @@ export function ChatSidebar(props: ChatSidebarProps) {
             <ArrowLeft size={18} />
           </button>
         </Show>
-        <label class="search-box">
+        <label
+          class="flex min-w-0 flex-1 items-center gap-2 rounded-[0.65rem] border border-transparent bg-surface px-3 py-2 text-muted focus-within:border-[color-mix(in_srgb,var(--accent)_60%,transparent)] focus-within:shadow-[0_0_0_3px_var(--accent-soft)] [&>input]:min-w-0 [&>input]:flex-1 [&>input]:border-0 [&>input]:bg-transparent [&>input]:text-[0.82rem] [&>input]:text-ink [&>input]:outline-0"
+          classList={{ hidden: compact() && archiveOpen() }}
+        >
           <Search size={16} />
           <input
             value={query()}
@@ -275,7 +301,10 @@ export function ChatSidebar(props: ChatSidebarProps) {
         </label>
       </header>
 
-      <div class="chat-filters flex items-center gap-2 px-4 pb-3 text-xs font-medium text-muted">
+      <div
+        class="chat-filters flex items-center gap-2 px-4 pb-3 text-xs font-medium text-muted"
+        classList={{ hidden: compact() }}
+      >
         <For each={['all', 'unread', 'groups'] as const}>
           {(value) => (
             <button
@@ -295,7 +324,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
 
       <div
         ref={(element) => (chatListElement = element)}
-        class="scroll-area min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3"
+        class="scroll-area min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        classList={{ '!px-0 pt-2': compact() }}
         data-testid="chat-list"
         onScroll={(event) => {
           setListScrollTop(event.currentTarget.scrollTop);
@@ -308,7 +338,10 @@ export function ChatSidebar(props: ChatSidebarProps) {
           }
         >
           <button
-            class="chat-row archived-chats-row"
+            class="chat-row archived-chats-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
+            classList={{
+              '!justify-center !gap-0 !rounded-none !px-0 !py-[0.55rem]': compact(),
+            }}
             aria-label={`Archived chats, ${archivedChats().length} ${
               archivedChats().length === 1 ? 'chat' : 'chats'
             }${archivedUnreadCount() > 0 ? `, ${describeUnreadCount(archivedUnreadCount())}` : ''}`}
@@ -317,17 +350,21 @@ export function ChatSidebar(props: ChatSidebarProps) {
               setContextMenu(undefined);
             }}
           >
-            <div class="archive-avatar">
+            <div class="grid size-[2.65rem] shrink-0 place-items-center rounded-full bg-[color-mix(in_srgb,var(--accent)_82%,#26303b)] text-white">
               <Archive size={19} />
             </div>
-            <UnreadBadge count={archivedUnreadCount()} muted={archivedUnreadMuted()} compact />
-            <span class="min-w-0 flex-1 text-left">
+            <Show when={compact()}>
+              <UnreadBadge count={archivedUnreadCount()} muted={archivedUnreadMuted()} compact />
+            </Show>
+            <span class="min-w-0 flex-1 text-left" classList={{ hidden: compact() }}>
               <span class="block text-[14px] font-semibold">Archived chats</span>
               <span class="mt-1 block truncate text-[13px] text-[var(--muted)]">
                 {archivedChats().length} {archivedChats().length === 1 ? 'chat' : 'chats'}
               </span>
             </span>
-            <UnreadBadge count={archivedUnreadCount()} muted={archivedUnreadMuted()} />
+            <Show when={!compact()}>
+              <UnreadBadge count={archivedUnreadCount()} muted={archivedUnreadMuted()} />
+            </Show>
           </button>
         </Show>
         <Show when={virtualRange().start > 0}>
@@ -339,11 +376,17 @@ export function ChatSidebar(props: ChatSidebarProps) {
         <For each={virtualChats()}>
           {(chat, virtualIndex) => (
             <button
-              class={`chat-row ${chat.id === props.activeChatId ? 'active' : ''}`}
+              class="chat-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
+              classList={{
+                active: chat.id === props.activeChatId,
+                '!bg-[var(--dialog-selected)] text-white [--muted:rgb(255_255_255/0.85)]':
+                  chat.id === props.activeChatId,
+                '!justify-center !gap-0 !rounded-none !px-0 !py-[0.55rem]': compact(),
+              }}
               onClick={() => {
                 setContextMenu(undefined);
-                props.select(chat.id);
-                props.closeMobile();
+                void props.directory.select(chat.id);
+                props.layout.setMobileOpen(false);
               }}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -358,8 +401,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
                 setContextUser(undefined);
                 setContextMenu(menu);
                 if (chat.kind === 'user') {
-                  void props
-                    .getUserDetails(chat.id)
+                  void props.directory
+                    .details(chat.id)
                     .then((details) => {
                       if (contextMenu()?.chatId === chat.id) setContextUser(details);
                     })
@@ -367,34 +410,50 @@ export function ChatSidebar(props: ChatSidebarProps) {
                 }
               }}
               aria-label={`${chat.title}, ${chat.preview}${
-                normalizeUnreadCount(chat.unread) > 0 ? `, ${describeUnreadCount(chat.unread)}` : ''
-              }${chat.muted ? ', muted' : ''}`}
+                chat.lastMessageStatus ? `, last message ${chat.lastMessageStatus}` : ''
+              }${normalizeUnreadCount(chat.unread) > 0 ? `, ${describeUnreadCount(chat.unread)}` : ''}${chat.muted ? ', muted' : ''}`}
               aria-current={chat.id === props.activeChatId ? 'true' : undefined}
               aria-posinset={virtualRange().start + virtualIndex() + 1}
               aria-setsize={filteredChats().length}
             >
               <Avatar
-                identity={props.avatarIdentity(chat.id)}
+                identity={props.media.avatarIdentity(chat.id)}
                 initials={chat.initials}
                 color={chat.color}
                 online={chat.presence === 'online'}
-                loadCached={() => props.loadCachedAvatar(chat.id)}
-                load={props.online ? () => props.loadAvatar(chat.id) : undefined}
+                loadCached={() => props.media.loadAvatar(chat.id, true)}
+                load={props.online ? () => props.media.loadAvatar(chat.id) : undefined}
               />
-              <UnreadBadge count={chat.unread} muted={chat.muted} compact />
-              <span class="min-w-0 flex-1 text-left">
+              <Show when={compact()}>
+                <UnreadBadge count={chat.unread} muted={chat.muted} compact />
+              </Show>
+              <span class="min-w-0 flex-1 text-left" classList={{ hidden: compact() }}>
                 <span class="flex items-baseline justify-between gap-3">
                   <span class="truncate text-[14px] font-semibold">{chat.title}</span>
                   <span class="shrink-0 text-[11px] text-[var(--muted)]">{chat.time}</span>
                 </span>
-                <span class="mt-1 flex items-center justify-between gap-2">
-                  <span class="truncate text-[13px] text-[var(--muted)]">{chat.preview}</span>
-                  <Show
-                    when={chat.unread > 0}
-                    fallback={chat.muted ? <BellOff size={12} class="text-[var(--muted)]" /> : null}
-                  >
-                    <UnreadBadge count={chat.unread} muted={chat.muted} />
+                <span class="mt-1 flex min-w-0 items-center gap-1 text-[var(--muted)]">
+                  <Show when={chat.lastMessageStatus === 'sent'}>
+                    <Check
+                      size={14}
+                      class="chat-delivery-status size-3.5 shrink-0"
+                      aria-label="Last message sent"
+                    />
                   </Show>
+                  <Show when={chat.lastMessageStatus === 'read'}>
+                    <CheckCheck
+                      size={14}
+                      class="chat-delivery-status size-3.5 shrink-0 text-accent"
+                      aria-label="Last message read"
+                    />
+                  </Show>
+                  <span class="min-w-0 flex-1 truncate text-[13px]">{chat.preview}</span>
+                  <span class="ml-auto flex shrink-0 items-center gap-1.5">
+                    <Show when={chat.muted}>
+                      <MutedIcon />
+                    </Show>
+                    <UnreadBadge count={chat.unread} muted={chat.muted} />
+                  </span>
                 </span>
               </span>
             </button>
@@ -409,18 +468,23 @@ export function ChatSidebar(props: ChatSidebarProps) {
           />
         </Show>
         <Show when={visiblePeerResults().length > 0}>
-          <p class="sidebar-list-heading">Telegram</p>
+          <p class="mx-[0.7rem] mt-3 mb-1 text-xs font-bold tracking-[0.04em] text-accent uppercase">
+            Telegram
+          </p>
           <For each={visiblePeerResults()}>
             {(result) => (
               <button
-                class="chat-row"
+                class="chat-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
+                classList={{
+                  '!justify-center !gap-0 !rounded-none !px-0 !py-[0.55rem]': compact(),
+                }}
                 data-testid="peer-search-result"
                 aria-label={`${result.title}, ${result.category}`}
                 onClick={() => {
                   setQuery('');
                   setArchiveOpen(false);
-                  props.openPeer(result);
-                  props.closeMobile();
+                  void props.directory.open(result);
+                  props.layout.setMobileOpen(false);
                 }}
               >
                 <Avatar
@@ -428,15 +492,24 @@ export function ChatSidebar(props: ChatSidebarProps) {
                   initials={result.initials}
                   color={result.color}
                   loadCached={
-                    result.hasAvatar ? () => props.loadPeerAvatar(result, true) : undefined
+                    result.hasAvatar
+                      ? () =>
+                          props.media.loadPeerAvatar(
+                            result.peer,
+                            result.hasAvatar,
+                            result.avatarId,
+                            true,
+                          )
+                      : undefined
                   }
                   load={
                     props.online && result.hasAvatar
-                      ? () => props.loadPeerAvatar(result, false)
+                      ? () =>
+                          props.media.loadPeerAvatar(result.peer, result.hasAvatar, result.avatarId)
                       : undefined
                   }
                 />
-                <span class="min-w-0 flex-1 text-left">
+                <span class="min-w-0 flex-1 text-left" classList={{ hidden: compact() }}>
                   <span class="block truncate text-[14px] font-semibold">{result.title}</span>
                   <span class="mt-1 block truncate text-[13px] text-[var(--muted)]">
                     {result.username ? `@${result.username} · ` : ''}
@@ -490,7 +563,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
                   onClick={() => {
                     const selected = chat();
                     setContextMenu(undefined);
-                    if (selected) props.setMuted(selected.id, !selected.muted);
+                    if (selected) void props.directory.setMuted(selected.id, !selected.muted);
                   }}
                 >
                   <BellOff size={16} />
@@ -501,7 +574,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
                   onClick={() => {
                     const selected = chat();
                     setContextMenu(undefined);
-                    if (selected) props.setPinned(selected.id, !selected.pinned);
+                    if (selected) void props.directory.setPinned(selected.id, !selected.pinned);
                   }}
                 >
                   {chat()?.pinned ? <PinOff size={16} /> : <Pin size={16} />}
@@ -512,7 +585,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
                   onClick={() => {
                     const selected = chat();
                     setContextMenu(undefined);
-                    if (selected) props.setArchived(selected.id, !selected.archived);
+                    if (selected) void props.directory.setArchived(selected.id, !selected.archived);
                   }}
                 >
                   {chat()?.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
@@ -526,7 +599,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
                       const selected = chat();
                       const details = contextUser();
                       setContextMenu(undefined);
-                      if (selected && details) props.setBlocked(selected.id, !details.blocked);
+                      if (selected && details)
+                        void props.directory.setBlocked(selected.id, !details.blocked);
                     }}
                   >
                     <Ban size={16} />
@@ -554,10 +628,18 @@ export function ChatSidebar(props: ChatSidebarProps) {
           }}
         </Show>
       </div>
-      <footer class="sidebar-settings-footer">
-        <button onClick={props.openSettings} aria-label="Open settings">
+      <footer
+        class="sidebar-settings-footer shrink-0 border-t border-line px-3 py-[0.55rem]"
+        classList={{ '!px-0': compact() }}
+      >
+        <button
+          class="flex min-h-11 w-full items-center gap-[0.65rem] rounded-[0.55rem] border-0 bg-transparent px-[0.7rem] py-[0.6rem] text-left text-muted hover:bg-[var(--surface-hover)] hover:text-ink"
+          classList={{ '!justify-center !rounded-none !px-0': compact() }}
+          onClick={props.openSettings}
+          aria-label="Open settings"
+        >
           <Settings size={18} />
-          <span>Settings</span>
+          <span classList={{ hidden: compact() }}>Settings</span>
         </button>
       </footer>
       <div
@@ -565,12 +647,12 @@ export function ChatSidebar(props: ChatSidebarProps) {
         role="separator"
         aria-label="Resize chat list"
         aria-orientation="vertical"
-        aria-valuemin={props.minWidth}
-        aria-valuemax={props.maxWidth}
-        aria-valuenow={props.width}
+        aria-valuemin={72}
+        aria-valuemax={props.layout.responsiveMaxWidth()}
+        aria-valuenow={props.layout.effectiveWidth()}
         tabIndex={0}
-        onPointerDown={props.startResize}
-        onKeyDown={props.resizeWithKeyboard}
+        onPointerDown={props.layout.startResize}
+        onKeyDown={props.layout.resizeWithKeyboard}
       />
     </aside>
   );
