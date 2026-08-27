@@ -79,20 +79,20 @@ export function DetailsPane(props: DetailsPaneProps) {
   };
   return (
     <aside
-      class="details-pane min-h-0 min-w-0 border-l border-[var(--line)] bg-[var(--panel)]"
+      class="details-pane min-h-0 min-w-0 border-l border-line bg-panel"
       role={props.modal ? 'dialog' : undefined}
       aria-modal={props.modal ? 'true' : undefined}
       aria-label={props.modal ? 'Chat details' : undefined}
       tabIndex={props.modal ? -1 : undefined}
     >
-      <header class="details-header flex h-16 items-center justify-between border-b border-[var(--line)] px-4">
+      <header class="details-header flex h-16 items-center justify-between border-b border-line px-4">
         <strong class="text-sm font-semibold">Info</strong>
         <button class="icon-button" onClick={props.close} aria-label="Close details">
           <PanelRightClose size={18} />
         </button>
       </header>
       <div class="scroll-area h-[calc(100%-4rem)] overflow-y-auto">
-        <section class="flex flex-col items-center border-b border-[var(--line)] px-6 py-7 text-center">
+        <section class="flex flex-col items-center border-b border-line px-6 py-7 text-center">
           <div data-testid="details-avatar">
             <Avatar
               identity={props.avatarIdentity}

@@ -18,6 +18,7 @@ import Trash2 from 'lucide-solid/icons/trash-2';
 import {
   For,
   Show,
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -32,6 +33,7 @@ import { messageTextForClipboard } from '../../domain/messageText';
 import { telegramPeerColor } from '../../domain/peerColor';
 import type {
   EngineSnapshot,
+  TelegramChatAppearance,
   TelegramGroupMember,
   TelegramHistoryGap,
   TelegramMessage,
@@ -39,6 +41,7 @@ import type {
   SharedMediaKind,
   TelegramSticker,
   TelegramStickerPack,
+  TelegramWallpaper,
 } from '../../telegram/types';
 import type { AppEnvironment } from './appRuntime';
 import { BotControls } from '../bots/BotControls';
@@ -69,6 +72,17 @@ import { MediaAttachment } from '../media/MediaAttachment';
 import { cachedAssetUrl, pruneAssetUrls, rememberAssetUrl } from '../media/assetUrls';
 import { MediaAssets } from '../media/mediaAssets';
 import { Avatar } from '../shared/Avatar';
+import { loadCustomWallpaper, saveCustomWallpaper } from '../theme/customWallpaperStore';
+import {
+  applyThemePreferences,
+  normalizeThemePreferences,
+  readableTextColor,
+  readThemePreferences,
+  saveThemePreferences,
+  telegramWallpaperBackground,
+  type ThemePreferences,
+  type ThemePresetId,
+} from '../theme/themePreferences';
 import { AuthOverlay } from './AuthOverlay';
 import { SettingsDialog } from './SettingsDialog';
 
@@ -80,6 +94,65 @@ const LEFT_SIDEBAR_MAX_WIDTH = 480;
 const LEFT_SIDEBAR_COMPACT_WIDTH = 128;
 const MAX_RENDERED_MESSAGES = 400;
 const MAX_CACHED_MESSAGE_VIEWS = MAX_RENDERED_MESSAGES * 2;
+
+function chatThemeSettings(
+  chatAppearance: TelegramChatAppearance | undefined,
+  preferences: ThemePreferences,
+) {
+  const preferredBase =
+    preferences.theme === 'day' || preferences.theme === 'classic'
+      ? preferences.theme
+      : preferences.theme === 'tinted'
+        ? 'tinted'
+        : 'night';
+  const settings = chatAppearance?.theme?.settings;
+  return (
+    settings?.find(({ baseTheme }) => baseTheme === preferredBase) ??
+    (preferredBase === 'night' || preferredBase === 'tinted'
+      ? settings?.find(({ baseTheme }) => baseTheme === 'tinted' || baseTheme === 'night')
+      : undefined) ??
+    settings?.[0]
+  );
+}
+
+function debugChatAppearance(
+  peer: TelegramPeer,
+  chatAppearance: TelegramChatAppearance | undefined,
+  preferences: ThemePreferences,
+) {
+  const settings = chatThemeSettings(chatAppearance, preferences);
+  const wallpaper = chatAppearance?.wallpaper ?? settings?.wallpaper;
+  const patternMode = wallpaper?.pattern
+    ? wallpaper.dark ||
+      (wallpaper.settings.intensity ?? 50) < 0 ||
+      settings?.baseTheme === 'night' ||
+      settings?.baseTheme === 'tinted'
+      ? 'inverted'
+      : 'normal'
+    : 'none';
+  console.debug(
+    '%c TELEVECHA · TELEGRAM APPEARANCE ',
+    'background:#229ed9;color:#fff;font-weight:800;padding:5px 9px;border-radius:6px;',
+    {
+      peer: { id: peer.id, kind: peer.kind },
+      telegram: {
+        chatTheme: chatAppearance?.theme,
+        directChatWallpaper: chatAppearance?.wallpaper,
+      },
+      resolvedByTeleVecha: {
+        appTheme: preferences.theme,
+        selectedThemeSettings: settings,
+        selectedWallpaperSource: chatAppearance?.wallpaper
+          ? 'chat'
+          : settings?.wallpaper
+            ? 'theme'
+            : 'none',
+        selectedWallpaper: wallpaper,
+        patternMode,
+      },
+    },
+  );
+}
 
 function peerFromId(peerId: string): TelegramPeer {
   return {
@@ -214,6 +287,13 @@ export function App(props: AppProps) {
   const [groupMembers, setGroupMembers] = createSignal<TelegramGroupMember[]>([]);
   const [groupMembersLoading, setGroupMembersLoading] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [appearance, setAppearance] = createSignal(readThemePreferences());
+  const [telegramWallpapers, setTelegramWallpapers] = createSignal<TelegramWallpaper[]>([]);
+  const [activeChatAppearance, setActiveChatAppearance] = createSignal<TelegramChatAppearance>();
+  const [activeChatWallpaperAsset, setActiveChatWallpaperAsset] = createSignal('');
+  const [appearanceCatalogLoading, setAppearanceCatalogLoading] = createSignal(false);
+  const [wallpaperBusy, setWallpaperBusy] = createSignal(false);
+  const [wallpaperError, setWallpaperError] = createSignal('');
   const [pendingActionId, setPendingActionId] = createSignal('');
   const [messageWindowStart, setMessageWindowStart] = createSignal(0);
   const [jumpToPresentVisible, setJumpToPresentVisible] = createSignal(false);
@@ -253,6 +333,11 @@ export function App(props: AppProps) {
   let historyLoadGeneration = 0;
   let openMessageGeneration = 0;
   let peerOpenGeneration = 0;
+  let wallpaperLoadGeneration = 0;
+  let wallpaperObjectUrl: string | undefined;
+  let chatAppearanceLoadGeneration = 0;
+  const chatAppearances = new Map<string, TelegramChatAppearance>();
+  const chatWallpaperObjectUrls = new Map<string, string>();
   let viewport!: ReturnType<typeof createConversationViewport>;
 
   onCleanup(() => {
@@ -262,6 +347,155 @@ export function App(props: AppProps) {
     openMessageGeneration += 1;
     olderLoadRunning = false;
     olderLoadQueued = false;
+    wallpaperLoadGeneration += 1;
+    chatAppearanceLoadGeneration += 1;
+    if (wallpaperObjectUrl) URL.revokeObjectURL(wallpaperObjectUrl);
+    for (const objectUrl of chatWallpaperObjectUrls.values()) URL.revokeObjectURL(objectUrl);
+    chatWallpaperObjectUrls.clear();
+  });
+
+  const showWallpaperAsset = (blob?: Blob) => {
+    if (wallpaperObjectUrl) URL.revokeObjectURL(wallpaperObjectUrl);
+    wallpaperObjectUrl = blob ? URL.createObjectURL(blob) : undefined;
+    if (wallpaperObjectUrl) {
+      document.documentElement.style.setProperty(
+        '--wallpaper-asset',
+        `url("${wallpaperObjectUrl}")`,
+      );
+    } else {
+      document.documentElement.style.removeProperty('--wallpaper-asset');
+    }
+  };
+
+  const loadStoredWallpaper = async (preferences = appearance()) => {
+    const generation = ++wallpaperLoadGeneration;
+    try {
+      const blob =
+        preferences.wallpaper === 'custom'
+          ? await loadCustomWallpaper()
+          : preferences.wallpaper === 'telegram' && preferences.telegramWallpaper?.hasFile
+            ? await engine.downloadWallpaper(preferences.telegramWallpaper.id)
+            : undefined;
+      if (generation === wallpaperLoadGeneration) showWallpaperAsset(blob);
+    } catch (cause) {
+      if (generation !== wallpaperLoadGeneration) return;
+      showWallpaperAsset();
+      setWallpaperError(
+        cause instanceof Error ? cause.message : 'Could not load the saved background.',
+      );
+    }
+  };
+
+  const commitAppearance = (next: ThemePreferences) => {
+    const normalized = normalizeThemePreferences(next);
+    setAppearance(normalized);
+    applyThemePreferences(normalized);
+    try {
+      saveThemePreferences(normalized);
+    } catch {
+      // Appearance still changes for this tab when persistent storage is unavailable.
+    }
+    if (normalized.wallpaper !== 'custom' && normalized.wallpaper !== 'telegram') {
+      wallpaperLoadGeneration += 1;
+      showWallpaperAsset();
+    }
+  };
+
+  const loadAppearanceCatalog = async () => {
+    if (appearanceCatalogLoading()) return;
+    setAppearanceCatalogLoading(true);
+    try {
+      setTelegramWallpapers(await engine.getWallpapers());
+    } catch {
+      setTelegramWallpapers([]);
+    } finally {
+      setAppearanceCatalogLoading(false);
+    }
+  };
+
+  const selectTheme = (theme: ThemePresetId) => {
+    commitAppearance({ ...appearance(), theme });
+  };
+
+  const selectAccentColor = (accentColor: string) => {
+    commitAppearance({ ...appearance(), accentColor, systemAccent: false });
+  };
+
+  const selectSystemAccent = (systemAccent: boolean) => {
+    commitAppearance({ ...appearance(), systemAccent });
+  };
+
+  const selectWallpaper = (wallpaper: ThemePreferences['wallpaper']) => {
+    const next = { ...appearance(), wallpaper };
+    commitAppearance(next);
+    if (wallpaper === 'custom' || wallpaper === 'telegram') void loadStoredWallpaper(next);
+  };
+
+  const selectTelegramWallpaper = async (wallpaper: TelegramWallpaper) => {
+    if (wallpaperBusy()) return;
+    setWallpaperBusy(true);
+    setWallpaperError('');
+    try {
+      let blob: Blob | undefined;
+      if (wallpaper.hasFile) {
+        blob = await engine.downloadWallpaper(wallpaper.id);
+      }
+      const next: ThemePreferences = {
+        ...appearance(),
+        wallpaper: 'telegram',
+        wallpaperBlur: wallpaper.settings.blur ? 8 : appearance().wallpaperBlur,
+        telegramWallpaper: {
+          id: wallpaper.id,
+          label: wallpaper.slug || `Telegram ${wallpaper.id}`,
+          backgroundColors: wallpaper.settings.backgroundColors,
+          rotation: wallpaper.settings.rotation ?? 135,
+          hasFile: wallpaper.hasFile,
+          pattern: wallpaper.pattern,
+          dark: wallpaper.dark,
+          ...(wallpaper.settings.intensity !== undefined
+            ? { intensity: wallpaper.settings.intensity }
+            : {}),
+        },
+      };
+      commitAppearance(next);
+      showWallpaperAsset(blob);
+    } catch (cause) {
+      setWallpaperError(cause instanceof Error ? cause.message : 'Could not load the background.');
+    } finally {
+      setWallpaperBusy(false);
+    }
+  };
+
+  const uploadWallpaper = async (file: File) => {
+    if (wallpaperBusy()) return;
+    setWallpaperBusy(true);
+    setWallpaperError('');
+    try {
+      await saveCustomWallpaper(file);
+      const next = { ...appearance(), wallpaper: 'custom' as const };
+      commitAppearance(next);
+      showWallpaperAsset(file);
+    } catch (cause) {
+      setWallpaperError(cause instanceof Error ? cause.message : 'Could not save the background.');
+    } finally {
+      setWallpaperBusy(false);
+    }
+  };
+
+  const openSettings = () => {
+    setMobileSidebarOpen(false);
+    setSettingsOpen(true);
+    if (!telegramWallpapers().length && !appearanceCatalogLoading()) void loadAppearanceCatalog();
+  };
+
+  onMount(() => {
+    const preferences = appearance();
+    if (
+      preferences.wallpaper === 'custom' ||
+      (preferences.wallpaper === 'telegram' && preferences.telegramWallpaper?.hasFile)
+    ) {
+      void loadStoredWallpaper(preferences);
+    }
   });
 
   const responsiveLeftSidebarMaxWidth = () =>
@@ -406,6 +640,119 @@ export function App(props: AppProps) {
   const activeDialog = createMemo(() =>
     snapshot().dialogs.find(({ peer }) => peer.id === activeChatId()),
   );
+  const activeChatThemeSettings = createMemo(() =>
+    chatThemeSettings(activeChatAppearance(), appearance()),
+  );
+  const activeChatWallpaper = createMemo(
+    () => activeChatAppearance()?.wallpaper ?? activeChatThemeSettings()?.wallpaper,
+  );
+  const activeChatPatternMode = createMemo(() => {
+    const wallpaper = activeChatWallpaper();
+    if (!wallpaper?.pattern) return undefined;
+    const baseTheme = activeChatThemeSettings()?.baseTheme;
+    return wallpaper.dark ||
+      (wallpaper.settings.intensity ?? 50) < 0 ||
+      baseTheme === 'night' ||
+      baseTheme === 'tinted'
+      ? 'inverted'
+      : 'normal';
+  });
+  const activeChatWallpaperStyle = createMemo(() => {
+    const settings = activeChatThemeSettings();
+    const wallpaper = activeChatWallpaper();
+    const colors = wallpaper?.settings.backgroundColors.length
+      ? wallpaper.settings.backgroundColors
+      : undefined;
+    return {
+      ...(activeChatWallpaperAsset()
+        ? { '--chat-wallpaper-asset': `url("${activeChatWallpaperAsset()}")` }
+        : {}),
+      ...(colors
+        ? {
+            '--chat-wallpaper-gradient': telegramWallpaperBackground(
+              colors,
+              wallpaper?.settings.rotation ?? 135,
+            ),
+          }
+        : {}),
+      ...(settings
+        ? {
+            '--chat-accent': settings.accentColor,
+            '--chat-outbox-accent': settings.outboxAccentColor ?? settings.accentColor,
+            '--chat-message-1':
+              settings.messageColors[0] ?? settings.outboxAccentColor ?? settings.accentColor,
+            '--chat-message-2':
+              settings.messageColors[1] ??
+              settings.messageColors[0] ??
+              settings.outboxAccentColor ??
+              settings.accentColor,
+            '--chat-message-text': readableTextColor(
+              settings.messageColors[0] ?? settings.outboxAccentColor ?? settings.accentColor,
+            ),
+          }
+        : {}),
+      ...(wallpaper?.settings.blur ? { '--chat-wallpaper-blur': '8px' } : {}),
+      ...(wallpaper?.pattern
+        ? {
+            '--chat-wallpaper-intensity': `${Math.abs(wallpaper.settings.intensity ?? 50) / 100}`,
+          }
+        : {}),
+    };
+  });
+  createEffect(() => {
+    const dialog = activeDialog();
+    const generation = ++chatAppearanceLoadGeneration;
+    if (!dialog || dialog.transient) {
+      batch(() => {
+        setActiveChatAppearance(undefined);
+        setActiveChatWallpaperAsset('');
+      });
+      return;
+    }
+    const cachedAppearance = chatAppearances.get(dialog.peer.id);
+    const cachedSettings = chatThemeSettings(cachedAppearance, appearance());
+    const cachedWallpaper = cachedAppearance?.wallpaper ?? cachedSettings?.wallpaper;
+    batch(() => {
+      setActiveChatAppearance(cachedAppearance);
+      setActiveChatWallpaperAsset(
+        cachedWallpaper ? (chatWallpaperObjectUrls.get(cachedWallpaper.id) ?? '') : '',
+      );
+    });
+    void engine
+      .getChatAppearance(dialog.peer)
+      .then(async (chatAppearance) => {
+        if (!chatAppearance) return;
+        chatAppearances.set(dialog.peer.id, chatAppearance);
+        if (generation === chatAppearanceLoadGeneration) {
+          debugChatAppearance(dialog.peer, chatAppearance, appearance());
+        }
+        const settings = chatThemeSettings(chatAppearance, appearance());
+        const wallpaper = chatAppearance.wallpaper ?? settings?.wallpaper;
+        if (!wallpaper?.hasFile) {
+          if (generation === chatAppearanceLoadGeneration) setActiveChatAppearance(chatAppearance);
+          return;
+        }
+        const cachedObjectUrl = chatWallpaperObjectUrls.get(wallpaper.id);
+        if (cachedObjectUrl) {
+          if (generation === chatAppearanceLoadGeneration) {
+            batch(() => {
+              setActiveChatWallpaperAsset(cachedObjectUrl);
+              setActiveChatAppearance(chatAppearance);
+            });
+          }
+          return;
+        }
+        if (generation === chatAppearanceLoadGeneration) setActiveChatAppearance(chatAppearance);
+        const blob = await engine.downloadWallpaper(wallpaper.id);
+        let objectUrl = chatWallpaperObjectUrls.get(wallpaper.id);
+        if (!objectUrl) {
+          objectUrl = URL.createObjectURL(blob);
+          chatWallpaperObjectUrls.set(wallpaper.id, objectUrl);
+        }
+        if (generation === chatAppearanceLoadGeneration) setActiveChatWallpaperAsset(objectUrl);
+      })
+      .catch(() => undefined);
+  });
   const composer = createComposerSession({
     engine,
     snapshot,
@@ -1574,7 +1921,7 @@ export function App(props: AppProps) {
   });
 
   return (
-    <main class="h-dvh overflow-hidden bg-[var(--canvas)] text-[var(--text)]">
+    <main class="h-dvh overflow-hidden bg-canvas text-ink">
       <div
         ref={(element) => (appGridElement = element)}
         class="app-grid h-full"
@@ -1635,10 +1982,7 @@ export function App(props: AppProps) {
             const chat = visibleChats().find(({ id }) => id === peerId);
             if (chat) setDeleteChatTarget(chat);
           }}
-          openSettings={() => {
-            setMobileSidebarOpen(false);
-            setSettingsOpen(true);
-          }}
+          openSettings={openSettings}
           closeMobile={() => setMobileSidebarOpen(false)}
           startResize={startLeftSidebarResize}
           resizeWithKeyboard={resizeLeftSidebarWithKeyboard}
@@ -1659,10 +2003,10 @@ export function App(props: AppProps) {
 
         <section
           ref={(element) => (conversationPaneElement = element)}
-          class="conversation-pane relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--chat)]"
+          class="conversation-pane relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-chat"
         >
           <header
-            class="chat-header flex h-16 shrink-0 items-center justify-between border-b border-[var(--line)] bg-[var(--panel)] px-4"
+            class="chat-header flex h-16 shrink-0 items-center justify-between border-b border-line bg-panel px-4"
             data-testid="conversation-header"
           >
             <div class="flex min-w-0 items-center gap-3 text-left">
@@ -1690,7 +2034,7 @@ export function App(props: AppProps) {
                   class="block text-xs"
                   classList={{
                     'text-emerald-400': online(),
-                    'text-[var(--muted)]': !online(),
+                    'text-muted': !online(),
                   }}
                   role="status"
                 >
@@ -1787,7 +2131,14 @@ export function App(props: AppProps) {
               </div>
             )}
           </Show>
-          <div class="message-scroll-shell relative min-h-0 flex-1">
+          <div
+            class="message-scroll-shell relative min-h-0 flex-1"
+            data-chat-theme={activeChatThemeSettings() ? 'telegram' : undefined}
+            data-chat-wallpaper={activeChatWallpaper() ? 'telegram' : undefined}
+            data-chat-pattern={activeChatPatternMode()}
+            style={activeChatWallpaperStyle()}
+          >
+            <div class="chat-wallpaper" aria-hidden="true" />
             <div
               ref={setMessageScroller}
               class={`message-scroller scroll-area relative h-full min-h-0 overflow-y-auto overscroll-contain px-5 py-6${activeChat().kind === 'channel' ? ' channel-messages' : ''}`}
@@ -1796,7 +2147,6 @@ export function App(props: AppProps) {
               onScroll={viewport.handleScroll}
               onWheel={viewport.handleWheel}
             >
-              <div class="pointer-events-none absolute inset-0 chat-texture" />
               <div
                 ref={setMessageContent}
                 class="conversation-content relative mx-auto flex max-w-3xl flex-col gap-2"
@@ -2161,7 +2511,7 @@ export function App(props: AppProps) {
                                     </Show>
                                   }
                                 >
-                                  <CheckCheck size={13} class="text-sky-300" />
+                                  <CheckCheck size={13} class="message-status-read" />
                                 </Show>
                               </Show>
                             </footer>
@@ -2529,6 +2879,17 @@ export function App(props: AppProps) {
             close={() => !loggingOut() && !clearingCache() && setSettingsOpen(false)}
             clearCache={() => void clearCache()}
             logOut={() => void logOut()}
+            appearance={appearance()}
+            telegramWallpapers={telegramWallpapers()}
+            wallpaperBusy={wallpaperBusy()}
+            wallpaperError={wallpaperError()}
+            setTheme={selectTheme}
+            setAccentColor={selectAccentColor}
+            setSystemAccent={selectSystemAccent}
+            setWallpaper={selectWallpaper}
+            setTelegramWallpaper={(wallpaper) => void selectTelegramWallpaper(wallpaper)}
+            setWallpaperEffects={(effects) => commitAppearance({ ...appearance(), ...effects })}
+            uploadWallpaper={(file) => void uploadWallpaper(file)}
           />
         </Show>
 

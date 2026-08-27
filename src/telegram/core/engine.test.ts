@@ -334,6 +334,8 @@ class FakeTransport implements TelegramTransport {
   downloadMediaCalls = 0;
   downloadAvatarCalls = 0;
   downloadCustomEmojiCalls = 0;
+  downloadWallpaperCalls = 0;
+  chatAppearanceCalls = 0;
   botCommandCalls = 0;
   botStartCalls: Array<{ startParam: string; randomId: string }> = [];
   botCallbackCalls: Array<{ messageId: number; data: number[] }> = [];
@@ -385,6 +387,27 @@ class FakeTransport implements TelegramTransport {
   async submitPassword(_password: string) {}
   async getCurrentState() {
     return currentCursor;
+  }
+  async downloadWallpaper(wallpaperId: string) {
+    this.downloadWallpaperCalls += 1;
+    return new Blob([wallpaperId], { type: 'image/svg+xml' });
+  }
+  async getChatAppearance(_peer: TelegramPeer) {
+    this.chatAppearanceCalls += 1;
+    return {
+      wallpaper: {
+        id: 'wallpaper-appearance',
+        dark: true,
+        pattern: true,
+        hasFile: true,
+        settings: {
+          backgroundColors: ['#102d40', '#1d5960'],
+          blur: false,
+          motion: false,
+          intensity: -60,
+        },
+      },
+    };
   }
   async getDifference(_cursor: SyncCursor, totalLimit: number) {
     this.differenceCalls += 1;
@@ -5487,6 +5510,43 @@ describe('MessagingEngine', () => {
 
     expect(store.blobs.has(originalKey)).toBe(false);
     await engine.stop();
+  });
+
+  it('caches each Telegram wallpaper by id and coalesces concurrent downloads', async () => {
+    const store = new MemoryStore();
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, store);
+
+    const [first, concurrent] = await Promise.all([
+      engine.downloadWallpaper('wallpaper-77'),
+      engine.downloadWallpaper('wallpaper-77'),
+    ]);
+    const cached = await engine.downloadWallpaper('wallpaper-77');
+
+    expect(transport.downloadWallpaperCalls).toBe(1);
+    expect(await first.text()).toBe('wallpaper-77');
+    expect(await concurrent.text()).toBe('wallpaper-77');
+    expect(await cached.text()).toBe('wallpaper-77');
+    expect(store.blobs.has('wallpaper:wallpaper-77')).toBe(true);
+  });
+
+  it('caches chat appearance metadata in memory and persistent storage', async () => {
+    const store = new MemoryStore();
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, store);
+
+    const first = await engine.getChatAppearance(peer);
+    const cached = await engine.getChatAppearance(peer);
+
+    expect(first?.wallpaper?.id).toBe('wallpaper-appearance');
+    expect(cached).toEqual(first);
+    expect(transport.chatAppearanceCalls).toBe(1);
+    expect(store.blobs.has(`chat-appearance:${peer.id}`)).toBe(true);
+
+    const nextEngine = new MessagingEngine(transport, store);
+    const persisted = await nextEngine.getChatAppearance(peer);
+    expect(persisted).toEqual(first);
+    expect(transport.chatAppearanceCalls).toBe(1);
   });
 
   it('replays persisted outbox peers concurrently while preserving each peer queue', async () => {

@@ -238,7 +238,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 
   return (
     <aside
-      class="chat-sidebar relative flex min-h-0 min-w-0 flex-col border-r border-[var(--line)] bg-[var(--panel)]"
+      class="chat-sidebar relative flex min-h-0 min-w-0 flex-col border-r border-line bg-panel"
       classList={{
         compact: props.compact,
         'mobile-open': props.mobileOpen,
@@ -275,7 +275,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
         </label>
       </header>
 
-      <div class="chat-filters flex items-center gap-2 px-4 pb-3 text-xs font-medium text-[var(--muted)]">
+      <div class="chat-filters flex items-center gap-2 px-4 pb-3 text-xs font-medium text-muted">
         <For each={['all', 'unread', 'groups'] as const}>
           {(value) => (
             <button

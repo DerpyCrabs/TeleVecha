@@ -10,6 +10,7 @@ import type {
   SharedMediaKind,
   SyncCursor,
   TelegramCredentials,
+  TelegramChatAppearance,
   TelegramActivityKind,
   TelegramDialog,
   TelegramMedia,
@@ -21,9 +22,11 @@ import type {
   TelegramSearchPage,
   TelegramSticker,
   TelegramStickerPack,
+  TelegramTheme,
   TelegramTextFormat,
   TelegramTransport,
   TelegramUrlAuthAcceptOptions,
+  TelegramWallpaper,
   TransportUpdateBatch,
   TransportUpdate,
 } from '../types';
@@ -262,6 +265,10 @@ interface FixtureStats {
   getReadOutboxMaxId: number;
   downloadMedia: number;
   downloadAvatar: number;
+  getThemes: number;
+  getWallpapers: number;
+  getChatAppearance: number;
+  downloadWallpaper: number;
   getRecentStickers: number;
   getStickerPacks: number;
   getSavedGifs: number;
@@ -385,6 +392,10 @@ export class FixtureTelegramTransport implements TelegramTransport {
     getReadOutboxMaxId: 0,
     downloadMedia: 0,
     downloadAvatar: 0,
+    getThemes: 0,
+    getWallpapers: 0,
+    getChatAppearance: 0,
+    downloadWallpaper: 0,
     getRecentStickers: 0,
     getStickerPacks: 0,
     getSavedGifs: 0,
@@ -959,6 +970,125 @@ export class FixtureTelegramTransport implements TelegramTransport {
       ],
       { type: 'image/svg+xml' },
     );
+  }
+  async getThemes(): Promise<TelegramTheme[]> {
+    this.stats.getThemes += 1;
+    return [
+      {
+        id: 'theme-fixture-ocean',
+        slug: 'fixture-ocean',
+        title: 'Ocean Blue',
+        emoticon: '🌊',
+        default: false,
+        forChat: false,
+        settings: [
+          {
+            baseTheme: 'tinted',
+            accentColor: '#56a8e8',
+            outboxAccentColor: '#4b8fca',
+            messageColors: ['#2b5278', '#376f9d'],
+            messageColorsAnimated: false,
+          },
+        ],
+      },
+      {
+        id: 'theme-fixture-mint',
+        slug: 'fixture-mint',
+        title: 'Mint Day',
+        emoticon: '🌿',
+        default: false,
+        forChat: false,
+        settings: [
+          {
+            baseTheme: 'day',
+            accentColor: '#2a9d8f',
+            outboxAccentColor: '#70bfae',
+            messageColors: ['#ccefe5'],
+            messageColorsAnimated: false,
+          },
+        ],
+      },
+    ];
+  }
+  async getChatAppearance(peer: TelegramPeer): Promise<TelegramChatAppearance | undefined> {
+    this.stats.getChatAppearance += 1;
+    if (peer.id !== peers[0]?.id) return undefined;
+    return {
+      theme: {
+        id: 'theme-fixture-ocean',
+        slug: 'fixture-ocean',
+        title: 'Ocean Blue',
+        emoticon: '🌊',
+        default: false,
+        forChat: true,
+        settings: [
+          {
+            baseTheme: 'night',
+            accentColor: '#56a8e8',
+            outboxAccentColor: '#4b8fca',
+            messageColors: ['#e8f5cf', '#f4f8dc'],
+            messageColorsAnimated: false,
+            wallpaper: {
+              id: 'wallpaper-fixture-chat-ocean',
+              dark: false,
+              pattern: true,
+              hasFile: true,
+              settings: {
+                backgroundColors: ['#102d40', '#1d5960', '#312f61'],
+                blur: false,
+                motion: false,
+                rotation: 135,
+                intensity: 60,
+              },
+            },
+          },
+        ],
+      },
+    };
+  }
+  async getWallpapers(): Promise<TelegramWallpaper[]> {
+    this.stats.getWallpapers += 1;
+    return [
+      {
+        id: 'wallpaper-fixture-lagoon',
+        slug: 'fixture-lagoon',
+        dark: true,
+        pattern: false,
+        hasFile: true,
+        settings: {
+          backgroundColors: ['#183b56', '#267871'],
+          blur: false,
+          motion: false,
+          rotation: 45,
+        },
+      },
+      {
+        id: 'wallpaper-fixture-peach',
+        dark: false,
+        pattern: false,
+        hasFile: false,
+        settings: {
+          backgroundColors: ['#f7d9c4', '#c6def1', '#dbcdf0'],
+          blur: false,
+          motion: false,
+          rotation: 135,
+        },
+      },
+    ];
+  }
+  async downloadWallpaper(wallpaperId: string) {
+    this.stats.downloadWallpaper += 1;
+    if (wallpaperId === 'wallpaper-fixture-chat-ocean') {
+      return new Blob(
+        [
+          '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><g fill="none" stroke="#ffffff" stroke-opacity=".16" stroke-width="4"><circle cx="60" cy="60" r="24"/><path d="M140 40l42 42-42 42-42-42zM25 180h190"/></g></svg>',
+        ],
+        { type: 'image/svg+xml' },
+      );
+    }
+    if (wallpaperId !== 'wallpaper-fixture-lagoon') throw new Error('Unknown fixture wallpaper.');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#183b56"/><stop offset="1" stop-color="#267871"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><g fill="#ffffff" opacity=".08"><circle cx="180" cy="170" r="90"/><circle cx="900" cy="540" r="180"/></g></svg>`;
+    return new Blob([svg], { type: 'image/svg+xml' });
   }
   async getRecentStickers(): Promise<TelegramSticker[]> {
     this.stats.getRecentStickers += 1;

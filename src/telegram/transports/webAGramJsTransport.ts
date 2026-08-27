@@ -1,4 +1,5 @@
 import { telegramPeerColor } from '../../domain/peerColor';
+import { gunzipSync } from 'fflate';
 import type { RichBlock, RichCaption, RichText } from '../../domain/richMessage';
 import { reportDiagnostic } from '../core/diagnostics';
 import type { CacheStore } from '../persistence/store';
@@ -33,9 +34,15 @@ import type {
   TelegramSearchPage,
   TelegramSticker,
   TelegramStickerPack,
+  TelegramBaseTheme,
+  TelegramTheme,
+  TelegramChatAppearance,
+  TelegramThemeSettings,
   TelegramTextFormat,
   TelegramTransport,
   TelegramUserDetails,
+  TelegramWallpaper,
+  TelegramWallpaperSettings,
   TelegramUrlAuthAcceptOptions,
   TelegramUrlAuthResult,
   TransportMutationResult,
@@ -74,6 +81,7 @@ export class WebAGramJsTransport implements TelegramTransport {
   private readonly messageMedia = new Map<string, Api.TypeMessageMedia>();
   private readonly linkPreviewPhotos = new Map<string, Api.Photo>();
   private readonly stickerDocuments = new Map<string, Api.Document>();
+  private readonly wallpaperDocuments = new Map<string, Api.Document>();
   private readonly entities = new Map<string, Api.TypeUser | Api.TypeChat>();
   private readonly channelSenderRoles = new Map<
     string,
@@ -1124,6 +1132,195 @@ export class WebAGramJsTransport implements TelegramTransport {
     if (!this.hasDownloadableAvatar(entity)) return undefined;
     const bytes = await this.getClient().downloadProfilePhoto(entity as Api.User | Api.Chat);
     return bytes ? new Blob([bytes as BlobPart], { type: 'image/jpeg' }) : undefined;
+  }
+
+  async getThemes(): Promise<TelegramTheme[]> {
+    const result = await this.getClient().invoke(
+      new Api.account.GetThemes({ format: 'tdesktop', hash: 0n }),
+    );
+    return this.mapThemes(result);
+  }
+
+  private async getChatThemes(): Promise<TelegramTheme[]> {
+    const result = await this.getClient().invoke(new Api.account.GetChatThemes({ hash: 0n }));
+    return this.mapThemes(result);
+  }
+
+  private mapThemes(result: Api.account.TypeThemes): TelegramTheme[] {
+    if (!(result instanceof Api.account.Themes)) return [];
+    return result.themes.flatMap((theme) => {
+      if (!(theme instanceof Api.Theme)) return [];
+      return [
+        {
+          id: theme.id.toString(),
+          slug: theme.slug,
+          title: theme.title,
+          ...(theme.emoticon ? { emoticon: theme.emoticon } : {}),
+          default: Boolean(theme.default),
+          forChat: Boolean(theme.forChat),
+          settings: (theme.settings ?? []).flatMap((settings) =>
+            settings instanceof Api.ThemeSettings ? [this.mapThemeSettings(settings)] : [],
+          ),
+        },
+      ];
+    });
+  }
+
+  async getChatAppearance(peer: TelegramPeer): Promise<TelegramChatAppearance | undefined> {
+    let themeEmoticon: string | undefined;
+    let wallpaper: TelegramWallpaper | undefined;
+    let inlineTheme: TelegramTheme | undefined;
+
+    if (peer.kind === 'user') {
+      const result = await this.getClient().invoke(
+        new Api.users.GetFullUser({ id: this.inputUser(peer) }),
+      );
+      this.rememberEntities(result.users, result.chats);
+      if (result.fullUser instanceof Api.UserFull) {
+        if (result.fullUser.theme instanceof Api.ChatTheme) {
+          themeEmoticon = result.fullUser.theme.emoticon;
+        } else if (result.fullUser.theme instanceof Api.ChatThemeUniqueGift) {
+          inlineTheme = {
+            id: `chat-gift:${peer.id}`,
+            slug: '',
+            title: 'Chat theme',
+            default: false,
+            forChat: true,
+            settings: result.fullUser.theme.themeSettings.flatMap((settings) =>
+              settings instanceof Api.ThemeSettings ? [this.mapThemeSettings(settings)] : [],
+            ),
+          };
+        }
+        wallpaper = result.fullUser.wallpaper
+          ? this.mapWallpaper(result.fullUser.wallpaper)[0]
+          : undefined;
+      }
+    } else {
+      const result =
+        peer.kind === 'channel'
+          ? await this.getClient().invoke(
+              new Api.channels.GetFullChannel({ channel: this.inputChannel(peer) }),
+            )
+          : await this.getClient().invoke(
+              new Api.messages.GetFullChat({ chatId: BigInt(peer.id.slice(2)) }),
+            );
+      this.rememberEntities(result.users, result.chats);
+      if (result.fullChat instanceof Api.ChatFull || result.fullChat instanceof Api.ChannelFull) {
+        themeEmoticon = result.fullChat.themeEmoticon;
+        wallpaper =
+          result.fullChat instanceof Api.ChannelFull && result.fullChat.wallpaper
+            ? this.mapWallpaper(result.fullChat.wallpaper)[0]
+            : undefined;
+      }
+    }
+
+    const theme =
+      inlineTheme ??
+      (themeEmoticon
+        ? (await this.getChatThemes()).find(({ emoticon }) => emoticon === themeEmoticon)
+        : undefined);
+    return theme || wallpaper
+      ? { ...(theme ? { theme } : {}), ...(wallpaper ? { wallpaper } : {}) }
+      : undefined;
+  }
+
+  async getWallpapers(): Promise<TelegramWallpaper[]> {
+    const result = await this.getClient().invoke(new Api.account.GetWallPapers({ hash: 0n }));
+    if (!(result instanceof Api.account.WallPapers)) return [];
+    return result.wallpapers.flatMap((wallpaper) => this.mapWallpaper(wallpaper));
+  }
+
+  async downloadWallpaper(wallpaperId: string) {
+    let document = this.wallpaperDocuments.get(wallpaperId);
+    if (!document) {
+      await this.getWallpapers();
+      document = this.wallpaperDocuments.get(wallpaperId);
+    }
+    if (!document) throw new Error('Reload the Telegram backgrounds and try again.');
+    const bytes = await this.getClient().downloadMedia(document, { workers: 1 });
+    if (!bytes) throw new Error('Telegram returned no background image bytes.');
+    if (document.mimeType === 'application/x-tgwallpattern') {
+      const source =
+        bytes instanceof Uint8Array ? bytes : new Uint8Array(await bytes.arrayBuffer());
+      try {
+        return new Blob([gunzipSync(source)], { type: 'image/svg+xml' });
+      } catch (error) {
+        throw new Error('Telegram returned an invalid TGV wallpaper pattern.', { cause: error });
+      }
+    }
+    return new Blob([bytes as BlobPart], { type: document.mimeType || 'image/jpeg' });
+  }
+
+  private mapThemeSettings(settings: Api.ThemeSettings): TelegramThemeSettings {
+    return {
+      baseTheme: this.mapBaseTheme(settings.baseTheme),
+      accentColor: this.telegramColor(settings.accentColor),
+      ...(settings.outboxAccentColor !== undefined
+        ? { outboxAccentColor: this.telegramColor(settings.outboxAccentColor) }
+        : {}),
+      messageColors: (settings.messageColors ?? []).map((color) => this.telegramColor(color)),
+      messageColorsAnimated: Boolean(settings.messageColorsAnimated),
+      ...(settings.wallpaper ? { wallpaper: this.mapWallpaper(settings.wallpaper)[0] } : {}),
+    };
+  }
+
+  private mapBaseTheme(theme: Api.TypeBaseTheme): TelegramBaseTheme {
+    if (theme instanceof Api.BaseThemeDay) return 'day';
+    if (theme instanceof Api.BaseThemeNight) return 'night';
+    if (theme instanceof Api.BaseThemeTinted) return 'tinted';
+    if (theme instanceof Api.BaseThemeArctic) return 'arctic';
+    return 'classic';
+  }
+
+  private mapWallpaperSettings(settings?: Api.TypeWallPaperSettings): TelegramWallpaperSettings {
+    const value = settings instanceof Api.WallPaperSettings ? settings : undefined;
+    return {
+      backgroundColors: [
+        value?.backgroundColor,
+        value?.secondBackgroundColor,
+        value?.thirdBackgroundColor,
+        value?.fourthBackgroundColor,
+      ].flatMap((color) => (color === undefined ? [] : [this.telegramColor(color)])),
+      blur: Boolean(value?.blur),
+      motion: Boolean(value?.motion),
+      ...(value?.intensity !== undefined ? { intensity: value.intensity } : {}),
+      ...(value?.rotation !== undefined ? { rotation: value.rotation } : {}),
+      ...(value?.emoticon ? { emoticon: value.emoticon } : {}),
+    };
+  }
+
+  private mapWallpaper(wallpaper: Api.TypeWallPaper): TelegramWallpaper[] {
+    if (wallpaper instanceof Api.WallPaper) {
+      if (wallpaper.document instanceof Api.Document) {
+        this.wallpaperDocuments.set(wallpaper.id.toString(), wallpaper.document);
+      }
+      return [
+        {
+          id: wallpaper.id.toString(),
+          slug: wallpaper.slug,
+          dark: Boolean(wallpaper.dark),
+          pattern: Boolean(wallpaper.pattern),
+          hasFile: wallpaper.document instanceof Api.Document,
+          settings: this.mapWallpaperSettings(wallpaper.settings),
+        },
+      ];
+    }
+    if (wallpaper instanceof Api.WallPaperNoFile) {
+      return [
+        {
+          id: wallpaper.id.toString(),
+          dark: Boolean(wallpaper.dark),
+          pattern: false,
+          hasFile: false,
+          settings: this.mapWallpaperSettings(wallpaper.settings),
+        },
+      ];
+    }
+    return [];
+  }
+
+  private telegramColor(color: number) {
+    return `#${(color >>> 0).toString(16).padStart(8, '0').slice(-6)}`;
   }
 
   async getRecentStickers(): Promise<TelegramSticker[]> {

@@ -221,7 +221,7 @@ export function ChatComposer(props: ChatComposerProps) {
   };
 
   return (
-    <footer class="chat-composer relative shrink-0 border-t border-[var(--line)] bg-[var(--panel)] p-3">
+    <footer class="chat-composer relative shrink-0 border-t border-line bg-panel p-3">
       <Show when={expressionOpen()}>
         <div ref={(element) => (expressionRoot = element)}>
           <ExpressionPicker

@@ -4,7 +4,10 @@ import Settings from 'lucide-solid/icons/settings';
 import X from 'lucide-solid/icons/x';
 import { Portal } from 'solid-js/web';
 
+import type { TelegramWallpaper } from '../../telegram/types';
 import { useModalDialog } from '../shared/useModalDialog';
+import { AppearanceSettings } from '../theme/AppearanceSettings';
+import type { ThemePreferences, ThemePresetId } from '../theme/themePreferences';
 
 export function SettingsDialog(props: {
   loggingOut: boolean;
@@ -12,6 +15,17 @@ export function SettingsDialog(props: {
   close: () => void;
   clearCache: () => void;
   logOut: () => void;
+  appearance: ThemePreferences;
+  telegramWallpapers: TelegramWallpaper[];
+  wallpaperBusy: boolean;
+  wallpaperError: string;
+  setTheme: (theme: ThemePresetId) => void;
+  setAccentColor: (color: string) => void;
+  setSystemAccent: (enabled: boolean) => void;
+  setWallpaper: (wallpaper: ThemePreferences['wallpaper']) => void;
+  setTelegramWallpaper: (wallpaper: TelegramWallpaper) => void;
+  setWallpaperEffects: (effects: Pick<ThemePreferences, 'wallpaperBlur' | 'wallpaperDim'>) => void;
+  uploadWallpaper: (file: File) => void;
 }) {
   let overlay: HTMLDivElement | undefined;
   useModalDialog(() => overlay, props.close);
@@ -45,39 +59,54 @@ export function SettingsDialog(props: {
               <X size={18} />
             </button>
           </header>
-          <div class="settings-section">
-            <div>
-              <strong>Local cache</strong>
-              <p>
-                Clear cached chats, messages, avatars, and media, then download current data from
-                Telegram again. Drafts, queued sends, and your session are kept.
-              </p>
+          <div class="settings-dialog-content scroll-area">
+            <AppearanceSettings
+              preferences={props.appearance}
+              telegramWallpapers={props.telegramWallpapers}
+              wallpaperBusy={props.wallpaperBusy}
+              wallpaperError={props.wallpaperError}
+              setTheme={props.setTheme}
+              setAccentColor={props.setAccentColor}
+              setSystemAccent={props.setSystemAccent}
+              setWallpaper={props.setWallpaper}
+              setTelegramWallpaper={props.setTelegramWallpaper}
+              setEffects={props.setWallpaperEffects}
+              uploadWallpaper={props.uploadWallpaper}
+            />
+            <div class="settings-section">
+              <div>
+                <strong>Local cache</strong>
+                <p>
+                  Clear cached chats, messages, avatars, and media, then download current data from
+                  Telegram again. Drafts, queued sends, and your session are kept.
+                </p>
+              </div>
+              <button
+                class="settings-cache-action"
+                disabled={props.loggingOut || props.clearingCache}
+                onClick={props.clearCache}
+              >
+                <RotateCcw size={17} />
+                {props.clearingCache ? 'Clearing…' : 'Clear cache'}
+              </button>
             </div>
-            <button
-              class="settings-cache-action"
-              disabled={props.loggingOut || props.clearingCache}
-              onClick={props.clearCache}
-            >
-              <RotateCcw size={17} />
-              {props.clearingCache ? 'Clearing…' : 'Clear cache'}
-            </button>
-          </div>
-          <div class="settings-section">
-            <div>
-              <strong>Telegram account</strong>
-              <p>
-                Signing out removes the session, cached chats, drafts, media, and queued sends from
-                this browser.
-              </p>
+            <div class="settings-section">
+              <div>
+                <strong>Telegram account</strong>
+                <p>
+                  Signing out removes the session, cached chats, drafts, media, and queued sends
+                  from this browser.
+                </p>
+              </div>
+              <button
+                class="settings-danger-action"
+                disabled={props.loggingOut || props.clearingCache}
+                onClick={props.logOut}
+              >
+                <LogOut size={17} />
+                {props.loggingOut ? 'Signing out…' : 'Sign out'}
+              </button>
             </div>
-            <button
-              class="settings-danger-action"
-              disabled={props.loggingOut || props.clearingCache}
-              onClick={props.logOut}
-            >
-              <LogOut size={17} />
-              {props.loggingOut ? 'Signing out…' : 'Sign out'}
-            </button>
           </div>
         </section>
       </div>

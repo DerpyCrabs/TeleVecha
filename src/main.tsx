@@ -2,10 +2,13 @@ import { render } from 'solid-js/web';
 
 import { App } from './ui/app/App';
 import { defaultAppEnvironment } from './ui/app/appRuntime';
+import { applyThemePreferences, readThemePreferences } from './ui/theme/themePreferences';
 import './styles.css';
 import './bot.css';
 
 const root = document.querySelector<HTMLDivElement>('#root');
+
+applyThemePreferences(readThemePreferences());
 
 if (!root) {
   throw new Error('TeleVecha could not find its root element.');

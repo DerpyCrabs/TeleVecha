@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { gzipSync, strToU8 } from 'fflate';
 
 import { Api } from '../../vendor/weba/src/lib/gramjs/tl';
 import {
@@ -74,6 +75,181 @@ describe('WebAGramJsTransport mapping', () => {
 
     await expect(target.getAuthorizedAccountId()).resolves.toBe('991');
     expect(getMe).toHaveBeenCalledOnce();
+  });
+
+  it('reads Telegram themes and wallpapers without installing either', async () => {
+    const target = transport();
+    const wallpaper = new Api.WallPaperNoFile({
+      id: 55n,
+      dark: true,
+      settings: new Api.WallPaperSettings({
+        backgroundColor: 0x17212b,
+        secondBackgroundColor: 0x2b5278,
+        rotation: 45,
+        blur: true,
+      }),
+    });
+    const invoke = vi.fn((request: unknown) => {
+      if (request instanceof Api.account.GetThemes) {
+        return Promise.resolve(
+          new Api.account.Themes({
+            hash: 1n,
+            themes: [
+              new Api.Theme({
+                id: 10n,
+                accessHash: 11n,
+                slug: 'ocean',
+                title: 'Ocean',
+                settings: [
+                  new Api.ThemeSettings({
+                    baseTheme: new Api.BaseThemeTinted(),
+                    accentColor: 0x56a8e8,
+                    outboxAccentColor: 0x4b8fca,
+                    messageColors: [0x2b5278, 0x376f9d],
+                    wallpaper,
+                  }),
+                ],
+              }),
+            ],
+          }),
+        );
+      }
+      if (request instanceof Api.account.GetWallPapers) {
+        return Promise.resolve(new Api.account.WallPapers({ hash: 2n, wallpapers: [wallpaper] }));
+      }
+      throw new Error('Unexpected request');
+    });
+    (target as unknown as TransportInternals).client = { invoke };
+
+    await expect(target.getThemes()).resolves.toEqual([
+      expect.objectContaining({
+        id: '10',
+        title: 'Ocean',
+        settings: [
+          expect.objectContaining({
+            baseTheme: 'tinted',
+            accentColor: '#56a8e8',
+            outboxAccentColor: '#4b8fca',
+            messageColors: ['#2b5278', '#376f9d'],
+            wallpaper: expect.objectContaining({ id: '55', dark: true }),
+          }),
+        ],
+      }),
+    ]);
+    await expect(target.getWallpapers()).resolves.toEqual([
+      expect.objectContaining({
+        id: '55',
+        hasFile: false,
+        settings: expect.objectContaining({
+          backgroundColors: ['#17212b', '#2b5278'],
+          rotation: 45,
+          blur: true,
+        }),
+      }),
+    ]);
+    expect(invoke.mock.calls[0]?.[0]).toBeInstanceOf(Api.account.GetThemes);
+    expect(invoke.mock.calls[0]?.[0]).toMatchObject({ format: 'tdesktop', hash: 0n });
+    expect(invoke.mock.calls[1]?.[0]).toBeInstanceOf(Api.account.GetWallPapers);
+  });
+
+  it('decodes Telegram TGV wallpaper patterns into browser-readable SVG', async () => {
+    const target = transport();
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h8v8z"/></svg>';
+    const document = new Api.Document({
+      id: 501n,
+      accessHash: 502n,
+      fileReference: new Uint8Array([1]),
+      date: 1,
+      mimeType: 'application/x-tgwallpattern',
+      size: 100n,
+      dcId: 2,
+      attributes: [],
+    });
+    const wallpaper = new Api.WallPaper({
+      id: 500n,
+      accessHash: 503n,
+      slug: 'pattern',
+      pattern: true,
+      document,
+      settings: new Api.WallPaperSettings({ backgroundColor: 0x102d40, intensity: 60 }),
+    });
+    const invoke = vi
+      .fn()
+      .mockResolvedValue(new Api.account.WallPapers({ hash: 1n, wallpapers: [wallpaper] }));
+    const downloadMedia = vi.fn().mockResolvedValue(gzipSync(strToU8(svg)));
+    (target as unknown as TransportInternals).client = { invoke, downloadMedia };
+
+    const decoded = await target.downloadWallpaper('500');
+
+    expect(decoded.type).toBe('image/svg+xml');
+    await expect(decoded.text()).resolves.toBe(svg);
+    expect(invoke).toHaveBeenCalledWith(expect.any(Api.account.GetWallPapers));
+    expect(downloadMedia).toHaveBeenCalledWith(document, { workers: 1 });
+  });
+
+  it('includes the chat theme request in the runtime TL schema', () => {
+    expect(Api.account.GetChatThemes).toBeTypeOf('function');
+    expect(new Api.account.GetChatThemes({ hash: 0n })).toBeInstanceOf(Api.account.GetChatThemes);
+  });
+
+  it('resolves the theme and background assigned to a private chat', async () => {
+    const target = transport();
+    const wallpaper = new Api.WallPaperNoFile({
+      id: 77n,
+      settings: new Api.WallPaperSettings({
+        backgroundColor: 0x102d40,
+        secondBackgroundColor: 0x1d5960,
+      }),
+    });
+    const theme = new Api.Theme({
+      id: 88n,
+      accessHash: 89n,
+      slug: 'ocean-chat',
+      title: 'Ocean Chat',
+      emoticon: '🌊',
+      forChat: true,
+      settings: [
+        new Api.ThemeSettings({
+          baseTheme: new Api.BaseThemeNight(),
+          accentColor: 0x56a8e8,
+          messageColors: [0x2b5278],
+          wallpaper,
+        }),
+      ],
+    });
+    const invoke = vi.fn((request: unknown) => {
+      if (request instanceof Api.users.GetFullUser) {
+        return Promise.resolve(
+          new Api.users.UserFull({
+            fullUser: new Api.UserFull({
+              id: 11n,
+              settings: new Api.PeerSettings({}),
+              notifySettings: new Api.PeerNotifySettings({}),
+              commonChatsCount: 0,
+              theme: new Api.ChatTheme({ emoticon: '🌊' }),
+            }),
+            chats: [],
+            users: [new Api.User({ id: 11n, firstName: 'Alice' })],
+          }),
+        );
+      }
+      if (request instanceof Api.account.GetChatThemes) {
+        return Promise.resolve(new Api.account.Themes({ hash: 1n, themes: [theme] }));
+      }
+      throw new Error('Unexpected request');
+    });
+    (target as unknown as TransportInternals).client = { invoke };
+
+    await expect(
+      target.getChatAppearance({ id: 'u:11', kind: 'user', accessHash: '12' }),
+    ).resolves.toEqual({
+      theme: expect.objectContaining({
+        id: '88',
+        emoticon: '🌊',
+        settings: [expect.objectContaining({ wallpaper: expect.objectContaining({ id: '77' }) })],
+      }),
+    });
+    expect(invoke.mock.calls[1]?.[0]).toBeInstanceOf(Api.account.GetChatThemes);
   });
 
   it('installs the raw update handler on every replacement client', () => {

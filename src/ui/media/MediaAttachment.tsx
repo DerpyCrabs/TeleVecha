@@ -51,8 +51,10 @@ export function MediaAttachment(props: MediaAttachmentProps) {
   });
 
   const isImage = () =>
-    (props.media.kind === 'photo' || props.media.kind === 'sticker') &&
-    props.media.mimeType !== 'application/x-tgsticker';
+    props.media.kind === 'photo' ||
+    (props.media.kind === 'sticker' &&
+      props.media.mimeType !== 'application/x-tgsticker' &&
+      !props.media.mimeType.startsWith('video/'));
   const isVideo = () =>
     props.media.kind === 'video' ||
     (props.media.kind === 'animation' && props.media.mimeType.startsWith('video/')) ||

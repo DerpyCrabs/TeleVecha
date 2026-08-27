@@ -111,6 +111,17 @@ test('renders voice notes, rectangular video messages, service events, and album
           height: 400,
         },
       },
+      {
+        id: 89,
+        text: '',
+        media: {
+          kind: 'sticker' as const,
+          name: 'sticker.webm',
+          mimeType: 'video/webm',
+          width: 512,
+          height: 512,
+        },
+      },
     ];
     messages.forEach((message, index) =>
       fixture.emit({
@@ -140,6 +151,11 @@ test('renders voice notes, rectangular video messages, service events, and album
     'border-radius',
     '50%',
   );
+
+  const videoSticker = page.locator('article[data-message-id="89"]');
+  await expect(videoSticker.locator('video')).toHaveCount(1);
+  await expect(videoSticker.locator('img')).toHaveCount(0);
+  await expect(videoSticker.getByText('sticker.webm')).toHaveCount(0);
 
   const album = page.locator('article[data-message-id="83"] .media-album');
   await expect(album).toBeVisible();

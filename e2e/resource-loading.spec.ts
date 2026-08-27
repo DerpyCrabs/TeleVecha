@@ -13,7 +13,7 @@ test('loads only the Lucide icons used by the interface', async ({ page }) => {
   );
 
   expect(iconResources).not.toEqual(expect.arrayContaining([expect.stringContaining('ambulance')]));
-  expect(iconResources.length).toBeLessThanOrEqual(55);
+  expect(iconResources.length).toBeLessThanOrEqual(65);
 });
 
 test('serves the TeleVecha browser identity', async ({ page, request }) => {

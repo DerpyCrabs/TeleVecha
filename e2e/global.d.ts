@@ -35,6 +35,10 @@ interface Window {
       getReadOutboxMaxId: number;
       downloadMedia: number;
       downloadAvatar: number;
+      getThemes: number;
+      getWallpapers: number;
+      getChatAppearance: number;
+      downloadWallpaper: number;
       getRecentStickers: number;
       getStickerPacks: number;
       getSavedGifs: number;

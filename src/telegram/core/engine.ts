@@ -12,6 +12,7 @@ import type {
   PendingSend,
   TelegramBotCallbackResult,
   TelegramBotCommand,
+  TelegramChatAppearance,
   TelegramCredentials,
   TelegramDialog,
   TelegramHistoryGap,
@@ -94,6 +95,12 @@ export class MessagingEngine {
   private readonly avatarDownloads = new Map<string, Promise<Blob | undefined>>();
   private readonly stickerDownloads = new Map<string, Promise<Blob>>();
   private readonly customEmojiDownloads = new Map<string, Promise<Blob>>();
+  private readonly wallpaperDownloads = new Map<string, Promise<Blob>>();
+  private readonly chatAppearanceRequests = new Map<
+    string,
+    Promise<TelegramChatAppearance | undefined>
+  >();
+  private readonly chatAppearanceCache = new Map<string, TelegramChatAppearance | undefined>();
   private readonly botCommandRequests = new Map<string, Promise<TelegramBotCommand[]>>();
   private readonly mutationVersions = new Map<string, number>();
   private mutationSequence = 0;
@@ -536,6 +543,9 @@ export class MessagingEngine {
         this.avatarDownloads.clear();
         this.stickerDownloads.clear();
         this.customEmojiDownloads.clear();
+        this.wallpaperDownloads.clear();
+        this.chatAppearanceRequests.clear();
+        this.chatAppearanceCache.clear();
         this.sharedMediaCountVersions.clear();
         this.pendingDeliveries.clear();
         this.peerDeliveryTails.clear();
@@ -2080,6 +2090,87 @@ export class MessagingEngine {
     return this.store.loadBlob(`avatar:${peer.id}:${avatarId ?? 'unknown'}`);
   }
 
+  async getAppearanceCatalog() {
+    const [themes, wallpapers] = await Promise.all([
+      this.transport.getThemes?.() ?? Promise.resolve([]),
+      this.transport.getWallpapers?.() ?? Promise.resolve([]),
+    ]);
+    return { themes, wallpapers };
+  }
+
+  async getWallpapers() {
+    return this.transport.getWallpapers?.() ?? [];
+  }
+
+  async getChatAppearance(peer: TelegramPeer) {
+    if (!this.transport.getChatAppearance) return undefined;
+    const cacheKey = `chat-appearance:${peer.id}`;
+    if (this.chatAppearanceCache.has(cacheKey)) {
+      return this.chatAppearanceCache.get(cacheKey);
+    }
+    const current = this.chatAppearanceRequests.get(cacheKey);
+    if (current) return current;
+    const loading = (async () => {
+      const cached = await this.store.loadBlob(cacheKey);
+      if (cached) {
+        try {
+          const entry = JSON.parse(await cached.text()) as {
+            savedAt: number;
+            value: TelegramChatAppearance | null;
+          };
+          if (Date.now() - entry.savedAt < 60 * 60 * 1000) {
+            const value = entry.value ?? undefined;
+            this.chatAppearanceCache.set(cacheKey, value);
+            return value;
+          }
+        } catch {
+          await this.store.deleteBlob(cacheKey).catch(() => undefined);
+        }
+      }
+      const value = await this.transport.getChatAppearance!(peer);
+      await this.store.saveBlob(
+        cacheKey,
+        new Blob([JSON.stringify({ savedAt: Date.now(), value: value ?? null })], {
+          type: 'application/json',
+        }),
+      );
+      this.chatAppearanceCache.set(cacheKey, value);
+      return value;
+    })();
+    this.chatAppearanceRequests.set(cacheKey, loading);
+    try {
+      return await loading;
+    } finally {
+      if (this.chatAppearanceRequests.get(cacheKey) === loading) {
+        this.chatAppearanceRequests.delete(cacheKey);
+      }
+    }
+  }
+
+  async downloadWallpaper(wallpaperId: string) {
+    if (!this.transport.downloadWallpaper) {
+      throw new Error('This Telegram transport cannot download backgrounds.');
+    }
+    const cacheKey = `wallpaper:${wallpaperId}`;
+    const current = this.wallpaperDownloads.get(cacheKey);
+    if (current) return current;
+    const loading = (async () => {
+      const cached = await this.store.loadBlob(cacheKey);
+      if (cached) return cached;
+      const blob = await this.transport.downloadWallpaper!(wallpaperId);
+      await this.store.saveBlob(cacheKey, blob);
+      return blob;
+    })();
+    this.wallpaperDownloads.set(cacheKey, loading);
+    try {
+      return await loading;
+    } finally {
+      if (this.wallpaperDownloads.get(cacheKey) === loading) {
+        this.wallpaperDownloads.delete(cacheKey);
+      }
+    }
+  }
+
   async getRecentStickers() {
     const generation = this.lifecycleGeneration;
     const accountId = this.accountId;
@@ -2863,6 +2954,9 @@ export class MessagingEngine {
       this.avatarDownloads.clear();
       this.stickerDownloads.clear();
       this.customEmojiDownloads.clear();
+      this.wallpaperDownloads.clear();
+      this.chatAppearanceRequests.clear();
+      this.chatAppearanceCache.clear();
       this.sharedMediaCountVersions.clear();
       this.unreadVersions.clear();
       this.pendingDeliveries.clear();

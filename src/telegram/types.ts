@@ -502,6 +502,50 @@ export interface TelegramCredentials {
   apiHash: string;
 }
 
+export type TelegramBaseTheme = 'classic' | 'day' | 'night' | 'tinted' | 'arctic';
+
+export interface TelegramWallpaperSettings {
+  backgroundColors: string[];
+  blur: boolean;
+  motion: boolean;
+  intensity?: number | undefined;
+  rotation?: number | undefined;
+  emoticon?: string | undefined;
+}
+
+export interface TelegramWallpaper {
+  id: string;
+  slug?: string | undefined;
+  dark: boolean;
+  pattern: boolean;
+  hasFile: boolean;
+  settings: TelegramWallpaperSettings;
+}
+
+export interface TelegramThemeSettings {
+  baseTheme: TelegramBaseTheme;
+  accentColor: string;
+  outboxAccentColor?: string | undefined;
+  messageColors: string[];
+  messageColorsAnimated: boolean;
+  wallpaper?: TelegramWallpaper | undefined;
+}
+
+export interface TelegramTheme {
+  id: string;
+  slug: string;
+  title: string;
+  emoticon?: string | undefined;
+  default: boolean;
+  forChat: boolean;
+  settings: TelegramThemeSettings[];
+}
+
+export interface TelegramChatAppearance {
+  theme?: TelegramTheme | undefined;
+  wallpaper?: TelegramWallpaper | undefined;
+}
+
 export interface TelegramTransport {
   connect(credentials: TelegramCredentials): Promise<void>;
   disconnect(): Promise<void>;
@@ -578,6 +622,10 @@ export interface TelegramTransport {
   ): Promise<SendAlbumResult>;
   downloadMedia(message: TelegramMessage): Promise<Blob>;
   downloadAvatar(peer: TelegramPeer): Promise<Blob | undefined>;
+  getThemes?(): Promise<TelegramTheme[]>;
+  getWallpapers?(): Promise<TelegramWallpaper[]>;
+  getChatAppearance?(peer: TelegramPeer): Promise<TelegramChatAppearance | undefined>;
+  downloadWallpaper?(wallpaperId: string): Promise<Blob>;
   getRecentStickers(): Promise<TelegramSticker[]>;
   getStickerPacks(): Promise<TelegramStickerPack[]>;
   getSavedGifs(): Promise<TelegramSticker[]>;
