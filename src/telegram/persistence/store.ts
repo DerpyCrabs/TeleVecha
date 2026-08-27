@@ -110,7 +110,7 @@ export class IndexedDbCacheStore implements CacheStore {
   private readonly database: Promise<IDBPDatabase<TeleVechaSchema>>;
 
   constructor(name = 'televecha') {
-    this.database = openDB<TeleVechaSchema>(name, 5, {
+    this.database = openDB<TeleVechaSchema>(name, 6, {
       upgrade(database, oldVersion, _newVersion, transaction) {
         if (oldVersion < 1) {
           database.createObjectStore('meta');

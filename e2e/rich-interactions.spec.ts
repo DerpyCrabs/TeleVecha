@@ -7,6 +7,17 @@ test.beforeEach(async ({ page }) => {
   await selectAlice(page);
 });
 
+test('shows a forwarded source and opens its original post', async ({ page }) => {
+  const forwarded = page
+    .locator('article[data-message-id="73"]')
+    .getByRole('button', { name: 'Forwarded from Release Channel' });
+  await expect(forwarded).toBeVisible();
+  await forwarded.click();
+
+  await expect(page.locator('article[data-message-id="5"]')).toHaveClass(/message-target/);
+  await expect(page.getByRole('heading', { name: 'Release Channel' })).toBeVisible();
+});
+
 async function openStickers(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' }).click();
   const expressionPicker = page.getByRole('dialog', { name: 'Emoji, GIFs and stickers' });

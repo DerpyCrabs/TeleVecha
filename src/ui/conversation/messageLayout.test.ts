@@ -29,6 +29,29 @@ function message(id: string, overrides: Partial<ChatMessage> = {}): ChatMessage 
 }
 
 describe('layoutMessages', () => {
+  it('uses forwarded-source metadata from any message in an album', () => {
+    const media = { kind: 'photo' as const, name: 'photo.jpg', mimeType: 'image/jpeg' };
+    const layouts = layoutMessages(
+      [
+        message('1', { groupedId: 'album', media, body: '' }),
+        message('2', {
+          groupedId: 'album',
+          media,
+          body: 'Caption',
+          forwardedFrom: { name: 'Source Channel', peerId: 'c:5', messageId: 9 },
+        }),
+      ],
+      chat,
+      [],
+    );
+
+    expect(layouts[0]?.forwardedFrom).toEqual({
+      name: 'Source Channel',
+      peerId: 'c:5',
+      messageId: 9,
+    });
+  });
+
   it('groups an album behind its first message', () => {
     const media = { kind: 'photo' as const, name: 'photo.jpg', mimeType: 'image/jpeg' };
     const layouts = layoutMessages(

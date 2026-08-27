@@ -39,6 +39,13 @@ export interface ChatMessage {
   outgoing: boolean;
   status: MessageStatus;
   groupedId?: string | undefined;
+  forwardedFrom?:
+    | {
+        name: string;
+        peerId?: string | undefined;
+        messageId?: number | undefined;
+      }
+    | undefined;
   service?:
     | {
         kind: string;

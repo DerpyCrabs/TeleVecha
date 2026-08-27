@@ -6,6 +6,7 @@ export interface MessageLayout {
   author: string;
   caption: ChatMessage;
   className: string;
+  forwardedFrom: ChatMessage['forwardedFrom'] | undefined;
   hide: boolean;
   media: ChatMessage['media'] | undefined;
   showDateDivider: boolean;
@@ -19,6 +20,7 @@ function sameLayout(previous: MessageLayout | undefined, next: MessageLayout) {
     previous.author === next.author &&
     previous.caption === next.caption &&
     previous.className === next.className &&
+    previous.forwardedFrom === next.forwardedFrom &&
     previous.hide === next.hide &&
     previous.media === next.media &&
     previous.showDateDivider === next.showDateDivider &&
@@ -85,12 +87,17 @@ export function layoutMessages(
   const next = messages.map((message, index) => {
     const album = albums[index] ?? [];
     const caption = album.find(({ body }) => Boolean(body)) ?? message;
+    const forwardedFrom =
+      message.forwardedFrom ??
+      caption.forwardedFrom ??
+      album.find((albumMessage) => albumMessage.forwardedFrom)?.forwardedFrom;
     const messageAuthor = author(message);
     const mediaOnly = Boolean(
       ((album.length > 1 && album.every(({ uploadProgress }) => uploadProgress === undefined)) ||
         (isVisualMedia(message) && message.uploadProgress === undefined)) &&
       !caption.body.trim() &&
       !messageAuthor &&
+      !forwardedFrom &&
       !message.replyTo &&
       !message.linkPreview &&
       !message.botKeyboard &&
@@ -110,6 +117,7 @@ export function layoutMessages(
       (album.length > 1 || isVisualMedia(message)) &&
       (caption.body.trim() ||
         messageAuthor ||
+        forwardedFrom ||
         message.replyTo ||
         message.botKeyboard ||
         message.reactions?.length) &&
@@ -166,6 +174,7 @@ export function layoutMessages(
       author: messageAuthor,
       caption,
       className,
+      forwardedFrom,
       hide: continuations[index] ?? false,
       media: album.length === 0 ? message.media : undefined,
       showDateDivider,

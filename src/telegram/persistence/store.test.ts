@@ -573,6 +573,39 @@ describe('IndexedDbCacheStore', () => {
     expect(await store.loadMessages(secondPeer.id)).toEqual([]);
   });
 
+  it('preserves version-five messages during the version-six migration', async () => {
+    const name = databaseName();
+    const request = indexedDB.open(name, 5);
+    await new Promise<void>((resolve, reject) => {
+      request.onupgradeneeded = () => {
+        const database = request.result;
+        database.createObjectStore('meta');
+        database.createObjectStore('dialogs', { keyPath: 'peer.id' });
+        const messages = database.createObjectStore('messages', {
+          keyPath: ['peerId', 'id'],
+        });
+        messages.createIndex('byPeer', 'peerId');
+        messages.createIndex('byMessageId', 'id');
+        messages.createIndex('byDate', 'date');
+        messages.put(cachedMessage(peer, 7));
+        database.createObjectStore('drafts', { keyPath: 'peerId' });
+        const outbox = database.createObjectStore('outbox', { keyPath: 'id' });
+        outbox.createIndex('byCreatedAt', 'createdAt');
+        database.createObjectStore('files', { keyPath: 'key' });
+      };
+      request.onsuccess = () => {
+        request.result.close();
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+
+    const store = new IndexedDbCacheStore(name);
+    expect(await store.loadMessages(peer.id)).toEqual([
+      expect.objectContaining({ id: 7, peerId: peer.id }),
+    ]);
+  });
+
   it('bounds the binary cache by entry count', async () => {
     const store = new IndexedDbCacheStore(databaseName());
     for (let index = 0; index < 257; index += 1) {

@@ -1950,6 +1950,38 @@ export function App(props: AppProps) {
                               </Show>
                             </strong>
                           </Show>
+                          <Show when={!message.service && layout().forwardedFrom}>
+                            {(forwarded) => (
+                              <button
+                                type="button"
+                                class="message-forwarded-from"
+                                disabled={
+                                  !forwarded().peerId ||
+                                  !snapshot().dialogs.some(
+                                    ({ peer }) => peer.id === forwarded().peerId,
+                                  )
+                                }
+                                onClick={() => {
+                                  const source = forwarded();
+                                  if (!source.peerId) return;
+                                  if (source.messageId !== undefined) {
+                                    void openMessage({
+                                      id: source.messageId,
+                                      peerId: source.peerId,
+                                      senderId: '',
+                                      text: '',
+                                      date: 0,
+                                      outgoing: false,
+                                    });
+                                  } else {
+                                    void selectChat(source.peerId);
+                                  }
+                                }}
+                              >
+                                Forwarded from <span>{forwarded().name}</span>
+                              </button>
+                            )}
+                          </Show>
                           <Show when={message.replyTo}>
                             <button
                               class="message-reply"

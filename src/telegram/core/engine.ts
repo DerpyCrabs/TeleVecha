@@ -2651,7 +2651,74 @@ export class MessagingEngine {
     });
     await startupSync;
     if (!this.isOperationCurrent(generation, accountId)) return;
+    await this.refreshActiveConversationAfterConnect(generation, accountId);
+    if (!this.isOperationCurrent(generation, accountId)) return;
     await this.flushOutbox();
+  }
+
+  private async refreshActiveConversationAfterConnect(
+    generation: number,
+    accountId: string | undefined,
+  ) {
+    const peerId = this.snapshotValue.activePeerId;
+    if (!peerId || !this.snapshotValue.online) return;
+    try {
+      if (this.snapshotValue.messages.length === 0) {
+        await this.reloadActiveConversation(generation);
+        return;
+      }
+      const dialog = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
+      if (!dialog) return;
+      const requestRevision = this.messageRevision;
+      const page = await this.transport.getHistory(dialog.peer, HISTORY_LIMIT);
+      if (
+        !this.isOperationCurrent(generation, accountId) ||
+        this.snapshotValue.activePeerId !== peerId
+      ) {
+        return;
+      }
+      const fetched = this.filterFetchedMessages(
+        peerId,
+        page.messages.map((message) => ({ ...message, cacheEpoch: this.epoch })),
+        requestRevision,
+      );
+      await this.store.putMessages(fetched);
+      if (
+        !this.isOperationCurrent(generation, accountId) ||
+        this.snapshotValue.activePeerId !== peerId
+      ) {
+        return;
+      }
+      const messages = this.mergeFetchedMessages(
+        peerId,
+        this.snapshotValue.messages,
+        fetched,
+        requestRevision,
+      );
+      const history = this.rememberHistory(peerId, {
+        messages,
+        hasOlderMessages: this.snapshotValue.hasOlderMessages || page.hasOlder,
+      });
+      this.historyIssues.delete(peerId);
+      this.patch({
+        messages: history.messages,
+        hasOlderMessages: history.hasOlderMessages,
+        loadingMessages: false,
+        historyError: undefined,
+        historyRetryAt: undefined,
+      });
+    } catch (error) {
+      if (!this.isOperationCurrent(generation, accountId)) return;
+      const dialog = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
+      const message = `Could not load ${dialog?.title ?? 'this chat'}. ${this.errorMessage(error)}`;
+      this.historyIssues.set(peerId, { message });
+      this.patch({
+        loadingMessages: false,
+        historyError: message,
+        historyRetryAt: undefined,
+      });
+      this.reportFailure('sync', `Could not refresh ${dialog?.title ?? 'the active chat'}.`, error);
+    }
   }
 
   private async confirmAuthorizedAccount(claimLegacyAccount: boolean, generation: number) {

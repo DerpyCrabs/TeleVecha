@@ -412,6 +412,30 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.message-forwarded-from {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #65baf1;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.05rem;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.message-forwarded-from:not(:disabled) {
+  cursor: pointer;
+}
+.message-forwarded-from:not(:disabled):hover span {
+  text-decoration: underline;
+}
+.message-forwarded-from:disabled {
+  opacity: 1;
+}
 .message-sender-role {
   flex: none;
   margin-left: auto;
@@ -973,6 +997,12 @@ button {
 }
 .message-captioned-media > .message-author {
   margin: 0.48rem 0.65rem 0.12rem;
+}
+.message-captioned-media > .message-forwarded-from {
+  margin: 0.48rem 0.65rem 0.12rem;
+}
+.message-captioned-media > .message-author + .message-forwarded-from {
+  margin-top: 0;
 }
 .message-captioned-media > .message-reply {
   width: calc(100% - 1.3rem);

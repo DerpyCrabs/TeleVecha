@@ -80,6 +80,15 @@ const messages = new Map<string, TelegramMessage[]>([
             }
           : {}),
         ...(id === 77 ? { replyToId: 76, replyQuote: 'bold italic' } : {}),
+        ...(id === 73
+          ? {
+              forwardedFrom: {
+                name: 'Release Channel',
+                peerId: peers[1]!.id,
+                messageId: 5,
+              },
+            }
+          : {}),
         ...(id === 74
           ? {
               richMessage: {

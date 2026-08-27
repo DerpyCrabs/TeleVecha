@@ -1595,8 +1595,8 @@ export class WebAGramJsTransport implements TelegramTransport {
                 raw.replyTo instanceof Api.MessageReplyHeader ? raw.replyTo.quoteText : undefined,
               mentions: this.mapMentions(raw.entities),
               links: this.mapLinks(raw.entities),
-              linkPreview: this.fallbackLinkPreview(raw.message, this.mapLinks(raw.entities)),
               formats: this.mapFormats(raw.entities),
+              forwardedFrom: this.mapForwardedFrom(raw.fwdFrom),
             },
           },
         ],
@@ -1625,8 +1625,8 @@ export class WebAGramJsTransport implements TelegramTransport {
                 raw.replyTo instanceof Api.MessageReplyHeader ? raw.replyTo.quoteText : undefined,
               mentions: this.mapMentions(raw.entities),
               links: this.mapLinks(raw.entities),
-              linkPreview: this.fallbackLinkPreview(raw.message, this.mapLinks(raw.entities)),
               formats: this.mapFormats(raw.entities),
+              forwardedFrom: this.mapForwardedFrom(raw.fwdFrom),
             },
           },
         ],
@@ -2033,6 +2033,7 @@ export class WebAGramJsTransport implements TelegramTransport {
       outgoing: Boolean(message.out),
       editedAt: message.editDate,
       groupedId: message.groupedId?.toString(),
+      forwardedFrom: this.mapForwardedFrom(message.fwdFrom),
       replyToId:
         message.replyTo instanceof Api.MessageReplyHeader
           ? message.replyTo.replyToMsgId
@@ -2044,11 +2045,31 @@ export class WebAGramJsTransport implements TelegramTransport {
       reactions: this.mapReactions(message.reactions),
       mentions: this.mapMentions(message.entities),
       links,
-      linkPreview:
-        this.mapLinkPreview(message.media) ?? this.fallbackLinkPreview(message.message, links),
+      linkPreview: this.mapLinkPreview(message.media),
       formats: this.mapFormats(message.entities),
       richMessage: this.mapRichMessage(message.richMessage),
       pinned: message.pinned,
+    };
+  }
+
+  private mapForwardedFrom(
+    header: Api.TypeMessageFwdHeader | undefined,
+  ): TelegramMessage['forwardedFrom'] {
+    if (!header) return undefined;
+    const source = header.fromId ?? header.savedFromId ?? header.savedFromPeer;
+    const peerId = this.peerId(source);
+    const name =
+      header.fromName ||
+      (peerId ? this.entityTitle(this.entities.get(peerId)) : '') ||
+      header.savedFromName ||
+      header.postAuthor ||
+      peerId;
+    if (!name) return undefined;
+    const messageId = header.channelPost ?? header.savedFromMsgId;
+    return {
+      name,
+      ...(peerId ? { peerId } : {}),
+      ...(messageId !== undefined ? { messageId } : {}),
     };
   }
 
@@ -2426,31 +2447,7 @@ export class WebAGramJsTransport implements TelegramTransport {
         hasPhoto: media.webpage.photo instanceof Api.Photo,
       };
     }
-    if (
-      (media.webpage instanceof Api.WebPagePending || media.webpage instanceof Api.WebPageEmpty) &&
-      media.webpage.url
-    ) {
-      return this.previewFromUrl(media.webpage.url);
-    }
     return undefined;
-  }
-
-  private fallbackLinkPreview(text: string, links: ReturnType<WebAGramJsTransport['mapLinks']>) {
-    const first = links[0];
-    const entityUrl = first
-      ? first.url || text.slice(first.offset, first.offset + first.length)
-      : undefined;
-    const matchedUrl = text.match(/https?:\/\/[^\s]+/u)?.[0]?.replace(/[),.!?]+$/u, '');
-    const url = entityUrl || matchedUrl;
-    return url ? this.previewFromUrl(url) : undefined;
-  }
-
-  private previewFromUrl(url: string) {
-    try {
-      return { url, siteName: new URL(url).hostname.replace(/^www\./u, '') };
-    } catch {
-      return { url };
-    }
   }
 
   private mapFormats(entities: Api.TypeMessageEntity[] | undefined) {

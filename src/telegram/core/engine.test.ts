@@ -2158,6 +2158,28 @@ describe('MessagingEngine', () => {
     await engine.stop();
   });
 
+  it('loads an empty active history after Telegram connects', async () => {
+    const store = new MemoryStore();
+    store.cursor = currentCursor;
+    store.lastPeerId = peer.id;
+    store.messages = [];
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, store);
+
+    await engine.start(credentials);
+
+    expect(engine.snapshot()).toMatchObject({
+      activePeerId: peer.id,
+      online: true,
+      historyError: undefined,
+    });
+    expect(engine.snapshot().messages).toEqual([
+      expect.objectContaining({ id: dialog.topMessage?.id, text: dialog.topMessage?.text }),
+    ]);
+    expect(transport.historyCalls).toEqual([undefined]);
+    await engine.stop();
+  });
+
   it('keeps remembered cached history pageable after startup reconciliation', async () => {
     const store = new MemoryStore();
     store.cursor = currentCursor;
@@ -2183,8 +2205,8 @@ describe('MessagingEngine', () => {
     });
     await engine.loadOlderMessages();
 
-    expect(transport.historyCalls).toEqual([971]);
-    expect(engine.snapshot().messages[0]).toMatchObject({
+    expect(transport.historyCalls).toEqual([undefined, 971]);
+    expect(engine.snapshot().messages.find(({ id }) => id === 970)).toMatchObject({
       id: 970,
       text: 'Older remembered message',
     });

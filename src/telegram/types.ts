@@ -99,6 +99,7 @@ export interface TelegramMessage {
   replyQuote?: string | undefined;
   randomId?: string | undefined;
   groupedId?: string | undefined;
+  forwardedFrom?: TelegramForwardedFrom | undefined;
   service?: TelegramServiceMessage | undefined;
   botKeyboard?: TelegramBotKeyboard | undefined;
   media?: TelegramMedia | undefined;
@@ -109,6 +110,12 @@ export interface TelegramMessage {
   formats?: TelegramTextFormat[] | undefined;
   richMessage?: RichMessage | undefined;
   pinned?: boolean | undefined;
+}
+
+export interface TelegramForwardedFrom {
+  name: string;
+  peerId?: string | undefined;
+  messageId?: number | undefined;
 }
 
 export interface TelegramBotCommand {

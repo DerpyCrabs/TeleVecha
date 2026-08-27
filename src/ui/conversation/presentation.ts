@@ -72,6 +72,7 @@ export function presentMessage(
     outgoing: message.outgoing,
     status: message.outgoing && message.id <= readOutboxMaxId ? 'read' : 'sent',
     groupedId: message.groupedId,
+    forwardedFrom: message.forwardedFrom,
     service: message.service,
     botKeyboard: message.botKeyboard,
     media: message.media,

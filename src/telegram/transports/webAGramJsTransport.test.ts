@@ -1182,6 +1182,44 @@ describe('WebAGramJsTransport mapping', () => {
     });
   });
 
+  it('maps forwarded message authors and original channel posts', () => {
+    const target = transport() as unknown as {
+      entities: Map<string, Api.TypeUser | Api.TypeChat>;
+      mapMessage(
+        message: Api.TypeMessage,
+      ): { forwardedFrom?: { name: string; peerId?: string; messageId?: number } } | undefined;
+    };
+    target.entities.set(
+      'c:202',
+      new Api.Channel({
+        id: 202n,
+        title: 'Release Channel',
+        photo: new Api.ChatPhotoEmpty(),
+        date: 100,
+      }),
+    );
+
+    const mapped = target.mapMessage(
+      new Api.Message({
+        id: 18,
+        peerId: new Api.PeerUser({ userId: 1n }),
+        date: 100,
+        message: 'Forwarded post',
+        fwdFrom: new Api.MessageFwdHeader({
+          fromId: new Api.PeerChannel({ channelId: 202n }),
+          channelPost: 17,
+          date: 90,
+        }),
+      }),
+    );
+
+    expect(mapped?.forwardedFrom).toEqual({
+      name: 'Release Channel',
+      peerId: 'c:202',
+      messageId: 17,
+    });
+  });
+
   it('maps bot rich messages into safe structured content', () => {
     const target = transport() as unknown as {
       mapMessage(
@@ -1285,7 +1323,7 @@ describe('WebAGramJsTransport mapping', () => {
     });
   });
 
-  it('shows a domain preview while Telegram webpage metadata is pending or absent', () => {
+  it('hides pending and absent webpage previews like Telegram Desktop', () => {
     const target = transport() as unknown as {
       mapMessage(message: Api.TypeMessage): { linkPreview?: unknown } | undefined;
     };
@@ -1313,15 +1351,24 @@ describe('WebAGramJsTransport mapping', () => {
         message: 'Read https://example.org/path now',
       }),
     );
+    const empty = target.mapMessage(
+      new Api.Message({
+        id: 11,
+        peerId,
+        date: 100,
+        message: 'https://www.instagram.com/p/example',
+        media: new Api.MessageMediaWebPage({
+          webpage: new Api.WebPageEmpty({
+            id: 5n,
+            url: 'https://www.instagram.com/p/example',
+          }),
+        }),
+      }),
+    );
 
-    expect(pending?.linkPreview).toEqual({
-      url: 'https://www.reddit.com/r/example',
-      siteName: 'reddit.com',
-    });
-    expect(absent?.linkPreview).toEqual({
-      url: 'https://example.org/path',
-      siteName: 'example.org',
-    });
+    expect(pending?.linkPreview).toBeUndefined();
+    expect(absent?.linkPreview).toBeUndefined();
+    expect(empty?.linkPreview).toBeUndefined();
   });
 
   it('uses Telegram reaction RPCs for choosing and clearing an emoji', async () => {
