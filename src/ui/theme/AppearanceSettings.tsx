@@ -9,6 +9,8 @@ import {
   ACCENT_COLORS,
   THEME_OPTIONS,
   WALLPAPER_OPTIONS,
+  MAX_CHAT_FONT_SIZE,
+  MIN_CHAT_FONT_SIZE,
   telegramWallpaperBackground,
   type ThemePreferences,
   type ThemePresetId,
@@ -28,6 +30,7 @@ export function AppearanceSettings(props: {
   setTheme: (theme: ThemePresetId) => void;
   setAccentColor: (color: string) => void;
   setSystemAccent: (enabled: boolean) => void;
+  setChatFontSize: (size: number) => void;
   setWallpaper: (wallpaper: ThemePreferences['wallpaper']) => void;
   setTelegramWallpaper: (wallpaper: TelegramWallpaper) => void;
   setEffects: (effects: Pick<ThemePreferences, 'wallpaperBlur' | 'wallpaperDim'>) => void;
@@ -91,6 +94,30 @@ export function AppearanceSettings(props: {
             onChange={(event) => props.setSystemAccent(event.currentTarget.checked)}
           />
           <span>System accent color</span>
+        </label>
+      </section>
+
+      <section class="appearance-group" aria-labelledby="appearance-font-title">
+        <div class="appearance-heading">
+          <div>
+            <strong id="appearance-font-title">Chat font size</strong>
+            <p>Changes message text only. The rest of the interface keeps its current size.</p>
+          </div>
+        </div>
+        <label class="grid gap-2">
+          <span class="flex items-center justify-between text-xs text-muted">
+            Message text <output>{props.preferences.chatFontSize}px</output>
+          </span>
+          <input
+            class="w-full accent-[var(--accent)]"
+            type="range"
+            aria-label="Chat font size"
+            min={MIN_CHAT_FONT_SIZE}
+            max={MAX_CHAT_FONT_SIZE}
+            step="1"
+            value={props.preferences.chatFontSize}
+            onInput={(event) => props.setChatFontSize(Number(event.currentTarget.value))}
+          />
         </label>
       </section>
 

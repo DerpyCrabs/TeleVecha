@@ -23,6 +23,7 @@ export function SettingsDialog(props: {
   setTheme: (theme: ThemePresetId) => void;
   setAccentColor: (color: string) => void;
   setSystemAccent: (enabled: boolean) => void;
+  setChatFontSize: (size: number) => void;
   setWallpaper: (wallpaper: ThemePreferences['wallpaper']) => void;
   setTelegramWallpaper: (wallpaper: TelegramWallpaper) => void;
   setWallpaperEffects: (effects: Pick<ThemePreferences, 'wallpaperBlur' | 'wallpaperDim'>) => void;
@@ -74,6 +75,7 @@ export function SettingsDialog(props: {
               setTheme={props.setTheme}
               setAccentColor={props.setAccentColor}
               setSystemAccent={props.setSystemAccent}
+              setChatFontSize={props.setChatFontSize}
               setWallpaper={props.setWallpaper}
               setTelegramWallpaper={props.setTelegramWallpaper}
               setEffects={props.setWallpaperEffects}

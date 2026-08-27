@@ -1,5 +1,8 @@
 export const THEME_STORAGE_KEY = 'televecha:appearance';
 const THEME_PREFERENCES_VERSION = 5;
+export const MIN_CHAT_FONT_SIZE = 12;
+export const MAX_CHAT_FONT_SIZE = 24;
+export const DEFAULT_CHAT_FONT_SIZE = 15;
 
 export const ACCENT_COLORS = [
   '#43c6bd',
@@ -79,6 +82,7 @@ export interface ThemePreferences {
   wallpaper: WallpaperId;
   wallpaperBlur: number;
   wallpaperDim: number;
+  chatFontSize: number;
   telegramTheme?: TelegramThemePreference | undefined;
   telegramWallpaper?: TelegramWallpaperPreference | undefined;
 }
@@ -90,6 +94,7 @@ export const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
   wallpaper: 'none',
   wallpaperBlur: 0,
   wallpaperDim: 18,
+  chatFontSize: DEFAULT_CHAT_FONT_SIZE,
 };
 
 const themeIds = new Set<string>(THEME_OPTIONS.map(({ id }) => id));
@@ -211,6 +216,12 @@ export function normalizeThemePreferences(value: unknown): ThemePreferences {
       20,
     ),
     wallpaperDim: boundedNumber(record.wallpaperDim, DEFAULT_THEME_PREFERENCES.wallpaperDim, 0, 70),
+    chatFontSize: boundedNumber(
+      record.chatFontSize,
+      DEFAULT_THEME_PREFERENCES.chatFontSize,
+      MIN_CHAT_FONT_SIZE,
+      MAX_CHAT_FONT_SIZE,
+    ),
     ...(telegramTheme ? { telegramTheme } : {}),
     ...(telegramWallpaper ? { telegramWallpaper } : {}),
   };
@@ -283,6 +294,11 @@ export function applyThemePreferences(
   }
   root.style.setProperty('--wallpaper-blur', `${normalized.wallpaperBlur}px`);
   root.style.setProperty('--wallpaper-dim', `${normalized.wallpaperDim / 100}`);
+  root.style.setProperty('--chat-font-size', `${normalized.chatFontSize}px`);
+  root.style.setProperty(
+    '--chat-font-scale',
+    `${normalized.chatFontSize / DEFAULT_CHAT_FONT_SIZE}`,
+  );
   root.style.colorScheme =
     resolvedTheme === 'day' || resolvedTheme === 'classic' ? 'light' : 'dark';
   for (const property of ['--accent', '--accent-soft', '--dialog-selected']) {

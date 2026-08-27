@@ -132,8 +132,8 @@
   border: 1px solid rgb(255 255 255 / 0.045);
   border-radius: 0.78rem;
   padding: 0.48rem 0.65rem 0.32rem;
-  font-size: 0.9375rem;
-  line-height: 1.32rem;
+  font-size: var(--chat-font-size, 0.9375rem);
+  line-height: 1.408;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
 }
 .message.incoming {
@@ -167,8 +167,8 @@
   background: var(--service-background);
   padding: 0.32rem 0.72rem;
   color: var(--muted);
-  font-size: 0.75rem;
-  line-height: 1.05rem;
+  font-size: calc(0.75rem * var(--chat-font-scale, 1));
+  line-height: 1.4;
   text-align: center;
   box-shadow: none;
 }
@@ -183,8 +183,8 @@
   overflow: hidden;
   margin-bottom: 0.12rem;
   color: #93c5fd;
-  font-size: 0.72rem;
-  line-height: 1rem;
+  font-size: calc(0.72rem * var(--chat-font-scale, 1));
+  line-height: 1.39;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -201,9 +201,9 @@
   padding: 0;
   background: transparent;
   color: #65baf1;
-  font-size: 0.74rem;
+  font-size: calc(0.74rem * var(--chat-font-scale, 1));
   font-weight: 600;
-  line-height: 1.05rem;
+  line-height: 1.42;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -224,9 +224,9 @@
   padding: 0.08rem 0.38rem;
   background: color-mix(in srgb, currentcolor 18%, transparent);
   color: inherit;
-  font-size: 0.64rem;
+  font-size: calc(0.64rem * var(--chat-font-scale, 1));
   font-weight: 600;
-  line-height: 0.9rem;
+  line-height: 1.41;
 }
 .message-sender-role.owner {
   color: #a879e8;
@@ -339,16 +339,16 @@
   margin: 0;
 }
 .rich-message h1 {
-  font-size: 1.35rem;
+  font-size: calc(1.35rem * var(--chat-font-scale, 1));
 }
 .rich-message h2 {
-  font-size: 1.2rem;
+  font-size: calc(1.2rem * var(--chat-font-scale, 1));
 }
 .rich-message h3 {
-  font-size: 1.08rem;
+  font-size: calc(1.08rem * var(--chat-font-scale, 1));
 }
 .rich-message :where(h4, h5, h6) {
-  font-size: 1rem;
+  font-size: calc(1rem * var(--chat-font-scale, 1));
 }
 .rich-subtitle,
 .rich-author,
@@ -472,7 +472,7 @@
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.75rem;
+  font-size: calc(0.75rem * var(--chat-font-scale, 1));
   align-items: center;
   gap: 0.45rem;
 }
@@ -544,18 +544,18 @@
 }
 .link-preview small {
   color: var(--link);
-  font-size: 0.67rem;
+  font-size: calc(0.67rem * var(--chat-font-scale, 1));
   font-weight: 600;
 }
 .link-preview strong {
-  font-size: 0.78rem;
+  font-size: calc(0.78rem * var(--chat-font-scale, 1));
 }
 .link-preview-copy > span {
   display: -webkit-box;
   overflow: hidden;
   color: var(--muted);
-  font-size: 0.7rem;
-  line-height: 1rem;
+  font-size: calc(0.7rem * var(--chat-font-scale, 1));
+  line-height: calc(1rem * var(--chat-font-scale, 1));
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
@@ -596,8 +596,8 @@
   gap: 0.25rem;
   margin: 0.25rem 0 0 0.75rem;
   color: #aab0ba;
-  font-size: 0.68rem;
-  line-height: 1rem;
+  font-size: calc(0.68rem * var(--chat-font-scale, 1));
+  line-height: calc(1rem * var(--chat-font-scale, 1));
 }
 .message.outgoing footer {
   color: color-mix(in srgb, var(--message-foreground) 72%, transparent);
@@ -653,7 +653,7 @@
 .upload-progress {
   width: min(20rem, 100%);
   margin-top: 0.4rem;
-  font-size: 0.7rem;
+  font-size: calc(0.7rem * var(--chat-font-scale, 1));
 }
 .sync-error {
   position: fixed;
@@ -943,7 +943,7 @@
   background: rgb(11 13 17 / 0.8);
   padding: 0.2rem 0.45rem;
   color: #fff;
-  font-size: 0.7rem;
+  font-size: calc(0.7rem * var(--chat-font-scale, 1));
   font-weight: 700;
   backdrop-filter: blur(0.3rem);
 }
@@ -1177,14 +1177,14 @@
 }
 .media-file strong {
   overflow: hidden;
-  font-size: 0.76rem;
+  font-size: calc(0.76rem * var(--chat-font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .media-file small {
   margin-top: 0.1rem;
   color: var(--muted);
-  font-size: 0.65rem;
+  font-size: calc(0.65rem * var(--chat-font-scale, 1));
 }
 .icon-button:disabled,
 .send-button:disabled {
@@ -1210,14 +1210,14 @@
   background: #20232a;
   padding: 0.12rem 0.48rem;
   color: var(--text);
-  font-size: 0.7rem;
+  font-size: calc(0.7rem * var(--chat-font-scale, 1));
 }
 .reaction.chosen {
   border-color: color-mix(in srgb, var(--accent) 70%, transparent);
   background: var(--accent-soft);
 }
 .reaction b {
-  font-size: 0.64rem;
+  font-size: calc(0.64rem * var(--chat-font-scale, 1));
   font-weight: 600;
 }
 .add-reaction,

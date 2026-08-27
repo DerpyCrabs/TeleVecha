@@ -160,6 +160,7 @@ export function createAppearanceSession(source: AppearanceSource) {
     selectAccentColor: (accentColor: string) =>
       commit({ ...appearance(), accentColor, systemAccent: false }),
     selectSystemAccent: (systemAccent: boolean) => commit({ ...appearance(), systemAccent }),
+    selectChatFontSize: (chatFontSize: number) => commit({ ...appearance(), chatFontSize }),
     update: (changes: Partial<ThemePreferences>) => commit({ ...appearance(), ...changes }),
     selectWallpaper,
     selectTelegramWallpaper,

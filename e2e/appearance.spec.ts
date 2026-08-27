@@ -53,6 +53,42 @@ test('matches Telegram Desktop base themes and accent controls', async ({ page }
   await expect(settings.getByLabel('System accent color')).toBeChecked();
 });
 
+test('changes and persists message font size without resizing interface text', async ({ page }) => {
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  const settingsTitle = settings.getByText('Settings', { exact: true });
+  const conversationTitle = page.getByTestId('conversation-header').locator('strong');
+  const interfaceSizes = await Promise.all([
+    settingsTitle.evaluate((element) => getComputedStyle(element).fontSize),
+    conversationTitle.evaluate((element) => getComputedStyle(element).fontSize),
+  ]);
+
+  await settings.getByRole('slider', { name: 'Chat font size' }).fill('21');
+
+  await expect(settings.getByText('21px', { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document.documentElement.style.getPropertyValue('--chat-font-size').trim(),
+      ),
+    )
+    .toBe('21px');
+  await expect
+    .poll(() =>
+      Promise.all([
+        settingsTitle.evaluate((element) => getComputedStyle(element).fontSize),
+        conversationTitle.evaluate((element) => getComputedStyle(element).fontSize),
+      ]),
+    )
+    .toEqual(interfaceSizes);
+
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await selectAlice(page);
+  await expect(page.locator('article.message .message-body').last()).toHaveCSS('font-size', '21px');
+
+  await page.reload();
+  await expect(page.locator('article.message .message-body').last()).toHaveCSS('font-size', '21px');
+});
+
 test('scrolls the settings content inside the dialog', async ({ page }) => {
   const content = page.locator('.settings-dialog-content');
   await expect(content).toHaveCSS('overflow-y', 'auto');

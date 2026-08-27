@@ -215,6 +215,7 @@ export function App(props: AppProps) {
     selectTheme,
     selectAccentColor,
     selectSystemAccent,
+    selectChatFontSize,
     selectWallpaper,
     selectTelegramWallpaper,
     uploadWallpaper,
@@ -1912,6 +1913,7 @@ export function App(props: AppProps) {
             setTheme={selectTheme}
             setAccentColor={selectAccentColor}
             setSystemAccent={selectSystemAccent}
+            setChatFontSize={selectChatFontSize}
             setWallpaper={selectWallpaper}
             setTelegramWallpaper={(wallpaper) => void selectTelegramWallpaper(wallpaper)}
             setWallpaperEffects={appearanceSession.update}

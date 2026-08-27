@@ -17,6 +17,7 @@ describe('theme preferences', () => {
         wallpaper: 'aurora',
         wallpaperBlur: 99,
         wallpaperDim: -4,
+        chatFontSize: 99,
       }),
     ).toEqual({
       theme: 'night',
@@ -25,6 +26,7 @@ describe('theme preferences', () => {
       wallpaper: 'aurora',
       wallpaperBlur: 20,
       wallpaperDim: 0,
+      chatFontSize: 24,
     });
   });
 
@@ -50,6 +52,7 @@ describe('theme preferences', () => {
       wallpaper: 'none',
       wallpaperBlur: 0,
       wallpaperDim: 18,
+      chatFontSize: 15,
     });
   });
 
@@ -64,6 +67,7 @@ describe('theme preferences', () => {
         wallpaper: 'sunset',
         wallpaperBlur: 4,
         wallpaperDim: 24,
+        chatFontSize: 18,
       },
       {
         setItem(key, value) {
@@ -80,6 +84,7 @@ describe('theme preferences', () => {
       wallpaper: 'sunset',
       wallpaperBlur: 4,
       wallpaperDim: 24,
+      chatFontSize: 18,
       version: 5,
     });
   });
