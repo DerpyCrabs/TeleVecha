@@ -75,6 +75,8 @@ describe('layoutMessages', () => {
   it('groups consecutive channel posts by sender and shows one trailing avatar', () => {
     const layouts = layoutMessages([message('1'), message('2')], chat, []);
 
+    expect(layouts[0]?.author).toBe('user:2');
+    expect(layouts[1]?.author).toBe('');
     expect(layouts[0]?.showSenderAvatar).toBe(false);
     expect(layouts[1]?.showSenderAvatar).toBe(true);
     expect(layouts[1]?.className).toContain('message-same-sender');

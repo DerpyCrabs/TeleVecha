@@ -129,6 +129,7 @@ test('groups channel posts by author and keeps the avatar on the last post', asy
     } satisfies TransportUpdate);
   });
 
+  const runStart = page.locator('[data-message-id="5"]');
   const first = page.locator('[data-message-id="6"]');
   const last = page.locator('[data-message-id="7"]');
   const different = page.locator('[data-message-id="8"]');
@@ -138,9 +139,11 @@ test('groups channel posts by author and keeps the avatar on the last post', asy
   await expect(first.locator('.message-sender-avatar')).toHaveCount(0);
   await expect(last.locator('.message-sender-avatar')).toHaveCount(1);
   await expect(different.locator('.message-sender-avatar')).toHaveCount(1);
-  await expect(last.locator('.message-sender-role.owner')).toHaveText('owner');
+  await expect(runStart.locator('.message-sender-role.owner')).toHaveText('owner');
+  await expect(first.locator('.message-author')).toHaveCount(0);
+  await expect(last.locator('.message-author')).toHaveCount(0);
   await expect(different.locator('.message-sender-role.admin')).toHaveText('moderator');
-  const roleAlignment = await last.evaluate((message) => {
+  const roleAlignment = await runStart.evaluate((message) => {
     const role = message.querySelector('.message-sender-role')?.getBoundingClientRect();
     const name = message.querySelector('.message-author > span')?.getBoundingClientRect();
     const bubble = message.getBoundingClientRect();
@@ -153,7 +156,7 @@ test('groups channel posts by author and keeps the avatar on the last post', asy
   expect(roleAlignment.roleRightInset).toBeLessThan(12);
   expect(roleAlignment.roleStartsAfterName).toBe(true);
   const authorColors = await Promise.all(
-    [last, different].map((message) =>
+    [runStart, different].map((message) =>
       message.locator('.message-author').evaluate((element) => getComputedStyle(element).color),
     ),
   );

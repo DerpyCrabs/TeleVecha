@@ -91,7 +91,7 @@ export function layoutMessages(
       message.forwardedFrom ??
       caption.forwardedFrom ??
       album.find((albumMessage) => albumMessage.forwardedFrom)?.forwardedFrom;
-    const messageAuthor = author(message);
+    const messageAuthor = sameSender(previousVisible(index), message) ? '' : author(message);
     const mediaOnly = Boolean(
       ((album.length > 1 && album.every(({ uploadProgress }) => uploadProgress === undefined)) ||
         (isVisualMedia(message) && message.uploadProgress === undefined)) &&
