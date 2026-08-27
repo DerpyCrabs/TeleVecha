@@ -1,7 +1,7 @@
 import { reportDiagnostic } from './diagnostics';
 import { PendingSendQueue } from './pendingQueue';
 import { RetryScheduler } from './retryScheduler';
-import type { CacheStore } from '../persistence/store';
+import type { CacheStore, TimedCacheValue } from '../persistence/store';
 import { acquireSingleTabLease, TabLockUnsupportedError, type TabLease } from '../session/tabLock';
 import type {
   CachedDialog,
@@ -16,6 +16,7 @@ import type {
   TelegramDialog,
   TelegramHistoryGap,
   TelegramActivityKind,
+  TelegramGroupMember,
   TelegramMessage,
   TelegramPeer,
   TelegramPeerSearchResult,
@@ -51,6 +52,7 @@ const EXPRESSION_INDEX_CACHE_KEYS = [
   'sticker-index:packs:v2',
   'sticker-index:gifs:v2',
 ];
+const PEER_METADATA_CACHE_TTL_MS = 5 * 60 * 1_000;
 
 type Listener = (snapshot: EngineSnapshot) => void;
 
@@ -71,6 +73,7 @@ export class MessagingEngine {
     activities: [],
     expressionRevision: 0,
     botCommandsRevision: 0,
+    groupMembersRevision: 0,
   };
   private readonly listeners = new Set<Listener>();
   private readonly lifecycleTasks = new Set<Promise<unknown>>();
@@ -98,6 +101,19 @@ export class MessagingEngine {
   private dialogStateTail = Promise.resolve();
   private metadataWriteTail = Promise.resolve();
   private readonly pinnedMessageVersions = new Map<string, number>();
+  private readonly pinnedMessageCache = new Map<string, TimedCacheValue<TelegramMessage[]>>();
+  private readonly pinnedMessageCacheLoaded = new Set<string>();
+  private readonly pinnedMessageRequests = new Map<
+    string,
+    { version: number; request: Promise<void> }
+  >();
+  private readonly groupMemberVersions = new Map<string, number>();
+  private readonly groupMemberCache = new Map<string, TimedCacheValue<TelegramGroupMember[]>>();
+  private readonly groupMemberCacheLoaded = new Set<string>();
+  private readonly groupMemberRequests = new Map<
+    string,
+    { version: number; request: Promise<TelegramGroupMember[]> }
+  >();
   private readonly draftWrites = new Map<string, Promise<void>>();
   private readonly draftVersions = new Map<string, number>();
   private readonly duplicateDraftSends = new Map<string, Map<string, Promise<void>>>();
@@ -508,6 +524,13 @@ export class MessagingEngine {
         this.mutationSequence = 0;
         this.mutationTails.clear();
         this.pinnedMessageVersions.clear();
+        this.pinnedMessageCache.clear();
+        this.pinnedMessageCacheLoaded.clear();
+        this.pinnedMessageRequests.clear();
+        this.groupMemberVersions.clear();
+        this.groupMemberCache.clear();
+        this.groupMemberCacheLoaded.clear();
+        this.groupMemberRequests.clear();
         this.mediaVersions.clear();
         this.mediaDownloads.clear();
         this.avatarDownloads.clear();
@@ -532,8 +555,10 @@ export class MessagingEngine {
       this.snapshotValue.messages.length > 0
     ) {
       const current = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
-      if (current && !this.snapshotValue.sharedMediaCounts)
-        void this.loadSharedMediaCounts(current);
+      if (current) {
+        if (!this.snapshotValue.sharedMediaCounts) void this.loadSharedMediaCounts(current);
+        if (this.snapshotValue.pinnedMessages.length === 0) void this.loadPinnedMessages(current);
+      }
       return;
     }
     const dialog = this.snapshotValue.dialogs.find((candidate) => candidate.peer.id === peerId);
@@ -577,10 +602,8 @@ export class MessagingEngine {
         this.reportFailure('cache', 'Could not remember the selected conversation.', error);
       });
       if (this.canMarkRead(peerId)) void this.markRead(dialog, dialog.topMessageId);
-      if (this.snapshotValue.online) {
-        void this.loadSharedMediaCounts(dialog);
-        void this.loadPinnedMessages(dialog);
-      }
+      if (this.snapshotValue.online) void this.loadSharedMediaCounts(dialog);
+      void this.loadPinnedMessages(dialog);
       return;
     }
 
@@ -641,10 +664,8 @@ export class MessagingEngine {
         historyRetryAt: issue?.retryAt,
       });
       if (this.canMarkRead(peerId)) void this.markRead(dialog, dialog.topMessageId);
-      if (this.snapshotValue.online) {
-        void this.loadSharedMediaCounts(dialog);
-        void this.loadPinnedMessages(dialog);
-      }
+      if (this.snapshotValue.online) void this.loadSharedMediaCounts(dialog);
+      void this.loadPinnedMessages(dialog);
       return;
     }
 
@@ -776,21 +797,45 @@ export class MessagingEngine {
     }
   }
 
-  private async loadPinnedMessages(
+  private loadPinnedMessages(
     dialog: TelegramDialog,
     version = this.pinnedMessageVersions.get(dialog.peer.id) ?? 0,
   ) {
-    if (!this.snapshotValue.online) return;
+    const current = this.pinnedMessageRequests.get(dialog.peer.id);
+    if (current?.version === version) return current.request;
+    const request = this.loadPinnedMessagesFromCacheAndTelegram(dialog, version).finally(() => {
+      if (this.pinnedMessageRequests.get(dialog.peer.id)?.request === request) {
+        this.pinnedMessageRequests.delete(dialog.peer.id);
+      }
+    });
+    this.pinnedMessageRequests.set(dialog.peer.id, { version, request });
+    return request;
+  }
+
+  private async loadPinnedMessagesFromCacheAndTelegram(dialog: TelegramDialog, version: number) {
     const generation = this.lifecycleGeneration;
     const accountId = this.accountId;
+    const cached = await this.cachedPinnedMessages(dialog.peer.id);
+    if (
+      cached &&
+      this.isOperationCurrent(generation, accountId) &&
+      this.snapshotValue.activePeerId === dialog.peer.id &&
+      (this.pinnedMessageVersions.get(dialog.peer.id) ?? 0) === version
+    ) {
+      this.patch({ pinnedMessages: cached.value });
+    }
+    if (this.isFreshPeerMetadata(cached) || !this.snapshotValue.online) return;
     try {
       const messages = await this.transport.getPinnedMessages(dialog.peer);
       if (
         this.isOperationCurrent(generation, accountId) &&
-        this.snapshotValue.activePeerId === dialog.peer.id &&
         (this.pinnedMessageVersions.get(dialog.peer.id) ?? 0) === version
-      )
-        this.patch({ pinnedMessages: messages });
+      ) {
+        await this.rememberPinnedMessages(dialog.peer.id, messages);
+        if (this.snapshotValue.activePeerId === dialog.peer.id) {
+          this.patch({ pinnedMessages: messages });
+        }
+      }
     } catch (error) {
       if (this.isOperationCurrent(generation, accountId)) {
         this.fail('sync', `Could not load pinned messages for ${dialog.title}.`, error, false);
@@ -1123,9 +1168,44 @@ export class MessagingEngine {
     return request;
   }
 
-  getGroupMembers(peer: TelegramPeer, limit = 50) {
+  async getGroupMembers(peer: TelegramPeer, limit = 50) {
     if (peer.kind === 'user' || !this.transport.getGroupMembers) return Promise.resolve([]);
-    return this.transport.getGroupMembers(peer, limit);
+    const cached = await this.cachedGroupMembers(peer.id);
+    if (cached) {
+      if (!this.isFreshPeerMetadata(cached) && this.snapshotValue.online) {
+        void this.refreshGroupMembers(peer, limit).catch(() => undefined);
+      }
+      return cached.value.slice(0, limit);
+    }
+    if (!this.snapshotValue.online) return [];
+    return this.refreshGroupMembers(peer, limit);
+  }
+
+  private refreshGroupMembers(peer: TelegramPeer, limit: number) {
+    const version = this.groupMemberVersions.get(peer.id) ?? 0;
+    const current = this.groupMemberRequests.get(peer.id);
+    if (current?.version === version) return current.request;
+    const generation = this.lifecycleGeneration;
+    const accountId = this.accountId;
+    const request = this.transport.getGroupMembers!(peer, limit)
+      .then(async (members) => {
+        if (
+          !this.isOperationCurrent(generation, accountId) ||
+          (this.groupMemberVersions.get(peer.id) ?? 0) !== version
+        ) {
+          return this.groupMemberCache.get(peer.id)?.value.slice(0, limit) ?? [];
+        }
+        await this.rememberGroupMembers(peer.id, members);
+        this.patch({ groupMembersRevision: this.snapshotValue.groupMembersRevision + 1 });
+        return members;
+      })
+      .finally(() => {
+        if (this.groupMemberRequests.get(peer.id)?.request === request) {
+          this.groupMemberRequests.delete(peer.id);
+        }
+      });
+    this.groupMemberRequests.set(peer.id, { version, request });
+    return request;
   }
 
   async setBlocked(peer: TelegramPeer, blocked: boolean) {
@@ -1361,6 +1441,8 @@ export class MessagingEngine {
               ),
               this.store.replaceMessages(peer.id, []),
               this.store.saveDraft(peer.id, ''),
+              this.store.deletePinnedMessages?.(peer.id),
+              this.store.deleteGroupMembers?.(peer.id),
               ...pending.map((send) => this.store.deletePending(send.id)),
             ]);
             for (const send of pending) {
@@ -1432,6 +1514,7 @@ export class MessagingEngine {
               : this.snapshotValue.pinnedMessages
             : this.snapshotValue.pinnedMessages.filter(({ id }) => id !== messageId);
           this.patch({ pinnedMessages });
+          await this.rememberPinnedMessages(peer.id, pinnedMessages);
         } catch (error) {
           if (this.isOperationCurrent(generation, accountId)) {
             this.fail('sync', `Could not ${pinned ? 'pin' : 'unpin'} the message.`, error, false);
@@ -2768,6 +2851,13 @@ export class MessagingEngine {
       this.mutationSequence = 0;
       this.mutationTails.clear();
       this.pinnedMessageVersions.clear();
+      this.pinnedMessageCache.clear();
+      this.pinnedMessageCacheLoaded.clear();
+      this.pinnedMessageRequests.clear();
+      this.groupMemberVersions.clear();
+      this.groupMemberCache.clear();
+      this.groupMemberCacheLoaded.clear();
+      this.groupMemberRequests.clear();
       this.mediaVersions.clear();
       this.mediaDownloads.clear();
       this.avatarDownloads.clear();
@@ -3398,6 +3488,12 @@ export class MessagingEngine {
         this.unreadVersions.set(message.peerId, (this.unreadVersions.get(message.peerId) ?? 0) + 1);
       }
       await this.store.putMessage(message);
+      if (
+        isNewMessage &&
+        (message.service?.kind === 'users-added' || message.service?.kind === 'user-removed')
+      ) {
+        await this.invalidateGroupMembers(message.peerId);
+      }
       const loaded = this.loadedHistories.get(message.peerId);
       if (loaded) {
         loaded.messages = this.boundHistoryMessages(
@@ -3420,6 +3516,9 @@ export class MessagingEngine {
           pinnedMessages,
           historyGaps: this.historyGaps.get(message.peerId) ?? [],
         });
+        if (pinnedMessages.some(({ id }) => id === message.id)) {
+          await this.rememberPinnedMessages(message.peerId, pinnedMessages);
+        }
       }
       await this.updateDialogHead(message, isNewMessage);
       if (publish && !message.outgoing && this.canMarkRead(message.peerId)) {
@@ -3444,12 +3543,15 @@ export class MessagingEngine {
         }
       }
       if (publish && (!update.peerId || this.snapshotValue.activePeerId === update.peerId)) {
+        const activePeerId = this.snapshotValue.activePeerId;
+        const pinnedMessages = this.snapshotValue.pinnedMessages.filter(
+          (message) => !deleted.has(message.id),
+        );
         this.patch({
           messages: this.snapshotValue.messages.filter((message) => !deleted.has(message.id)),
-          pinnedMessages: this.snapshotValue.pinnedMessages.filter(
-            (message) => !deleted.has(message.id),
-          ),
+          pinnedMessages,
         });
+        if (activePeerId) await this.rememberPinnedMessages(activePeerId, pinnedMessages);
       }
       const dialogs = await Promise.all(
         this.snapshotValue.dialogs.map(async (dialog) => {
@@ -3623,6 +3725,7 @@ export class MessagingEngine {
     if (update.type === 'pts-advanced') return;
     if (update.type === 'pinned-messages') {
       const pinVersion = this.nextMutationVersion(this.pinnedMessageVersions, update.peerId);
+      await this.invalidatePinnedMessages(update.peerId);
       if (this.snapshotValue.activePeerId !== update.peerId) return;
       const dialog = this.snapshotValue.dialogs.find(({ peer }) => peer.id === update.peerId);
       if (!dialog) return;
@@ -4776,6 +4879,78 @@ export class MessagingEngine {
   private clearHistoryFailure(peerId: string) {
     this.historyFailures.delete(peerId);
     this.historyIssues.delete(peerId);
+  }
+
+  private isFreshPeerMetadata<T>(cached: TimedCacheValue<T> | undefined) {
+    return Boolean(cached && Date.now() - cached.savedAt < PEER_METADATA_CACHE_TTL_MS);
+  }
+
+  private async cachedPinnedMessages(peerId: string) {
+    if (this.pinnedMessageCacheLoaded.has(peerId)) return this.pinnedMessageCache.get(peerId);
+    this.pinnedMessageCacheLoaded.add(peerId);
+    try {
+      const cached = await this.store.loadPinnedMessages?.(peerId);
+      if (cached) this.pinnedMessageCache.set(peerId, cached);
+      return cached;
+    } catch (error) {
+      this.reportFailure('cache', 'Could not load cached pinned messages.', error);
+      return undefined;
+    }
+  }
+
+  private async rememberPinnedMessages(peerId: string, messages: TelegramMessage[]) {
+    this.pinnedMessageCacheLoaded.add(peerId);
+    this.pinnedMessageCache.set(peerId, { value: messages, savedAt: Date.now() });
+    try {
+      await this.store.savePinnedMessages?.(peerId, messages);
+    } catch (error) {
+      this.reportFailure('cache', 'Could not cache pinned messages.', error);
+    }
+  }
+
+  private async invalidatePinnedMessages(peerId: string) {
+    this.pinnedMessageCache.delete(peerId);
+    this.pinnedMessageCacheLoaded.add(peerId);
+    try {
+      await this.store.deletePinnedMessages?.(peerId);
+    } catch (error) {
+      this.reportFailure('cache', 'Could not invalidate cached pinned messages.', error);
+    }
+  }
+
+  private async cachedGroupMembers(peerId: string) {
+    if (this.groupMemberCacheLoaded.has(peerId)) return this.groupMemberCache.get(peerId);
+    this.groupMemberCacheLoaded.add(peerId);
+    try {
+      const cached = await this.store.loadGroupMembers?.(peerId);
+      if (cached) this.groupMemberCache.set(peerId, cached);
+      return cached;
+    } catch (error) {
+      this.reportFailure('cache', 'Could not load cached group members.', error);
+      return undefined;
+    }
+  }
+
+  private async rememberGroupMembers(peerId: string, members: TelegramGroupMember[]) {
+    this.groupMemberCacheLoaded.add(peerId);
+    this.groupMemberCache.set(peerId, { value: members, savedAt: Date.now() });
+    try {
+      await this.store.saveGroupMembers?.(peerId, members);
+    } catch (error) {
+      this.reportFailure('cache', 'Could not cache group members.', error);
+    }
+  }
+
+  private async invalidateGroupMembers(peerId: string) {
+    this.nextMutationVersion(this.groupMemberVersions, peerId);
+    this.groupMemberCache.delete(peerId);
+    this.groupMemberCacheLoaded.add(peerId);
+    try {
+      await this.store.deleteGroupMembers?.(peerId);
+    } catch (error) {
+      this.reportFailure('cache', 'Could not invalidate cached group members.', error);
+    }
+    this.patch({ groupMembersRevision: this.snapshotValue.groupMembersRevision + 1 });
   }
 
   private isLifecycleCurrent(generation: number) {

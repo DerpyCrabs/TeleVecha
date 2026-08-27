@@ -22,7 +22,16 @@ interface SharedMediaPanelProps {
   close: () => void;
 }
 
-const labels: Record<SharedMediaKind, string> = { media: 'Media', files: 'Files', links: 'Links' };
+const labels: Record<SharedMediaKind, string> = {
+  photos: 'Photos',
+  videos: 'Videos',
+  files: 'Files',
+  audio: 'Audio files',
+  links: 'Shared links',
+  voice: 'Voice messages',
+  gifs: 'GIFs',
+};
+const visualKinds = new Set<SharedMediaKind>(['photos', 'videos', 'gifs']);
 
 function messageTime(message: TelegramMessage) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
@@ -106,7 +115,9 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
               <X size={18} />
             </button>
           </header>
-          <div class={`shared-items shared-${props.initialKind}`}>
+          <div
+            class={`shared-items ${visualKinds.has(props.initialKind) ? 'shared-media' : `shared-${props.initialKind}`}`}
+          >
             <Show when={!loading()} fallback={<p>Loading {props.initialKind}…</p>}>
               <For
                 each={items()}
@@ -121,55 +132,55 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
               >
                 {(message) => (
                   <Show
-                    when={props.initialKind === 'media'}
+                    when={visualKinds.has(props.initialKind)}
                     fallback={
                       <Show
-                        when={props.initialKind === 'files'}
+                        when={props.initialKind === 'links'}
                         fallback={
-                          <article class="shared-link-row">
+                          <article class="shared-file-row">
                             <span class="shared-kind-icon">
-                              <Link size={18} />
+                              <FileText size={20} />
                             </span>
                             <div>
-                              <For each={links(message.text)}>
-                                {(url) => {
-                                  const href = safeExternalUrl(url);
-                                  return href ? (
-                                    <a href={href} target="_blank" rel="noopener noreferrer">
-                                      {url}
-                                    </a>
-                                  ) : (
-                                    <span>{url}</span>
-                                  );
-                                }}
-                              </For>
+                              <strong>{message.media?.name}</strong>
+                              <small>
+                                {[fileSize(message.media?.size), message.media?.mimeType]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </small>
                               <time>{messageTime(message)}</time>
                             </div>
                             <button
                               onClick={() => props.openMessage(message)}
-                              aria-label="Go to linked message"
+                              aria-label="Go to file message"
                             >
                               <ExternalLink size={16} />
                             </button>
                           </article>
                         }
                       >
-                        <article class="shared-file-row">
+                        <article class="shared-link-row">
                           <span class="shared-kind-icon">
-                            <FileText size={20} />
+                            <Link size={18} />
                           </span>
                           <div>
-                            <strong>{message.media?.name}</strong>
-                            <small>
-                              {[fileSize(message.media?.size), message.media?.mimeType]
-                                .filter(Boolean)
-                                .join(' · ')}
-                            </small>
+                            <For each={links(message.text)}>
+                              {(url) => {
+                                const href = safeExternalUrl(url);
+                                return href ? (
+                                  <a href={href} target="_blank" rel="noopener noreferrer">
+                                    {url}
+                                  </a>
+                                ) : (
+                                  <span>{url}</span>
+                                );
+                              }}
+                            </For>
                             <time>{messageTime(message)}</time>
                           </div>
                           <button
                             onClick={() => props.openMessage(message)}
-                            aria-label="Go to file message"
+                            aria-label="Go to linked message"
                           >
                             <ExternalLink size={16} />
                           </button>

@@ -560,8 +560,8 @@ export class FixtureTelegramTransport implements TelegramTransport {
   async getSharedMediaCounts(peer: TelegramPeer) {
     this.stats.getSharedMediaCounts += 1;
     return peer.id === peers[0]!.id
-      ? { media: 128, files: 16, links: 44 }
-      : { media: 7, files: 3, links: 12 };
+      ? { photos: 128, videos: 9, files: 16, audio: 5, links: 44, voice: 11, gifs: 6 }
+      : { photos: 7, videos: 2, files: 3, audio: 1, links: 12, voice: 4, gifs: 2 };
   }
   async getSharedMedia(
     peer: TelegramPeer,
@@ -575,7 +575,15 @@ export class FixtureTelegramTransport implements TelegramTransport {
         ? Boolean(message.links?.length || /https?:\/\//u.test(message.text))
         : kind === 'files'
           ? message.media?.kind === 'file'
-          : Boolean(message.media && message.media.kind !== 'file'),
+          : kind === 'photos'
+            ? message.media?.kind === 'photo'
+            : kind === 'videos'
+              ? message.media?.kind === 'video'
+              : kind === 'audio'
+                ? message.media?.kind === 'file' && message.media.mimeType.startsWith('audio/')
+                : kind === 'voice'
+                  ? message.media?.kind === 'voice' || message.media?.kind === 'round-video'
+                  : message.media?.kind === 'animation',
     );
     return this.messagePage(found, limit, offset, false);
   }

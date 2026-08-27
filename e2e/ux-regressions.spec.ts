@@ -37,8 +37,11 @@ test('dismisses chat actions and every transient dialog consistently', async ({ 
   await page.keyboard.press('Escape');
   await expect(search).toHaveCount(0);
 
-  await page.locator('.details-pane').getByRole('button', { name: /Media/ }).click();
-  const shared = page.getByRole('dialog', { name: 'Shared media' });
+  await page
+    .locator('.details-pane')
+    .getByRole('button', { name: /Photos/ })
+    .click();
+  const shared = page.getByRole('dialog', { name: 'Shared photos' });
   await page.keyboard.press('Escape');
   await expect(shared).toHaveCount(0);
 

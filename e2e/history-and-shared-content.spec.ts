@@ -1,6 +1,6 @@
 import { expect, type Locator, test } from '@playwright/test';
 
-import { fixtureStats, openReady, selectAlice } from './helpers';
+import { chatButton, fixtureStats, openReady, selectAlice } from './helpers';
 
 async function waitForScrollToSettle(scroller: Locator) {
   await scroller.evaluate(
@@ -28,13 +28,13 @@ test.beforeEach(async ({ page }) => {
 test('opens the selected shared-content type directly with useful message context', async ({
   page,
 }) => {
-  await page.getByRole('button', { name: /Media.*128/ }).click();
-  let shared = page.getByRole('dialog', { name: 'Shared media' });
+  await page.getByRole('button', { name: /Photos.*128/ }).click();
+  let shared = page.getByRole('dialog', { name: 'Shared photos' });
   await expect(shared.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
   await expect(shared.getByRole('tablist')).toHaveCount(0);
   await expect(shared.locator('.shared-media-tile').first()).toHaveCSS('min-height', '144px');
   await expect(shared.getByRole('button', { name: /Go to media message/ }).first()).toBeVisible();
-  await shared.getByRole('button', { name: /Close shared media/ }).click();
+  await shared.getByRole('button', { name: /Close shared photos/ }).click();
 
   await page.getByRole('button', { name: /Links.*44/ }).click();
   shared = page.getByRole('dialog', { name: 'Shared links' });
@@ -52,8 +52,8 @@ test('opens the selected shared-content type directly with useful message contex
 test('Escape closes only the topmost media viewer before its shared-media dialog', async ({
   page,
 }) => {
-  await page.getByRole('button', { name: /Media.*128/ }).click();
-  const shared = page.getByRole('dialog', { name: 'Shared media' });
+  await page.getByRole('button', { name: /Photos.*128/ }).click();
+  const shared = page.getByRole('dialog', { name: 'Shared photos' });
   const preview = shared.getByRole('button', {
     name: 'Open fixture.jpg fullscreen preview',
   });
@@ -75,14 +75,14 @@ test('shows a thumbnail in replies to media messages and jumps from shared media
 }) => {
   const reply = page.locator('article[data-message-id="79"] .message-reply');
   await expect(reply.locator('img')).toBeVisible();
-  await page.getByRole('button', { name: /Media.*128/ }).click();
+  await page.getByRole('button', { name: /Photos.*128/ }).click();
   await page.getByRole('button', { name: /Go to media message fixture.jpg from/ }).click();
-  await expect(page.getByRole('dialog', { name: 'Shared media' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Shared photos' })).toHaveCount(0);
   await expect(page.locator('article[data-message-id="78"]')).toBeInViewport();
 });
 
 test('loads and reveals old shared media outside the current history window', async ({ page }) => {
-  await page.getByRole('button', { name: /Media.*128/ }).click();
+  await page.getByRole('button', { name: /Photos.*128/ }).click();
   await page.getByRole('button', { name: /Go to media message old-fixture.jpg/ }).click();
   await expect(page.locator('article[data-message-id="5"]')).toBeInViewport();
   expect((await fixtureStats(page))?.getHistoryAround).toBe(1);
@@ -91,11 +91,11 @@ test('loads and reveals old shared media outside the current history window', as
 test('a slow message jump cannot take over a newer chat selection', async ({ page }) => {
   await page.goto('/?scenario=held-history-around');
   await selectAlice(page);
-  await page.getByRole('button', { name: /Media.*128/ }).click();
+  await page.getByRole('button', { name: /Photos.*128/ }).click();
   await page.getByRole('button', { name: /Go to media message old-fixture.jpg/ }).click();
   await expect.poll(async () => (await fixtureStats(page))?.getHistoryAround ?? 0).toBe(1);
 
-  await page.getByRole('button', { name: /Release Channel/ }).click();
+  await chatButton(page, /Release Channel/).click();
   await expect(page.locator('.chat-header')).toContainText('Release Channel');
   await expect(page.getByTestId('message-scroller')).toContainText('Release notes are ready');
 

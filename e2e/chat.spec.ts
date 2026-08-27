@@ -92,7 +92,7 @@ test('keeps outgoing message bubbles dark and distinct from incoming messages', 
 
 test('uses global media totals and only renders working details controls', async ({ page }) => {
   const details = page.locator('aside.details-pane');
-  await expect(details).toContainText('Media');
+  await expect(details).toContainText('Photos');
   await expect(details).toContainText('128');
   await expect(details).toContainText('16');
   await expect(details).toContainText('44');

@@ -41,6 +41,7 @@ function snapshot(messages: TelegramMessage[] = [], pending: PendingSend[] = [])
     activities: [],
     expressionRevision: 0,
     botCommandsRevision: 0,
+    groupMembersRevision: 0,
   };
 }
 

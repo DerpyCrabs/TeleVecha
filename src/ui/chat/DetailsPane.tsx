@@ -1,6 +1,10 @@
 import FileText from 'lucide-solid/icons/file-text';
+import FileImage from 'lucide-solid/icons/file-image';
+import Headphones from 'lucide-solid/icons/headphones';
 import Image from 'lucide-solid/icons/image';
 import Link from 'lucide-solid/icons/link';
+import Mic from 'lucide-solid/icons/mic';
+import Video from 'lucide-solid/icons/video';
 import Hand from 'lucide-solid/icons/hand';
 import PanelRightClose from 'lucide-solid/icons/panel-right-close';
 import Pencil from 'lucide-solid/icons/pencil';
@@ -136,20 +140,40 @@ export function DetailsPane(props: DetailsPaneProps) {
           </section>
         </Show>
         <section class="p-2">
-          <button class="detail-row" onClick={() => props.openShared('media')}>
+          <button class="detail-row" onClick={() => props.openShared('photos')}>
             <Image size={17} />
-            <span>Media</span>
-            <b>{props.counts?.media ?? '…'}</b>
+            <span>Photos</span>
+            <b>{props.counts?.photos ?? '…'}</b>
+          </button>
+          <button class="detail-row" onClick={() => props.openShared('videos')}>
+            <Video size={17} />
+            <span>Videos</span>
+            <b>{props.counts?.videos ?? '…'}</b>
           </button>
           <button class="detail-row" onClick={() => props.openShared('files')}>
             <FileText size={17} />
             <span>Files</span>
             <b>{props.counts?.files ?? '…'}</b>
           </button>
+          <button class="detail-row" onClick={() => props.openShared('audio')}>
+            <Headphones size={17} />
+            <span>Audio files</span>
+            <b>{props.counts?.audio ?? '…'}</b>
+          </button>
           <button class="detail-row" onClick={() => props.openShared('links')}>
             <Link size={17} />
             <span>Links</span>
             <b>{props.counts?.links ?? '…'}</b>
+          </button>
+          <button class="detail-row" onClick={() => props.openShared('voice')}>
+            <Mic size={17} />
+            <span>Voice messages</span>
+            <b>{props.counts?.voice ?? '…'}</b>
+          </button>
+          <button class="detail-row" onClick={() => props.openShared('gifs')}>
+            <FileImage size={17} />
+            <span>GIFs</span>
+            <b>{props.counts?.gifs ?? '…'}</b>
           </button>
         </section>
         <Show when={props.chat.kind === 'user' && props.userDetails}>

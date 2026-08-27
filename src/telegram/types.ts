@@ -267,7 +267,7 @@ export interface TelegramSearchOffset {
   rate?: number | undefined;
 }
 
-export type SharedMediaKind = 'media' | 'files' | 'links';
+export type SharedMediaKind = 'photos' | 'videos' | 'files' | 'audio' | 'links' | 'voice' | 'gifs';
 export type TelegramActivityKind = 'typing' | 'uploading' | 'recording' | 'choosing-sticker';
 
 export interface TelegramActivity {
@@ -472,9 +472,13 @@ export interface HistoryPage {
 }
 
 export interface SharedMediaCounts {
-  media: number;
+  photos: number;
+  videos: number;
   files: number;
+  audio: number;
   links: number;
+  voice: number;
+  gifs: number;
 }
 
 export interface TransportMutationResult {
@@ -737,6 +741,7 @@ export interface EngineSnapshot {
   activities: TelegramActivity[];
   expressionRevision: number;
   botCommandsRevision: number;
+  groupMembersRevision: number;
   authStep?: 'phone' | 'code' | 'password' | undefined;
   codeViaApp?: boolean | undefined;
   historyError?: string | undefined;

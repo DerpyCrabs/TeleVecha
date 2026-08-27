@@ -137,7 +137,9 @@ test('switches chats and updates messages, header, details, and global counts to
 
   await expect(page.getByTestId('message-scroller')).toContainText('Release notes are ready');
   await expect(page.getByTestId('conversation-header')).toContainText('Release Channel');
-  await expect(page.locator('aside.details-pane')).toContainText('Media7Files3Links12');
+  await expect(page.locator('aside.details-pane')).toContainText(
+    'Photos7Videos2Files3Audio files1Links12Voice messages4GIFs2',
+  );
   await expect(page.getByTestId('message-scroller')).not.toContainText('Fixture message 79');
 });
 

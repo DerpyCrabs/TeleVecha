@@ -32,6 +32,29 @@ test('does not treat channels as bot-command chats', async ({ page }) => {
   expect((await fixtureStats(page))?.getBotCommands).toBe(0);
 });
 
+test('does not show bot commands in an ordinary group without published commands', async ({
+  page,
+}) => {
+  await openReady(page);
+  await page.evaluate(() => {
+    const transport = window.__televechaRuntimes?.get('fixture:default')?.transport;
+    if (!transport) throw new Error('Fixture transport is unavailable');
+    const original = transport.getBotCommands?.bind(transport);
+    transport.getBotCommands = async (peer) => {
+      const commands = (await original?.(peer)) ?? [];
+      return peer.id === 'g:303' ? [] : commands;
+    };
+  });
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Fixture Group/ })
+    .click();
+
+  await expect.poll(async () => (await fixtureStats(page))?.getBotCommands).toBe(1);
+  await expect(page.getByRole('button', { name: 'Commands' })).toHaveCount(0);
+  await expect(page.locator('.bot-command-bar')).toHaveCount(0);
+});
+
 test('groups channel posts by author and keeps the avatar on the last post', async ({ page }) => {
   await openReady(page);
   await page

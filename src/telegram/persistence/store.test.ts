@@ -306,6 +306,31 @@ describe('IndexedDbCacheStore', () => {
     expect(await store.loadBlob('avatar:u:1:1')).toBeUndefined();
   });
 
+  it('persists peer metadata and removes it with the disposable cache', async () => {
+    const name = databaseName();
+    const store = new IndexedDbCacheStore(name);
+    const pinned = [{ ...cachedMessage(peer, 7), pinned: true }];
+    const members = [
+      {
+        peer: { id: 'u:2', kind: 'user' as const },
+        title: 'Member',
+        initials: 'M',
+        color: '#123456',
+        hasAvatar: false,
+      },
+    ];
+    await store.savePinnedMessages(peer.id, pinned);
+    await store.saveGroupMembers(peer.id, members);
+
+    const reopened = new IndexedDbCacheStore(name);
+    await expect(reopened.loadPinnedMessages(peer.id)).resolves.toMatchObject({ value: pinned });
+    await expect(reopened.loadGroupMembers(peer.id)).resolves.toMatchObject({ value: members });
+
+    await reopened.clearCacheData();
+    await expect(reopened.loadPinnedMessages(peer.id)).resolves.toBeUndefined();
+    await expect(reopened.loadGroupMembers(peer.id)).resolves.toBeUndefined();
+  });
+
   it('supports peer-scoped and global message deletion', async () => {
     const store = new IndexedDbCacheStore(databaseName());
     await store.replaceMessages(peer.id, [cachedMessage(peer, 1), cachedMessage(peer, 2)]);

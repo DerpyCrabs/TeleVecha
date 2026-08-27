@@ -454,6 +454,7 @@ export function App(props: AppProps) {
   };
   let groupMembersLoadGeneration = 0;
   createEffect(() => {
+    void snapshot().groupMembersRevision;
     const open = detailsOpen();
     const peerId = activeChatId();
     const kind = activeChat().kind;
@@ -2367,20 +2368,13 @@ export function App(props: AppProps) {
             when={
               activeChatId() !== 'empty' &&
               (activeChat().bot ||
-                activeChat().kind === 'group' ||
-                bot.commandsLoading() ||
                 bot.commands().length > 0 ||
                 Boolean(visibleReplyKeyboard()?.keyboard.rows.some((row) => row.length > 0)))
             }
           >
             <BotControls
               isBot={Boolean(activeChat().bot)}
-              showCommands={Boolean(
-                activeChat().bot ||
-                activeChat().kind === 'group' ||
-                bot.commandsLoading() ||
-                bot.commands().length > 0,
-              )}
+              showCommands={Boolean(activeChat().bot || bot.commands().length > 0)}
               started={botStarted()}
               enabled={canSend()}
               starting={bot.starting()}

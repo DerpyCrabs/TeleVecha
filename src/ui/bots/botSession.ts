@@ -114,6 +114,8 @@ export function createBotSession(options: BotSessionOptions) {
     setUrlAuthBusy(false);
     setInlineSwitch(undefined);
     if (noticeTimer) clearTimeout(noticeTimer);
+    const dialog = options.activeDialog();
+    if (dialog?.peer.kind === 'group') void loadCommands().catch(() => undefined);
   });
 
   let observedCommandsRevision = options.snapshot().botCommandsRevision;

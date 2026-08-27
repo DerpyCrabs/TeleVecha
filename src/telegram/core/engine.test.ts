@@ -17,9 +17,11 @@ import type {
   SendAlbumOptions,
   SendFileOptions,
   SendTextResult,
+  SharedMediaCounts,
   SyncCursor,
   TelegramCredentials,
   TelegramDialog,
+  TelegramGroupMember,
   TelegramMessage,
   TelegramPeer,
   TelegramPeerSearchResult,
@@ -31,6 +33,16 @@ import type {
   TransportUpdateBatch,
   TransportMutationResult,
 } from '../types';
+
+const sharedCounts = (value: number): SharedMediaCounts => ({
+  photos: value,
+  videos: value,
+  files: value,
+  audio: value,
+  links: value,
+  voice: value,
+  gifs: value,
+});
 
 const peer: TelegramPeer = { id: 'peer-1', kind: 'user' };
 const dialog: TelegramDialog = {
@@ -89,6 +101,8 @@ class MemoryStore implements CacheStore {
   draftRevisions: Record<string, number> = {};
   outbox: PendingSend[] = [];
   blobs = new Map<string, Blob>();
+  pinnedMessages = new Map<string, { value: TelegramMessage[]; savedAt: number }>();
+  groupMembers = new Map<string, { value: TelegramGroupMember[]; savedAt: number }>();
   lastPeerId: string | undefined;
   preparedOutboxBytes: number[] = [];
 
@@ -120,6 +134,8 @@ class MemoryStore implements CacheStore {
     this.draftRevisions = {};
     this.outbox = [];
     this.blobs.clear();
+    this.pinnedMessages.clear();
+    this.groupMembers.clear();
     this.lastPeerId = undefined;
   }
   async clearCacheData() {
@@ -128,6 +144,8 @@ class MemoryStore implements CacheStore {
     this.dialogs = [];
     this.messages = [];
     this.blobs.clear();
+    this.pinnedMessages.clear();
+    this.groupMembers.clear();
     this.lastPeerId = undefined;
   }
   async prepareOutboxWrite(bytes: number, _forceEviction?: boolean) {
@@ -150,6 +168,8 @@ class MemoryStore implements CacheStore {
     this.drafts = {};
     this.draftRevisions = {};
     this.blobs.clear();
+    this.pinnedMessages.clear();
+    this.groupMembers.clear();
     this.lastPeerId = undefined;
     this.outbox = this.outbox.map((send) =>
       send.accountId
@@ -221,6 +241,24 @@ class MemoryStore implements CacheStore {
       (message) =>
         (peerId !== undefined && message.peerId !== peerId) || !messageIds.includes(message.id),
     );
+  }
+  async loadPinnedMessages(peerId: string) {
+    return this.pinnedMessages.get(peerId);
+  }
+  async savePinnedMessages(peerId: string, messages: TelegramMessage[]) {
+    this.pinnedMessages.set(peerId, { value: messages, savedAt: Date.now() });
+  }
+  async deletePinnedMessages(peerId: string) {
+    this.pinnedMessages.delete(peerId);
+  }
+  async loadGroupMembers(peerId: string) {
+    return this.groupMembers.get(peerId);
+  }
+  async saveGroupMembers(peerId: string, members: TelegramGroupMember[]) {
+    this.groupMembers.set(peerId, { value: members, savedAt: Date.now() });
+  }
+  async deleteGroupMembers(peerId: string) {
+    this.groupMembers.delete(peerId);
   }
   async loadDrafts() {
     return this.drafts;
@@ -300,6 +338,8 @@ class FakeTransport implements TelegramTransport {
   botStartCalls: Array<{ startParam: string; randomId: string }> = [];
   botCallbackCalls: Array<{ messageId: number; data: number[] }> = [];
   sharedMediaCalls = 0;
+  pinnedMessageCalls = 0;
+  groupMemberCalls = 0;
   stickerPackCalls = 0;
   stickerPacks: import('../types').TelegramStickerPack[] = [];
   sentReplies: Array<TelegramReplyTarget | undefined> = [];
@@ -381,7 +421,7 @@ class FakeTransport implements TelegramTransport {
   }
   async getSharedMediaCounts(_peer: TelegramPeer) {
     this.sharedMediaCalls += 1;
-    return { media: 12, files: 3, links: 4 };
+    return { ...sharedCounts(0), photos: 12, files: 3, links: 4 };
   }
   async getSharedMedia() {
     return { messages: [dialog.topMessage!], hasMore: false };
@@ -391,7 +431,20 @@ class FakeTransport implements TelegramTransport {
     return { messages: [dialog.topMessage!], hasMore: false };
   }
   async getPinnedMessages(_peer: TelegramPeer): Promise<TelegramMessage[]> {
+    this.pinnedMessageCalls += 1;
     return this.pinnedMessages;
+  }
+  async getGroupMembers(_peer: TelegramPeer): Promise<TelegramGroupMember[]> {
+    this.groupMemberCalls += 1;
+    return [
+      {
+        peer: { id: 'member-1', kind: 'user' },
+        title: 'Member One',
+        initials: 'MO',
+        color: '#123456',
+        hasAvatar: false,
+      },
+    ];
   }
   async setMuted(_peer: TelegramPeer, muted: boolean) {
     this.muteCalls.push(muted);
@@ -725,7 +778,7 @@ describe('MessagingEngine', () => {
     await engine.start(credentials);
     await engine.selectChat(peer.id);
 
-    await expect(engine.getSharedMedia('media')).resolves.toEqual({
+    await expect(engine.getSharedMedia('photos')).resolves.toEqual({
       messages: [dialog.topMessage],
       hasMore: false,
     });
@@ -787,6 +840,100 @@ describe('MessagingEngine', () => {
     await vi.waitFor(() =>
       expect(engine.snapshot().pinnedMessages.map(({ id }) => id)).toEqual([6, 7]),
     );
+    expect(transport.pinnedMessageCalls).toBe(2);
+    await engine.stop();
+  });
+
+  it('reuses cached pinned messages and group members across engine instances', async () => {
+    const store = new MemoryStore();
+    const transport = new FakeTransport();
+    const groupPeer: TelegramPeer = { id: 'group-1', kind: 'group' };
+
+    const first = new MessagingEngine(transport, store);
+    await first.start(credentials);
+    await first.selectChat(peer.id);
+    await vi.waitFor(() => expect(first.snapshot().pinnedMessages).toHaveLength(1));
+    await expect(first.getGroupMembers(groupPeer)).resolves.toHaveLength(1);
+    await expect(first.getGroupMembers(groupPeer)).resolves.toHaveLength(1);
+    expect(transport.pinnedMessageCalls).toBe(1);
+    expect(transport.groupMemberCalls).toBe(1);
+    await first.stop();
+
+    const second = new MessagingEngine(transport, store);
+    await second.start(credentials);
+    await second.selectChat(peer.id);
+    await vi.waitFor(() => expect(second.snapshot().pinnedMessages).toHaveLength(1));
+    await expect(second.getGroupMembers(groupPeer)).resolves.toHaveLength(1);
+    expect(transport.pinnedMessageCalls).toBe(1);
+    expect(transport.groupMemberCalls).toBe(1);
+    await second.stop();
+  });
+
+  it('returns stale group members immediately and refreshes them in the background', async () => {
+    const store = new MemoryStore();
+    const transport = new FakeTransport();
+    const groupPeer: TelegramPeer = { id: 'group-1', kind: 'group' };
+    store.groupMembers.set(groupPeer.id, {
+      value: [
+        {
+          peer: { id: 'cached-member', kind: 'user' },
+          title: 'Cached Member',
+          initials: 'CM',
+          color: '#654321',
+          hasAvatar: false,
+        },
+      ],
+      savedAt: 0,
+    });
+
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+
+    await expect(engine.getGroupMembers(groupPeer)).resolves.toEqual([
+      expect.objectContaining({ title: 'Cached Member' }),
+    ]);
+    await vi.waitFor(() =>
+      expect(store.groupMembers.get(groupPeer.id)?.value).toEqual([
+        expect.objectContaining({ title: 'Member One' }),
+      ]),
+    );
+    expect(transport.groupMemberCalls).toBe(1);
+    await engine.stop();
+  });
+
+  it('invalidates cached group members when the membership changes', async () => {
+    const store = new MemoryStore();
+    const transport = new FakeTransport();
+    const groupPeer: TelegramPeer = { id: 'group-1', kind: 'group' };
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+    await engine.getGroupMembers(groupPeer);
+    const revision = engine.snapshot().groupMembersRevision;
+
+    transport.emit({
+      type: 'new-message',
+      pts: 21,
+      ptsCount: 1,
+      message: {
+        id: 8,
+        peerId: groupPeer.id,
+        senderId: peer.id,
+        text: '',
+        date: 101,
+        outgoing: false,
+        service: {
+          kind: 'users-added',
+          text: 'Member Two joined the group',
+          targetUserIds: ['member-2'],
+        },
+      },
+    });
+
+    await vi.waitFor(() =>
+      expect(engine.snapshot().groupMembersRevision).toBeGreaterThan(revision),
+    );
+    await engine.getGroupMembers(groupPeer);
+    expect(transport.groupMemberCalls).toBe(2);
     await engine.stop();
   });
 
@@ -1417,8 +1564,8 @@ describe('MessagingEngine', () => {
 
   it('keeps latest-state shared-media counts when an older request resolves last', async () => {
     const oldCountsStarted = deferred<void>();
-    const oldCounts = deferred<{ media: number; files: number; links: number }>();
-    const latestCounts = { media: 90, files: 12, links: 7 };
+    const oldCounts = deferred<SharedMediaCounts>();
+    const latestCounts = { ...sharedCounts(0), photos: 90, files: 12, links: 7 };
     class RefreshingCountsTransport extends FakeTransport {
       countRequests = 0;
 
@@ -1447,7 +1594,7 @@ describe('MessagingEngine', () => {
 
     await engine.refreshUpdates();
     expect(engine.snapshot().sharedMediaCounts).toEqual(latestCounts);
-    oldCounts.resolve({ media: 1, files: 1, links: 1 });
+    oldCounts.resolve(sharedCounts(1));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(engine.snapshot().sharedMediaCounts).toEqual(latestCounts);
@@ -2784,8 +2931,8 @@ describe('MessagingEngine', () => {
       title: 'Second',
       topMessage: { ...dialog.topMessage!, peerId: secondPeer.id },
     };
-    const firstCounts = deferred<{ media: number; files: number; links: number }>();
-    const secondCounts = deferred<{ media: number; files: number; links: number }>();
+    const firstCounts = deferred<SharedMediaCounts>();
+    const secondCounts = deferred<SharedMediaCounts>();
     class SlowCountsTransport extends FakeTransport {
       override async getDialogs() {
         return { dialogs: [dialog, secondDialog] };
@@ -2798,12 +2945,11 @@ describe('MessagingEngine', () => {
     await engine.start(credentials);
     await engine.selectChat(peer.id);
     await engine.selectChat(secondPeer.id);
-    secondCounts.resolve({ media: 2, files: 3, links: 4 });
-    firstCounts.resolve({ media: 100, files: 100, links: 100 });
+    const expectedCounts = { ...sharedCounts(0), photos: 2, files: 3, links: 4 };
+    secondCounts.resolve(expectedCounts);
+    firstCounts.resolve(sharedCounts(100));
 
-    await vi.waitFor(() =>
-      expect(engine.snapshot().sharedMediaCounts).toEqual({ media: 2, files: 3, links: 4 }),
-    );
+    await vi.waitFor(() => expect(engine.snapshot().sharedMediaCounts).toEqual(expectedCounts));
     await engine.stop();
   });
 
@@ -5082,7 +5228,7 @@ describe('MessagingEngine', () => {
 
   it('ignores a shared-media error that arrives after stop', async () => {
     const started = deferred<void>();
-    const counts = deferred<{ media: number; files: number; links: number }>();
+    const counts = deferred<SharedMediaCounts>();
     class SlowSharedMediaTransport extends FakeTransport {
       override getSharedMediaCounts() {
         started.resolve(undefined);

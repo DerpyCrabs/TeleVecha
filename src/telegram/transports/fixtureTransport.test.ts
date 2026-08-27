@@ -45,16 +45,18 @@ describe('FixtureTelegramTransport contracts', () => {
       hasMore: true,
     });
 
-    const firstMedia = await target.getSharedMedia(alice, 'media', 1);
+    const firstMedia = await target.getSharedMedia(alice, 'photos', 1);
     expect(firstMedia).toMatchObject({
       messages: [{ id: 78 }],
       hasMore: true,
       nextOffset: { messageId: 78 },
     });
-    await expect(target.getSharedMedia(alice, 'media', 1, firstMedia.nextOffset)).resolves.toEqual({
-      messages: [expect.objectContaining({ id: 5 })],
-      hasMore: false,
-    });
+    await expect(target.getSharedMedia(alice, 'photos', 1, firstMedia.nextOffset)).resolves.toEqual(
+      {
+        messages: [expect.objectContaining({ id: 5 })],
+        hasMore: false,
+      },
+    );
     expect(window.__televechaFixture?.stats.searchMessages).toBe(2);
     expect(window.__televechaFixture?.stats.getSharedMedia).toBe(2);
   });

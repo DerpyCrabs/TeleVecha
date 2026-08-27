@@ -6,6 +6,7 @@ import type {
   PendingSend,
   SyncCursor,
   TelegramDialog,
+  TelegramGroupMember,
   TelegramMessage,
 } from '../types';
 
@@ -17,6 +18,13 @@ const QUOTA_BLOB_EVICTION_COUNT = 32;
 const QUOTA_MESSAGE_EVICTION_COUNT = 500;
 const LEGACY_ACCOUNT_ID = 'legacy-unowned';
 const DEFAULT_MESSAGE_LOAD_LIMIT = 500;
+const PINNED_MESSAGES_KEY_PREFIX = 'pinned-messages:';
+const GROUP_MEMBERS_KEY_PREFIX = 'group-members:';
+
+export interface TimedCacheValue<T> {
+  value: T;
+  savedAt: number;
+}
 
 export interface LatestStateCache {
   cursor: SyncCursor;
@@ -97,6 +105,12 @@ export interface CacheStore {
   putMessages(messages: CachedMessage[]): Promise<void>;
   putMessage(message: CachedMessage): Promise<void>;
   deleteMessages(peerId: string | undefined, messageIds: number[]): Promise<void>;
+  loadPinnedMessages?(peerId: string): Promise<TimedCacheValue<TelegramMessage[]> | undefined>;
+  savePinnedMessages?(peerId: string, messages: TelegramMessage[]): Promise<void>;
+  deletePinnedMessages?(peerId: string): Promise<void>;
+  loadGroupMembers?(peerId: string): Promise<TimedCacheValue<TelegramGroupMember[]> | undefined>;
+  saveGroupMembers?(peerId: string, members: TelegramGroupMember[]): Promise<void>;
+  deleteGroupMembers?(peerId: string): Promise<void>;
   saveDraft(peerId: string, text: string, revision?: number): Promise<void>;
   commitOutbox(sends: PendingSend | PendingSend[], draft?: DraftReservation): Promise<void>;
   deletePending(id: string): Promise<void>;
@@ -186,6 +200,10 @@ export class IndexedDbCacheStore implements CacheStore {
     const database = await this.database;
     const transaction = database.transaction(['meta', 'dialogs', 'messages', 'files'], 'readwrite');
     const meta = transaction.objectStore('meta');
+    const metadataKeys = (await meta.getAllKeys()).filter(
+      (key) =>
+        key.startsWith(PINNED_MESSAGES_KEY_PREFIX) || key.startsWith(GROUP_MEMBERS_KEY_PREFIX),
+    );
     await Promise.all([
       transaction.objectStore('dialogs').clear(),
       transaction.objectStore('messages').clear(),
@@ -193,6 +211,7 @@ export class IndexedDbCacheStore implements CacheStore {
       meta.delete('cursor'),
       meta.delete('epoch'),
       meta.delete('last-peer-id'),
+      ...metadataKeys.map((key) => meta.delete(key)),
     ]);
     await transaction.done;
   }
@@ -245,6 +264,10 @@ export class IndexedDbCacheStore implements CacheStore {
     const meta = transaction.objectStore('meta');
     const outbox = transaction.objectStore('outbox');
     const previousAccountId = (await meta.get('account-id')) as string | undefined;
+    const metadataKeys = (await meta.getAllKeys()).filter(
+      (key) =>
+        key.startsWith(PINNED_MESSAGES_KEY_PREFIX) || key.startsWith(GROUP_MEMBERS_KEY_PREFIX),
+    );
     const pending = await outbox.getAll();
     await Promise.all([
       transaction.objectStore('dialogs').clear(),
@@ -254,6 +277,7 @@ export class IndexedDbCacheStore implements CacheStore {
       meta.delete('cursor'),
       meta.delete('epoch'),
       meta.delete('last-peer-id'),
+      ...metadataKeys.map((key) => meta.delete(key)),
       ...pending
         .filter((send) => !send.accountId)
         .map((send) =>
@@ -416,6 +440,30 @@ export class IndexedDbCacheStore implements CacheStore {
     await transaction.done;
   }
 
+  loadPinnedMessages(peerId: string) {
+    return this.loadTimedValue<TelegramMessage[]>(`${PINNED_MESSAGES_KEY_PREFIX}${peerId}`);
+  }
+
+  savePinnedMessages(peerId: string, messages: TelegramMessage[]) {
+    return this.saveTimedValue(`${PINNED_MESSAGES_KEY_PREFIX}${peerId}`, messages);
+  }
+
+  async deletePinnedMessages(peerId: string) {
+    await (await this.database).delete('meta', `${PINNED_MESSAGES_KEY_PREFIX}${peerId}`);
+  }
+
+  loadGroupMembers(peerId: string) {
+    return this.loadTimedValue<TelegramGroupMember[]>(`${GROUP_MEMBERS_KEY_PREFIX}${peerId}`);
+  }
+
+  saveGroupMembers(peerId: string, members: TelegramGroupMember[]) {
+    return this.saveTimedValue(`${GROUP_MEMBERS_KEY_PREFIX}${peerId}`, members);
+  }
+
+  async deleteGroupMembers(peerId: string) {
+    await (await this.database).delete('meta', `${GROUP_MEMBERS_KEY_PREFIX}${peerId}`);
+  }
+
   async loadDrafts() {
     const drafts = await (await this.database).getAll('drafts');
     return Object.fromEntries(drafts.map(({ peerId, text }) => [peerId, text]));
@@ -512,6 +560,14 @@ export class IndexedDbCacheStore implements CacheStore {
 
   async saveLastPeerId(peerId: string) {
     await (await this.database).put('meta', peerId, 'last-peer-id');
+  }
+
+  private async loadTimedValue<T>(key: string) {
+    return (await this.database).get('meta', key) as Promise<TimedCacheValue<T> | undefined>;
+  }
+
+  private async saveTimedValue<T>(key: string, value: T) {
+    await (await this.database).put('meta', { value, savedAt: Date.now() }, key);
   }
 
   private isQuotaError(error: unknown) {

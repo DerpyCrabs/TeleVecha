@@ -656,33 +656,22 @@ export class WebAGramJsTransport implements TelegramTransport {
   }
 
   async getSharedMediaCounts(peer: TelegramPeer) {
-    const count = async (filter: Api.TypeMessagesFilter) => {
-      const result = await this.getClient().invoke(
-        new Api.messages.Search({
-          peer: this.inputPeer(peer),
-          q: '',
-          filter,
-          minDate: 0,
-          maxDate: 0,
-          offsetId: 0,
-          addOffset: 0,
-          limit: 1,
-          maxId: 0,
-          minId: 0,
-          hash: 0n,
-        }),
-      );
-      if (!(result instanceof Api.messages.MessagesNotModified)) {
-        this.rememberEntities(result.users, result.chats);
-      }
-      return 'count' in result ? result.count : result.messages.length;
+    const filters = this.sharedMediaFilters();
+    const counters = await this.getClient().invoke(
+      new Api.messages.GetSearchCounters({
+        peer: this.inputPeer(peer),
+        filters: Object.values(filters),
+      }),
+    );
+    return {
+      photos: counters[0]?.count ?? 0,
+      videos: counters[1]?.count ?? 0,
+      files: counters[2]?.count ?? 0,
+      audio: counters[3]?.count ?? 0,
+      links: counters[4]?.count ?? 0,
+      voice: counters[5]?.count ?? 0,
+      gifs: counters[6]?.count ?? 0,
     };
-    const [media, files, links] = await Promise.all([
-      count(new Api.InputMessagesFilterPhotoVideo()),
-      count(new Api.InputMessagesFilterDocument()),
-      count(new Api.InputMessagesFilterUrl()),
-    ]);
-    return { media, files, links };
   }
 
   async getSharedMedia(
@@ -691,11 +680,7 @@ export class WebAGramJsTransport implements TelegramTransport {
     limit: number,
     offset?: TelegramSearchOffset,
   ): Promise<TelegramSearchPage> {
-    const filters = {
-      media: new Api.InputMessagesFilterPhotoVideo(),
-      files: new Api.InputMessagesFilterDocument(),
-      links: new Api.InputMessagesFilterUrl(),
-    } satisfies Record<SharedMediaKind, Api.TypeMessagesFilter>;
+    const filters = this.sharedMediaFilters();
     const result = await this.getClient().invoke(
       new Api.messages.Search({
         peer: this.inputPeer(peer),
@@ -716,6 +701,18 @@ export class WebAGramJsTransport implements TelegramTransport {
     }
     this.rememberEntities(result.users, result.chats);
     return this.mapSearchPage(result, limit, false);
+  }
+
+  private sharedMediaFilters() {
+    return {
+      photos: new Api.InputMessagesFilterPhotos(),
+      videos: new Api.InputMessagesFilterVideo(),
+      files: new Api.InputMessagesFilterDocument(),
+      audio: new Api.InputMessagesFilterMusic(),
+      links: new Api.InputMessagesFilterUrl(),
+      voice: new Api.InputMessagesFilterRoundVoice(),
+      gifs: new Api.InputMessagesFilterGif(),
+    } satisfies Record<SharedMediaKind, Api.TypeMessagesFilter>;
   }
 
   async searchMessages(

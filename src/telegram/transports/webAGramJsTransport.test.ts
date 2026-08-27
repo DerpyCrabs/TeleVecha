@@ -2076,47 +2076,66 @@ describe('WebAGramJsTransport mapping', () => {
     expect(invoke.mock.calls[0]?.[0]).toBeInstanceOf(Api.messages.GetPeerDialogs);
   });
 
-  it('requests global photo, document, and link counts', async () => {
+  it('requests all Telegram Desktop shared-content counters in one RPC', async () => {
     const target = transport();
+    const filters = [
+      new Api.InputMessagesFilterPhotos(),
+      new Api.InputMessagesFilterVideo(),
+      new Api.InputMessagesFilterDocument(),
+      new Api.InputMessagesFilterMusic(),
+      new Api.InputMessagesFilterUrl(),
+      new Api.InputMessagesFilterRoundVoice(),
+      new Api.InputMessagesFilterGif(),
+    ];
     const invoke = vi
       .fn()
-      .mockResolvedValueOnce(
-        new Api.messages.MessagesSlice({
-          count: 12,
-          messages: [],
-          topics: [],
-          chats: [],
-          users: [],
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Api.messages.MessagesSlice({
-          count: 3,
-          messages: [],
-          topics: [],
-          chats: [],
-          users: [],
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Api.messages.MessagesSlice({
-          count: 4,
-          messages: [],
-          topics: [],
-          chats: [],
-          users: [],
-        }),
+      .mockResolvedValue(
+        filters.map(
+          (filter, index) => new Api.messages.SearchCounter({ filter, count: index + 1 }),
+        ),
       );
     (target as unknown as TransportInternals).client = { invoke };
 
     await expect(
       target.getSharedMediaCounts({ id: 'u:11', kind: 'user', accessHash: '91' }),
-    ).resolves.toEqual({ media: 12, files: 3, links: 4 });
-    expect(invoke.mock.calls.map(([request]) => (request as { filter: unknown }).filter)).toEqual([
-      expect.any(Api.InputMessagesFilterPhotoVideo),
-      expect.any(Api.InputMessagesFilterDocument),
-      expect.any(Api.InputMessagesFilterUrl),
-    ]);
+    ).resolves.toEqual({ photos: 1, videos: 2, files: 3, audio: 4, links: 5, voice: 6, gifs: 7 });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0]).toMatchObject({
+      filters: [
+        expect.any(Api.InputMessagesFilterPhotos),
+        expect.any(Api.InputMessagesFilterVideo),
+        expect.any(Api.InputMessagesFilterDocument),
+        expect.any(Api.InputMessagesFilterMusic),
+        expect.any(Api.InputMessagesFilterUrl),
+        expect.any(Api.InputMessagesFilterRoundVoice),
+        expect.any(Api.InputMessagesFilterGif),
+      ],
+    });
+  });
+
+  it.each([
+    ['photos', Api.InputMessagesFilterPhotos],
+    ['videos', Api.InputMessagesFilterVideo],
+    ['files', Api.InputMessagesFilterDocument],
+    ['audio', Api.InputMessagesFilterMusic],
+    ['links', Api.InputMessagesFilterUrl],
+    ['voice', Api.InputMessagesFilterRoundVoice],
+    ['gifs', Api.InputMessagesFilterGif],
+  ] as const)('uses the Telegram %s filter when loading shared content', async (kind, Filter) => {
+    const target = transport();
+    const invoke = vi.fn().mockResolvedValue(
+      new Api.messages.Messages({
+        messages: [],
+        topics: [],
+        chats: [],
+        users: [],
+      }),
+    );
+    (target as unknown as TransportInternals).client = { invoke };
+
+    await target.getSharedMedia({ id: 'u:11', kind: 'user', accessHash: '91' }, kind, 20);
+
+    expect(invoke.mock.calls[0]?.[0]).toMatchObject({ filter: expect.any(Filter) });
   });
 
   it('uses Telegram RPCs for search, shared content, pins, mute, and typing', async () => {
@@ -2186,13 +2205,13 @@ describe('WebAGramJsTransport mapping', () => {
     (target as unknown as TransportInternals).client = { invoke };
     const peer = { id: 'u:11', kind: 'user' as const, accessHash: '91' };
 
-    await expect(target.getSharedMedia(peer, 'media', 2, { messageId: 31 })).resolves.toMatchObject(
-      {
-        messages: [{ id: 30 }, { id: 29 }],
-        hasMore: true,
-        nextOffset: { messageId: 29 },
-      },
-    );
+    await expect(
+      target.getSharedMedia(peer, 'photos', 2, { messageId: 31 }),
+    ).resolves.toMatchObject({
+      messages: [{ id: 30 }, { id: 29 }],
+      hasMore: true,
+      nextOffset: { messageId: 29 },
+    });
     await expect(
       target.searchMessages('result', peer, 2, { messageId: 30 }),
     ).resolves.toMatchObject({
