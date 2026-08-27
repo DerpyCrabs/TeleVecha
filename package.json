@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vp dev",
+    "dev:e2e": "VITE_TELEVECHA_E2E=1 node scripts/playwright-server.mjs",
     "build": "vp build",
     "check": "vp check",
     "check:e2e": "tsc --noEmit -p tsconfig.e2e.json",

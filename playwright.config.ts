@@ -28,9 +28,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `VITE_TELEVECHA_E2E=1 npm run dev -- --host 127.0.0.1 --port ${port}`,
+    command: `npm run dev:e2e -- ${port}`,
     url: baseURL,
-    reuseExistingServer: false,
+    reuseExistingServer: true,
     timeout: 30_000,
   },
 });
