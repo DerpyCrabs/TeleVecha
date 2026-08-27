@@ -194,6 +194,63 @@ test('removes deleted messages from the open conversation', async ({ page }) => 
   await expect(page.locator('article[data-message-id="79"]')).toHaveCount(0);
 });
 
+test('closes the message context menu when messages change', async ({ page }) => {
+  const menu = page.getByRole('menu', { name: 'Message actions' });
+  const target = page.locator('article[data-message-id="80"]');
+
+  await target.click({ button: 'right' });
+  await expect(menu).toBeVisible();
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 81,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: 'Message that changes the layout',
+        date: 1_700_002_000,
+        outgoing: false,
+      },
+    }),
+  );
+  await expect(menu).toHaveCount(0);
+
+  await target.click({ button: 'right' });
+  await expect(menu).toBeVisible();
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'edit-message',
+      pts: 12,
+      ptsCount: 1,
+      message: {
+        id: 80,
+        peerId: 'u:101',
+        senderId: 'self',
+        text: 'Edited while the context menu was open',
+        date: 1_700_000_080,
+        outgoing: true,
+        editedAt: 1_700_002_100,
+      },
+    }),
+  );
+  await expect(menu).toHaveCount(0);
+
+  await target.click({ button: 'right' });
+  await expect(menu).toBeVisible();
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'delete-messages',
+      pts: 13,
+      ptsCount: 1,
+      peerId: 'u:101',
+      messageIds: [79],
+    }),
+  );
+  await expect(menu).toHaveCount(0);
+});
+
 test('renders a live photo caption and its standard reactions together', async ({ page }) => {
   await page.evaluate(() =>
     window.__televechaFixture?.emit({

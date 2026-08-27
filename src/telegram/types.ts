@@ -1,3 +1,5 @@
+import type { RichMessage } from '../domain/richMessage';
+
 export interface SyncCursor {
   pts: number;
   qts: number;
@@ -105,6 +107,7 @@ export interface TelegramMessage {
   links?: TelegramLink[] | undefined;
   linkPreview?: TelegramLinkPreview | undefined;
   formats?: TelegramTextFormat[] | undefined;
+  richMessage?: RichMessage | undefined;
   pinned?: boolean | undefined;
 }
 
@@ -232,8 +235,17 @@ export interface TelegramTextFormat {
     | 'pre'
     | 'spoiler'
     | 'blockquote'
-    | 'textUrl';
+    | 'expandableBlockquote'
+    | 'textUrl'
+    | 'customEmoji'
+    | 'formattedDate'
+    | 'diffInsert'
+    | 'diffReplace'
+    | 'diffDelete';
   url?: string | undefined;
+  customEmojiId?: string | undefined;
+  timestamp?: number | undefined;
+  oldText?: string | undefined;
 }
 
 export interface TelegramSearchPage {

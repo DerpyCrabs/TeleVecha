@@ -478,6 +478,177 @@ button {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+.message-body .expandable-blockquote {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  max-height: 2.8em;
+  border-left: 3px solid var(--accent);
+  padding-left: 0.5rem;
+  cursor: pointer;
+  vertical-align: bottom;
+}
+.message-body .expandable-blockquote:not(.expanded)::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  background: var(--bubble, #20242b);
+  padding-left: 0.25rem;
+  content: '\2026';
+}
+.message-body .expandable-blockquote.expanded {
+  max-height: none;
+}
+.message-body .custom-emoji,
+.rich-custom-emoji {
+  display: inline-block;
+  min-width: 1em;
+  text-align: center;
+}
+.message-body .formatted-date {
+  text-decoration: underline dotted;
+  text-underline-offset: 0.15em;
+}
+.message-body .diff-insert,
+.rich-diff {
+  background: rgb(70 180 100 / 0.22);
+}
+.message-body .diff-replace {
+  background: rgb(235 175 55 / 0.25);
+}
+.message-body .diff-delete {
+  background: rgb(220 75 75 / 0.22);
+  text-decoration: line-through;
+}
+.rich-message {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rich-message :where(h1, h2, h3, h4, h5, h6, p, blockquote, pre, figure, ul, ol) {
+  margin: 0;
+}
+.rich-message h1 {
+  font-size: 1.35rem;
+}
+.rich-message h2 {
+  font-size: 1.2rem;
+}
+.rich-message h3 {
+  font-size: 1.08rem;
+}
+.rich-message :where(h4, h5, h6) {
+  font-size: 1rem;
+}
+.rich-subtitle,
+.rich-author,
+.rich-message footer,
+.rich-message figcaption {
+  color: var(--muted);
+  font-size: 0.86em;
+}
+.rich-kicker {
+  color: var(--accent);
+  font-size: 0.76em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.rich-thinking {
+  font-style: italic;
+}
+.rich-message :where(code, pre) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.rich-message code {
+  border-radius: 0.25rem;
+  background: rgb(0 0 0 / 0.25);
+  padding: 0.08rem 0.22rem;
+}
+.rich-message pre {
+  overflow-x: auto;
+  border-radius: 0.45rem;
+  background: rgb(0 0 0 / 0.25);
+  padding: 0.65rem;
+  white-space: pre-wrap;
+}
+.rich-message blockquote,
+.rich-quote {
+  border-left: 3px solid var(--accent);
+  padding-left: 0.65rem;
+}
+.rich-pullquote {
+  border-left: 0;
+  padding: 0.5rem 1rem;
+  text-align: center;
+}
+.rich-message cite {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--muted);
+}
+.rich-message details > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.rich-spoiler {
+  border-radius: 0.2rem;
+  background: #727680;
+  color: transparent;
+  cursor: pointer;
+}
+.rich-spoiler.revealed {
+  background: rgb(114 118 128 / 0.22);
+  color: inherit;
+}
+.rich-message mark {
+  border-radius: 0.15rem;
+  background: rgb(255 210 70 / 0.32);
+  color: inherit;
+}
+.rich-message :where(ul, ol) {
+  padding-left: 1.4rem;
+}
+.rich-message li + li {
+  margin-top: 0.3rem;
+}
+.rich-message li input {
+  margin-right: 0.4rem;
+}
+.rich-list-marker {
+  margin-right: 0.3rem;
+  color: var(--muted);
+}
+.rich-table-scroll {
+  overflow-x: auto;
+}
+.rich-message table {
+  border-collapse: collapse;
+  min-width: 100%;
+}
+.rich-message caption {
+  padding-bottom: 0.35rem;
+  font-weight: 700;
+  text-align: left;
+}
+.rich-message :where(th, td) {
+  padding: 0.35rem 0.5rem;
+}
+.rich-message table.bordered :where(th, td) {
+  border: 1px solid var(--line);
+}
+.rich-message table.striped tr:nth-child(even) {
+  background: rgb(255 255 255 / 0.04);
+}
+.rich-media-placeholder,
+.rich-media > a {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  padding: 0.65rem;
+  color: var(--muted);
+}
 .message-reply {
   display: flex;
   width: 100%;
@@ -956,7 +1127,9 @@ button {
   grid-template-rows: auto minmax(0, 1fr);
   background: rgb(5 7 10 / 0.94);
   backdrop-filter: blur(12px);
+  width: 100vw;
   height: 100dvh;
+  overflow: hidden;
 }
 .media-viewer > header {
   display: flex;
@@ -967,10 +1140,20 @@ button {
   padding: 0.75rem 1rem;
   color: var(--text);
 }
-.media-viewer > header span {
+.media-viewer-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.65rem;
+}
+.media-viewer-title span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.media-viewer-title small {
+  flex: 0 0 auto;
+  color: var(--muted);
 }
 .media-viewer > header button {
   display: grid;
@@ -984,15 +1167,52 @@ button {
   color: var(--text);
 }
 .media-viewer-content {
+  position: relative;
   display: grid;
   min-width: 0;
   min-height: 0;
   place-items: center;
-  padding: 0 1.5rem 1.5rem;
+  overflow: hidden;
+  padding: 0 1.5rem max(1.5rem, env(safe-area-inset-bottom));
+}
+.media-viewer-navigation {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  translate: 0 -50%;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(9 12 17 / 0.72);
+  color: var(--text);
+  backdrop-filter: blur(0.35rem);
+}
+.media-viewer-navigation.previous {
+  left: max(0.75rem, env(safe-area-inset-left));
+}
+.media-viewer-navigation.next {
+  right: max(0.75rem, env(safe-area-inset-right));
+}
+.media-viewer-navigation[aria-disabled='true'] {
+  opacity: 0.28;
+}
+.media-viewer-navigation:not([aria-disabled='true']):hover {
+  background: rgb(35 40 50 / 0.88);
+}
+.media-viewer-navigation:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .media-viewer-content img,
 .media-viewer-content video {
   display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;

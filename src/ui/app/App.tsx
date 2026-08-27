@@ -5,6 +5,7 @@ import ChevronDown from 'lucide-solid/icons/chevron-down';
 import ChevronUp from 'lucide-solid/icons/chevron-up';
 import CircleAlert from 'lucide-solid/icons/circle-alert';
 import Clock3 from 'lucide-solid/icons/clock-3';
+import Copy from 'lucide-solid/icons/copy';
 import Forward from 'lucide-solid/icons/forward';
 import Menu from 'lucide-solid/icons/menu';
 import MessageSquareText from 'lucide-solid/icons/message-square-text';
@@ -27,6 +28,7 @@ import {
 import { createStore, reconcile, type SetStoreFunction } from 'solid-js/store';
 
 import type { ChatMessage, ChatSummary } from '../../domain/models';
+import { messageTextForClipboard } from '../../domain/messageText';
 import { telegramPeerColor } from '../../domain/peerColor';
 import type {
   EngineSnapshot,
@@ -149,6 +151,38 @@ function stableView<T extends object>(cache: Map<string, StoredView<T>>, key: st
 
 function runInBackground(task: Promise<unknown>) {
   void task.catch(() => undefined);
+}
+
+function messageLayoutRevision(messages: TelegramMessage[]) {
+  return JSON.stringify(
+    messages.map(
+      ({
+        id,
+        text,
+        editedAt,
+        groupedId,
+        replyToId,
+        replyQuote,
+        service,
+        media,
+        formats,
+        richMessage,
+        botKeyboard,
+      }) => ({
+        id,
+        text,
+        editedAt,
+        groupedId,
+        replyToId,
+        replyQuote,
+        service,
+        media,
+        formats,
+        richMessage,
+        botKeyboard,
+      }),
+    ),
+  );
 }
 
 interface AppProps {
@@ -492,6 +526,16 @@ export function App(props: AppProps) {
   });
   const activeMessageEntries = createMemo<KeyedMessageView[]>(() => {
     return presentConversation(snapshot(), activeChatId());
+  });
+  let observedMessages = snapshot().messages;
+  let observedMessageLayoutRevision = messageLayoutRevision(observedMessages);
+  createEffect(() => {
+    const messages = snapshot().messages;
+    if (messages === observedMessages) return;
+    observedMessages = messages;
+    const revision = messageLayoutRevision(messages);
+    if (revision !== observedMessageLayoutRevision) setMessageContextMenu(undefined);
+    observedMessageLayoutRevision = revision;
   });
   const activeMessages = createMemo(() => activeMessageEntries().map(({ message }) => message));
   const pendingSendForMessage = (messageId: string) =>
@@ -1512,6 +1556,11 @@ export function App(props: AppProps) {
     const menu = messageContextMenu();
     return menu ? renderedMessages().find(({ id }) => id === menu.messageId) : undefined;
   });
+  const copyMessageText = async (message: ChatMessage) => {
+    const text = messageTextForClipboard(message);
+    setMessageContextMenu(undefined);
+    if (text) await navigator.clipboard.writeText(text);
+  };
 
   const connectionNotice = createMemo(() => {
     const current = snapshot() as EngineSnapshot & { online?: boolean };
@@ -2187,6 +2236,11 @@ export function App(props: AppProps) {
                           >
                             <Reply size={15} /> Reply
                           </button>
+                          <Show when={messageTextForClipboard(target())}>
+                            <button role="menuitem" onClick={() => void copyMessageText(target())}>
+                              <Copy size={15} /> Copy text
+                            </button>
+                          </Show>
                           <button
                             role="menuitem"
                             onClick={() => {

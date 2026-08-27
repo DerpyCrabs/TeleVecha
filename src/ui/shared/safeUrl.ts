@@ -1,4 +1,4 @@
-const EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tg:']);
+const EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:', 'tg:']);
 
 export function safeExternalUrl(value: string | undefined) {
   if (!value) return undefined;

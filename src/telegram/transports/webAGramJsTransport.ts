@@ -1,4 +1,5 @@
 import { telegramPeerColor } from '../../domain/peerColor';
+import type { RichBlock, RichCaption, RichText } from '../../domain/richMessage';
 import { reportDiagnostic } from '../core/diagnostics';
 import type { CacheStore } from '../persistence/store';
 import type {
@@ -2046,6 +2047,7 @@ export class WebAGramJsTransport implements TelegramTransport {
       linkPreview:
         this.mapLinkPreview(message.media) ?? this.fallbackLinkPreview(message.message, links),
       formats: this.mapFormats(message.entities),
+      richMessage: this.mapRichMessage(message.richMessage),
       pinned: message.pinned,
     };
   }
@@ -2469,10 +2471,398 @@ export class WebAGramJsTransport implements TelegramTransport {
                     : entity instanceof Api.MessageEntitySpoiler
                       ? ('spoiler' as const)
                       : entity instanceof Api.MessageEntityBlockquote
-                        ? ('blockquote' as const)
-                        : undefined;
-      return kind ? [{ offset: entity.offset, length: entity.length, kind }] : [];
+                        ? entity.collapsed
+                          ? ('expandableBlockquote' as const)
+                          : ('blockquote' as const)
+                        : entity instanceof Api.MessageEntityCustomEmoji
+                          ? ('customEmoji' as const)
+                          : entity instanceof Api.MessageEntityFormattedDate
+                            ? ('formattedDate' as const)
+                            : entity instanceof Api.MessageEntityDiffInsert
+                              ? ('diffInsert' as const)
+                              : entity instanceof Api.MessageEntityDiffReplace
+                                ? ('diffReplace' as const)
+                                : entity instanceof Api.MessageEntityDiffDelete
+                                  ? ('diffDelete' as const)
+                                  : undefined;
+      if (!kind) return [];
+      return [
+        {
+          offset: entity.offset,
+          length: entity.length,
+          kind,
+          ...(entity instanceof Api.MessageEntityCustomEmoji
+            ? { customEmojiId: entity.documentId.toString() }
+            : {}),
+          ...(entity instanceof Api.MessageEntityFormattedDate ? { timestamp: entity.date } : {}),
+          ...(entity instanceof Api.MessageEntityDiffReplace ? { oldText: entity.oldText } : {}),
+        },
+      ];
     });
+  }
+
+  private mapRichMessage(message: Api.TypeRichMessage | undefined) {
+    if (!(message instanceof Api.RichMessage)) return undefined;
+    return {
+      blocks: message.blocks.flatMap((block) => this.mapRichBlock(block)),
+      rtl: Boolean(message.rtl),
+      partial: Boolean(message.part),
+    };
+  }
+
+  private richTextValue(text: Api.TypeRichText): string {
+    if (text instanceof Api.TextPlain) return text.text;
+    if (text instanceof Api.TextConcat)
+      return text.texts.map((part) => this.richTextValue(part)).join('');
+    if (text instanceof Api.TextCustomEmoji) return text.alt;
+    if (text instanceof Api.TextMath) return text.source;
+    if (text instanceof Api.TextImage) return '\ufffc';
+    if ('text' in text && text.text) return this.richTextValue(text.text);
+    return '';
+  }
+
+  private mapRichText(text: Api.TypeRichText): RichText {
+    if (text instanceof Api.TextPlain) return { kind: 'text', text: text.text };
+    if (text instanceof Api.TextEmpty) return { kind: 'text', text: '' };
+    if (text instanceof Api.TextConcat) {
+      return { kind: 'concat', children: text.texts.map((part) => this.mapRichText(part)) };
+    }
+    if (text instanceof Api.TextBold) return { kind: 'bold', child: this.mapRichText(text.text) };
+    if (text instanceof Api.TextItalic)
+      return { kind: 'italic', child: this.mapRichText(text.text) };
+    if (text instanceof Api.TextUnderline)
+      return { kind: 'underline', child: this.mapRichText(text.text) };
+    if (text instanceof Api.TextStrike)
+      return { kind: 'strike', child: this.mapRichText(text.text) };
+    if (text instanceof Api.TextFixed) return { kind: 'code', child: this.mapRichText(text.text) };
+    if (text instanceof Api.TextSubscript)
+      return { kind: 'subscript', child: this.mapRichText(text.text) };
+    if (text instanceof Api.TextSuperscript)
+      return { kind: 'superscript', child: this.mapRichText(text.text) };
+    if (text instanceof Api.TextMarked)
+      return { kind: 'marked', child: this.mapRichText(text.text) };
+    if (text instanceof Api.TextSpoiler)
+      return { kind: 'spoiler', child: this.mapRichText(text.text) };
+    if (text instanceof Api.TextUrl) {
+      return { kind: 'link', child: this.mapRichText(text.text), url: text.url };
+    }
+    if (text instanceof Api.TextEmail) {
+      return { kind: 'link', child: this.mapRichText(text.text), url: `mailto:${text.email}` };
+    }
+    if (text instanceof Api.TextPhone) {
+      return { kind: 'link', child: this.mapRichText(text.text), url: `tel:${text.phone}` };
+    }
+    if (text instanceof Api.TextAutoUrl) {
+      return {
+        kind: 'link',
+        child: this.mapRichText(text.text),
+        url: this.richTextValue(text.text),
+      };
+    }
+    if (text instanceof Api.TextAutoEmail) {
+      return {
+        kind: 'link',
+        child: this.mapRichText(text.text),
+        url: `mailto:${this.richTextValue(text.text)}`,
+      };
+    }
+    if (text instanceof Api.TextAutoPhone) {
+      return {
+        kind: 'link',
+        child: this.mapRichText(text.text),
+        url: `tel:${this.richTextValue(text.text)}`,
+      };
+    }
+    if (text instanceof Api.TextMentionName) {
+      return {
+        kind: 'link',
+        child: this.mapRichText(text.text),
+        url: `tg://user?id=${text.userId}`,
+      };
+    }
+    if (text instanceof Api.TextMention) {
+      const value = this.richTextValue(text.text);
+      return {
+        kind: 'link',
+        child: this.mapRichText(text.text),
+        url: value.startsWith('@') ? `https://t.me/${value.slice(1)}` : value,
+      };
+    }
+    if (text instanceof Api.TextCustomEmoji) {
+      return { kind: 'customEmoji', alt: text.alt, documentId: text.documentId.toString() };
+    }
+    if (text instanceof Api.TextImage) {
+      return { kind: 'customEmoji', alt: '\ufffc', documentId: text.documentId.toString() };
+    }
+    if (text instanceof Api.TextMath) return { kind: 'math', source: text.source };
+    if (text instanceof Api.TextAnchor) {
+      return { kind: 'anchor', child: this.mapRichText(text.text), name: text.name };
+    }
+    if (text instanceof Api.TextDate) {
+      return { kind: 'date', child: this.mapRichText(text.text), timestamp: text.date };
+    }
+    if (text instanceof Api.TextDiff) {
+      return {
+        kind: 'diff',
+        child: this.mapRichText(text.text),
+        oldText: this.mapRichText(text.oldText),
+      };
+    }
+    if ('text' in text && text.text) return this.mapRichText(text.text);
+    return { kind: 'text', text: '' };
+  }
+
+  private mapRichCaption(caption: Api.TypePageCaption): RichCaption {
+    return {
+      text: this.mapRichText(caption.text),
+      ...(caption.credit instanceof Api.TextEmpty
+        ? {}
+        : { credit: this.mapRichText(caption.credit) }),
+    };
+  }
+
+  private mapRichBlock(block: Api.TypePageBlock): RichBlock[] {
+    const textRole =
+      block instanceof Api.PageBlockTitle
+        ? ('title' as const)
+        : block instanceof Api.PageBlockSubtitle
+          ? ('subtitle' as const)
+          : block instanceof Api.PageBlockHeader
+            ? ('header' as const)
+            : block instanceof Api.PageBlockSubheader
+              ? ('subheader' as const)
+              : block instanceof Api.PageBlockParagraph
+                ? ('paragraph' as const)
+                : block instanceof Api.PageBlockFooter
+                  ? ('footer' as const)
+                  : block instanceof Api.PageBlockKicker
+                    ? ('kicker' as const)
+                    : block instanceof Api.PageBlockThinking
+                      ? ('thinking' as const)
+                      : undefined;
+    if (textRole && 'text' in block) {
+      return [{ kind: 'text', role: textRole, text: this.mapRichText(block.text) }];
+    }
+    const heading =
+      block instanceof Api.PageBlockHeading1
+        ? 1
+        : block instanceof Api.PageBlockHeading2
+          ? 2
+          : block instanceof Api.PageBlockHeading3
+            ? 3
+            : block instanceof Api.PageBlockHeading4
+              ? 4
+              : block instanceof Api.PageBlockHeading5
+                ? 5
+                : block instanceof Api.PageBlockHeading6
+                  ? 6
+                  : undefined;
+    if (heading && 'text' in block) {
+      return [
+        {
+          kind: 'heading',
+          level: heading as 1 | 2 | 3 | 4 | 5 | 6,
+          text: this.mapRichText(block.text),
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockPreformatted) {
+      return [
+        { kind: 'pre', text: this.mapRichText(block.text), language: block.language || undefined },
+      ];
+    }
+    if (block instanceof Api.PageBlockDivider) return [{ kind: 'divider' }];
+    if (block instanceof Api.PageBlockAnchor) return [{ kind: 'anchor', name: block.name }];
+    if (block instanceof Api.PageBlockMath) return [{ kind: 'math', source: block.source }];
+    if (block instanceof Api.PageBlockAuthorDate) {
+      return [
+        {
+          kind: 'author',
+          author: this.mapRichText(block.author),
+          publishedAt: block.publishedDate,
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockList || block instanceof Api.PageBlockOrderedList) {
+      return [
+        {
+          kind: 'list',
+          ordered: block instanceof Api.PageBlockOrderedList,
+          ...(block instanceof Api.PageBlockOrderedList
+            ? { reversed: Boolean(block.reversed), start: block.start }
+            : {}),
+          items: block.items.map((item) => ({
+            ...('checkbox' in item
+              ? { checkbox: Boolean(item.checkbox), checked: Boolean(item.checked) }
+              : {}),
+            ...('num' in item && item.num ? { marker: item.num } : {}),
+            ...('value' in item && item.value !== undefined ? { value: item.value } : {}),
+            ...('text' in item
+              ? { text: this.mapRichText(item.text) }
+              : 'blocks' in item
+                ? { blocks: item.blocks.flatMap((child) => this.mapRichBlock(child)) }
+                : {}),
+          })),
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockBlockquote) {
+      return [
+        {
+          kind: 'quote',
+          blocks: [{ kind: 'text', role: 'paragraph', text: this.mapRichText(block.text) }],
+          ...(block.caption instanceof Api.TextEmpty
+            ? {}
+            : { caption: this.mapRichText(block.caption) }),
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockPullquote) {
+      return [
+        {
+          kind: 'quote',
+          pull: true,
+          blocks: [{ kind: 'text', role: 'paragraph', text: this.mapRichText(block.text) }],
+          ...(block.caption instanceof Api.TextEmpty
+            ? {}
+            : { caption: this.mapRichText(block.caption) }),
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockBlockquoteBlocks) {
+      return [
+        {
+          kind: 'quote',
+          expandable: true,
+          blocks: block.blocks.flatMap((child) => this.mapRichBlock(child)),
+          ...(block.caption instanceof Api.TextEmpty
+            ? {}
+            : { caption: this.mapRichText(block.caption) }),
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockDetails) {
+      return [
+        {
+          kind: 'details',
+          title: this.mapRichText(block.title),
+          blocks: block.blocks.flatMap((child) => this.mapRichBlock(child)),
+          open: Boolean(block.open),
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockTable) {
+      return [
+        {
+          kind: 'table',
+          ...(block.title instanceof Api.TextEmpty ? {} : { title: this.mapRichText(block.title) }),
+          bordered: Boolean(block.bordered),
+          striped: Boolean(block.striped),
+          rows: block.rows.map((row) =>
+            row.cells.map((cell) => ({
+              ...(cell.text ? { text: this.mapRichText(cell.text) } : {}),
+              header: Boolean(cell.header),
+              align: cell.alignRight ? 'right' : cell.alignCenter ? 'center' : 'left',
+              verticalAlign: cell.valignBottom ? 'bottom' : cell.valignMiddle ? 'middle' : 'top',
+              colSpan: cell.colspan,
+              rowSpan: cell.rowspan,
+            })),
+          ),
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockCover) {
+      return [{ kind: 'group', mode: 'cover', blocks: this.mapRichBlock(block.cover) }];
+    }
+    if (block instanceof Api.PageBlockCollage || block instanceof Api.PageBlockSlideshow) {
+      return [
+        {
+          kind: 'group',
+          mode: block instanceof Api.PageBlockCollage ? 'collage' : 'slideshow',
+          blocks: block.items.flatMap((child) => this.mapRichBlock(child)),
+          caption: this.mapRichCaption(block.caption),
+        },
+      ];
+    }
+    if (
+      block instanceof Api.PageBlockPhoto ||
+      block instanceof Api.PageBlockVideo ||
+      block instanceof Api.PageBlockAudio
+    ) {
+      return [
+        {
+          kind: 'media',
+          mediaKind:
+            block instanceof Api.PageBlockPhoto
+              ? 'photo'
+              : block instanceof Api.PageBlockVideo
+                ? 'video'
+                : 'audio',
+          id: (block instanceof Api.PageBlockPhoto
+            ? block.photoId
+            : block instanceof Api.PageBlockVideo
+              ? block.videoId
+              : block.audioId
+          ).toString(),
+          caption: this.mapRichCaption(block.caption),
+          ...('spoiler' in block ? { spoiler: Boolean(block.spoiler) } : {}),
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockEmbed) {
+      return [
+        {
+          kind: 'media',
+          mediaKind: 'embed',
+          url: block.url,
+          caption: this.mapRichCaption(block.caption),
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockMap) {
+      const url =
+        block.geo instanceof Api.GeoPoint
+          ? `https://www.openstreetmap.org/?mlat=${block.geo.lat}&mlon=${block.geo.long}`
+          : undefined;
+      return [
+        { kind: 'media', mediaKind: 'map', url, caption: this.mapRichCaption(block.caption) },
+      ];
+    }
+    if (block instanceof Api.PageBlockEmbedPost) {
+      return [
+        {
+          kind: 'quote',
+          blocks: block.blocks.flatMap((child) => this.mapRichBlock(child)),
+          caption: { kind: 'link', child: { kind: 'text', text: block.author }, url: block.url },
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockChannel) {
+      return [
+        {
+          kind: 'text',
+          role: 'paragraph',
+          text: { kind: 'text', text: 'title' in block.channel ? block.channel.title : 'Channel' },
+        },
+      ];
+    }
+    if (block instanceof Api.PageBlockRelatedArticles) {
+      return [
+        { kind: 'text', role: 'subheader', text: this.mapRichText(block.title) },
+        {
+          kind: 'list',
+          ordered: false,
+          items: block.articles.map((article) => ({
+            text: {
+              kind: 'link',
+              child: { kind: 'text', text: article.title || article.description || article.url },
+              url: article.url,
+            },
+          })),
+        },
+      ];
+    }
+    return [];
   }
 
   private inputDocument(sticker: TelegramSticker) {
@@ -2494,7 +2884,26 @@ export class WebAGramJsTransport implements TelegramTransport {
       if (format.kind === 'pre') return new Api.MessageEntityPre({ ...base, language: '' });
       if (format.kind === 'spoiler') return new Api.MessageEntitySpoiler(base);
       if (format.kind === 'blockquote') return new Api.MessageEntityBlockquote(base);
-      return new Api.MessageEntityTextUrl({ ...base, url: format.url ?? '' });
+      if (format.kind === 'expandableBlockquote') {
+        return new Api.MessageEntityBlockquote({ ...base, collapsed: true });
+      }
+      if (format.kind === 'textUrl') {
+        return new Api.MessageEntityTextUrl({ ...base, url: format.url ?? '' });
+      }
+      if (format.kind === 'customEmoji') {
+        return new Api.MessageEntityCustomEmoji({
+          ...base,
+          documentId: BigInt(format.customEmojiId ?? 0),
+        });
+      }
+      if (format.kind === 'formattedDate') {
+        return new Api.MessageEntityFormattedDate({ ...base, date: format.timestamp ?? 0 });
+      }
+      if (format.kind === 'diffInsert') return new Api.MessageEntityDiffInsert(base);
+      if (format.kind === 'diffReplace') {
+        return new Api.MessageEntityDiffReplace({ ...base, oldText: format.oldText ?? '' });
+      }
+      return new Api.MessageEntityDiffDelete(base);
     });
   }
 

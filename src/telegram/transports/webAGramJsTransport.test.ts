@@ -1115,6 +1115,10 @@ describe('WebAGramJsTransport mapping', () => {
         new Api.MessageEntityBold({ offset: 7, length: 4 }),
         new Api.MessageEntitySpoiler({ offset: 12, length: 6 }),
         new Api.MessageEntityTextUrl({ offset: 19, length: 4, url: 'https://example.com' }),
+        new Api.MessageEntityBlockquote({ offset: 7, length: 4, collapsed: true }),
+        new Api.MessageEntityCustomEmoji({ offset: 0, length: 2, documentId: 88n }),
+        new Api.MessageEntityFormattedDate({ offset: 19, length: 4, date: 1_700_000_000 }),
+        new Api.MessageEntityDiffReplace({ offset: 7, length: 4, oldText: 'cold' }),
       ],
       reactions: new Api.MessageReactions({
         results: [
@@ -1161,6 +1165,10 @@ describe('WebAGramJsTransport mapping', () => {
       formats: [
         { offset: 7, length: 4, kind: 'bold' },
         { offset: 12, length: 6, kind: 'spoiler' },
+        { offset: 7, length: 4, kind: 'expandableBlockquote' },
+        { offset: 0, length: 2, kind: 'customEmoji', customEmojiId: '88' },
+        { offset: 19, length: 4, kind: 'formattedDate', timestamp: 1_700_000_000 },
+        { offset: 7, length: 4, kind: 'diffReplace', oldText: 'cold' },
       ],
       replyToId: 7,
       replyQuote: 'quoted',
@@ -1170,6 +1178,109 @@ describe('WebAGramJsTransport mapping', () => {
         title: 'Preview title',
         description: 'Preview description',
         hasPhoto: true,
+      },
+    });
+  });
+
+  it('maps bot rich messages into safe structured content', () => {
+    const target = transport() as unknown as {
+      mapMessage(
+        message: Api.TypeMessage,
+      ): { richMessage?: { rtl?: boolean; blocks: Array<Record<string, unknown>> } } | undefined;
+    };
+    const richMessage = new Api.RichMessage({
+      rtl: true,
+      blocks: [
+        new Api.PageBlockHeading1({ text: new Api.TextPlain({ text: 'Release notes' }) }),
+        new Api.PageBlockParagraph({
+          text: new Api.TextConcat({
+            texts: [
+              new Api.TextBold({ text: new Api.TextPlain({ text: 'Rich Markdown' }) }),
+              new Api.TextPlain({ text: ' with ' }),
+              new Api.TextMarked({ text: new Api.TextPlain({ text: 'highlighting' }) }),
+              new Api.TextCustomEmoji({ documentId: 55n, alt: '👍' }),
+            ],
+          }),
+        }),
+        new Api.PageBlockList({
+          items: [
+            new Api.PageListItemText({
+              checkbox: true,
+              checked: true,
+              text: new Api.TextPlain({ text: 'Task done' }),
+            }),
+          ],
+        }),
+        new Api.PageBlockBlockquoteBlocks({
+          blocks: [
+            new Api.PageBlockParagraph({ text: new Api.TextPlain({ text: 'Hidden quote' }) }),
+          ],
+          caption: new Api.TextPlain({ text: 'Source' }),
+        }),
+        new Api.PageBlockTable({
+          bordered: true,
+          title: new Api.TextPlain({ text: 'Numbers' }),
+          rows: [
+            new Api.PageTableRow({
+              cells: [
+                new Api.PageTableCell({
+                  header: true,
+                  text: new Api.TextPlain({ text: 'Value' }),
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+      photos: [],
+      documents: [],
+    });
+
+    expect(
+      target.mapMessage(
+        new Api.Message({
+          id: 9,
+          peerId: new Api.PeerUser({ userId: 1n }),
+          date: 100,
+          message: '',
+          richMessage,
+        }),
+      ),
+    ).toMatchObject({
+      richMessage: {
+        rtl: true,
+        blocks: [
+          { kind: 'heading', level: 1, text: { kind: 'text', text: 'Release notes' } },
+          {
+            kind: 'text',
+            role: 'paragraph',
+            text: {
+              kind: 'concat',
+              children: [
+                { kind: 'bold', child: { kind: 'text', text: 'Rich Markdown' } },
+                { kind: 'text', text: ' with ' },
+                { kind: 'marked', child: { kind: 'text', text: 'highlighting' } },
+                { kind: 'customEmoji', documentId: '55', alt: '👍' },
+              ],
+            },
+          },
+          {
+            kind: 'list',
+            ordered: false,
+            items: [{ checkbox: true, checked: true, text: { kind: 'text', text: 'Task done' } }],
+          },
+          {
+            kind: 'quote',
+            expandable: true,
+            caption: { kind: 'text', text: 'Source' },
+          },
+          {
+            kind: 'table',
+            bordered: true,
+            title: { kind: 'text', text: 'Numbers' },
+            rows: [[{ header: true, text: { kind: 'text', text: 'Value' } }]],
+          },
+        ],
       },
     });
   });

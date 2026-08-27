@@ -7,6 +7,32 @@ test.beforeEach(async ({ page }) => {
   await selectAlice(page);
 });
 
+test('copies regular and rich message text from the context menu', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  const regular = page.locator('article[data-message-id="80"]');
+  await regular.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy text' }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('Newest message from fixture');
+
+  const rich = page.locator('article[data-message-id="74"]');
+  await rich.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy text' }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(
+      [
+        'Rich Markdown',
+        'Highlighted and hidden',
+        '- [x] Rendered task',
+        'Feature\tStatus',
+        'More\nNested content',
+      ].join('\n\n'),
+    );
+});
+
 test('pins and unpins a message and exposes the pinned-message bar', async ({ page }) => {
   const message = page.locator('article[data-message-id="79"]');
   await message.click({ button: 'right' });

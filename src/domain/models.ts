@@ -1,3 +1,5 @@
+import type { RichMessage } from './richMessage';
+
 export type Presence = 'online' | 'recently' | 'offline';
 
 export interface ChatSummary {
@@ -110,10 +112,20 @@ export interface ChatMessage {
           | 'pre'
           | 'spoiler'
           | 'blockquote'
-          | 'textUrl';
+          | 'expandableBlockquote'
+          | 'textUrl'
+          | 'customEmoji'
+          | 'formattedDate'
+          | 'diffInsert'
+          | 'diffReplace'
+          | 'diffDelete';
         url?: string | undefined;
+        customEmojiId?: string | undefined;
+        timestamp?: number | undefined;
+        oldText?: string | undefined;
       }>
     | undefined;
+  richMessage?: RichMessage | undefined;
   uploadProgress?: number | undefined;
   media?:
     | {

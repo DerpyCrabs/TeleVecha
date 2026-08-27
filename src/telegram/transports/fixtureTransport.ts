@@ -80,6 +80,72 @@ const messages = new Map<string, TelegramMessage[]>([
             }
           : {}),
         ...(id === 77 ? { replyToId: 76, replyQuote: 'bold italic' } : {}),
+        ...(id === 74
+          ? {
+              richMessage: {
+                blocks: [
+                  {
+                    kind: 'heading' as const,
+                    level: 2 as const,
+                    text: { kind: 'text' as const, text: 'Rich Markdown' },
+                  },
+                  {
+                    kind: 'text' as const,
+                    role: 'paragraph' as const,
+                    text: {
+                      kind: 'concat' as const,
+                      children: [
+                        {
+                          kind: 'marked' as const,
+                          child: { kind: 'text' as const, text: 'Highlighted' },
+                        },
+                        { kind: 'text' as const, text: ' and ' },
+                        {
+                          kind: 'spoiler' as const,
+                          child: { kind: 'text' as const, text: 'hidden' },
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    kind: 'list' as const,
+                    ordered: false,
+                    items: [
+                      {
+                        checkbox: true,
+                        checked: true,
+                        text: { kind: 'text' as const, text: 'Rendered task' },
+                      },
+                    ],
+                  },
+                  {
+                    kind: 'table' as const,
+                    bordered: true,
+                    rows: [
+                      [
+                        {
+                          header: true,
+                          text: { kind: 'text' as const, text: 'Feature' },
+                        },
+                        { text: { kind: 'text' as const, text: 'Status' } },
+                      ],
+                    ],
+                  },
+                  {
+                    kind: 'details' as const,
+                    title: { kind: 'text' as const, text: 'More' },
+                    blocks: [
+                      {
+                        kind: 'text' as const,
+                        role: 'paragraph' as const,
+                        text: { kind: 'text' as const, text: 'Nested content' },
+                      },
+                    ],
+                  },
+                ],
+              },
+            }
+          : {}),
         ...(id === 79
           ? {
               replyToId: 78,
@@ -858,9 +924,11 @@ export class FixtureTelegramTransport implements TelegramTransport {
       await new Promise((resolve) => window.setTimeout(resolve, 400));
     }
     if (message.media?.mimeType === 'application/x-tgsticker') return fixtureTgsBlob();
+    const width = message.media?.width ?? 320;
+    const height = message.media?.height ?? 180;
     return new Blob(
       [
-        '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#6650d8"/></svg>',
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="#6650d8"/></svg>`,
       ],
       { type: 'image/svg+xml' },
     );

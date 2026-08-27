@@ -290,3 +290,21 @@ test('renders mentions, links, previews, wrapping, formatting, and spoilers', as
     await message.locator('.message-body').evaluate((body) => body.scrollWidth <= body.clientWidth),
   ).toBe(true);
 });
+
+test('renders bot Rich Markdown blocks and nested formatting', async ({ page }) => {
+  const rich = page.locator('article[data-message-id="74"] .rich-message');
+  await expect(rich.getByRole('heading', { name: 'Rich Markdown' })).toBeVisible();
+  await expect(rich.locator('mark')).toHaveText('Highlighted');
+  await expect(rich.getByRole('checkbox', { name: 'Completed' })).toBeChecked();
+  await expect(rich.getByRole('columnheader', { name: 'Feature' })).toBeVisible();
+  await expect(rich.getByRole('cell', { name: 'Status' })).toBeVisible();
+
+  const spoiler = rich.locator('.rich-spoiler');
+  await expect(spoiler).toHaveAccessibleName('Hidden spoiler. Activate to reveal.');
+  await expect(spoiler).toHaveCSS('color', 'rgba(0, 0, 0, 0)');
+  await spoiler.click();
+  await expect(spoiler).toHaveAttribute('aria-expanded', 'true');
+
+  await rich.getByText('More').click();
+  await expect(rich.getByText('Nested content')).toBeVisible();
+});

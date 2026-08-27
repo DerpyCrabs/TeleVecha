@@ -14,6 +14,13 @@ interface MediaAttachmentProps {
   compact?: boolean | undefined;
   decorative?: boolean | undefined;
   revision?: string | number | undefined;
+  onOpenPreview?: ((preview: MediaPreview) => void) | undefined;
+}
+
+export interface MediaPreview {
+  kind: 'image' | 'video';
+  name: string;
+  url: string;
 }
 
 export function MediaAttachment(props: MediaAttachmentProps) {
@@ -62,7 +69,13 @@ export function MediaAttachment(props: MediaAttachmentProps) {
         ? ('video' as const)
         : undefined;
   const openPreview = () => {
-    if (url() && previewKind() && !props.decorative) setPreviewOpen(true);
+    const kind = previewKind();
+    if (!url() || !kind || props.decorative) return;
+    if (props.onOpenPreview) {
+      props.onOpenPreview({ kind, name: props.media.name, url: url() });
+      return;
+    }
+    setPreviewOpen(true);
   };
 
   const load = async () => {

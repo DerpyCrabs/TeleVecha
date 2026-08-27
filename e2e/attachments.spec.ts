@@ -230,6 +230,28 @@ test('keeps decorated and extreme portrait photos free of an outer frame', async
     return bounds.width / bounds.height;
   });
   expect(extremeRatio).toBeCloseTo(0.5, 2);
+
+  await extreme
+    .getByRole('button', { name: 'Open extreme-portrait.jpg fullscreen preview' })
+    .click();
+  const viewer = page.getByRole('dialog', { name: 'Media preview: extreme-portrait.jpg' });
+  const fullscreenImage = viewer.getByRole('img', { name: 'extreme-portrait.jpg' });
+  const bounds = await viewer.locator('.media-viewer-content').evaluate((content) => {
+    const image = content.querySelector('img')!;
+    const contentRect = content.getBoundingClientRect();
+    const imageRect = image.getBoundingClientRect();
+    return {
+      naturalRatio: image.naturalWidth / image.naturalHeight,
+      objectFit: getComputedStyle(image).objectFit,
+      content: { width: contentRect.width, height: contentRect.height },
+      image: { width: imageRect.width, height: imageRect.height },
+    };
+  });
+  expect(bounds.naturalRatio).toBeCloseTo(0.1, 2);
+  expect(bounds.objectFit).toBe('contain');
+  expect(bounds.image.width).toBeLessThanOrEqual(bounds.content.width);
+  expect(bounds.image.height).toBeLessThanOrEqual(bounds.content.height);
+  await fullscreenImage.press('Escape');
 });
 
 test('shows a retry control when automatic media loading fails', async ({ page }) => {
@@ -248,10 +270,16 @@ test('opens photo and video attachments in a fullscreen viewer', async ({ page }
   const photoTrigger = page.getByRole('button', { name: 'Open fixture.jpg fullscreen preview' });
   await photoTrigger.click();
   const photoViewer = page.getByRole('dialog', { name: 'Media preview: fixture.jpg' });
-  await expect(photoViewer.getByRole('img', { name: 'fixture.jpg' })).toBeVisible();
+  const fullscreenPhoto = photoViewer.getByRole('img', { name: 'fixture.jpg' });
+  await expect(fullscreenPhoto).toBeVisible();
   await expect(photoViewer.getByRole('button', { name: 'Close media preview' })).toBeFocused();
   expect((await fixtureStats(page))?.downloadMedia).toBe(downloadsBefore);
-  await page.keyboard.press('Escape');
+  await fullscreenPhoto.click({ position: { x: 160, y: 90 } });
+  await expect(photoViewer).toBeVisible();
+  const viewerContent = photoViewer.locator('.media-viewer-content');
+  const contentBox = await viewerContent.boundingBox();
+  expect(contentBox).not.toBeNull();
+  await viewerContent.click({ position: { x: 2, y: contentBox!.height / 2 } });
   await expect(photoViewer).toHaveCount(0);
   await expect(photoTrigger).toBeFocused();
 

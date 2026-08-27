@@ -1,7 +1,8 @@
-import { For, Show } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 
 import type { ChatMessage } from '../../domain/models';
-import { MediaAttachment } from '../media/MediaAttachment';
+import { MediaAttachment, type MediaPreview } from '../media/MediaAttachment';
+import { MediaViewer } from '../media/MediaViewer';
 
 interface MessageAlbumProps {
   messages: ChatMessage[];
@@ -13,6 +14,49 @@ interface MessageAlbumProps {
 }
 
 export function MessageAlbum(props: MessageAlbumProps) {
+  const [viewer, setViewer] = createSignal<
+    { index: number; message: ChatMessage; preview: MediaPreview } | undefined
+  >();
+  const [viewerLoading, setViewerLoading] = createSignal(false);
+  let viewerGeneration = 0;
+  const previewableMessages = () =>
+    props.messages.filter(
+      (message) =>
+        message.media?.kind === 'photo' ||
+        message.media?.kind === 'video' ||
+        (message.media?.kind === 'animation' && message.media.mimeType.startsWith('video/')),
+    );
+  const previewKind = (message: ChatMessage) =>
+    message.media?.kind === 'photo' ? ('image' as const) : ('video' as const);
+  const openPreview = (message: ChatMessage, preview: MediaPreview) => {
+    const index = previewableMessages().findIndex(({ id }) => id === message.id);
+    if (index >= 0) setViewer({ index, message, preview });
+  };
+  const navigatePreview = async (index: number) => {
+    const messages = previewableMessages();
+    const message = messages[index];
+    if (!message?.media || viewerLoading()) return;
+    const generation = ++viewerGeneration;
+    setViewerLoading(true);
+    try {
+      const url = props.cachedUrl(message) ?? (await props.load(message));
+      if (generation !== viewerGeneration) return;
+      setViewer({
+        index,
+        message,
+        preview: { kind: previewKind(message), name: message.media.name, url },
+      });
+    } catch {
+      // Keep the current attachment visible if its neighbour cannot be loaded.
+    } finally {
+      if (generation === viewerGeneration) setViewerLoading(false);
+    }
+  };
+  const closeViewer = () => {
+    viewerGeneration += 1;
+    setViewerLoading(false);
+    setViewer(undefined);
+  };
   const aspectRatio = (message: ChatMessage) => {
     const width = message.media?.width;
     const height = message.media?.height;
@@ -77,6 +121,7 @@ export function MessageAlbum(props: MessageAlbumProps) {
                       cachedUrl={() => props.cachedUrl(message)}
                       load={() => props.load(message)}
                       revision={props.revision?.(message)}
+                      onOpenPreview={(preview) => openPreview(message, preview)}
                     />
                   ) : null}
                   <Show when={props.progress?.(message) !== undefined}>
@@ -90,6 +135,27 @@ export function MessageAlbum(props: MessageAlbumProps) {
           </div>
         )}
       </For>
+      <Show when={viewer()}>
+        {(current) => (
+          <MediaViewer
+            kind={current().preview.kind}
+            name={current().preview.name}
+            url={current().preview.url}
+            close={closeViewer}
+            position={current().index + 1}
+            count={previewableMessages().length}
+            loading={viewerLoading()}
+            previous={
+              current().index > 0 ? () => void navigatePreview(current().index - 1) : undefined
+            }
+            next={
+              current().index < previewableMessages().length - 1
+                ? () => void navigatePreview(current().index + 1)
+                : undefined
+            }
+          />
+        )}
+      </Show>
     </div>
   );
 }
