@@ -801,11 +801,39 @@ export class WebAGramJsTransport implements TelegramTransport {
         candidate instanceof Api.User && candidate.id.toString() === peer.id.slice(2),
     );
     return {
+      firstName: user?.firstName,
+      lastName: user?.lastName,
       phone: user?.phone,
       username: user?.username,
       bio: result.fullUser instanceof Api.UserFull ? result.fullUser.about : undefined,
+      birthday:
+        result.fullUser instanceof Api.UserFull && result.fullUser.birthday instanceof Api.Birthday
+          ? {
+              day: result.fullUser.birthday.day,
+              month: result.fullUser.birthday.month,
+              ...(result.fullUser.birthday.year ? { year: result.fullUser.birthday.year } : {}),
+            }
+          : undefined,
+      isContact: Boolean(user?.contact),
       blocked: result.fullUser instanceof Api.UserFull && Boolean(result.fullUser.blocked),
     };
+  }
+
+  async updateContact(peer: TelegramPeer, firstName: string, lastName: string, phone: string) {
+    if (peer.kind !== 'user') throw new Error('Only users can be contacts.');
+    await this.getClient().invoke(
+      new Api.contacts.AddContact({
+        id: this.inputUser(peer),
+        firstName,
+        lastName,
+        phone,
+      }),
+    );
+  }
+
+  async deleteContact(peer: TelegramPeer) {
+    if (peer.kind !== 'user') throw new Error('Only users can be contacts.');
+    await this.getClient().invoke(new Api.contacts.DeleteContacts({ id: [this.inputUser(peer)] }));
   }
 
   async getGroupMembers(peer: TelegramPeer, limit = 50) {

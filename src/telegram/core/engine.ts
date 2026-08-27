@@ -1177,6 +1177,70 @@ export class MessagingEngine {
     );
   }
 
+  async updateContact(peer: TelegramPeer, firstName: string, lastName: string, phone: string) {
+    if (!this.transport.updateContact) return false;
+    try {
+      await this.transport.updateContact(peer, firstName, lastName, phone);
+      return await this.queueDialogStateOperation(async () => {
+        const dialogs = this.snapshotValue.dialogs.map((dialog) => {
+          if (dialog.peer.id !== peer.id) return dialog;
+          const title = `${firstName} ${lastName}`.trim() || dialog.title;
+          return {
+            ...dialog,
+            title,
+            initials: title
+              .split(/\s+/u)
+              .slice(0, 2)
+              .map((part) => part[0])
+              .join('')
+              .toUpperCase(),
+            userDetails: dialog.userDetails
+              ? { ...dialog.userDetails, firstName, lastName, phone, isContact: true }
+              : dialog.userDetails,
+          };
+        });
+        this.patch({ dialogs });
+        const changed = dialogs.find((dialog) => dialog.peer.id === peer.id);
+        if (changed && !changed.transient) {
+          await this.store.putDialog({ ...changed, cacheEpoch: this.epoch });
+        }
+        if (changed?.userDetails) {
+          this.userDetails.set(peer.id, Promise.resolve(changed.userDetails));
+        }
+        return true;
+      });
+    } catch (error) {
+      this.fail('sync', 'Could not update this contact.', error, false);
+      return false;
+    }
+  }
+
+  async deleteContact(peer: TelegramPeer) {
+    if (!this.transport.deleteContact) return false;
+    try {
+      await this.transport.deleteContact(peer);
+      return await this.queueDialogStateOperation(async () => {
+        const dialogs = this.snapshotValue.dialogs.map((dialog) =>
+          dialog.peer.id === peer.id && dialog.userDetails
+            ? { ...dialog, userDetails: { ...dialog.userDetails, isContact: false } }
+            : dialog,
+        );
+        this.patch({ dialogs });
+        const changed = dialogs.find((dialog) => dialog.peer.id === peer.id);
+        if (changed && !changed.transient) {
+          await this.store.putDialog({ ...changed, cacheEpoch: this.epoch });
+        }
+        if (changed?.userDetails) {
+          this.userDetails.set(peer.id, Promise.resolve(changed.userDetails));
+        }
+        return true;
+      });
+    } catch (error) {
+      this.fail('sync', 'Could not delete this contact.', error, false);
+      return false;
+    }
+  }
+
   async setPinnedDialog(peer: TelegramPeer, pinned: boolean) {
     const generation = this.lifecycleGeneration;
     const accountId = this.accountId;

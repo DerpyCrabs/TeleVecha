@@ -207,6 +207,8 @@ interface FixtureStats {
   setMuted: number;
   getUserDetails: number;
   setBlocked: number;
+  updateContact: number;
+  deleteContact: number;
   setPinnedDialog: number;
   setArchived: number;
   deleteDialog: number;
@@ -328,6 +330,8 @@ export class FixtureTelegramTransport implements TelegramTransport {
     setMuted: 0,
     getUserDetails: 0,
     setBlocked: 0,
+    updateContact: 0,
+    deleteContact: 0,
     setPinnedDialog: 0,
     setArchived: 0,
     deleteDialog: 0,
@@ -655,11 +659,21 @@ export class FixtureTelegramTransport implements TelegramTransport {
   async getUserDetails(peer: TelegramPeer) {
     this.stats.getUserDetails += 1;
     return {
+      firstName: 'Alice',
+      lastName: 'Fixture',
       phone: '+1 555 010 2048',
       username: 'alice_fixture',
       bio: 'Fixture profile used by end-to-end tests.\nalice@example.com https://example.com @telegram',
+      birthday: { day: 14, month: 3, year: 1994 },
+      isContact: true,
       blocked: this.blockedPeers.has(peer.id),
     };
+  }
+  async updateContact(_peer: TelegramPeer, _firstName: string, _lastName: string, _phone: string) {
+    this.stats.updateContact += 1;
+  }
+  async deleteContact(_peer: TelegramPeer) {
+    this.stats.deleteContact += 1;
   }
   async getGroupMembers(peer: TelegramPeer) {
     if (peer.kind === 'user') return [];

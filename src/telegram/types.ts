@@ -49,9 +49,19 @@ export interface TelegramPeerSearchResult {
 }
 
 export interface TelegramUserDetails {
+  firstName?: string | undefined;
+  lastName?: string | undefined;
   phone?: string | undefined;
   username?: string | undefined;
   bio?: string | undefined;
+  birthday?:
+    | {
+        day: number;
+        month: number;
+        year?: number | undefined;
+      }
+    | undefined;
+  isContact?: boolean | undefined;
   blocked: boolean;
 }
 
@@ -511,6 +521,13 @@ export interface TelegramTransport {
   ): Promise<TelegramSearchPage>;
   getPinnedMessages(peer: TelegramPeer): Promise<TelegramMessage[]>;
   getUserDetails(peer: TelegramPeer): Promise<TelegramUserDetails>;
+  updateContact?(
+    peer: TelegramPeer,
+    firstName: string,
+    lastName: string,
+    phone: string,
+  ): Promise<void>;
+  deleteContact?(peer: TelegramPeer): Promise<void>;
   getGroupMembers?(peer: TelegramPeer, limit?: number): Promise<TelegramGroupMember[]>;
   setMuted(peer: TelegramPeer, muted: boolean): Promise<void>;
   setBlocked(peer: TelegramPeer, blocked: boolean): Promise<void>;

@@ -2369,6 +2369,33 @@ button {
   color: var(--muted);
   font-size: 0.75rem;
 }
+.contact-actions {
+  display: grid;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 0.45rem 0.5rem;
+}
+.contact-actions button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1.4rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.55rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  padding: 0.6rem 0.75rem;
+  color: var(--text);
+  text-align: left;
+  font-size: 0.82rem;
+}
+.contact-actions button:hover {
+  background: rgb(255 255 255 / 0.045);
+  color: var(--text);
+}
+.contact-actions button.danger {
+  color: #f87171;
+}
 .group-members {
   border-bottom: 1px solid var(--line);
   padding: 0.75rem 0.65rem;

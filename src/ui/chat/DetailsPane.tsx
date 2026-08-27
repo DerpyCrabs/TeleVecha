@@ -1,7 +1,11 @@
 import FileText from 'lucide-solid/icons/file-text';
 import Image from 'lucide-solid/icons/image';
 import Link from 'lucide-solid/icons/link';
+import Hand from 'lucide-solid/icons/hand';
 import PanelRightClose from 'lucide-solid/icons/panel-right-close';
+import Pencil from 'lucide-solid/icons/pencil';
+import Share2 from 'lucide-solid/icons/share-2';
+import Trash2 from 'lucide-solid/icons/trash-2';
 import { For, Show } from 'solid-js';
 
 import type { ChatSummary } from '../../domain/models';
@@ -29,6 +33,10 @@ interface DetailsPaneProps {
   loadMemberAvatar: (member: TelegramGroupMember) => Promise<string | undefined>;
   close: () => void;
   openShared: (kind: SharedMediaKind) => void;
+  shareContact: () => void;
+  editContact: () => void;
+  deleteContact: () => void;
+  setBlocked: (blocked: boolean) => void;
 }
 
 export function DetailsPane(props: DetailsPaneProps) {
@@ -54,6 +62,16 @@ export function DetailsPane(props: DetailsPaneProps) {
     if (member.presence === 'online') return 'online';
     if (member.presence === 'recently') return 'last seen recently';
     return 'offline';
+  };
+  const birthday = () => {
+    const value = props.userDetails?.birthday;
+    if (!value) return undefined;
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'long',
+      day: 'numeric',
+      ...(value.year ? { year: 'numeric' as const } : {}),
+      timeZone: 'UTC',
+    }).format(new Date(Date.UTC(value.year ?? 2000, value.month - 1, value.day)));
   };
   return (
     <aside
@@ -109,6 +127,12 @@ export function DetailsPane(props: DetailsPaneProps) {
                 <small>Username</small>
               </a>
             </Show>
+            <Show when={birthday()}>
+              <div>
+                <span>{birthday()}</span>
+                <small>Birthday</small>
+              </div>
+            </Show>
           </section>
         </Show>
         <section class="p-2">
@@ -128,6 +152,28 @@ export function DetailsPane(props: DetailsPaneProps) {
             <b>{props.counts?.links ?? '…'}</b>
           </button>
         </section>
+        <Show when={props.chat.kind === 'user' && props.userDetails}>
+          <section class="contact-actions" aria-label="Contact actions">
+            <button onClick={props.shareContact}>
+              <Share2 size={17} />
+              <span>Share this contact</span>
+            </button>
+            <Show when={props.userDetails?.isContact}>
+              <button onClick={props.editContact}>
+                <Pencil size={17} />
+                <span>Edit contact</span>
+              </button>
+              <button onClick={props.deleteContact}>
+                <Trash2 size={17} />
+                <span>Delete contact</span>
+              </button>
+            </Show>
+            <button class="danger" onClick={() => props.setBlocked(!props.userDetails?.blocked)}>
+              <Hand size={17} />
+              <span>{props.userDetails?.blocked ? 'Unblock user' : 'Block user'}</span>
+            </button>
+          </section>
+        </Show>
         <Show when={props.chat.kind !== 'user'}>
           <section class="group-members" aria-label="Members">
             <header>

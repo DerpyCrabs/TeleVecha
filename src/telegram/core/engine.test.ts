@@ -307,6 +307,8 @@ class FakeTransport implements TelegramTransport {
   failReaction = false;
   muteCalls: boolean[] = [];
   blockCalls: boolean[] = [];
+  contactUpdates: Array<{ firstName: string; lastName: string; phone: string }> = [];
+  deleteContactCalls = 0;
   dialogPinCalls: boolean[] = [];
   archiveCalls: boolean[] = [];
   peerSearchResults: TelegramPeerSearchResult[] = [];
@@ -400,6 +402,12 @@ class FakeTransport implements TelegramTransport {
   }
   async setBlocked(_peer: TelegramPeer, blocked: boolean) {
     this.blockCalls.push(blocked);
+  }
+  async updateContact(_peer: TelegramPeer, firstName: string, lastName: string, phone: string) {
+    this.contactUpdates.push({ firstName, lastName, phone });
+  }
+  async deleteContact(_peer: TelegramPeer) {
+    this.deleteContactCalls += 1;
   }
   async setPinnedDialog(_peer: TelegramPeer, pinned: boolean) {
     this.dialogPinCalls.push(pinned);
@@ -635,6 +643,20 @@ describe('MessagingEngine', () => {
     expect(transport.blockCalls).toEqual([true]);
     expect(engine.snapshot().dialogs[0]?.userDetails?.blocked).toBe(true);
     expect(store.dialogs[0]?.userDetails?.blocked).toBe(true);
+
+    await engine.updateContact(peer, 'Mira', 'Lane', '+15550102048');
+    expect(transport.contactUpdates).toEqual([
+      { firstName: 'Mira', lastName: 'Lane', phone: '+15550102048' },
+    ]);
+    expect(engine.snapshot().dialogs[0]).toMatchObject({
+      title: 'Mira Lane',
+      userDetails: { firstName: 'Mira', lastName: 'Lane', isContact: true },
+    });
+
+    await engine.deleteContact(peer);
+    expect(transport.deleteContactCalls).toBe(1);
+    expect(engine.snapshot().dialogs[0]?.userDetails?.isContact).toBe(false);
+    expect(store.dialogs[0]?.userDetails?.isContact).toBe(false);
 
     await engine.setPinnedDialog(peer, true);
     expect(transport.dialogPinCalls).toEqual([true]);

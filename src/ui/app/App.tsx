@@ -389,6 +389,35 @@ export function App(props: AppProps) {
   const activeUserDetails = createMemo(
     () => snapshot().dialogs.find(({ peer }) => peer.id === activeChatId())?.userDetails,
   );
+  const shareActiveContact = async () => {
+    const chat = activeChat();
+    const details = activeUserDetails();
+    const url = details?.username ? `https://t.me/${details.username}` : undefined;
+    const text = [chat.title, details?.phone, url].filter(Boolean).join('\n');
+    if (navigator.share) {
+      await navigator.share({ title: chat.title, text, ...(url ? { url } : {}) });
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+  };
+  const editActiveContact = () => {
+    const dialog = activeDialog();
+    const details = activeUserDetails();
+    if (!dialog || dialog.peer.kind !== 'user' || !details) return;
+    const firstName = window.prompt('First name', details.firstName ?? dialog.title)?.trim();
+    if (firstName === undefined || firstName === '') return;
+    const lastName = window.prompt('Last name', details.lastName ?? '')?.trim();
+    if (lastName === undefined) return;
+    const phone = window.prompt('Phone', details.phone ?? '')?.trim();
+    if (phone === undefined) return;
+    runInBackground(engine.updateContact(dialog.peer, firstName, lastName, phone));
+  };
+  const deleteActiveContact = () => {
+    const dialog = activeDialog();
+    if (!dialog || dialog.peer.kind !== 'user') return;
+    if (!window.confirm(`Delete ${dialog.title} from your contacts?`)) return;
+    runInBackground(engine.deleteContact(dialog.peer));
+  };
   let groupMembersLoadGeneration = 0;
   createEffect(() => {
     const open = detailsOpen();
@@ -2442,6 +2471,14 @@ export function App(props: AppProps) {
           }
           close={() => updateDetailsOpen(false)}
           openShared={setSharedMediaKind}
+          shareContact={() => runInBackground(shareActiveContact())}
+          editContact={editActiveContact}
+          deleteContact={deleteActiveContact}
+          setBlocked={(blocked) => {
+            const dialog = activeDialog();
+            if (dialog?.peer.kind === 'user')
+              runInBackground(engine.setBlocked(dialog.peer, blocked));
+          }}
         />
       </div>
       <Show when={authOpen()}>

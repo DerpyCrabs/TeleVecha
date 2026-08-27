@@ -101,6 +101,12 @@ test('shows and caches Telegram user profile fields', async ({ page }) => {
     'href',
     'https://t.me/alice_fixture',
   );
+  await expect(details.getByText('March 14, 1994')).toBeVisible();
+  await expect(details.getByText('Birthday', { exact: true })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Share this contact' })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Edit contact' })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Delete contact' })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Block user' })).toBeVisible();
   expect((await fixtureStats(page))?.getUserDetails).toBe(1);
 
   await page.reload();

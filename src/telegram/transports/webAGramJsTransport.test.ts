@@ -2064,12 +2064,13 @@ describe('WebAGramJsTransport mapping', () => {
     });
   });
 
-  it('uses Telegram RPCs for user details, block, dialog pin, and private-chat deletion', async () => {
+  it('uses Telegram RPCs for user details, contacts, block, dialog pin, and private-chat deletion', async () => {
     const details = new Api.users.UserFull({
       fullUser: new Api.UserFull({
         id: 11n,
         about: 'Profile bio',
         blocked: true,
+        birthday: new Api.Birthday({ day: 14, month: 3, year: 1994 }),
         settings: new Api.PeerSettings(),
         notifySettings: new Api.PeerNotifySettings(),
         commonChatsCount: 0,
@@ -2080,8 +2081,10 @@ describe('WebAGramJsTransport mapping', () => {
           id: 11n,
           accessHash: 91n,
           firstName: 'Mira',
+          lastName: 'Lane',
           phone: '15550102048',
           username: 'mira',
+          contact: true,
         }),
       ],
     });
@@ -2091,17 +2094,25 @@ describe('WebAGramJsTransport mapping', () => {
       .mockResolvedValueOnce(details)
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(affected);
     const target = transport();
     (target as unknown as TransportInternals).client = { invoke };
     const peer = { id: 'u:11', kind: 'user' as const, accessHash: '91' };
 
     await expect(target.getUserDetails(peer)).resolves.toEqual({
+      firstName: 'Mira',
+      lastName: 'Lane',
       phone: '15550102048',
       username: 'mira',
       bio: 'Profile bio',
+      birthday: { day: 14, month: 3, year: 1994 },
+      isContact: true,
       blocked: true,
     });
+    await target.updateContact(peer, 'Mira', 'Lane', '15550102048');
+    await target.deleteContact(peer);
     await target.setBlocked(peer, false);
     await target.setPinnedDialog(peer, true);
     const deletion = await target.deleteDialog(peer);
@@ -2112,12 +2123,20 @@ describe('WebAGramJsTransport mapping', () => {
 
     const requests = invoke.mock.calls.map(([request]) => request);
     expect(requests[0]).toBeInstanceOf(Api.users.GetFullUser);
-    expect(requests[1]).toBeInstanceOf(Api.contacts.Unblock);
-    expect(requests[2]).toMatchObject({
+    expect(requests[1]).toMatchObject({
+      id: expect.any(Api.InputUser),
+      firstName: 'Mira',
+      lastName: 'Lane',
+      phone: '15550102048',
+    });
+    expect(requests[1]).toBeInstanceOf(Api.contacts.AddContact);
+    expect(requests[2]).toBeInstanceOf(Api.contacts.DeleteContacts);
+    expect(requests[3]).toBeInstanceOf(Api.contacts.Unblock);
+    expect(requests[4]).toMatchObject({
       pinned: true,
       peer: expect.any(Api.InputDialogPeer),
     });
-    expect(requests[3]).toBeInstanceOf(Api.messages.DeleteHistory);
+    expect(requests[5]).toBeInstanceOf(Api.messages.DeleteHistory);
   });
 
   it('maps typing and pinned-message updates', () => {
