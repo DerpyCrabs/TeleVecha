@@ -1,15 +1,17 @@
 import { MessagingEngine } from '../../telegram/core/engine';
+import type { MessagingClient } from '../../telegram/core/client';
 import { IndexedDbCacheStore } from '../../telegram/persistence/store';
+import { TabCoordinator, type TabCoordinatorOwner } from '../../telegram/session/tabCoordinator';
 import { FixtureTelegramTransport } from '../../telegram/transports/fixtureTransport';
-import type { TelegramCredentials, TelegramTransport } from '../../telegram/types';
+import type { PendingSend, TelegramCredentials, TelegramTransport } from '../../telegram/types';
 import { WebAGramJsTransport } from '../../telegram/transports/webAGramJsTransport';
 
 export interface AppRuntime {
-  engine: MessagingEngine;
+  engine: MessagingClient;
 }
 
 interface ControlledRuntime extends AppRuntime {
-  transport: TelegramTransport;
+  transport?: TelegramTransport | undefined;
 }
 
 export interface AppEnvironment {
@@ -34,13 +36,50 @@ function runtime(fixtureMode: boolean, fixtureScenario: string | null): Controll
   const existing = runtimes.get(key);
   if (existing) return existing;
 
-  const store = new IndexedDbCacheStore(
-    fixtureMode ? `televecha-e2e${fixtureScenario ? `-${fixtureScenario}` : ''}` : 'televecha',
-  );
-  const transport: TelegramTransport = fixtureMode
-    ? new FixtureTelegramTransport()
-    : new WebAGramJsTransport(store);
-  const created = { engine: new MessagingEngine(transport, store), transport };
+  const databaseName = fixtureMode
+    ? `televecha-e2e${fixtureScenario ? `-${fixtureScenario}` : ''}`
+    : 'televecha';
+  const created: ControlledRuntime = { engine: undefined as unknown as MessagingClient };
+  const reader = new IndexedDbCacheStore(databaseName);
+  const pendingPayloads = new Map<string, PendingSend>();
+  const coordinator = new TabCoordinator({
+    key,
+    loadBlob: (blobKey) => reader.loadBlob(blobKey),
+    hydrateSnapshot: async (snapshot, pendingPayloadIds) => {
+      const payloadIds = new Set(pendingPayloadIds);
+      for (const id of pendingPayloads.keys()) {
+        if (!payloadIds.has(id)) pendingPayloads.delete(id);
+      }
+      const missing = pendingPayloadIds.filter((id) => !pendingPayloads.has(id));
+      if (missing.length > 0) {
+        const missingIds = new Set(missing);
+        for (const pending of (await reader.loadWorkspace()).pending) {
+          if (missingIds.has(pending.id)) pendingPayloads.set(pending.id, pending);
+        }
+      }
+      if (pendingPayloads.size === 0) return snapshot;
+      return {
+        ...snapshot,
+        pending: snapshot.pending.map((pending) =>
+          payloadIds.has(pending.id) ? (pendingPayloads.get(pending.id) ?? pending) : pending,
+        ),
+      };
+    },
+    createOwner(): TabCoordinatorOwner {
+      const store = new IndexedDbCacheStore(databaseName);
+      const transport: TelegramTransport = fixtureMode
+        ? new FixtureTelegramTransport()
+        : new WebAGramJsTransport(store);
+      return {
+        engine: new MessagingEngine(transport, store, { manageTabLease: false }),
+        transport,
+      };
+    },
+    ownerChanged(owner) {
+      created.transport = owner?.transport as TelegramTransport | undefined;
+    },
+  });
+  created.engine = coordinator.client;
   runtimes.set(key, created);
   return created;
 }

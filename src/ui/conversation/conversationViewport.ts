@@ -1,6 +1,6 @@
 import { createSignal, onCleanup, type Accessor } from 'solid-js';
 
-const PRESENT_SCROLL_EPSILON = 0.5;
+const PRESENT_SCROLL_EPSILON = 2;
 
 interface ConversationViewportOptions {
   state: ConversationWindowState;
@@ -137,6 +137,11 @@ export function createConversationViewport(options: ConversationViewportOptions)
   };
 
   const preserveReadingPosition = (scroller: HTMLDivElement) => {
+    if (followingPresent && options.windowIncludesPresent()) return;
+    if (!followingPresent) {
+      if (!anchor) anchor = visibleAnchor(scroller);
+      return;
+    }
     const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     if (!options.windowIncludesPresent() || distance > 8) stopFollowing(scroller);
   };

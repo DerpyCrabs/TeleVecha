@@ -7,6 +7,25 @@ test.beforeEach(async ({ page }) => {
   await selectAlice(page);
 });
 
+test('keeps the browser context menu available on image content', async ({ page }) => {
+  const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
+  await expect(image).toBeVisible();
+
+  const inlineAllowed = await image.evaluate((element) =>
+    element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })),
+  );
+  expect(inlineAllowed).toBe(true);
+  await expect(page.getByRole('menu', { name: 'Message actions' })).toHaveCount(0);
+
+  await image.click();
+  const preview = page.getByRole('dialog', { name: /Media preview:/ }).getByRole('img');
+  await expect(preview).toBeVisible();
+  const previewAllowed = await preview.evaluate((element) =>
+    element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })),
+  );
+  expect(previewAllowed).toBe(true);
+});
+
 test('copies regular and rich message text from the context menu', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 

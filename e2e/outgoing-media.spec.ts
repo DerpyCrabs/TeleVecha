@@ -128,7 +128,7 @@ test('replaces media while editing an outgoing message', async ({ page }) => {
     .getByRole('img', { name: 'fixture.jpg' })
     .getAttribute('src');
   const downloadsBefore = (await fixtureStats(page))?.downloadMedia ?? 0;
-  await message.click({ button: 'right' });
+  await message.locator('.message-copy').click({ button: 'right' });
   await page
     .getByRole('menu', { name: 'Message actions' })
     .getByRole('menuitem', { name: 'Edit' })
@@ -170,7 +170,7 @@ test('does not overwrite a newer draft when a slow edit finishes', async ({ page
   });
 
   const message = page.locator('article[data-message-id="78"]');
-  await message.click({ button: 'right' });
+  await message.locator('.message-copy').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Edit' }).click();
   await composer.fill('Edited caption');
   await page.getByRole('button', { name: 'Send message' }).click();

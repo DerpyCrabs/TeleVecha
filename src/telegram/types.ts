@@ -799,4 +799,5 @@ export interface EngineSnapshot {
   historyRetryAt?: number | undefined;
   operationError?: string | undefined;
   error?: string | undefined;
+  requiresReload?: boolean | undefined;
 }

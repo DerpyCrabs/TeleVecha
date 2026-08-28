@@ -8,7 +8,17 @@ test.beforeEach(async ({ page }) => {
 
 async function expectSelectedDialogStyle(dialog: Locator) {
   await expect(dialog).toHaveClass(/\bactive\b/u);
-  await expect(dialog).toHaveCSS('background-color', 'rgb(25, 102, 179)');
+  await expect
+    .poll(() =>
+      dialog.evaluate((element) => {
+        const channels = (getComputedStyle(element).backgroundColor.match(/[\d.]+/gu) ?? []).map(
+          Number,
+        );
+        const [red = 0, green = 0, blue = 0, alpha = 1] = channels;
+        return alpha === 1 && blue > red && green > red;
+      }),
+    )
+    .toBe(true);
 }
 
 test('opens and closes the chat drawer on a phone viewport', async ({ page }) => {

@@ -95,6 +95,13 @@ export function MessageAlbum(props: MessageAlbumProps) {
                   tabIndex={0}
                   aria-label={`Album item ${message.media?.name ?? message.id}. Press Shift+F10 for actions.`}
                   onContextMenu={(event) => {
+                    if (
+                      event.target instanceof HTMLImageElement ||
+                      event.target instanceof HTMLVideoElement
+                    ) {
+                      event.stopPropagation();
+                      return;
+                    }
                     event.preventDefault();
                     event.stopPropagation();
                     props.openActions(message, event);

@@ -167,6 +167,7 @@ export class MessagingEngine {
   constructor(
     private readonly transport: TelegramTransport,
     private readonly store: CacheStore,
+    private readonly options: { manageTabLease?: boolean } = {},
   ) {
     this.pendingQueue = new PendingSendQueue(store);
   }
@@ -287,7 +288,7 @@ export class MessagingEngine {
   }
 
   private async startSession(credentials: TelegramCredentials, generation: number) {
-    if (!this.tabLease) {
+    if (this.options.manageTabLease !== false && !this.tabLease) {
       try {
         const lease = await acquireSingleTabLease();
         if (!this.isLifecycleCurrent(generation)) {
@@ -543,7 +544,7 @@ export class MessagingEngine {
     }
   }
 
-  async selectChat(peerId: string) {
+  async selectChat(peerId: string, rememberSelection = true) {
     const generation = this.lifecycleGeneration;
     const accountId = this.accountId;
     if (
@@ -591,7 +592,7 @@ export class MessagingEngine {
         historyRetryAt: issue?.retryAt,
       });
       const lastPeerWrite = this.lastPeerWrite.then(() =>
-        this.isOperationCurrent(generation, accountId)
+        rememberSelection && this.isOperationCurrent(generation, accountId)
           ? this.store.saveLastPeerId(peerId)
           : undefined,
       );
@@ -617,7 +618,7 @@ export class MessagingEngine {
       historyRetryAt: undefined,
     });
     const lastPeerWrite = this.lastPeerWrite.then(() =>
-      this.isOperationCurrent(generation, accountId)
+      rememberSelection && this.isOperationCurrent(generation, accountId)
         ? this.store.saveLastPeerId(peerId)
         : undefined,
     );
@@ -765,8 +766,8 @@ export class MessagingEngine {
     }
   }
 
-  async openConversation(peerId: string) {
-    await this.selectChat(peerId);
+  async openConversation(peerId: string, rememberSelection = true) {
+    await this.selectChat(peerId, rememberSelection);
     if (this.snapshotValue.activePeerId !== peerId) {
       throw new Error('Could not select the requested conversation.');
     }
@@ -3536,13 +3537,15 @@ export class MessagingEngine {
   }
 
   private async setChannelPts(peerId: string, channelPts: number) {
-    const dialogs = this.snapshotValue.dialogs.map((dialog) =>
-      dialog.peer.id === peerId ? { ...dialog, channelPts } : dialog,
-    );
-    const changed = dialogs.find(({ peer }) => peer.id === peerId);
-    if (!changed) return;
-    await this.store.putDialog({ ...changed, cacheEpoch: this.epoch });
-    this.patch({ dialogs });
+    await this.queueDialogStateOperation(async () => {
+      const dialogs = this.snapshotValue.dialogs.map((dialog) =>
+        dialog.peer.id === peerId ? { ...dialog, channelPts } : dialog,
+      );
+      const changed = dialogs.find(({ peer }) => peer.id === peerId);
+      if (!changed) return;
+      await this.store.putDialog({ ...changed, cacheEpoch: this.epoch });
+      this.patch({ dialogs });
+    });
   }
 
   private updatePeerId(update: Extract<TransportUpdate, { pts: number }>) {

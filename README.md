@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-Open the URL printed by Vite+. TeleVecha blocks a second active tab because two independent update consumers sharing one browser cache can corrupt the local cursor.
+Open the URL printed by Vite+. Multiple tabs share one elected Telegram sync owner. Each tab keeps independent navigation while commands, drafts, updates, and owner failover travel through a versioned browser channel. The Web Locks and Broadcast Channel APIs are required so TeleVecha can prevent competing update consumers from corrupting the shared cursor.
 
 ## Register a Telegram application
 
@@ -61,7 +61,7 @@ npm run build
 
 Playwright uses port 4174 by default. Set `TELEVECHA_E2E_PORT` when that port is already in use.
 
-The unit suite covers the messaging engine, IndexedDB migrations and bounds, tab lease, and Telegram adapter mappings. The Playwright suite runs against a deterministic transport and a separate `televecha-e2e` database. It tests login and offline states, desktop and phone navigation, drafts, sends and failed-outbox recovery, focus-aware read receipts, uploads, lazy media caching, live edits and deletions, history/search/shared-media pagination, scroll anchoring and render bounds, modal focus, reload persistence, layout containment, and the two-tab lock. It never opens a production Telegram session.
+The unit suite covers the messaging engine, IndexedDB migrations and bounds, tab election, and Telegram adapter mappings. The Playwright suite runs against a deterministic transport and a separate `televecha-e2e` database. It tests login and offline states, desktop and phone navigation, drafts, sends and failed-outbox recovery, focus-aware read receipts, uploads, lazy media caching, live edits and deletions, history/search/shared-media pagination, scroll anchoring and render bounds, modal focus, reload persistence, layout containment, independent two-tab conversations, synchronized drafts, and automatic owner failover. It never opens a production Telegram session.
 
 ## Current limits
 

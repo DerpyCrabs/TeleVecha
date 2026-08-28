@@ -174,6 +174,7 @@ export function App(props: AppProps) {
   const environment = props.environment;
   const { credentials, configurationError } = environment;
   const { engine } = environment.runtime;
+  let initialUrlPeerId = new URL(window.location.href).searchParams.get('chat') ?? undefined;
   const [snapshot, setSnapshot] = createSignal<EngineSnapshot>(engine.snapshot());
   const [authOpen, setAuthOpen] = createSignal(engine.snapshot().phase !== 'ready');
   const [activeChatId, setActiveChatId] = createSignal('empty');
@@ -308,6 +309,13 @@ export function App(props: AppProps) {
       unread: 0,
     };
   });
+  createEffect(() => {
+    const chat = activeChat();
+    document.title = chat.id === 'empty' ? 'TeleVecha' : `${chat.title} - TeleVecha`;
+  });
+  onCleanup(() => {
+    document.title = 'TeleVecha';
+  });
   const activeSharedCounts = createMemo(() => snapshot().sharedMediaCounts);
   createEffect(() => {
     const peerId = activeChatId();
@@ -343,6 +351,16 @@ export function App(props: AppProps) {
     focus: () =>
       document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.focus(),
   });
+  const canonicalDraft = createMemo(() => {
+    const peerId = activeChatId();
+    return peerId === 'empty' ? '' : (snapshot().drafts[peerId] ?? '');
+  });
+  createEffect(
+    on(canonicalDraft, (draft) => {
+      if (activeChatId() === 'empty' || composer.editing() || composer.draft() === draft) return;
+      composer.syncDraft(draft);
+    }),
+  );
   const expressions = createExpressionSession({
     source: engine,
     conversation: activeConversation,
@@ -503,7 +521,17 @@ export function App(props: AppProps) {
     },
   });
 
-  const selectChat = async (id: string, linkedOpenGeneration?: number) => {
+  const updateChatUrl = (peerId: string, mode: 'push' | 'replace') => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('chat', peerId);
+    window.history[mode === 'push' ? 'pushState' : 'replaceState']({}, '', url);
+  };
+
+  const selectChat = async (
+    id: string,
+    linkedOpenGeneration?: number,
+    urlMode: 'push' | 'replace' | 'none' = 'push',
+  ) => {
     if (linkedOpenGeneration === undefined) {
       openMessageGeneration += 1;
       openingMessage = false;
@@ -540,6 +568,7 @@ export function App(props: AppProps) {
       if (generation !== selectionGeneration || activeChatId() !== id) return false;
       setActiveConversation(conversation);
       const current = engine.snapshot();
+      if (current.activePeerId === id && urlMode !== 'none') updateChatUrl(id, urlMode);
       if (
         current.activePeerId === id &&
         !current.loadingMessages &&
@@ -827,6 +856,12 @@ export function App(props: AppProps) {
       if (document.visibilityState === 'visible') resumeTelegramState();
       reportConversationVisibility();
     };
+    const handlePopState = () => {
+      const peerId = new URL(window.location.href).searchParams.get('chat');
+      if (peerId && snapshot().dialogs.some(({ peer }) => peer.id === peerId)) {
+        runInBackground(selectChat(peerId, undefined, 'none'));
+      }
+    };
     const handleResize = () => {
       viewport.captureAnchor();
       const nextNarrowLayout = window.innerWidth <= 1100;
@@ -841,11 +876,14 @@ export function App(props: AppProps) {
     window.addEventListener('blur', reportConversationVisibility);
     window.addEventListener('resize', handleResize);
     window.addEventListener('online', recoverOnlineConnection);
+    window.addEventListener('popstate', handlePopState);
     document.addEventListener('visibilitychange', refreshVisibleTelegramState);
 
     const unsubscribe = engine.subscribe((next) => {
       setSnapshot(next);
-      if (next.phase === 'unauthorized') {
+      if (next.requiresReload) {
+        setAuthOpen(true);
+      } else if (next.phase === 'unauthorized') {
         setAuthOpen(true);
       } else if (
         next.dialogs.length > 0 &&
@@ -876,9 +914,20 @@ export function App(props: AppProps) {
           setSharedMediaKind(undefined);
         }
       } else if (next.phase !== 'unauthorized' && !currentExists) {
+        const requestedPeerExists = next.dialogs.some(({ peer }) => peer.id === initialUrlPeerId);
         const enginePeerExists = next.dialogs.some(({ peer }) => peer.id === next.activePeerId);
-        const target = enginePeerExists ? next.activePeerId : next.dialogs[0]?.peer.id;
-        if (target) runInBackground(selectChat(target));
+        const target = requestedPeerExists
+          ? initialUrlPeerId
+          : enginePeerExists
+            ? next.activePeerId
+            : next.dialogs[0]?.peer.id;
+        if (initialUrlPeerId && !requestedPeerExists && next.phase === 'ready') {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('chat');
+          window.history.replaceState({}, '', url);
+        }
+        initialUrlPeerId = undefined;
+        if (target) runInBackground(selectChat(target, undefined, 'replace'));
       }
     });
     if (credentials && engine.snapshot().phase === 'idle') void engine.start(credentials);
@@ -896,6 +945,7 @@ export function App(props: AppProps) {
       window.removeEventListener('blur', reportConversationVisibility);
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('online', recoverOnlineConnection);
+      window.removeEventListener('popstate', handlePopState);
       document.removeEventListener('visibilitychange', refreshVisibleTelegramState);
       if (visibilityFrame !== undefined) cancelAnimationFrame(visibilityFrame);
       const peerId = activeChatId();
@@ -1034,6 +1084,8 @@ export function App(props: AppProps) {
 
   const openMessageActions = (message: ChatMessage, event: MouseEvent) => {
     if (message.service || !Number.isSafeInteger(Number(message.id))) return;
+    if (event.target instanceof HTMLImageElement || event.target instanceof HTMLVideoElement)
+      return;
     event.preventDefault();
     event.stopPropagation();
     expressions.close();

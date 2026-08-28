@@ -97,6 +97,11 @@ export function ChatSidebar(props: ChatSidebarProps) {
   const [contextUser, setContextUser] = createSignal<TelegramUserDetails>();
   let peerSearchGeneration = 0;
   let chatListElement: HTMLDivElement | undefined;
+  const chatHref = (peerId: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('chat', peerId);
+    return `${url.pathname}${url.search}${url.hash}`;
+  };
   const archivedChats = createMemo(() => props.chats.filter((chat) => chat.archived));
   const archivedUnreadCount = createMemo(() =>
     archivedChats().reduce((total, chat) => total + normalizeUnreadCount(chat.unread), 0),
@@ -375,7 +380,9 @@ export function ChatSidebar(props: ChatSidebarProps) {
         </Show>
         <For each={virtualChats()}>
           {(chat, virtualIndex) => (
-            <button
+            <a
+              href={chatHref(chat.id)}
+              role="button"
               class="chat-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
               classList={{
                 active: chat.id === props.activeChatId,
@@ -383,7 +390,17 @@ export function ChatSidebar(props: ChatSidebarProps) {
                   chat.id === props.activeChatId,
                 '!justify-center !gap-0 !rounded-none !px-0 !py-[0.55rem]': compact(),
               }}
-              onClick={() => {
+              onClick={(event) => {
+                if (
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                ) {
+                  return;
+                }
+                event.preventDefault();
                 setContextMenu(undefined);
                 void props.directory.select(chat.id);
                 props.layout.setMobileOpen(false);
@@ -456,7 +473,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
                   </span>
                 </span>
               </span>
-            </button>
+            </a>
           )}
         </For>
         <Show when={virtualRange().end < filteredChats().length}>

@@ -19,7 +19,7 @@ test('loads only the Lucide icons used by the interface', async ({ page }) => {
 test('serves the TeleVecha browser identity', async ({ page, request }) => {
   await openReady(page);
 
-  await expect(page).toHaveTitle('TeleVecha');
+  await expect(page).toHaveTitle('Release Channel - TeleVecha');
   await expect(page.locator('meta[name="application-name"]')).toHaveAttribute(
     'content',
     'TeleVecha',

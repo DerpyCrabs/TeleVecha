@@ -6,6 +6,15 @@ test.beforeEach(async ({ page }) => {
   await openReady(page);
 });
 
+test('shows the open dialog name in the browser tab title', async ({ page }) => {
+  await selectAlice(page);
+  await expect(page).toHaveTitle('Alice Fixture - TeleVecha');
+
+  await chatButton(page, /Release Channel/).click();
+  await expect(page.getByTestId('conversation-header')).toContainText('Release Channel');
+  await expect(page).toHaveTitle('Release Channel - TeleVecha');
+});
+
 test('searches chat titles and message previews without changing the open chat', async ({
   page,
 }) => {

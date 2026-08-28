@@ -1,4 +1,4 @@
-import type { MessagingEngine } from '../../telegram/core/engine';
+import type { MessagingClient } from '../../telegram/core/client';
 import type {
   TelegramDialog,
   TelegramMessage,
@@ -14,7 +14,7 @@ export interface MediaAsset {
 }
 
 type MediaSource = Pick<
-  MessagingEngine,
+  MessagingClient,
   | 'loadCachedAvatar'
   | 'downloadAvatar'
   | 'mediaAssetKey'

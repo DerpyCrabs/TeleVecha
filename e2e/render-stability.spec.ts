@@ -264,7 +264,7 @@ test('a small upward wheel movement leaves present-follow mode', async ({ page }
   expect(await distanceFromPresent()).toBeCloseTo(readingDistance, 0);
 
   await page.mouse.wheel(0, 4);
-  await expect.poll(distanceFromPresent).toBeLessThan(0.5);
+  await expect.poll(distanceFromPresent).toBeLessThanOrEqual(2);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -619,14 +619,22 @@ test('fifty draft updates cause no message-list or chat-list child replacement',
     new MutationObserver((records) => {
       removals.chats += records.reduce((count, record) => count + record.removedNodes.length, 0);
     }).observe(chats, { childList: true, subtree: true });
-    Object.assign(window, { __uxRemovals: removals });
+    const engine = window.__televechaRuntimes?.get('fixture:default')?.engine;
+    if (!engine) throw new Error('Missing fixture engine');
+    const setDraft = engine.setDraft.bind(engine);
+    let draftWrites = 0;
+    engine.setDraft = (...args) => {
+      draftWrites += 1;
+      return setDraft(...args);
+    };
+    Object.assign(window, { __uxRemovals: removals, __draftWrites: () => draftWrites });
   });
   const callsBefore = await fixtureStats(page);
 
   await page
     .getByRole('textbox', { name: 'Message' })
     .pressSequentially('1234567890'.repeat(5), { delay: 2 });
-  await page.waitForTimeout(50);
+  await page.waitForTimeout(200);
 
   expect(
     await page.evaluate(
@@ -634,6 +642,11 @@ test('fifty draft updates cause no message-list or chat-list child replacement',
         (window as unknown as { __uxRemovals: { messages: number; chats: number } }).__uxRemovals,
     ),
   ).toEqual({ messages: 0, chats: 0 });
+  expect(
+    await page.evaluate(() =>
+      (window as unknown as { __draftWrites: () => number }).__draftWrites(),
+    ),
+  ).toBeLessThanOrEqual(2);
   const callsAfter = await fixtureStats(page);
   expect(callsAfter?.getDialogs).toBe(callsBefore?.getDialogs);
   expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);

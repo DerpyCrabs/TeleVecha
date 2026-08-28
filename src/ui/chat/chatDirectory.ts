@@ -1,10 +1,10 @@
 import type { Accessor } from 'solid-js';
 
-import type { MessagingEngine } from '../../telegram/core/engine';
+import type { MessagingClient } from '../../telegram/core/client';
 import type { TelegramDialog, TelegramPeerSearchResult } from '../../telegram/types';
 
 type DirectorySource = Pick<
-  MessagingEngine,
+  MessagingClient,
   | 'searchPeers'
   | 'addPeer'
   | 'getUserDetails'

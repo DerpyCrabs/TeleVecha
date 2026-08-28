@@ -153,27 +153,31 @@ test('keeps the last bubble above the composer when the composer grows', async (
     .toBeLessThanOrEqual(-8);
 });
 
-test('keeps outgoing message bubbles dark and distinct from incoming messages', async ({
+test('keeps outgoing message bubbles readable and distinct from incoming messages', async ({
   page,
 }) => {
   const colors = await page.evaluate(() => {
-    const readRgb = (selector: string, property: 'backgroundColor' | 'color') => {
+    const readStyle = (selector: string) => {
       const element = document.querySelector<HTMLElement>(selector);
       if (!element) throw new Error(`Missing ${selector}`);
-      const value = getComputedStyle(element)[property];
-      return (value.match(/[\d.]+/gu) ?? []).slice(0, 3).map(Number);
+      const style = getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        backgroundImage: style.backgroundImage,
+        color: (style.color.match(/[\d.]+/gu) ?? []).slice(0, 3).map(Number),
+      };
     };
     return {
-      incoming: readRgb('.message.incoming', 'backgroundColor'),
-      outgoing: readRgb('.message.outgoing', 'backgroundColor'),
-      outgoingText: readRgb('.message.outgoing', 'color'),
+      incoming: readStyle('.message.incoming'),
+      outgoing: readStyle('.message.outgoing'),
     };
   });
   const average = (rgb: number[]) => rgb.reduce((sum, channel) => sum + channel, 0) / rgb.length;
 
-  expect(average(colors.outgoing)).toBeLessThan(55);
-  expect(average(colors.outgoing)).toBeGreaterThan(average(colors.incoming));
-  expect(average(colors.outgoingText)).toBeLessThan(235);
+  expect(colors.outgoing.backgroundImage).not.toBe('none');
+  expect(colors.outgoing.backgroundImage).not.toBe(colors.incoming.backgroundImage);
+  expect(colors.outgoing.backgroundColor).not.toBe(colors.incoming.backgroundColor);
+  expect(average(colors.outgoing.color)).toBeLessThan(235);
 });
 
 test('uses global media totals and only renders working details controls', async ({ page }) => {

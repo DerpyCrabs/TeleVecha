@@ -266,8 +266,9 @@ test('shows a retry control when automatic media loading fails', async ({ page }
 });
 
 test('opens photo and video attachments in a fullscreen viewer', async ({ page }) => {
-  const downloadsBefore = (await fixtureStats(page))?.downloadMedia;
   const photoTrigger = page.getByRole('button', { name: 'Open fixture.jpg fullscreen preview' });
+  await expect(photoTrigger).toBeVisible();
+  const downloadsBefore = (await fixtureStats(page))?.downloadMedia;
   await photoTrigger.click();
   const photoViewer = page.getByRole('dialog', { name: 'Media preview: fixture.jpg' });
   const fullscreenPhoto = photoViewer.getByRole('img', { name: 'fixture.jpg' });
@@ -434,6 +435,9 @@ test('downloads a generic file on demand and replaces the button with a download
   );
 
   const attachment = page.locator('article[data-message-id="81"]');
+  await expect
+    .poll(async () => (await fixtureStats(page))?.downloadMedia ?? 0)
+    .toBeGreaterThanOrEqual(2);
   const downloadsBefore = (await fixtureStats(page))?.downloadMedia ?? 0;
   await attachment.getByRole('button', { name: /report.pdf/ }).click();
   const link = attachment.getByRole('link', { name: /report.pdf/ });

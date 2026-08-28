@@ -62,6 +62,7 @@ export function ChatComposer(props: ChatComposerProps) {
   let expressionRoot: HTMLDivElement | undefined;
   let expressionButton: HTMLButtonElement | undefined;
   let expressionPointerType = '';
+  let textareaResizeFrame: number | undefined;
 
   const setExpressionOpen = (open: boolean) => {
     setExpressionOpenState(open);
@@ -71,7 +72,8 @@ export function ChatComposer(props: ChatComposerProps) {
   const editingAttachment = () =>
     props.composer.attachments().find(({ id }) => id === editingAttachmentId());
 
-  const resizeTextarea = () => {
+  const resizeTextareaNow = () => {
+    textareaResizeFrame = undefined;
     const input = textarea;
     if (!input) return;
     input.style.height = '0px';
@@ -81,6 +83,10 @@ export function ChatComposer(props: ChatComposerProps) {
     const height = Math.max(minimum, Math.min(input.scrollHeight, maximum));
     input.style.height = `${height}px`;
     input.style.overflowY = input.scrollHeight > maximum ? 'auto' : 'hidden';
+  };
+  const resizeTextarea = () => {
+    if (textareaResizeFrame !== undefined) return;
+    textareaResizeFrame = requestAnimationFrame(resizeTextareaNow);
   };
 
   const closeExpression = (restoreFocus = false) => {
@@ -133,6 +139,7 @@ export function ChatComposer(props: ChatComposerProps) {
     });
   });
   onCleanup(() => {
+    if (textareaResizeFrame !== undefined) cancelAnimationFrame(textareaResizeFrame);
     props.expressions.setVisible(false);
   });
 
