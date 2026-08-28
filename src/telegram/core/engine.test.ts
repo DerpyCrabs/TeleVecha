@@ -217,7 +217,16 @@ class MemoryStore implements CacheStore {
     this.dialogs = [...this.dialogs.filter(({ peer }) => peer.id !== next.peer.id), next];
   }
   async loadMessages(peerId: string, limit = 500) {
-    return this.messages.filter((message) => message.peerId === peerId).slice(-limit);
+    return this.messages
+      .filter((message) => message.peerId === peerId)
+      .sort((first, second) => first.id - second.id)
+      .slice(-limit);
+  }
+  async loadMessagesBefore(peerId: string, beforeMessageId: number, limit = 500) {
+    return this.messages
+      .filter((message) => message.peerId === peerId && message.id < beforeMessageId)
+      .sort((first, second) => first.id - second.id)
+      .slice(-limit);
   }
   async loadMessage(peerId: string, messageId: number) {
     return this.messages.find((message) => message.peerId === peerId && message.id === messageId);
@@ -2365,6 +2374,72 @@ describe('MessagingEngine', () => {
 
     expect(transport.historyCalls).toEqual([971]);
     expect(engine.snapshot().messages[0]).toMatchObject({ id: 970, text: 'Older message' });
+    await engine.stop();
+  });
+
+  it('opens only the newest cached page and adds the previous cached page on demand', async () => {
+    const store = new MemoryStore();
+    store.messages = Array.from({ length: 80 }, (_, index) => ({
+      ...dialog.topMessage!,
+      id: index + 1,
+      text: `Cached message ${index + 1}`,
+      cacheEpoch: 0,
+    }));
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+
+    await engine.selectChat(peer.id);
+    expect(engine.snapshot().messages).toHaveLength(50);
+    expect(engine.snapshot().messages[0]?.id).toBe(31);
+
+    await engine.loadOlderMessages();
+    expect(engine.snapshot().messages).toHaveLength(80);
+    expect(engine.snapshot().messages[0]?.id).toBe(1);
+    expect(transport.historyCalls).toEqual([]);
+    await engine.stop();
+  });
+
+  it('loads a newly cached older page even while network history is in backoff', async () => {
+    const store = new MemoryStore();
+    store.messages = Array.from({ length: 50 }, (_, index) => ({
+      ...dialog.topMessage!,
+      id: index + 51,
+      text: `Cached message ${index + 51}`,
+      cacheEpoch: 0,
+    }));
+    class FailingOlderTransport extends FakeTransport {
+      override async getHistory(
+        _peer: TelegramPeer,
+        _limit: number,
+        beforeMessageId?: number,
+      ): Promise<HistoryPage> {
+        this.historyCalls.push(beforeMessageId);
+        throw new Error('network history unavailable');
+      }
+    }
+    const transport = new FailingOlderTransport();
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+    await engine.selectChat(peer.id);
+
+    await engine.loadOlderMessages();
+    expect(engine.snapshot().historyError).toContain('network history unavailable');
+
+    store.messages.push(
+      ...Array.from({ length: 50 }, (_, index) => ({
+        ...dialog.topMessage!,
+        id: index + 1,
+        text: `Cached message ${index + 1}`,
+        cacheEpoch: 0,
+      })),
+    );
+    await engine.loadOlderMessages();
+
+    expect(engine.snapshot().messages).toHaveLength(100);
+    expect(engine.snapshot().messages[0]?.id).toBe(1);
+    expect(engine.snapshot().historyError).toBeUndefined();
+    expect(transport.historyCalls).toEqual([51]);
     await engine.stop();
   });
 

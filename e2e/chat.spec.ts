@@ -180,6 +180,57 @@ test('keeps outgoing message bubbles readable and distinct from incoming message
   expect(average(colors.outgoing.color)).toBeLessThan(235);
 });
 
+test('keeps consecutive messages from the same sender closer together', async ({ page }) => {
+  const emit = (id: number, pts: number, outgoing: boolean) =>
+    page.evaluate(
+      ({ id, pts, outgoing }) =>
+        window.__televechaFixture?.emit({
+          type: 'new-message',
+          pts,
+          ptsCount: 1,
+          message: {
+            id,
+            peerId: 'u:101',
+            senderId: outgoing ? '' : 'u:202',
+            text: `Consecutive fixture ${id}`,
+            date: 1_700_003_000 + id,
+            outgoing,
+          },
+        }),
+      { id, pts, outgoing },
+    );
+  await emit(181, 11, true);
+  await expect(page.locator('article[data-message-id="181"]')).toBeAttached();
+  await emit(182, 12, true);
+  await expect(page.locator('article[data-message-id="182"]')).toBeAttached();
+  await emit(183, 13, false);
+  const first = page.locator('article[data-message-id="181"]');
+  const second = page.locator('article[data-message-id="182"]');
+  const differentSender = page.locator('article[data-message-id="183"]');
+  const compact = page.locator('article[data-message-id="181"]').locator('..');
+  const regular = page.locator('article[data-message-id="182"]').locator('..');
+  await expect(compact).toBeVisible();
+  await expect(regular).toBeVisible();
+  await expect(compact).toHaveClass(/message-flow-row-compact/);
+  await expect(regular).not.toHaveClass(/message-flow-row-compact/);
+  const [compactGap, regularGap] = await Promise.all([
+    compact.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom)),
+    regular.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom)),
+  ]);
+  expect(compactGap).toBeLessThan(regularGap);
+  const actualGaps = await Promise.all([
+    first.evaluate(
+      (element, next) => next.getBoundingClientRect().top - element.getBoundingClientRect().bottom,
+      await second.elementHandle(),
+    ),
+    second.evaluate(
+      (element, next) => next.getBoundingClientRect().top - element.getBoundingClientRect().bottom,
+      await differentSender.elementHandle(),
+    ),
+  ]);
+  expect(actualGaps[0]).toBeLessThan(actualGaps[1] - 2);
+});
+
 test('uses global media totals and only renders working details controls', async ({ page }) => {
   const details = page.locator('aside.details-pane');
   await expect(details).toContainText('Photos');
@@ -243,34 +294,50 @@ test('updates reused header and details avatars when switching chats', async ({ 
 test('loads older messages automatically at the top and preserves the scroll anchor', async ({
   page,
 }) => {
-  await expect(page.locator('article.message')).toHaveCount(50);
+  await expect.poll(() => page.locator('article.message').count()).toBeGreaterThan(0);
+  await expect.poll(() => page.locator('article.message').count()).toBeLessThanOrEqual(60);
   await expect(page.getByRole('button', { name: 'Load older messages' })).toHaveCount(0);
 
   const scroller = page.getByTestId('message-scroller');
-  const anchor = page.getByText('Fixture message 31', { exact: true });
-  const anchorOffsetBefore = await scroller.evaluate((element) => {
-    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-    element.scrollTop = 0;
-    const anchorElement = [...element.querySelectorAll('p')].find(
-      (candidate) => candidate.textContent === 'Fixture message 31',
-    );
-    if (!anchorElement) throw new Error('Could not find the current oldest message');
-    return anchorElement.getBoundingClientRect().top - element.getBoundingClientRect().top;
-  });
-  await expect(page.locator('article.message')).toHaveCount(80);
-  await expect(page.getByText('Fixture message 1', { exact: true })).toBeAttached();
+  const anchor = await scroller.evaluate(
+    (element) =>
+      new Promise<{ id: string; offset: number }>((resolve, reject) => {
+        element.addEventListener(
+          'scroll',
+          () => {
+            const viewportTop = element.getBoundingClientRect().top;
+            const anchorElement = [
+              ...element.querySelectorAll<HTMLElement>('article.message'),
+            ].find((candidate) => candidate.getBoundingClientRect().bottom >= viewportTop);
+            if (!anchorElement?.dataset.messageId) {
+              reject(new Error('Could not find the visible history anchor'));
+              return;
+            }
+            resolve({
+              id: anchorElement.dataset.messageId,
+              offset: anchorElement.getBoundingClientRect().top - viewportTop,
+            });
+          },
+          { once: true },
+        );
+        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+        element.scrollTop = 0;
+      }),
+  );
+  await expect.poll(() => page.locator('article.message').count()).toBeGreaterThan(50);
   await expect(
     page.getByTestId('message-scroller').getByText('Newest message from fixture'),
   ).toBeAttached();
   await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  const anchorElement = page.locator(`article[data-message-id="${anchor.id}"]`);
   await expect
     .poll(async () => {
-      const anchorOffsetAfter = await anchor.evaluate(
+      const anchorOffsetAfter = await anchorElement.evaluate(
         (element, scrollElement) =>
           element.getBoundingClientRect().top - scrollElement.getBoundingClientRect().top,
         await scroller.elementHandle(),
       );
-      return Math.abs(anchorOffsetAfter - anchorOffsetBefore);
+      return Math.abs(anchorOffsetAfter - anchor.offset);
     })
     .toBeLessThan(3);
 });
@@ -278,6 +345,14 @@ test('loads older messages automatically at the top and preserves the scroll anc
 test('shows a chat scrollbar and jumps back to the present', async ({ page }) => {
   const scroller = page.getByTestId('message-scroller');
   await expect(page.getByRole('button', { name: 'Jump to present' })).toHaveCount(0);
+  expect(await scroller.evaluate((element) => getComputedStyle(element).overflowAnchor)).toBe(
+    'none',
+  );
+  expect(
+    await scroller
+      .locator('.present-scroll-anchor')
+      .evaluate((element) => getComputedStyle(element).position),
+  ).toBe('absolute');
   expect(
     await scroller.evaluate((element) =>
       getComputedStyle(element, '::-webkit-scrollbar').getPropertyValue('display'),
@@ -295,11 +370,93 @@ test('shows a chat scrollbar and jumps back to the present', async ({ page }) =>
   await expect
     .poll(() =>
       scroller.evaluate(
-        (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight,
       ),
     )
-    .toBeLessThan(3);
+    .toBe(true);
   await expect(jump).toHaveCount(0);
+
+  await page.mouse.wheel(0, -600);
+  await expect(jump).toBeVisible();
+  await page.mouse.wheel(0, 10_000);
+  await expect(jump).toHaveCount(0);
+});
+
+test('never overlaps adjacent message rows in normal document flow', async ({ page }) => {
+  const overlaps = await page.getByTestId('message-scroller').evaluate((element) => {
+    const rows = [...element.querySelectorAll<HTMLElement>('.message-flow-row:not([hidden])')];
+    return rows.slice(1).flatMap((row, index) => {
+      const previous = rows[index]!;
+      return row.getBoundingClientRect().top < previous.getBoundingClientRect().bottom
+        ? [
+            {
+              previous: previous.querySelector('article')?.getAttribute('data-message-id'),
+              current: row.querySelector('article')?.getAttribute('data-message-id'),
+            },
+          ]
+        : [];
+    });
+  });
+  expect(overlaps).toEqual([]);
+});
+
+test('keeps the final message close to the composer without a synthetic bottom gap', async ({
+  page,
+}) => {
+  const gap = await page.getByTestId('message-scroller').evaluate((element) => {
+    const rows = element.querySelectorAll<HTMLElement>('.message-flow-row:not([hidden])');
+    const message = rows[rows.length - 1]?.querySelector<HTMLElement>('article.message');
+    if (!message) throw new Error('Final message is missing');
+    return element.getBoundingClientRect().bottom - message.getBoundingClientRect().bottom;
+  });
+  expect(gap).toBeLessThan(10);
+});
+
+test('centers the empty-conversation state independently of message padding', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'delete-messages',
+      pts: 11,
+      ptsCount: 1,
+      peerId: 'u:101',
+      messageIds: Array.from({ length: 50 }, (_, index) => index + 31),
+    }),
+  );
+  const empty = page.getByRole('heading', { name: 'No messages yet' });
+  await expect(empty).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Jump to present' })).toHaveCount(0);
+  const offset = await page.getByTestId('message-scroller').evaluate((element) => {
+    const state = element.querySelector<HTMLElement>('h2')!;
+    const viewport = element.getBoundingClientRect();
+    const bounds = state.parentElement!.getBoundingClientRect();
+    return bounds.top + bounds.height / 2 - (viewport.top + viewport.height / 2);
+  });
+  expect(Math.abs(offset)).toBeLessThan(2);
+
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 12,
+      ptsCount: 1,
+      message: {
+        id: 181,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: 'First message after empty history',
+        date: 1_700_003_181,
+        outgoing: false,
+      },
+    }),
+  );
+  await expect(page.locator('article[data-message-id="181"]')).toBeVisible();
+  await expect
+    .poll(() =>
+      page
+        .getByTestId('message-scroller')
+        .evaluate((element) => element.scrollTop + element.clientHeight >= element.scrollHeight),
+    )
+    .toBe(true);
+  await expect(page.getByRole('button', { name: 'Jump to present' })).toHaveCount(0);
 });
 
 test('restores the last opened chat after reload', async ({ page }) => {

@@ -40,13 +40,17 @@ function isVisualMedia(message: ChatMessage) {
 }
 
 function sameSender(first: ChatMessage | undefined, second: ChatMessage | undefined) {
+  const sameIdentity = Boolean(
+    first &&
+    second &&
+    ((first.outgoing && second.outgoing) || (first.senderId && first.senderId === second.senderId)),
+  );
   return Boolean(
     first &&
     second &&
     !first.service &&
     !second.service &&
-    first.senderId &&
-    first.senderId === second.senderId &&
+    sameIdentity &&
     first.date !== undefined &&
     second.date !== undefined &&
     new Date(first.date * 1000).toDateString() === new Date(second.date * 1000).toDateString(),

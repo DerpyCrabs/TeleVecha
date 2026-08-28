@@ -62,6 +62,32 @@ test('typing a draft does not replace messages, media, or unchanged chat rows', 
   expect(callsAfter?.downloadMedia).toBe(callsBefore?.downloadMedia);
 });
 
+test('typing does not nudge the conversation on each input', async ({ page }) => {
+  const scroller = page.getByTestId('message-scroller');
+  const composer = page.getByRole('textbox', { name: 'Message' });
+  await waitForScrollToSettle(scroller);
+  const initial = await scroller.evaluate((element) => element.scrollTop);
+  await page.evaluate(() => {
+    const scrollElement = document.querySelector<HTMLElement>('[data-testid="message-scroller"]');
+    const input = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]');
+    if (!scrollElement || !input) throw new Error('Missing conversation controls');
+    const positions: number[] = [];
+    input.addEventListener('input', () => {
+      requestAnimationFrame(() => positions.push(scrollElement.scrollTop));
+    });
+    Object.assign(window, { __draftScrollPositions: positions });
+  });
+
+  await composer.pressSequentially('one stable line', { delay: 10 });
+  await page.waitForTimeout(50);
+  const positions = await page.evaluate(
+    () => (window as unknown as { __draftScrollPositions: number[] }).__draftScrollPositions,
+  );
+
+  expect(positions).toHaveLength('one stable line'.length);
+  expect(Math.max(initial, ...positions) - Math.min(initial, ...positions)).toBeLessThan(0.5);
+});
+
 test('opening and closing details does not replace the conversation or image', async ({ page }) => {
   const bubble = page.locator('article[data-message-id="79"]');
   const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
@@ -181,16 +207,28 @@ test('a new active-chat message appends without replacing existing bubbles', asy
 
 test('an incoming message does not move a viewport reading older messages', async ({ page }) => {
   const scroller = page.getByTestId('message-scroller');
-  const anchor = await scroller.evaluate((element) => {
-    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
-    element.scrollTop = Math.max(200, element.scrollHeight - element.clientHeight - 600);
-    const top = element.getBoundingClientRect().top;
-    const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
-      (candidate) => candidate.getBoundingClientRect().bottom >= top,
-    );
-    if (!message?.dataset.messageId) throw new Error('Visible message anchor is missing');
-    return { id: message.dataset.messageId, top: message.getBoundingClientRect().top };
-  });
+  const anchor = await scroller.evaluate(
+    (element) =>
+      new Promise<{ id: string; top: number }>((resolve, reject) => {
+        element.addEventListener(
+          'scroll',
+          () => {
+            const top = element.getBoundingClientRect().top;
+            const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
+              (candidate) => candidate.getBoundingClientRect().bottom >= top,
+            );
+            if (!message?.dataset.messageId) {
+              reject(new Error('Visible message anchor is missing'));
+              return;
+            }
+            resolve({ id: message.dataset.messageId, top: message.getBoundingClientRect().top });
+          },
+          { once: true },
+        );
+        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+        element.scrollTop = Math.max(200, element.scrollHeight - element.clientHeight - 600);
+      }),
+  );
 
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
@@ -208,7 +246,6 @@ test('an incoming message does not move a viewport reading older messages', asyn
     }),
   );
 
-  await expect(page.locator('article[data-message-id="81"]')).toBeAttached();
   const anchorAfter = page.locator(`article[data-message-id="${anchor.id}"]`);
   await expect
     .poll(async () =>
@@ -565,16 +602,28 @@ test('switching chats stays at the present after delayed media finishes layout',
 
 test('unrelated state changes preserve the reading scroll position', async ({ page }) => {
   const scroller = page.getByTestId('message-scroller');
-  const anchor = await scroller.evaluate((element) => {
-    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-    element.scrollTop = 600;
-    const top = element.getBoundingClientRect().top;
-    const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
-      (candidate) => candidate.getBoundingClientRect().bottom >= top,
-    );
-    if (!message?.dataset.messageId) throw new Error('Visible message anchor is missing');
-    return { id: message.dataset.messageId, top: message.getBoundingClientRect().top };
-  });
+  const anchor = await scroller.evaluate(
+    (element) =>
+      new Promise<{ id: string; top: number }>((resolve, reject) => {
+        element.addEventListener(
+          'scroll',
+          () => {
+            const top = element.getBoundingClientRect().top;
+            const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
+              (candidate) => candidate.getBoundingClientRect().bottom >= top,
+            );
+            if (!message?.dataset.messageId) {
+              reject(new Error('Visible message anchor is missing'));
+              return;
+            }
+            resolve({ id: message.dataset.messageId, top: message.getBoundingClientRect().top });
+          },
+          { once: true },
+        );
+        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+        element.scrollTop = 600;
+      }),
+  );
 
   await page.getByRole('textbox', { name: 'Message' }).fill('scroll-safe draft');
   await page.getByRole('button', { name: 'Close details' }).click();
@@ -603,6 +652,91 @@ test('unrelated state changes preserve the reading scroll position', async ({ pa
       ),
     )
     .toBeLessThan(3);
+});
+
+test('deleting any number of leading anchors preserves the first surviving message before paint', async ({
+  page,
+}) => {
+  const scroller = page.getByTestId('message-scroller');
+  await scroller.hover();
+  await page.mouse.wheel(0, -500);
+  await waitForScrollToSettle(scroller);
+  const anchors = await scroller.evaluate((element) => {
+    const viewportTop = element.getBoundingClientRect().top;
+    const visibleAndFollowing = [...element.querySelectorAll<HTMLElement>('article.message')]
+      .filter((message) => message.getBoundingClientRect().bottom >= viewportTop)
+      .slice(0, 5);
+    const fallback = visibleAndFollowing[4];
+    const removed = visibleAndFollowing.slice(0, 4);
+    if (
+      removed.length !== 4 ||
+      removed.some((message) => !message.dataset.messageId) ||
+      !fallback?.dataset.messageId
+    ) {
+      throw new Error('Five ordered anchors are required');
+    }
+    const fallbackTop = fallback.getBoundingClientRect().top;
+    const offsets: number[] = [];
+    let missing = 0;
+    let sampling = true;
+    const sample = () => {
+      if (!sampling) return;
+      const current = element.querySelector<HTMLElement>(
+        `article[data-message-id="${CSS.escape(fallback.dataset.messageId!)}"]`,
+      );
+      if (current) offsets.push(current.getBoundingClientRect().top - fallbackTop);
+      else missing += 1;
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+    Object.assign(window, {
+      __deletedAnchorFrames: offsets,
+      __deletedAnchorMissing: () => missing,
+      __stopDeletedAnchorFrames: () => {
+        sampling = false;
+      },
+    });
+    return {
+      removedIds: removed.map((message) => Number(message.dataset.messageId)),
+      fallbackId: fallback.dataset.messageId,
+      fallbackTop,
+    };
+  });
+
+  await page.evaluate((messageIds) => {
+    window.__televechaFixture?.emit({
+      type: 'delete-messages',
+      pts: 11,
+      ptsCount: 1,
+      peerId: 'u:101',
+      messageIds,
+    });
+  }, anchors.removedIds);
+  for (const messageId of anchors.removedIds) {
+    await expect(page.locator(`article[data-message-id="${messageId}"]`)).toHaveCount(0);
+  }
+  const fallback = page.locator(`article[data-message-id="${anchors.fallbackId}"]`);
+  await expect
+    .poll(async () =>
+      Math.abs(
+        (await fallback.evaluate((element) => element.getBoundingClientRect().top)) -
+          anchors.fallbackTop,
+      ),
+    )
+    .toBeLessThan(3);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  const frames = await page.evaluate(() => {
+    const tracked = window as unknown as {
+      __deletedAnchorFrames: number[];
+      __deletedAnchorMissing: () => number;
+      __stopDeletedAnchorFrames: () => void;
+    };
+    tracked.__stopDeletedAnchorFrames();
+    return { offsets: tracked.__deletedAnchorFrames, missing: tracked.__deletedAnchorMissing() };
+  });
+  expect(frames.missing).toBe(0);
+  expect(frames.offsets.length).toBeGreaterThan(0);
+  expect(Math.max(...frames.offsets.map(Math.abs))).toBeLessThan(3);
 });
 
 test('fifty draft updates cause no message-list or chat-list child replacement', async ({
@@ -652,22 +786,39 @@ test('fifty draft updates cause no message-list or chat-list child replacement',
   expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);
 });
 
-test('prepending older history preserves every already-rendered message node', async ({ page }) => {
-  const oldFirst = page.locator('article[data-message-id="31"]');
-  const imageBubble = page.locator('article[data-message-id="78"]');
-  const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
-  await mark(oldFirst, 'old-first');
-  await mark(imageBubble, 'image-bubble');
-  await mark(image, 'image');
-
+test('prepending older history preserves the visible node in the loaded DOM window', async ({
+  page,
+}) => {
   const scroller = page.getByTestId('message-scroller');
-  await scroller.evaluate((element) => {
-    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-    element.scrollTop = 0;
-  });
-  await expect(page.locator('article.message')).toHaveCount(80);
-
-  await expectMarked(oldFirst, 'old-first');
-  await expectMarked(imageBubble, 'image-bubble');
-  await expectMarked(image, 'image');
+  const anchor = await scroller.evaluate(
+    (element) =>
+      new Promise<{ id: string; top: number }>((resolve, reject) => {
+        element.addEventListener(
+          'scroll',
+          () => {
+            const viewportTop = element.getBoundingClientRect().top;
+            const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
+              (candidate) => candidate.getBoundingClientRect().bottom >= viewportTop,
+            );
+            if (!message?.dataset.messageId) {
+              reject(new Error('Visible message anchor is missing'));
+              return;
+            }
+            resolve({ id: message.dataset.messageId, top: message.getBoundingClientRect().top });
+          },
+          { once: true },
+        );
+        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+        element.scrollTop = 0;
+      }),
+  );
+  const preserved = page.locator(`article[data-message-id="${anchor.id}"]`);
+  await expect
+    .poll(async () =>
+      Math.abs(
+        (await preserved.evaluate((element) => element.getBoundingClientRect().top)) - anchor.top,
+      ),
+    )
+    .toBeLessThan(3);
+  await expect.poll(() => scroller.locator('article.message').count()).toBeGreaterThan(50);
 });

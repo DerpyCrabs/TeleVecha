@@ -82,6 +82,25 @@ describe('layoutMessages', () => {
     expect(layouts[1]?.className).toContain('message-same-sender');
   });
 
+  it('groups consecutive outgoing messages even when Telegram omits their sender id', () => {
+    const outgoing = (id: string, fields: Partial<ChatMessage> = {}) =>
+      message(id, { outgoing: true, senderId: '', ...fields });
+    const layouts = layoutMessages(
+      [
+        outgoing('1'),
+        outgoing('2', {
+          media: { kind: 'photo', name: 'photo.jpg', mimeType: 'image/jpeg' },
+        }),
+        outgoing('3', { replyToId: 1, replyTo: 'quoted' }),
+      ],
+      { ...chat, kind: 'user' },
+      [],
+    );
+
+    expect(layouts[1]?.className).toContain('message-same-sender');
+    expect(layouts[2]?.className).toContain('message-same-sender');
+  });
+
   it('derives media framing and width without caller-side rules', () => {
     const [layout] = layoutMessages(
       [

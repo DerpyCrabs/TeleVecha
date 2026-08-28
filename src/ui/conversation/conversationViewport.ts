@@ -1,362 +1,293 @@
-import { createSignal, onCleanup, type Accessor } from 'solid-js';
+import { createEffect, createSignal, onCleanup, untrack, type Accessor } from 'solid-js';
 
-const PRESENT_SCROLL_EPSILON = 2;
+import {
+  initialConversationViewportState,
+  transitionConversationViewport,
+  type ConversationViewportEffect,
+  type ConversationViewportEvent,
+} from './conversationViewportMachine';
+
+interface ConversationMessage {
+  id: string;
+}
 
 interface ConversationViewportOptions {
-  state: ConversationWindowState;
   scroller: Accessor<HTMLDivElement | undefined>;
   activePeerId: Accessor<string>;
-  messageCount: Accessor<number>;
-  windowIncludesPresent: Accessor<boolean>;
-  maxRenderedMessages: number;
+  messages: Accessor<readonly ConversationMessage[]>;
+  canLoadOlder: Accessor<boolean>;
   reportVisibility: () => void;
-  loadOlder: (scroller: HTMLDivElement) => void;
-  invalidateHistoryRestore: () => void;
+  loadOlder: (scroller: HTMLDivElement) => Promise<void>;
   cancelMessageOpen: () => void;
 }
 
-export function createConversationWindowState() {
-  const [windowStart, setWindowStart] = createSignal(0);
-  const [jumpVisible, setJumpVisible] = createSignal(false);
-  const [ready, setReady] = createSignal(true);
-  return { windowStart, setWindowStart, jumpVisible, setJumpVisible, ready, setReady };
-}
-
-type ConversationWindowState = ReturnType<typeof createConversationWindowState>;
-
-interface HistoryAnchor {
-  messageId: string;
+interface ReadingAnchorPoint {
+  element: HTMLElement;
   top: number;
 }
 
+/**
+ * Full-DOM conversation scrolling.
+ *
+ * At the present edge, layout changes remain bottom-pinned. While reading,
+ * the first surviving visible row remains at the same viewport coordinate.
+ * ResizeObserver and MutationObserver apply both invariants before paint.
+ * User input selects reading mode; scroll events only observe boundaries.
+ */
 export function createConversationViewport(options: ConversationViewportOptions) {
-  const { windowStart, setWindowStart, jumpVisible, setJumpVisible, ready, setReady } =
-    options.state;
-  let followingPresent = true;
-  let positioningPresent = false;
-  let positionGeneration = 0;
-  let scrollWriteActive = false;
-  let scrollWriteGeneration = 0;
-  let scrollFrame: number | undefined;
-  let anchor: HistoryAnchor | undefined;
-  let touchStart: { x: number; y: number } | undefined;
-  let pointerScrollActive = false;
-  let userIntentActive = false;
-  let userIntentTimer: ReturnType<typeof setTimeout> | undefined;
-  let userIntentDirection: -1 | 0 | 1 = 0;
-  let userIntentMoved = false;
+  const [state, setState] = createSignal(initialConversationViewportState);
+  const followingPresent = () => state().mode === 'present';
+  const jumpVisible = () => state().mode === 'history';
+  const ready = () => state().phase === 'ready';
+  let positionedPeer = '';
+  let prependHeight: number | undefined;
+  let resizeObserver: ResizeObserver | undefined;
+  let mutationObserver: MutationObserver | undefined;
+  let readingAnchors: ReadingAnchorPoint[] = [];
+  let touchY: number | undefined;
+  let pointerScrollCandidate = false;
 
-  const visibleAnchor = (scroller: HTMLDivElement) => {
-    const top = scroller.getBoundingClientRect().top;
-    const message = [...scroller.querySelectorAll<HTMLElement>('article.message')].find(
-      (candidate) => candidate.getBoundingClientRect().bottom >= top,
+  const atPresent = (scroller: HTMLDivElement) => {
+    const marker = scroller.querySelector<HTMLElement>('.present-scroll-anchor');
+    if (!marker) return options.messages().length === 0;
+    const markerBounds = marker.getBoundingClientRect();
+    const viewportBounds = scroller.getBoundingClientRect();
+    return markerBounds.top >= viewportBounds.top && markerBounds.bottom <= viewportBounds.bottom;
+  };
+
+  const captureReadingAnchors = (scroller: HTMLDivElement) => {
+    const viewportTop = scroller.getBoundingClientRect().top;
+    const measured = [...scroller.querySelectorAll<HTMLElement>('article.message')].map(
+      (element) => ({ element, bounds: element.getBoundingClientRect() }),
     );
-    return message?.dataset.messageId
-      ? { messageId: message.dataset.messageId, top: message.getBoundingClientRect().top }
-      : undefined;
+    const atOrAfterViewport = measured.filter(({ bounds }) => bounds.bottom >= viewportTop);
+    const beforeViewport = measured.filter(({ bounds }) => bounds.bottom < viewportTop).reverse();
+    readingAnchors = [...atOrAfterViewport, ...beforeViewport].map(({ element, bounds }) => ({
+      element,
+      top: bounds.top,
+    }));
   };
 
-  const restoreAnchor = (scroller: HTMLDivElement, target = anchor) => {
-    if (!target) return;
-    const message = scroller.querySelector<HTMLElement>(
-      `article[data-message-id="${CSS.escape(target.messageId)}"]`,
-    );
-    if (message) scroller.scrollTop += message.getBoundingClientRect().top - target.top;
+  const preserveReadingAnchor = (scroller: HTMLDivElement) => {
+    const anchor = readingAnchors.find(({ element }) => element.isConnected);
+    if (!anchor) return;
+    const delta = anchor.element.getBoundingClientRect().top - anchor.top;
+    if (delta !== 0) scroller.scrollTop += delta;
   };
 
-  const invalidateAlignment = () => {
-    positionGeneration += 1;
-    positioningPresent = false;
-    scrollWriteGeneration += 1;
-    scrollWriteActive = false;
-    if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
-    scrollFrame = undefined;
+  const pinPresent = (scroller: HTMLDivElement) => {
+    scroller.scrollTop = scroller.scrollHeight;
   };
 
-  const alignToPresent = (scroller: HTMLDivElement, settled?: () => void) => {
-    const generation = ++scrollWriteGeneration;
-    scrollWriteActive = true;
-    if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
-    const align = () => {
-      if (generation !== scrollWriteGeneration) return;
-      if (!followingPresent && !positioningPresent) {
-        scrollWriteActive = false;
-        scrollFrame = undefined;
-        return;
-      }
-      scroller.scrollTop = scroller.scrollHeight;
-      if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 2) {
-        scrollFrame = requestAnimationFrame(align);
-        return;
-      }
-      scrollFrame = requestAnimationFrame(() => {
-        if (generation !== scrollWriteGeneration) return;
-        if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 2) {
-          scrollFrame = requestAnimationFrame(align);
-          return;
+  const applyEffects = (
+    effects: ConversationViewportEffect[],
+    scroller: HTMLDivElement | undefined,
+  ) => {
+    for (const effect of effects) {
+      if (effect === 'pin-present' && scroller) pinPresent(scroller);
+      if (effect === 'capture-reading-anchor' && scroller) captureReadingAnchors(scroller);
+      if (effect === 'preserve-reading-anchor' && scroller) preserveReadingAnchor(scroller);
+      if (effect === 'request-older') {
+        if (!scroller) {
+          dispatch({ type: 'older-load-settled' });
+          continue;
         }
-        scrollWriteActive = false;
-        scrollFrame = undefined;
-        if (followingPresent) {
-          setJumpVisible(false);
-          options.reportVisibility();
-        }
-        settled?.();
-      });
-    };
-    align();
-  };
-
-  const updateJump = (scroller: HTMLDivElement, allowFollowingAtPresent = false) => {
-    const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-    if (
-      allowFollowingAtPresent &&
-      distance <= PRESENT_SCROLL_EPSILON &&
-      options.windowIncludesPresent()
-    ) {
-      followingPresent = true;
-      anchor = undefined;
-    } else if (distance > PRESENT_SCROLL_EPSILON || !options.windowIncludesPresent()) {
-      followingPresent = false;
-      anchor = visibleAnchor(scroller);
+        prependHeight = scroller.scrollHeight;
+        void options
+          .loadOlder(scroller)
+          .catch(() => undefined)
+          .finally(() => dispatch({ type: 'older-load-settled' }, scroller));
+      }
     }
-    setJumpVisible(!options.windowIncludesPresent() || distance > 160);
-    options.reportVisibility();
   };
 
-  const stopFollowing = (scroller: HTMLDivElement) => {
-    invalidateAlignment();
+  function dispatch(
+    event: ConversationViewportEvent,
+    scroller = options.scroller(),
+  ): ConversationViewportEffect[] {
+    return untrack(() => {
+      const transition = transitionConversationViewport(state(), event);
+      setState(transition.state);
+      applyEffects(transition.effects, scroller);
+      options.reportVisibility();
+      return transition.effects;
+    });
+  }
+
+  createEffect(() => {
+    if (options.messages().length === 0) {
+      untrack(() => dispatch({ type: 'conversation-empty' }));
+    }
+  });
+
+  const readHistory = (scroller: HTMLDivElement) => {
+    if (!followingPresent()) return;
     options.cancelMessageOpen();
-    options.invalidateHistoryRestore();
-    followingPresent = false;
-    anchor = visibleAnchor(scroller);
-    setReady(true);
-    const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-    setJumpVisible(!options.windowIncludesPresent() || distance > 160);
-    options.reportVisibility();
+    dispatch({ type: 'user-left-present' }, scroller);
   };
 
-  const preserveReadingPosition = (scroller: HTMLDivElement) => {
-    if (followingPresent && options.windowIncludesPresent()) return;
-    if (!followingPresent) {
-      if (!anchor) anchor = visibleAnchor(scroller);
-      return;
-    }
-    const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-    if (!options.windowIncludesPresent() || distance > 8) stopFollowing(scroller);
-  };
+  const attach = (scroller: HTMLDivElement, content: HTMLDivElement) => {
+    const handleScroll = () => {
+      if (followingPresent() && pointerScrollCandidate && !atPresent(scroller)) {
+        readHistory(scroller);
+      }
+      if (!followingPresent() && atPresent(scroller)) {
+        dispatch({ type: 'present-visible' }, scroller);
+      }
+      dispatch({ type: 'viewport-scrolled' }, scroller);
+      if (!followingPresent() && scroller.scrollTop === 0) {
+        dispatch({ type: 'top-reached', canLoad: options.canLoadOlder() }, scroller);
+      }
+    };
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) readHistory(scroller);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ||
+        (event.key === ' ' && event.shiftKey)
+      ) {
+        readHistory(scroller);
+      }
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      pointerScrollCandidate = event.button === 0;
+      if (event.pointerType === 'touch') {
+        touchY = event.clientY;
+        return;
+      }
+      if (event.button === 1) readHistory(scroller);
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch' || touchY === undefined || event.clientY === touchY) return;
+      touchY = event.clientY;
+      readHistory(scroller);
+    };
+    const handlePointerEnd = () => {
+      touchY = undefined;
+      pointerScrollCandidate = false;
+    };
+    scroller.addEventListener('scroll', handleScroll, { passive: true });
+    scroller.addEventListener('wheel', handleWheel, { passive: true });
+    scroller.addEventListener('keydown', handleKeyDown);
+    scroller.addEventListener('pointerdown', handlePointerDown);
+    scroller.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerEnd, true);
+    window.addEventListener('pointercancel', handlePointerEnd, true);
 
-  const resetIntent = () => {
-    userIntentDirection = 0;
-    userIntentMoved = false;
-  };
-  const settleIntent = () => {
-    if (pointerScrollActive || positioningPresent || scrollWriteActive) return false;
-    const scroller = options.scroller();
-    if (!scroller) return true;
-    if (followingPresent) alignToPresent(scroller);
-    else updateJump(scroller, userIntentDirection !== -1 || !userIntentMoved);
-    return true;
-  };
-  const clearIntent = (settle = true) => {
-    const hadIntent = userIntentActive || userIntentTimer !== undefined;
-    if (userIntentTimer) clearTimeout(userIntentTimer);
-    userIntentTimer = undefined;
-    userIntentActive = false;
-    if (!settle || !hadIntent || settleIntent()) resetIntent();
-  };
-  const markIntent = (direction: -1 | 0 | 1 = 0) => {
-    if (userIntentTimer) clearTimeout(userIntentTimer);
-    userIntentActive = true;
-    if (direction) userIntentDirection = direction;
-    userIntentTimer = setTimeout(() => {
-      userIntentActive = false;
-      userIntentTimer = undefined;
-      if (settleIntent()) resetIntent();
-    }, 180);
-  };
+    resizeObserver = new ResizeObserver(() => {
+      dispatch({ type: 'geometry-changed' }, scroller);
+    });
+    resizeObserver.observe(scroller);
+    resizeObserver.observe(content);
 
-  const preserveAnchor = () => {
-    const scroller = options.scroller();
-    if (scroller && !followingPresent) anchor = visibleAnchor(scroller);
-  };
+    mutationObserver = new MutationObserver(() => {
+      if (!followingPresent() && prependHeight !== undefined) {
+        const addedHeight = scroller.scrollHeight - prependHeight;
+        if (addedHeight !== 0) {
+          scroller.scrollTop += addedHeight;
+          prependHeight = undefined;
+        }
+      }
+      dispatch({ type: 'content-changed' }, scroller);
+    });
+    mutationObserver.observe(content, { childList: true });
 
-  const ensureAnchor = () => {
-    if (anchor) return;
-    const scroller = options.scroller();
-    if (scroller && !followingPresent) anchor = visibleAnchor(scroller);
-  };
-
-  const pauseAtHistory = () => {
-    invalidateAlignment();
-    followingPresent = false;
+    return () => {
+      scroller.removeEventListener('scroll', handleScroll);
+      scroller.removeEventListener('wheel', handleWheel);
+      scroller.removeEventListener('keydown', handleKeyDown);
+      scroller.removeEventListener('pointerdown', handlePointerDown);
+      scroller.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerEnd, true);
+      window.removeEventListener('pointercancel', handlePointerEnd, true);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      resizeObserver = undefined;
+      mutationObserver = undefined;
+    };
   };
 
   const resetForPeer = () => {
-    invalidateAlignment();
-    options.invalidateHistoryRestore();
-    followingPresent = true;
-    anchor = undefined;
-    setWindowStart(0);
-    setJumpVisible(false);
-    setReady(false);
+    positionedPeer = '';
+    prependHeight = undefined;
+    readingAnchors = [];
+    dispatch({ type: 'peer-reset' });
   };
 
-  const positionAtPresent = (peerId: string, messageCount: number, stillCurrent: () => boolean) => {
-    invalidateAlignment();
-    const generation = positionGeneration;
-    positioningPresent = true;
-    followingPresent = true;
-    setWindowStart(Math.max(0, messageCount - options.maxRenderedMessages));
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        if (
-          generation !== positionGeneration ||
-          options.activePeerId() !== peerId ||
-          !stillCurrent()
-        )
-          return;
-        const scroller = options.scroller();
-        if (!scroller) {
-          positioningPresent = false;
-          setReady(true);
-          return;
-        }
-        alignToPresent(scroller, () => {
-          if (
-            generation !== positionGeneration ||
-            options.activePeerId() !== peerId ||
-            !stillCurrent()
-          )
-            return;
-          positioningPresent = false;
-          setJumpVisible(false);
-          setReady(true);
-          options.reportVisibility();
-        });
-      }),
-    );
-  };
-
-  const jumpToPresent = () => {
+  const positionAtPresent = (peerId: string, stillCurrent: () => boolean) => {
+    if (!stillCurrent() || positionedPeer === peerId) return;
+    positionedPeer = peerId;
     const scroller = options.scroller();
-    if (!scroller) return;
-    invalidateAlignment();
-    const peerId = options.activePeerId();
-    const generation = positionGeneration;
-    followingPresent = true;
-    anchor = undefined;
-    setWindowStart(Math.max(0, options.messageCount() - options.maxRenderedMessages));
-    requestAnimationFrame(() => {
-      if (
-        generation !== positionGeneration ||
-        options.activePeerId() !== peerId ||
-        options.scroller() !== scroller ||
-        !followingPresent
-      )
-        return;
-      alignToPresent(scroller, () => {
-        if (generation !== positionGeneration || options.activePeerId() !== peerId) return;
-        setJumpVisible(false);
-        options.reportVisibility();
-      });
+    dispatch({ type: 'peer-positioned' }, scroller);
+    queueMicrotask(() => {
+      if (options.activePeerId() !== peerId || !stillCurrent()) return;
+      const current = options.scroller();
+      dispatch({ type: 'peer-positioned' }, current);
     });
   };
 
-  const handleKeyDown = (event: KeyboardEvent & { currentTarget: HTMLDivElement }) => {
-    if (!['ArrowUp', 'PageUp', 'Home', 'ArrowDown', 'PageDown', 'End'].includes(event.key)) return;
-    markIntent(['ArrowUp', 'PageUp', 'Home'].includes(event.key) ? -1 : 1);
-    stopFollowing(event.currentTarget);
-  };
-  const handleScroll = (event: Event & { currentTarget: HTMLDivElement }) => {
-    const scroller = event.currentTarget;
-    if (positioningPresent || scrollWriteActive) return options.reportVisibility();
-    if (followingPresent) return alignToPresent(scroller);
-    if (!userIntentActive && !pointerScrollActive) {
-      restoreAnchor(scroller);
-      return options.reportVisibility();
-    }
-    userIntentMoved = true;
-    markIntent();
-    updateJump(scroller, userIntentDirection !== -1);
-    options.loadOlder(scroller);
-  };
-  const handleWheel = (event: WheelEvent & { currentTarget: HTMLDivElement }) => {
-    markIntent(event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : 0);
-    if (event.deltaY < 0) stopFollowing(event.currentTarget);
-    else if (event.deltaY > 0) preserveReadingPosition(event.currentTarget);
-    if (event.deltaY < 0 && event.currentTarget.scrollTop <= 120)
-      options.loadOlder(event.currentTarget);
-  };
-  const handlePointerDown = (event: PointerEvent) => {
+  const jumpToPresent = () => {
+    options.cancelMessageOpen();
     const scroller = options.scroller();
-    if (!scroller) return;
-    if (event.pointerType === 'touch')
-      return void (touchStart = { x: event.clientX, y: event.clientY });
-    const bounds = scroller.getBoundingClientRect();
-    const scrollbarWidth = scroller.offsetWidth - scroller.clientWidth;
-    if (
-      (scrollbarWidth > 0 && event.clientX >= bounds.right - scrollbarWidth) ||
-      event.button === 1
-    ) {
-      pointerScrollActive = true;
-      markIntent();
-      stopFollowing(scroller);
-    } else {
-      clearIntent();
-      preserveReadingPosition(scroller);
-    }
+    dispatch({ type: 'jump-to-present' }, scroller);
   };
-  const handlePointerMove = (event: PointerEvent) => {
-    if (event.pointerType !== 'touch' || !touchStart) return;
-    if (Math.abs(event.clientX - touchStart.x) < 4 && Math.abs(event.clientY - touchStart.y) < 4)
-      return;
-    const direction = event.clientY > touchStart.y ? -1 : 1;
-    touchStart = undefined;
-    pointerScrollActive = true;
-    markIntent(direction);
+
+  const showMessage = (messageIndex: number) => {
     const scroller = options.scroller();
-    if (scroller) stopFollowing(scroller);
+    const message = options.messages()[messageIndex];
+    if (!scroller || !message) return false;
+    const target = scroller.querySelector<HTMLElement>(
+      `article[data-message-id="${CSS.escape(message.id)}"]`,
+    );
+    if (!target) return false;
+    dispatch({ type: 'history-target-opened' }, scroller);
+    target.scrollIntoView({ block: 'center' });
+    dispatch({ type: 'viewport-scrolled' }, scroller);
+    return true;
   };
-  const handlePointerEnd = () => {
-    touchStart = undefined;
-    if (pointerScrollActive) markIntent();
-    pointerScrollActive = false;
+
+  const reveal = (target: HTMLElement) => {
+    const scroller = options.scroller();
+    if (!scroller?.contains(target)) return false;
+    dispatch({ type: 'history-target-opened' }, scroller);
+    target.scrollIntoView({ block: 'center' });
+    dispatch({ type: 'viewport-scrolled' }, scroller);
+    return true;
   };
 
   onCleanup(() => {
-    invalidateAlignment();
-    clearIntent(false);
-    options.invalidateHistoryRestore();
+    resizeObserver?.disconnect();
+    mutationObserver?.disconnect();
   });
 
   return {
-    alignToPresent,
-    captureAnchor: preserveAnchor,
-    followingPresent: () => followingPresent,
-    handleKeyDown,
-    handlePointerDown,
-    handlePointerEnd,
-    handlePointerMove,
-    handleScroll,
-    handleWheel,
-    ensureAnchor,
-    invalidateAlignment,
-    jumpToPresent,
-    pauseAtHistory,
-    positionAtPresent,
-    preserveReadingPosition,
-    resetForPeer,
-    restoreAnchor,
-    setAnchor: (next: HistoryAnchor | undefined) => void (anchor = next),
-    stopFollowing,
-    updateJump,
-    visibleAnchor,
-    windowStart,
-    setWindowStart,
+    attach,
     jumpVisible,
     ready,
-    setReady,
+    setReady: (next: boolean) => dispatch({ type: next ? 'viewport-ready' : 'viewport-hidden' }),
+    followingPresent,
+    jumpToPresent,
+    positionAtPresent,
+    resetForPeer,
+    reveal,
+    showMessage,
+    pauseAtHistory: () => {
+      dispatch({ type: 'history-target-opened' });
+    },
+    reconcileLayout: () => {
+      dispatch({ type: 'geometry-changed' });
+    },
+    preserveReadingPosition: (scroller: HTMLDivElement) => {
+      dispatch({ type: 'reading-anchor-requested' }, scroller);
+    },
+    captureAnchor: () => {
+      dispatch({ type: 'reading-anchor-requested' });
+    },
+    updateJump: (scroller: HTMLDivElement, allowFollowing = false) => {
+      if (allowFollowing && atPresent(scroller)) dispatch({ type: 'present-visible' }, scroller);
+      options.reportVisibility();
+    },
   };
 }
 

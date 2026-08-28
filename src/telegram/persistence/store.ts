@@ -100,6 +100,11 @@ export interface CacheStore {
   replaceDialogs(dialogs: CachedDialog[]): Promise<void>;
   putDialog(dialog: CachedDialog): Promise<void>;
   loadMessages(peerId: string, limit?: number): Promise<CachedMessage[]>;
+  loadMessagesBefore(
+    peerId: string,
+    beforeMessageId: number,
+    limit?: number,
+  ): Promise<CachedMessage[]>;
   loadMessage(peerId: string, messageId: number): Promise<CachedMessage | undefined>;
   replaceMessages(peerId: string, messages: CachedMessage[]): Promise<void>;
   putMessages(messages: CachedMessage[]): Promise<void>;
@@ -387,6 +392,27 @@ export class IndexedDbCacheStore implements CacheStore {
     let cursor = await transaction.store
       .index('byPeer')
       .openCursor(IDBKeyRange.only(peerId), 'prev');
+    while (cursor && messages.length < requested) {
+      messages.push(cursor.value);
+      cursor = await cursor.continue();
+    }
+    await transaction.done;
+    return messages.reverse();
+  }
+
+  async loadMessagesBefore(
+    peerId: string,
+    beforeMessageId: number,
+    limit = DEFAULT_MESSAGE_LOAD_LIMIT,
+  ) {
+    const requested = Math.max(0, limit);
+    if (requested === 0) return [];
+    const transaction = (await this.database).transaction('messages');
+    const messages: CachedMessage[] = [];
+    let cursor = await transaction.store.openCursor(
+      IDBKeyRange.bound([peerId, Number.MIN_SAFE_INTEGER], [peerId, beforeMessageId], false, true),
+      'prev',
+    );
     while (cursor && messages.length < requested) {
       messages.push(cursor.value);
       cursor = await cursor.continue();

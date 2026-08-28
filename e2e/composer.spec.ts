@@ -70,6 +70,80 @@ test('grows multiline drafts, caps their height, and collapses after clearing', 
   await expect.poll(() => input.evaluate((element) => element.clientHeight)).toBe(singleLineHeight);
 });
 
+test('wraps an unbroken draft without pushing composer controls off screen', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message' });
+  const send = page.getByRole('button', { name: 'Send message' });
+  await input.fill('ы'.repeat(300));
+
+  const layout = await page.locator('.chat-composer').evaluate((composer) => {
+    const inputBox = composer.querySelector('textarea')!.getBoundingClientRect();
+    const sendBox = composer
+      .querySelector<HTMLButtonElement>('.send-button')!
+      .getBoundingClientRect();
+    return {
+      composer: composer.getBoundingClientRect(),
+      input: inputBox,
+      send: sendBox,
+      documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+
+  expect(layout.input.width).toBeLessThan(layout.composer.width);
+  expect(layout.send.right).toBeLessThanOrEqual(layout.composer.right);
+  expect(layout.send.left).toBeGreaterThanOrEqual(layout.composer.left);
+  expect(layout.documentOverflow).toBe(0);
+  await expect(send).toBeVisible();
+});
+
+test('stays at the present edge whenever the composer adds a line', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message' });
+  const scroller = page.getByTestId('message-scroller');
+  const distanceFromPresent = () =>
+    scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
+  await expect.poll(distanceFromPresent).toBeLessThan(0.5);
+  await scroller.evaluate((element) => {
+    const distances: number[] = [];
+    const jumpVisibility: boolean[] = [];
+    let sampling = true;
+    const sample = () => {
+      if (!sampling) return;
+      distances.push(element.scrollHeight - element.scrollTop - element.clientHeight);
+      jumpVisibility.push(Boolean(document.querySelector('.jump-to-present')));
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+    Object.assign(window, {
+      __composerGrowthFrames: distances,
+      __composerJumpFrames: jumpVisibility,
+      __stopComposerGrowthFrames: () => {
+        sampling = false;
+      },
+    });
+  });
+
+  for (let line = 1; line <= 6; line += 1) {
+    await input.fill(Array.from({ length: line }, () => 'line').join('\n'));
+    await expect.poll(distanceFromPresent).toBeLessThan(0.5);
+  }
+  await input.clear();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  const frameDistances = await page.evaluate(() => {
+    const tracked = window as unknown as {
+      __composerGrowthFrames: number[];
+      __composerJumpFrames: boolean[];
+      __stopComposerGrowthFrames: () => void;
+    };
+    tracked.__stopComposerGrowthFrames();
+    return {
+      distances: tracked.__composerGrowthFrames,
+      jumpVisibility: tracked.__composerJumpFrames,
+    };
+  });
+  expect(frameDistances.distances.length).toBeGreaterThan(0);
+  expect(Math.max(...frameDistances.distances.map(Math.abs))).toBeLessThan(0.5);
+  expect(frameDistances.jumpVisibility).not.toContain(true);
+});
+
 test('does not send whitespace or submit while an IME composition is active', async ({ page }) => {
   const input = page.getByRole('textbox', { name: 'Message' });
   const sendsBefore = (await fixtureStats(page))?.sendText;

@@ -1,4 +1,4 @@
-import { expect, type Locator, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 
 import { chatButton, fixtureStats, openReady, selectAlice } from './helpers';
 
@@ -16,6 +16,72 @@ async function waitForScrollToSettle(scroller: Locator) {
           else requestAnimationFrame(check);
         };
         requestAnimationFrame(check);
+      }),
+  );
+}
+
+async function expectLoadedWindowRendered(scroller: Locator) {
+  await expect.poll(() => scroller.locator('article.message').count()).toBeGreaterThan(0);
+  await expect
+    .poll(async () => {
+      const page = scroller.page();
+      return (await loadedMessageCount(page)) - (await scroller.locator('article.message').count());
+    })
+    .toBe(0);
+}
+
+async function loadedMessageCount(page: Page) {
+  return page.evaluate(() => {
+    const runtime = [...(window.__televechaRuntimes?.values() ?? [])][0];
+    return runtime?.engine.snapshot().messages.length ?? 0;
+  });
+}
+
+async function startHistoryAnchorSampling(scroller: Locator) {
+  return scroller.evaluate(
+    (element) =>
+      new Promise<{ id: string; top: number }>((resolve, reject) => {
+        element.addEventListener(
+          'scroll',
+          () => {
+            const viewportTop = element.getBoundingClientRect().top;
+            const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
+              (candidate) => candidate.getBoundingClientRect().bottom >= viewportTop,
+            );
+            if (!message?.dataset.messageId) {
+              reject(new Error('Visible history anchor is missing'));
+              return;
+            }
+            const anchor = {
+              id: message.dataset.messageId,
+              top: message.getBoundingClientRect().top,
+            };
+            const frameOffsets: number[] = [];
+            let missingFrames = 0;
+            let sampling = true;
+            const sample = () => {
+              if (!sampling) return;
+              const current = element.querySelector<HTMLElement>(
+                `article[data-message-id="${CSS.escape(anchor.id)}"]`,
+              );
+              if (current) frameOffsets.push(current.getBoundingClientRect().top - anchor.top);
+              else missingFrames += 1;
+              requestAnimationFrame(sample);
+            };
+            requestAnimationFrame(sample);
+            Object.assign(window, {
+              __historyAnchorFrames: frameOffsets,
+              __historyAnchorMissingFrames: () => missingFrames,
+              __stopHistoryAnchorFrames: () => {
+                sampling = false;
+              },
+            });
+            resolve(anchor);
+          },
+          { once: true },
+        );
+        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -600 }));
+        element.scrollTop = 0;
       }),
   );
 }
@@ -154,80 +220,68 @@ test('shows and incrementally fills a real gap after jumping far back in history
     .toBeLessThan(4);
 });
 
-test('loads all 1,000 messages while capping the DOM and preserving navigation', async ({
-  page,
-}) => {
+test('loads all 1,000 messages only as the user reaches each older page', async ({ page }) => {
   await page.goto('/?scenario=long-history');
   await page.getByRole('button', { name: /Long History/ }).click();
   const scroller = page.getByTestId('message-scroller');
+  await expect(scroller.getByText('Long history message 1000', { exact: true })).toBeVisible();
   await expect(scroller.getByText('Long history message 1000', { exact: true })).toBeVisible();
   for (const expected of Array.from({ length: 19 }, (_, index) => (index + 2) * 50)) {
-    const anchor = await scroller.evaluate((element) => {
+    await scroller.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-      element.scrollTop = 100;
-      const top = element.getBoundingClientRect().top;
-      const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
-        (candidate) => candidate.getBoundingClientRect().bottom >= top,
-      );
-      if (!message?.dataset.messageId) throw new Error('Visible history anchor is missing');
-      return { id: message.dataset.messageId, top: message.getBoundingClientRect().top };
+      element.scrollTop = 0;
     });
-    await expect(
-      scroller.getByText(`Long history message ${1001 - expected}`, { exact: true }),
-    ).toBeAttached();
-    await expect(page.locator('article.message')).toHaveCount(Math.min(expected, 400));
-    const sameAnchor = page.locator(`article[data-message-id="${anchor.id}"]`);
-    await expect
-      .poll(async () =>
-        Math.abs(
-          (await sameAnchor.evaluate((element) => element.getBoundingClientRect().top)) -
-            anchor.top,
-        ),
-      )
-      .toBeLessThan(4);
+    await expect.poll(() => loadedMessageCount(page)).toBeGreaterThanOrEqual(expected);
+    await expectLoadedWindowRendered(scroller);
   }
+  expect(await loadedMessageCount(page)).toBe(1000);
   await expect(page.getByText('Long history message 1', { exact: true })).toBeAttached();
-  await page.getByRole('button', { name: 'Show newer loaded messages' }).click();
-  await expect(page.getByText('Long history message 500', { exact: true })).toBeAttached();
-  await expect(page.getByRole('button', { name: 'Show earlier loaded messages' })).toBeVisible();
-  await scroller.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-  });
-  const jump = page.getByRole('button', { name: 'Jump to present' });
-  await expect(jump).toBeVisible();
-  await jump.click();
-  await expect(scroller.getByText('Long history message 1000', { exact: true })).toBeVisible();
-  await expect(page.getByText('Long history message 1', { exact: true })).not.toBeAttached();
-  await expect(page.locator('article.message')).toHaveCount(400);
+  await expectLoadedWindowRendered(scroller);
 });
 
-test('traverses an earlier cached message window before requesting more history', async ({
+test('full message flow does not produce ResizeObserver loop errors', async ({ page }) => {
+  const resizeErrors: string[] = [];
+  page.on('pageerror', (error) => {
+    if (error.message.includes('ResizeObserver')) resizeErrors.push(error.message);
+  });
+  await page.goto('/?scenario=long-history');
+  await page.getByRole('button', { name: /Long History/ }).click();
+  const scroller = page.getByTestId('message-scroller');
+  await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
+    await scroller.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+      element.scrollTop = 0;
+    });
+    await expect.poll(() => loadedMessageCount(page)).toBeGreaterThanOrEqual(100 + pageIndex * 50);
+    await expectLoadedWindowRendered(scroller);
+  }
+  expect(resizeErrors).toEqual([]);
+});
+
+test('loads earlier history only when the viewport reaches the exact loaded boundary', async ({
   page,
 }) => {
   await page.goto('/?scenario=long-history');
   await page.getByRole('button', { name: /Long History/ }).click();
   const scroller = page.getByTestId('message-scroller');
   await expect(scroller.getByText('Long history message 1000', { exact: true })).toBeVisible();
-  for (const oldestId of [901, 851, 801, 751, 701, 651, 601, 551, 501]) {
+  for (const expectedCount of [100, 150, 200, 250, 300, 350, 400, 450, 500]) {
     await scroller.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-      element.scrollTop = 100;
+      element.scrollTop = 0;
     });
-    await expect(
-      scroller.getByText(`Long history message ${oldestId}`, { exact: true }),
-    ).toBeAttached();
+    await expect.poll(() => loadedMessageCount(page)).toBeGreaterThanOrEqual(expectedCount);
+    await expectLoadedWindowRendered(scroller);
   }
-  await page.getByRole('button', { name: 'Show newer loaded messages' }).click();
-  await expect(scroller.getByText('Long history message 501', { exact: true })).not.toBeAttached();
-  const historyRequests = (await fixtureStats(page))?.getHistory;
+  const historyRequests = (await fixtureStats(page))?.getHistory ?? 0;
 
   await scroller.evaluate((element) => {
-    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
     element.scrollTop = 100;
   });
-
-  await expect(scroller.getByText('Long history message 501', { exact: true })).toBeAttached();
-  await expect.poll(async () => (await fixtureStats(page))?.getHistory).toBe(historyRequests);
+  await page.waitForTimeout(100);
+  expect((await fixtureStats(page))?.getHistory ?? 0).toBe(historyRequests);
+  await expectLoadedWindowRendered(scroller);
 });
 
 test('continues cached history after reloading the remembered chat', async ({ page }) => {
@@ -236,12 +290,18 @@ test('continues cached history after reloading the remembered chat', async ({ pa
   await expect(
     page.getByTestId('message-scroller').getByText('Long history message 1000', { exact: true }),
   ).toBeVisible();
-  await expect(page.locator('article.message')).toHaveCount(50);
+  await expectLoadedWindowRendered(page.getByTestId('message-scroller'));
+  await page.getByTestId('message-scroller').evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+    element.scrollTop = 0;
+  });
+  await expect.poll(() => loadedMessageCount(page)).toBe(100);
 
   await page.reload();
   await expect(
     page.getByTestId('message-scroller').getByText('Long history message 1000', { exact: true }),
   ).toBeVisible();
+  await expect(page.locator('article.message')).toHaveCount(50);
   expect((await fixtureStats(page))?.getHistory).toBe(0);
 
   const reloadedScroller = page.getByTestId('message-scroller');
@@ -250,27 +310,22 @@ test('continues cached history after reloading the remembered chat', async ({ pa
     element.scrollTop = 0;
   });
 
-  await expect.poll(async () => (await fixtureStats(page))?.getHistory).toBeGreaterThanOrEqual(1);
-  await expect.poll(() => page.locator('article.message').count()).toBeGreaterThanOrEqual(100);
-  await expect.poll(() => page.locator('article.message').count()).toBeLessThanOrEqual(400);
-  await expect(page.getByText('Long history message 901', { exact: true })).toBeAttached();
+  await expect.poll(() => loadedMessageCount(page)).toBeGreaterThanOrEqual(100);
+  expect((await fixtureStats(page))?.getHistory).toBe(0);
+  await expect(page.locator('article.message')).toHaveCount(100);
+  await expectLoadedWindowRendered(reloadedScroller);
 });
 
 test('preserves the visible message when an upward wheel loads older history', async ({ page }) => {
   await page.goto('/?scenario=long-history');
   await page.getByRole('button', { name: /Long History/ }).click();
   const scroller = page.getByTestId('message-scroller');
-  await expect(scroller.locator('article.message')).toHaveCount(50);
+  await expectLoadedWindowRendered(scroller);
 
-  const anchor = await scroller.evaluate((element) => {
-    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -600 }));
-    element.scrollTop = 0;
-    const message = element.querySelector<HTMLElement>('article.message');
-    if (!message?.dataset.messageId) throw new Error('Top message anchor is missing');
-    return { id: message.dataset.messageId, top: message.getBoundingClientRect().top };
-  });
+  const anchor = await startHistoryAnchorSampling(scroller);
 
-  await expect.poll(() => scroller.locator('article.message').count()).toBeGreaterThan(50);
+  await expect.poll(() => loadedMessageCount(page)).toBeGreaterThanOrEqual(100);
+  await expectLoadedWindowRendered(scroller);
   const anchorAfter = scroller.locator(`article[data-message-id="${anchor.id}"]`);
   await expect
     .poll(async () =>
@@ -279,23 +334,39 @@ test('preserves the visible message when an upward wheel loads older history', a
       ),
     )
     .toBeLessThan(3);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  const frameOffsets = await page.evaluate(() => {
+    const tracked = window as unknown as {
+      __historyAnchorFrames: number[];
+      __historyAnchorMissingFrames: () => number;
+      __stopHistoryAnchorFrames: () => void;
+    };
+    tracked.__stopHistoryAnchorFrames();
+    return {
+      offsets: tracked.__historyAnchorFrames,
+      missingFrames: tracked.__historyAnchorMissingFrames(),
+    };
+  });
+  expect(frameOffsets.offsets.length).toBeGreaterThan(0);
+  expect(frameOffsets.missingFrames).toBe(0);
+  expect(Math.max(...frameOffsets.offsets.map(Math.abs))).toBeLessThan(3);
 });
 
 test('keeps the viewport anchored while delayed older media finishes layout', async ({ page }) => {
   await page.goto('/?scenario=delayed-history-media');
   await page.getByRole('button', { name: /Long History/ }).click();
   const scroller = page.getByTestId('message-scroller');
-  await expect(scroller.locator('article.message')).toHaveCount(50);
+  await expectLoadedWindowRendered(scroller);
 
-  const anchor = await scroller.evaluate((element) => {
-    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -600 }));
-    element.scrollTop = 0;
-    const message = element.querySelector<HTMLElement>('article.message');
-    if (!message?.dataset.messageId) throw new Error('Top message anchor is missing');
-    return { id: message.dataset.messageId, top: message.getBoundingClientRect().top };
-  });
+  const anchor = await startHistoryAnchorSampling(scroller);
 
-  await expect.poll(() => scroller.locator('article.message').count()).toBeGreaterThan(50);
+  await expect.poll(() => loadedMessageCount(page)).toBeGreaterThanOrEqual(100);
+  await expectLoadedWindowRendered(scroller);
   const delayedMedia = page.locator('article[data-message-id="925"]');
   await expect(delayedMedia).toBeAttached();
   await expect(page.getByRole('img', { name: 'delayed-history-layout.tgs' })).toHaveCount(0);

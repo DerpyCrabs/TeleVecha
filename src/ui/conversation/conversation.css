@@ -610,6 +610,11 @@
   display: inline;
 }
 .history-loader {
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  z-index: 4;
+  transform: translateX(-50%);
   align-self: center;
   border: 1px solid rgb(255 255 255 / 0.08);
   border-radius: 999px;
@@ -639,16 +644,39 @@
 [data-testid='message-scroller'] {
   overflow-anchor: none;
   overflow-x: hidden;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 .conversation-content {
   min-height: 100%;
   justify-content: flex-end;
+  gap: 0;
+  visibility: hidden;
+}
+.conversation-content.conversation-ready {
   visibility: visible;
 }
 .present-scroll-anchor {
+  position: absolute;
+  right: 0;
+  bottom: 0;
   width: 1px;
   height: 1px;
-  flex: 0 0 1px;
+  pointer-events: none;
+  overflow-anchor: none;
+}
+.message-flow-row {
+  display: flex;
+  width: 100%;
+  flex: 0 0 auto;
+  flex-direction: column;
+  padding-bottom: 0.5rem;
+}
+.message-flow-row-first {
+  margin-top: 1rem;
+}
+.message-flow-row-compact {
+  padding-bottom: 0.15rem;
 }
 .upload-progress {
   width: min(20rem, 100%);
@@ -718,6 +746,11 @@
   opacity: 0.5;
 }
 .conversation-state {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  transform: translate(-50%, -50%);
   display: grid;
   max-width: 24rem;
   place-items: center;
@@ -740,6 +773,11 @@
   display: block;
 }
 .history-error {
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  z-index: 4;
+  transform: translateX(-50%);
   display: flex;
   max-width: min(34rem, 100%);
   align-items: center;

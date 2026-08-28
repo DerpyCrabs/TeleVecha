@@ -579,11 +579,17 @@ export class MessagingEngine {
     if (loaded) {
       const issue = this.historyIssues.get(peerId);
       this.touchHistory(peerId);
+      const messages =
+        loaded.messages.length > HISTORY_LIMIT
+          ? loaded.messages.slice(-HISTORY_LIMIT)
+          : loaded.messages;
+      const oldestId = messages[0]?.id;
+      if (oldestId !== undefined) this.historyOffsets.set(peerId, oldestId);
       this.patch({
         activePeerId: peerId,
-        messages: loaded.messages,
+        messages,
         loadingMessages: false,
-        hasOlderMessages: loaded.hasOlderMessages,
+        hasOlderMessages: loaded.messages.length > messages.length || loaded.hasOlderMessages,
         loadingOlderMessages: false,
         sharedMediaCounts: undefined,
         pinnedMessages: [],
@@ -627,7 +633,7 @@ export class MessagingEngine {
     });
     let cached: CachedMessage[] = [];
     try {
-      cached = (await this.store.loadMessages(peerId, MAX_MESSAGES_PER_HISTORY)).filter(
+      cached = (await this.store.loadMessages(peerId, HISTORY_LIMIT)).filter(
         (message) => message.cacheEpoch === this.epoch,
       );
     } catch (error) {
@@ -1614,22 +1620,60 @@ export class MessagingEngine {
     const dialog = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
     const oldest = this.snapshotValue.messages[0];
     if (!dialog || !oldest) return;
-    const failure = this.historyFailures.get(peerId);
-    if (failure && Date.now() < failure.retryAt) return;
-    if (!this.snapshotValue.online) {
-      const message = 'Older messages are unavailable while Telegram is offline.';
-      this.historyIssues.set(peerId, { message });
-      this.patch({
-        historyError: message,
-      });
-      return;
-    }
-
     this.patch({ loadingOlderMessages: true });
     const historyVersion = this.historyVersion(peerId);
     const requestRevision = this.messageRevision;
     try {
       const requestedOffset = this.historyOffsets.get(peerId) ?? oldest.id;
+      const matchingGap = (this.historyGaps.get(peerId) ?? []).find(
+        ({ newerMinMessageId }) => newerMinMessageId === requestedOffset,
+      );
+      const loadedIds = new Set(this.snapshotValue.messages.map(({ id }) => id));
+      const cachedPage = (
+        await this.store.loadMessagesBefore(peerId, requestedOffset, HISTORY_LIMIT)
+      ).filter(
+        (message) =>
+          message.cacheEpoch === this.epoch &&
+          !loadedIds.has(message.id) &&
+          (!matchingGap || message.id > matchingGap.olderMaxMessageId),
+      );
+      if (
+        !this.isHistoryOperationCurrent(peerId, historyVersion, generation, accountId) ||
+        this.snapshotValue.activePeerId !== peerId
+      ) {
+        return;
+      }
+      if (cachedPage.length > 0) {
+        const cachedMessages = this.sortMessages(cachedPage);
+        const nextOffset = cachedMessages[0]!.id;
+        this.historyOffsets.set(peerId, nextOffset);
+        const messages = this.mergeFetchedMessages(
+          peerId,
+          this.snapshotValue.messages,
+          cachedMessages,
+          requestRevision,
+        );
+        const history = this.rememberHistory(
+          peerId,
+          { messages, hasOlderMessages: true },
+          'oldest',
+        );
+        this.patch({
+          messages: history.messages,
+          hasOlderMessages: true,
+          historyError: undefined,
+          historyRetryAt: undefined,
+        });
+        return;
+      }
+      const failure = this.historyFailures.get(peerId);
+      if (failure && Date.now() < failure.retryAt) return;
+      if (!this.snapshotValue.online) {
+        const message = 'Older messages are unavailable while Telegram is offline.';
+        this.historyIssues.set(peerId, { message });
+        this.patch({ historyError: message });
+        return;
+      }
       const page = await this.transport.getHistory(dialog.peer, HISTORY_LIMIT, requestedOffset);
       if (
         !this.isHistoryOperationCurrent(peerId, historyVersion, generation, accountId) ||
@@ -1662,9 +1706,6 @@ export class MessagingEngine {
       const nextOffset = page.nextBeforeMessageId ?? pageOldestId;
       const advanced = nextOffset !== undefined && nextOffset < requestedOffset;
       if (advanced) this.historyOffsets.set(peerId, nextOffset);
-      const matchingGap = (this.historyGaps.get(peerId) ?? []).find(
-        ({ newerMinMessageId }) => newerMinMessageId === requestedOffset,
-      );
       const nextGaps = matchingGap
         ? this.advanceHistoryGap(peerId, matchingGap, page.messages, page.hasOlder)
         : (this.historyGaps.get(peerId) ?? []);
@@ -3225,7 +3266,7 @@ export class MessagingEngine {
     if (!this.isOperationCurrent(generation, accountId)) return;
     const peerId = this.snapshotValue.activePeerId;
     if (!peerId) return;
-    const cached = (await this.store.loadMessages(peerId, MAX_MESSAGES_PER_HISTORY)).filter(
+    const cached = (await this.store.loadMessages(peerId, HISTORY_LIMIT)).filter(
       (message) => message.cacheEpoch === this.epoch,
     );
     if (

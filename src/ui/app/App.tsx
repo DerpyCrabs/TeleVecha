@@ -64,12 +64,8 @@ import {
   presentConversation,
   type KeyedMessageView,
 } from '../conversation/conversationPresentation';
-import {
-  createConversationViewport,
-  createConversationWindowState,
-} from '../conversation/conversationViewport';
+import { createConversationViewport } from '../conversation/conversationViewport';
 import { layoutMessages } from '../conversation/messageLayout';
-import { albumSafeMessageWindow } from '../conversation/messageWindow';
 import { presentDialog } from '../conversation/presentation';
 import { MediaAttachment } from '../media/MediaAttachment';
 import { MediaAssets, type MediaAsset } from '../media/mediaAssets';
@@ -82,8 +78,7 @@ import { createDrawerFocusSession } from './drawerFocusSession';
 import { SettingsDialog } from './SettingsDialog';
 import { createSidebarLayout } from './sidebarLayout';
 
-const MAX_RENDERED_MESSAGES = 400;
-const MAX_CACHED_MESSAGE_VIEWS = MAX_RENDERED_MESSAGES * 2;
+const MAX_CACHED_MESSAGE_VIEWS = 800;
 
 function peerFromId(peerId: string): TelegramPeer {
   return {
@@ -179,7 +174,6 @@ export function App(props: AppProps) {
   const [authOpen, setAuthOpen] = createSignal(engine.snapshot().phase !== 'ready');
   const [activeChatId, setActiveChatId] = createSignal('empty');
   const [activeConversation, setActiveConversation] = createSignal<Conversation>();
-  const historyWindow = createConversationWindowState();
   const sidebarLayout = createSidebarLayout({
     captureConversationAnchor: () => viewport.captureAnchor(),
   });
@@ -430,20 +424,22 @@ export function App(props: AppProps) {
     );
     return index >= 0 ? send.album.attachments[index] : undefined;
   };
-  const messageWindowBounds = createMemo(() =>
-    albumSafeMessageWindow(activeMessages(), historyWindow.windowStart(), MAX_RENDERED_MESSAGES),
-  );
   let reportConversationVisibility = () => {};
   viewport = createConversationViewport({
-    state: historyWindow,
     scroller: () => messageScroller,
     activePeerId: activeChatId,
-    messageCount: () => activeMessages().length,
-    windowIncludesPresent: () => messageWindowBounds().end >= activeMessages().length,
-    maxRenderedMessages: MAX_RENDERED_MESSAGES,
+    messages: activeMessages,
+    canLoadOlder: () => {
+      const current = snapshot();
+      return (
+        current.activePeerId === activeChatId() &&
+        current.hasOlderMessages &&
+        !current.loadingMessages &&
+        !current.loadingOlderMessages
+      );
+    },
     reportVisibility: () => reportConversationVisibility(),
-    loadOlder: (scroller) => void history.loadOlder(scroller),
-    invalidateHistoryRestore: () => history.invalidateRestore(),
+    loadOlder: (scroller) => history.loadOlder(scroller),
     cancelMessageOpen: () => {
       openMessageGeneration += 1;
       openingMessage = false;
@@ -451,8 +447,7 @@ export function App(props: AppProps) {
   });
   const renderedMessages = createMemo<ChatMessage[]>((previous) => {
     const entries = activeMessageEntries();
-    const { start, end } = messageWindowBounds();
-    const visibleEntries = entries.slice(start, end);
+    const visibleEntries = entries;
     const visibleKeys = new Set(visibleEntries.map(({ key }) => key));
     const next = visibleEntries.map(({ key, message }) => stableView(messageViews, key, message));
     for (const key of messageViews.keys()) {
@@ -466,24 +461,6 @@ export function App(props: AppProps) {
       layoutMessages(renderedMessages(), activeChat(), snapshot().dialogs, previous),
     [],
   );
-  createEffect(() => {
-    const peerId = activeChatId();
-    const messageCount = activeMessages().length;
-    void peerId;
-    if (viewport.followingPresent()) {
-      viewport.setWindowStart(Math.max(0, messageCount - MAX_RENDERED_MESSAGES));
-    } else {
-      viewport.setWindowStart((start) => Math.min(start, Math.max(0, messageCount - 1)));
-      queueMicrotask(() => {
-        if (activeChatId() !== peerId || viewport.followingPresent()) return;
-        if (messageWindowBounds().end < activeMessages().length) {
-          const scroller = messageScroller;
-          if (scroller) viewport.updateJump(scroller);
-          reportConversationVisibility();
-        }
-      });
-    }
-  });
   const conversationHeader = createConversationHeaderSession({
     snapshot,
     chat: activeChat,
@@ -508,17 +485,10 @@ export function App(props: AppProps) {
     snapshot,
     activePeerId: activeChatId,
     conversation: activeConversation,
-    messages: activeMessages,
     loaded: activeConversationLoaded,
-    online,
     openingMessage: () => openingMessage,
     scroller: () => messageScroller,
     viewport: () => viewport,
-    maxRenderedMessages: MAX_RENDERED_MESSAGES,
-    cancelMessageOpen: () => {
-      openMessageGeneration += 1;
-      openingMessage = false;
-    },
   });
 
   const updateChatUrl = (peerId: string, mode: 'push' | 'replace') => {
@@ -579,8 +549,10 @@ export function App(props: AppProps) {
       }
       return current.activePeerId === id;
     } catch (cause) {
-      if (generation === selectionGeneration && activeChatId() === id)
+      if (generation === selectionGeneration && activeChatId() === id) {
         setConversationLoadError(cause instanceof Error ? cause.message : String(cause));
+        viewport.setReady(true);
+      }
       return false;
     }
   };
@@ -686,11 +658,7 @@ export function App(props: AppProps) {
       const peerId = activeChatId();
       if (!peerId || peerId === 'empty') return;
       const scroller = messageScroller;
-      const windowIncludesPresent = messageWindowBounds().end >= activeMessages().length;
-      const atBottom = scroller
-        ? windowIncludesPresent &&
-          scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 8
-        : false;
+      const atBottom = Boolean(scroller && viewport.followingPresent());
       const obscured =
         mobileSidebarOpen() ||
         (detailsOpen() && window.matchMedia('(max-width: 1100px)').matches) ||
@@ -765,24 +733,7 @@ export function App(props: AppProps) {
     let narrowLayout = window.innerWidth <= 1100;
     const scroller = messageScroller;
     const content = messageContent;
-    const resizeObserver =
-      scroller && content
-        ? new ResizeObserver(() => {
-            if (viewport.followingPresent()) viewport.alignToPresent(scroller);
-            else {
-              viewport.restoreAnchor(scroller);
-              viewport.ensureAnchor();
-              viewport.updateJump(scroller);
-            }
-            reportConversationVisibility();
-          })
-        : undefined;
-    if (content) resizeObserver?.observe(content);
-    if (scroller) resizeObserver?.observe(scroller);
-    scroller?.addEventListener('pointerdown', viewport.handlePointerDown, true);
-    scroller?.addEventListener('pointermove', viewport.handlePointerMove, true);
-    scroller?.addEventListener('pointerup', viewport.handlePointerEnd, true);
-    scroller?.addEventListener('pointercancel', viewport.handlePointerEnd, true);
+    const detachViewport = scroller && content ? viewport.attach(scroller, content) : undefined;
     const dismissMenus = (event: PointerEvent) => {
       const target = event.target as Element;
       if (!target.closest?.('.message-context-menu')) setMessageContextMenu(undefined);
@@ -934,11 +885,7 @@ export function App(props: AppProps) {
 
     onCleanup(() => {
       unsubscribe();
-      resizeObserver?.disconnect();
-      scroller?.removeEventListener('pointerdown', viewport.handlePointerDown, true);
-      scroller?.removeEventListener('pointermove', viewport.handlePointerMove, true);
-      scroller?.removeEventListener('pointerup', viewport.handlePointerEnd, true);
-      scroller?.removeEventListener('pointercancel', viewport.handlePointerEnd, true);
+      detachViewport?.();
       document.removeEventListener('pointerdown', dismissMenus);
       document.removeEventListener('keydown', dismissMenusWithKeyboard);
       window.removeEventListener('focus', handleFocus);
@@ -990,9 +937,7 @@ export function App(props: AppProps) {
 
   const centerMessageWindow = (messageId: number) => {
     const index = activeMessages().findIndex(({ id }) => id === String(messageId));
-    if (index < 0) return;
-    const maxStart = Math.max(0, activeMessages().length - MAX_RENDERED_MESSAGES);
-    viewport.setWindowStart(Math.min(maxStart, Math.max(0, index - MAX_RENDERED_MESSAGES / 2)));
+    return index >= 0 && viewport.showMessage(index);
   };
 
   const revealMessage = async (
@@ -1009,8 +954,8 @@ export function App(props: AppProps) {
       return false;
     }
     viewport.pauseAtHistory();
-    centerMessageWindow(messageId);
     for (let attempt = 0; attempt < 10; attempt += 1) {
+      centerMessageWindow(messageId);
       await nextFrame();
       if (
         openGeneration !== openMessageGeneration ||
@@ -1025,11 +970,9 @@ export function App(props: AppProps) {
         `:is(article.message, .media-album-item)[data-message-id="${messageId}"]`,
       );
       if (!target) continue;
-      target.scrollIntoView({ block: 'center' });
-      viewport.setAnchor({ messageId: String(messageId), top: target.getBoundingClientRect().top });
+      viewport.reveal(target);
       target.classList.add('message-target');
       window.setTimeout(() => target.classList.remove('message-target'), 1200);
-      if (scroller) viewport.updateJump(scroller);
       return true;
     }
     return false;
@@ -1299,15 +1242,12 @@ export function App(props: AppProps) {
             <div class="chat-wallpaper" aria-hidden="true" />
             <div
               ref={(element) => (messageScroller = element)}
-              class={`message-scroller scroll-area relative h-full min-h-0 overflow-y-auto overscroll-contain px-5 py-6${activeChat().kind === 'channel' ? ' channel-messages' : ''}`}
+              class={`message-scroller scroll-area relative h-full min-h-0 overflow-y-auto overscroll-contain px-5${activeChat().kind === 'channel' ? ' channel-messages' : ''}`}
               data-testid="message-scroller"
-              onKeyDown={viewport.handleKeyDown}
-              onScroll={viewport.handleScroll}
-              onWheel={viewport.handleWheel}
             >
               <div
                 ref={(element) => (messageContent = element)}
-                class="conversation-content relative mx-auto flex max-w-3xl flex-col gap-2"
+                class="conversation-content relative mx-auto flex max-w-3xl flex-col"
                 classList={{ 'conversation-ready': viewport.ready() }}
               >
                 <Show
@@ -1339,11 +1279,6 @@ export function App(props: AppProps) {
                     Loading older messages…
                   </div>
                 </Show>
-                <Show when={viewport.windowStart() > 0}>
-                  <button class="message-window-control" onClick={() => history.shiftWindow(-1)}>
-                    Show earlier loaded messages
-                  </button>
-                </Show>
                 <Show when={snapshot().historyError && activeMessages().length > 0}>
                   <div class="history-error" role="alert">
                     <span>{snapshot().historyError}</span>
@@ -1367,7 +1302,7 @@ export function App(props: AppProps) {
                         activeChatId() !== 'empty'
                       }
                     >
-                      <div class="mx-auto mt-20 flex max-w-xs flex-col items-center text-center">
+                      <div class="mx-auto my-auto flex max-w-xs flex-col items-center text-center">
                         <div class="mb-4 grid size-14 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
                           <MessageSquareText size={25} />
                         </div>
@@ -1380,9 +1315,22 @@ export function App(props: AppProps) {
                   }
                 >
                   {(message, index) => {
-                    const layout = () => messageLayouts()[index()]!;
+                    const absoluteIndex = index;
+                    const layout = () => messageLayouts()[absoluteIndex()]!;
+                    const compactAfter = () =>
+                      messageLayouts()
+                        .slice(absoluteIndex() + 1)
+                        .find((candidate) => !candidate.hide)
+                        ?.className.includes('message-same-sender') ?? false;
                     return (
-                      <>
+                      <div
+                        class="message-flow-row"
+                        classList={{
+                          'message-flow-row-first': index() === 0,
+                          'message-flow-row-compact': compactAfter(),
+                        }}
+                        hidden={layout().hide}
+                      >
                         <Show when={history.gapBefore(message)}>
                           {(gap) => (
                             <button
@@ -1410,7 +1358,6 @@ export function App(props: AppProps) {
                           style={{ width: layout().width }}
                           data-message-id={message.id}
                           data-media-kind={message.media?.kind}
-                          hidden={layout().hide}
                           aria-label={message.service?.text}
                           onContextMenu={(event) => openMessageActions(message, event)}
                         >
@@ -1691,7 +1638,7 @@ export function App(props: AppProps) {
                             />
                           </Show>
                         </article>
-                      </>
+                      </div>
                     );
                   }}
                 </For>
@@ -1792,11 +1739,6 @@ export function App(props: AppProps) {
                     </Show>
                   )}
                 </Show>
-                <Show when={messageWindowBounds().end < activeMessages().length}>
-                  <button class="message-window-control" onClick={() => history.shiftWindow(1)}>
-                    Show newer loaded messages
-                  </button>
-                </Show>
                 <div class="present-scroll-anchor" aria-hidden="true" />
               </div>
             </div>
@@ -1857,6 +1799,7 @@ export function App(props: AppProps) {
             enabled={canSend()}
             composer={composer}
             expressions={expressions}
+            onGeometryChange={viewport.reconcileLayout}
             media={{
               loadSticker: (sticker) => mediaAssets.loadSticker(sticker),
               stickerUrl: (sticker) => mediaAssets.sticker(sticker).cached(),

@@ -229,6 +229,9 @@ describe('IndexedDbCacheStore', () => {
     expect((await store.loadMessages(peer.id, 10)).map(({ id }) => id)).toEqual([
       511, 512, 513, 514, 515, 516, 517, 518, 519, 520,
     ]);
+    expect((await store.loadMessagesBefore(peer.id, 511, 10)).map(({ id }) => id)).toEqual([
+      501, 502, 503, 504, 505, 506, 507, 508, 509, 510,
+    ]);
     await expect(store.loadMessage(peer.id, 1)).resolves.toEqual(
       expect.objectContaining({ id: 1, peerId: peer.id }),
     );

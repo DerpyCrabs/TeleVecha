@@ -27,6 +27,7 @@ interface ChatComposerProps {
   placeholder?: string | undefined;
   composer: ComposerSession;
   expressions: ExpressionSession;
+  onGeometryChange?: (() => void) | undefined;
   media: {
     loadSticker(sticker: TelegramSticker): Promise<string>;
     stickerUrl(sticker: TelegramSticker): string | undefined;
@@ -62,7 +63,6 @@ export function ChatComposer(props: ChatComposerProps) {
   let expressionRoot: HTMLDivElement | undefined;
   let expressionButton: HTMLButtonElement | undefined;
   let expressionPointerType = '';
-  let textareaResizeFrame: number | undefined;
 
   const setExpressionOpen = (open: boolean) => {
     setExpressionOpenState(open);
@@ -71,23 +71,6 @@ export function ChatComposer(props: ChatComposerProps) {
 
   const editingAttachment = () =>
     props.composer.attachments().find(({ id }) => id === editingAttachmentId());
-
-  const resizeTextareaNow = () => {
-    textareaResizeFrame = undefined;
-    const input = textarea;
-    if (!input) return;
-    input.style.height = '0px';
-    const style = getComputedStyle(input);
-    const minimum = Number.parseFloat(style.minHeight) || 0;
-    const maximum = Number.parseFloat(style.maxHeight) || Number.POSITIVE_INFINITY;
-    const height = Math.max(minimum, Math.min(input.scrollHeight, maximum));
-    input.style.height = `${height}px`;
-    input.style.overflowY = input.scrollHeight > maximum ? 'auto' : 'hidden';
-  };
-  const resizeTextarea = () => {
-    if (textareaResizeFrame !== undefined) return;
-    textareaResizeFrame = requestAnimationFrame(resizeTextareaNow);
-  };
 
   const closeExpression = (restoreFocus = false) => {
     const focusWasInside = Boolean(
@@ -100,10 +83,6 @@ export function ChatComposer(props: ChatComposerProps) {
   createEffect(() => {
     void props.conversationId;
     closeExpression();
-  });
-  createEffect(() => {
-    void props.composer.draft();
-    queueMicrotask(resizeTextarea);
   });
   onMount(() => {
     const dismiss = (event: PointerEvent) => {
@@ -139,7 +118,6 @@ export function ChatComposer(props: ChatComposerProps) {
     });
   });
   onCleanup(() => {
-    if (textareaResizeFrame !== undefined) cancelAnimationFrame(textareaResizeFrame);
     props.expressions.setVisible(false);
   });
 
@@ -192,7 +170,6 @@ export function ChatComposer(props: ChatComposerProps) {
       const nextOffset = offset + emoji.length;
       nextInput.focus();
       nextInput.setSelectionRange(nextOffset, nextOffset);
-      resizeTextarea();
     });
   };
 
@@ -328,7 +305,7 @@ export function ChatComposer(props: ChatComposerProps) {
           />
         )}
       </Show>
-      <div class="mx-auto flex max-w-3xl items-center gap-2">
+      <div class="mx-auto flex w-full min-w-0 max-w-3xl items-center gap-2">
         <input
           ref={(element) => (fileInput = element)}
           class="sr-only"
@@ -421,7 +398,8 @@ export function ChatComposer(props: ChatComposerProps) {
             onInput={(event) => {
               props.composer.changeDraft(event.currentTarget.value);
               if (props.composer.formats().length > 0) props.composer.setFormats([]);
-              resizeTextarea();
+              void event.currentTarget.offsetHeight;
+              props.onGeometryChange?.();
             }}
             onKeyDown={(event) => {
               if (
