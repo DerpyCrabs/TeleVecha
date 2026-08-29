@@ -4,7 +4,7 @@ import { IndexedDbCacheStore } from '../../telegram/persistence/store';
 import { TabCoordinator, type TabCoordinatorOwner } from '../../telegram/session/tabCoordinator';
 import { FixtureTelegramTransport } from '../../telegram/transports/fixtureTransport';
 import type { PendingSend, TelegramCredentials, TelegramTransport } from '../../telegram/types';
-import { WebAGramJsTransport } from '../../telegram/transports/webAGramJsTransport';
+import { createWebTelegramTransport } from '../../telegram/transports/webTelegramTransport';
 
 export interface AppRuntime {
   engine: MessagingClient;
@@ -69,7 +69,7 @@ function runtime(fixtureMode: boolean, fixtureScenario: string | null): Controll
       const store = new IndexedDbCacheStore(databaseName);
       const transport: TelegramTransport = fixtureMode
         ? new FixtureTelegramTransport()
-        : new WebAGramJsTransport(store);
+        : createWebTelegramTransport(store);
       return {
         engine: new MessagingEngine(transport, store, { manageTabLease: false }),
         transport,

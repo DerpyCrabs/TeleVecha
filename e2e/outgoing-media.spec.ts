@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import { fixtureStats, openReady, selectAlice } from './helpers';
 
-const imagePath = 'src/vendor/weba/src/lib/gramjs/client/__data__/lock.png';
+const imagePath = 'e2e/fixtures/outgoing-media.png';
 const wideImage = (
   globalThis as unknown as {
     Buffer: { from(value: string, encoding: 'base64'): Uint8Array };
@@ -36,7 +36,9 @@ test('sends adjacent media as a Telegram album and a file-mode item separately',
   const album = page.locator('.media-album').last();
   await expect(album).toHaveAttribute('data-album-size', '2');
   await expect(album).toBeVisible();
-  await expect(page.locator('article[data-media-kind="file"]').last()).toContainText('lock.png');
+  await expect(page.locator('article[data-media-kind="file"]').last()).toContainText(
+    'outgoing-media.png',
+  );
 });
 
 test('renders a staged album as one group while its upload is pending', async ({ page }) => {
@@ -50,7 +52,7 @@ test('renders a staged album as one group while its upload is pending', async ({
   await expect(album).toHaveAttribute('data-album-size', '2');
   await expect(album.locator('xpath=ancestor::article')).not.toHaveClass(/message-media-surface/u);
   await expect(album.locator('.media-album-item')).toHaveCount(2);
-  await expect(album.getByRole('img', { name: 'lock.png' })).toHaveCount(2);
+  await expect(album.getByRole('img', { name: 'outgoing-media.png' })).toHaveCount(2);
   await expect(album.getByRole('status').filter({ hasText: '25%' })).toHaveCount(2);
 
   await page.evaluate(() => window.__televechaFixture?.releaseUpload());
@@ -60,7 +62,7 @@ test('renders a staged album as one group while its upload is pending', async ({
 test('crops and rotates a staged image before sending', async ({ page }) => {
   await page.locator('input[type="file"]').setInputFiles(imagePath);
   const attachment = page.getByTestId('composer-attachment');
-  await attachment.getByRole('button', { name: 'Edit image lock.png' }).click();
+  await attachment.getByRole('button', { name: 'Edit image outgoing-media.png' }).click();
   const editor = page.getByRole('dialog', { name: 'Edit image' });
   await editor.getByRole('button', { name: '16:9' }).click();
   await editor.getByRole('button', { name: 'Rotate right' }).click();
@@ -119,7 +121,7 @@ test('keeps staged attachments with the chat they belong to', async ({ page }) =
     .click();
 
   await expect(page.getByTestId('composer-attachment')).toHaveCount(2);
-  await expect(page.getByTestId('composer-attachment').first()).toContainText('lock.png');
+  await expect(page.getByTestId('composer-attachment').first()).toContainText('outgoing-media.png');
 });
 
 test('replaces media while editing an outgoing message', async ({ page }) => {
@@ -143,7 +145,7 @@ test('replaces media while editing an outgoing message', async ({ page }) => {
   await expect(message).toContainText('Replaced photo caption');
   await expect(message.locator('.message-edited')).toHaveText('edited');
   await expect(message).toHaveClass(/message-captioned-media/u);
-  const replacement = message.getByRole('img', { name: 'lock.png' });
+  const replacement = message.getByRole('img', { name: 'outgoing-media.png' });
   await expect(replacement).toBeVisible();
   await expect.poll(() => replacement.getAttribute('src')).not.toBe(originalSource);
   await expect

@@ -1,6 +1,6 @@
 # TeleVecha
 
-A local-first Telegram web client built with SolidJS, Vite+, Tailwind CSS, and the MTProto code vendored from Telegram Web A.
+A local-first Telegram web client built with SolidJS, Vite+, Tailwind CSS, and a project-owned browser MTProto implementation.
 
 The current client handles production-account login and logout, complete main and archived dialog lists, Telegram-wide peer search, paginated history and message search, focus-aware read receipts, live updates, formatted text, replies, reactions, forwarding, pinning, bot controls, multi-file/photo uploads with progress, media albums, and Telegram sticker formats. IndexedDB stores a bounded disposable cache, local-only drafts, the Telegram session, and an account-bound durable send queue. Installed builds cache their application shell for offline startup and publish the total unread count through the browser application-badge API when it is available.
 
@@ -52,6 +52,8 @@ TeleVecha does not replay every update since the last time it ran.
 
 ```sh
 npm run check
+npm run check:telegram-tl
+npm run check:telegram-tl-sources
 npm test
 npm run test:coverage
 npm run test:e2e
@@ -67,7 +69,7 @@ The unit suite covers the messaging engine, IndexedDB migrations and bounds, tab
 
 Static WebP, video, and TGS/Lottie stickers render in chat; animated media plays only while hovered or focused. Voice notes and rectangular video messages play inline, grouped media albums render as grids, and Telegram service events appear in history. Attachments can be staged together, sent as compressed media or files, cropped and rotated before upload, and replaced while Telegram still permits editing. Bot commands, start/restart flows, reply keyboards, inline callbacks, links, and copy buttons are supported. Calls, stories, secret chats, threaded topics, and Telegram cloud drafts are outside the current scope.
 
-The files under `src/vendor/weba` come from Telegram Web A. See its `UPSTREAM.md` and `LICENSE` for the pinned revision and license. TeleVecha is licensed under GPL-3.0-or-later.
+TeleVecha generates tagged TypeScript objects and binary codec descriptors from a pinned Telegram TL schema. The generator exposes only the RPC methods the app calls, while the decoder retains the constructor coverage required for valid update envelopes. The protocol implementation uses functions, plain objects, and closure state.
 
 ## Module design
 
@@ -75,9 +77,14 @@ The files under `src/vendor/weba` come from Telegram Web A. See its `UPSTREAM.md
 
 The engine's external dependencies live at two seams:
 
-- `TelegramTransport` has production, deterministic fixture, and test adapters. It translates Telegram into TeleVecha's domain types.
+- `TelegramTransport` has production, deterministic fixture, and test adapters. The production adapter hides the project-owned MTProto client and translates tagged TL records into TeleVecha's domain types.
 - `CacheStore` has IndexedDB and in-memory test adapters. Atomic latest-state and outbox operations keep persistence rules out of callers.
 
 Engine implementation details remain internal. `PendingSendQueue` owns durable per-peer ordering, `RetryScheduler` owns reconnect timing, and `ResourceCache` owns request coalescing, cached metadata, and stale-media versioning. UI workflow modules under `src/ui` own composer and expression state, bot and reply-keyboard behavior, contact details, conversation headers, responsive drawers, viewport layout, and global or chat-specific appearance. `App.tsx` composes those modules and renders the application shell. Tests should exercise the modules through their interfaces rather than their internal maps or timers.
 
 Solid state follows ownership. Signals hold writable interaction state, memos and derived accessors calculate values, and resources own reactive async reads. Effects are reserved for browser side effects, subscriptions, cleanup, and explicit invalidation workflows; `on` names the intended dependency when the effect also reads incidental state.
+
+## License
+
+TeleVecha's project-owned code is available under the [MIT License](LICENSE).
+Pinned TL schema inputs and third-party dependencies retain their own licenses.

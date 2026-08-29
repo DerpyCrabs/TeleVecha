@@ -9,7 +9,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('/src/vendor/weba/')) return 'telegram';
+          if (id.includes('/src/telegram/mtproto/')) return 'telegram';
           return undefined;
         },
       },
@@ -18,7 +18,6 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    exclude: ['src/vendor/**'],
     coverage: {
       include: ['src/telegram/**/*.ts'],
       exclude: ['src/telegram/**/*.test.ts', 'src/telegram/transports/fixtureTransport.ts'],
@@ -31,7 +30,7 @@ export default defineConfig({
     },
   },
   lint: {
-    ignorePatterns: ['coverage/**', 'dist/**', 'src/vendor/**', 'test-results/**'],
+    ignorePatterns: ['coverage/**', 'dist/**', 'test-results/**'],
     options: {
       typeAware: true,
       typeCheck: true,
@@ -41,7 +40,7 @@ export default defineConfig({
     },
   },
   fmt: {
-    ignorePatterns: ['coverage/**', 'dist/**', 'src/vendor/**', 'test-results/**'],
+    ignorePatterns: ['coverage/**', 'dist/**', 'test-results/**'],
     semi: true,
     singleQuote: true,
   },
