@@ -64,9 +64,20 @@ const MAX_MESSAGE_MEDIA_ENTRIES = 1_000;
 const MAX_STICKER_DOCUMENT_ENTRIES = 512;
 const MAX_ENTITY_ENTRIES = 2_000;
 const CONNECTION_LOSS_GRACE_MS = 5_000;
+const OPTIONAL_ENRICHMENT_DEADLINE_MS = 250;
+
+function telegramLong(value: string | bigint) {
+  return BigInt.asIntN(64, BigInt(value));
+}
+
+function sameTelegramLong(left: string | bigint, right: string | bigint) {
+  return telegramLong(left) === telegramLong(right);
+}
 
 export type WebTelegramTransportDependencies = Readonly<{
   readVideoMetadata?: (file: File) => Promise<{ duration: number; width: number; height: number }>;
+  optionalEnrichmentDeadlineMs?: number;
+  createClient?: typeof createMtprotoClient;
 }>;
 
 export type WebTelegramTransport = {
@@ -77,6 +88,27 @@ export function createWebTelegramTransport(
   store: Pick<CacheStore, 'loadTransportSession' | 'saveTransportSession'>,
   dependencies: WebTelegramTransportDependencies = {},
 ): WebTelegramTransport {
+  return createWebTelegramTransportImplementation(store, dependencies, false);
+}
+
+/** @internal White-box test harness; application code must use createWebTelegramTransport. */
+export function createWebTelegramTransportForTesting(
+  store: Pick<CacheStore, 'loadTransportSession' | 'saveTransportSession'>,
+  dependencies: WebTelegramTransportDependencies = {},
+): WebTelegramTransport {
+  return createWebTelegramTransportImplementation(store, dependencies, true);
+}
+
+function createWebTelegramTransportImplementation(
+  store: Pick<CacheStore, 'loadTransportSession' | 'saveTransportSession'>,
+  dependencies: WebTelegramTransportDependencies,
+  exposeTestInternals: boolean,
+): WebTelegramTransport {
+  const optionalEnrichmentDeadlineMs =
+    dependencies.optionalEnrichmentDeadlineMs ?? OPTIONAL_ENRICHMENT_DEADLINE_MS;
+  if (!Number.isFinite(optionalEnrichmentDeadlineMs) || optionalEnrichmentDeadlineMs < 0) {
+    throw new RangeError('Optional Telegram enrichment deadline must be non-negative.');
+  }
   const state = {
     client: undefined as MtprotoClient | undefined,
     connectionGeneration: 0,
@@ -121,7 +153,7 @@ export function createWebTelegramTransport(
     if (generation !== state.connectionGeneration) {
       throw new Error('Telegram connection attempt was superseded.');
     }
-    const client = createMtprotoClient({
+    const client = (dependencies.createClient ?? createMtprotoClient)({
       apiId: credentials.apiId,
       apiHash: credentials.apiHash,
       session: {
@@ -152,6 +184,10 @@ export function createWebTelegramTransport(
     if (generation !== state.connectionGeneration) {
       client.disconnect();
       throw new Error('Telegram connection attempt was superseded.');
+    }
+    if (state.client && state.client !== client) {
+      state.client.disconnect();
+      clearRuntimeCaches();
     }
     state.client = client;
     try {
@@ -460,7 +496,7 @@ export function createWebTelegramTransport(
         offsetPeer = toInputPeer(peer);
       }
     }
-    await ensureNotifyDefaults();
+    await waitForOptionalEnrichment(ensureNotifyDefaults());
     return {
       dialogs: [...dialogs.values()].slice(0, totalLimit).map((dialog) => ({
         ...dialog,
@@ -536,7 +572,7 @@ export function createWebTelegramTransport(
       (candidate): candidate is Tl.Dialog =>
         Api.Dialog.is(candidate) && toPeerId(candidate.peer) === peer.id,
     );
-    await ensureNotifyDefaults();
+    await waitForOptionalEnrichment(ensureNotifyDefaults());
     return item ? mapDialog(item, entities, messages) : undefined;
   }
   async function getHistory(
@@ -562,12 +598,14 @@ export function createWebTelegramTransport(
     rememberEntities(result.users, result.chats);
     const rawMessages = result.messages;
     const displayedRawMessages = rawMessages.slice(0, limit);
-    await ensureChannelSenderRoles(
-      peer,
-      displayedRawMessages.flatMap((message) => {
-        const senderId = 'fromId' in message ? toPeerId(message.fromId) : undefined;
-        return senderId ? [senderId] : [];
-      }),
+    await waitForOptionalEnrichment(
+      ensureChannelSenderRoles(
+        peer,
+        displayedRawMessages.flatMap((message) => {
+          const senderId = 'fromId' in message ? toPeerId(message.fromId) : undefined;
+          return senderId ? [senderId] : [];
+        }),
+      ),
     );
     const messages = displayedRawMessages
       .map((message) => mapMessage(message))
@@ -594,12 +632,14 @@ export function createWebTelegramTransport(
     );
     if (Api.messages.MessagesNotModified.is(result)) return [];
     rememberEntities(result.users, result.chats);
-    await ensureChannelSenderRoles(
-      peer,
-      result.messages.flatMap((message) => {
-        const senderId = 'fromId' in message ? toPeerId(message.fromId) : undefined;
-        return senderId ? [senderId] : [];
-      }),
+    await waitForOptionalEnrichment(
+      ensureChannelSenderRoles(
+        peer,
+        result.messages.flatMap((message) => {
+          const senderId = 'fromId' in message ? toPeerId(message.fromId) : undefined;
+          return senderId ? [senderId] : [];
+        }),
+      ),
     );
     return result.messages
       .map((candidate) => mapMessage(candidate))
@@ -970,7 +1010,7 @@ export function createWebTelegramTransport(
       Api.messages.SendMessage({
         peer: toInputPeer(peer),
         message: text,
-        randomId: BigInt(randomId),
+        randomId: telegramLong(randomId),
         ...(reply ? { replyTo: inputReply(reply) } : {}),
         ...(formats?.length ? { entities: inputEntities(formats) } : {}),
       }),
@@ -1006,7 +1046,7 @@ export function createWebTelegramTransport(
         peer: toInputPeer(peer),
         media,
         message: options.caption,
-        randomId: BigInt(options.randomId),
+        randomId: telegramLong(options.randomId),
         ...(options.reply ? { replyTo: inputReply(options.reply) } : {}),
         ...(options.formats?.length ? { entities: inputEntities(options.formats) } : {}),
       }),
@@ -1054,7 +1094,7 @@ export function createWebTelegramTransport(
       multiMedia.push(
         Api.InputSingleMedia({
           media,
-          randomId: BigInt(attachment.randomId),
+          randomId: telegramLong(attachment.randomId),
           message: index === 0 ? options.caption : '',
           ...(index === 0 && options.formats?.length
             ? { entities: inputEntities(options.formats) }
@@ -1417,7 +1457,7 @@ export function createWebTelegramTransport(
       Api.messages.StartBot({
         bot: inputUser(peer),
         peer: toInputPeer(peer),
-        randomId: BigInt(randomId),
+        randomId: telegramLong(randomId),
         startParam,
       }),
     );
@@ -1488,7 +1528,7 @@ export function createWebTelegramTransport(
       const result = await getClient().invoke(
         Api.messages.SendInlineBotResult({
           peer: toInputPeer(peer),
-          randomId: BigInt(randomId),
+          randomId: telegramLong(randomId),
           queryId: BigInt(sticker.inlineQueryId),
           id: sticker.inlineResultId,
           ...(reply ? { replyTo: inputReply(reply) } : {}),
@@ -1506,7 +1546,7 @@ export function createWebTelegramTransport(
         peer: toInputPeer(peer),
         media: Api.InputMediaDocument({ id: inputDocument(sticker) }),
         message: '',
-        randomId: BigInt(randomId),
+        randomId: telegramLong(randomId),
         ...(reply ? { replyTo: inputReply(reply) } : {}),
       }),
     );
@@ -1616,7 +1656,7 @@ export function createWebTelegramTransport(
       Api.messages.ForwardMessages({
         fromPeer: toInputPeer(fromPeer),
         id: [messageId],
-        randomId: [BigInt(randomId)],
+        randomId: [telegramLong(randomId)],
         toPeer: toInputPeer(toPeer),
       }),
     );
@@ -3421,7 +3461,7 @@ export function createWebTelegramTransport(
       : Api.Updates.is(result) || Api.UpdatesCombined.is(result)
         ? result.updates.find(
             (update): update is Tl.UpdateMessageID =>
-              Api.UpdateMessageID.is(update) && update.randomId.toString() === randomId,
+              Api.UpdateMessageID.is(update) && sameTelegramLong(update.randomId, randomId),
           )?.id
         : undefined;
     if (!message && returnedMessageId !== undefined) {
@@ -3594,9 +3634,12 @@ export function createWebTelegramTransport(
   }
   function clearRuntimeCaches() {
     clearConnectionLossTimer();
+    state.eventUnsubscribe?.();
+    state.eventUnsubscribe = undefined;
     state.messageMedia.clear();
     state.linkPreviewPhotos.clear();
     state.stickerDocuments.clear();
+    state.wallpaperDocuments.clear();
     state.entities.clear();
     state.channelSenderRoles.clear();
     state.channelRolesLoaded.clear();
@@ -3605,6 +3648,8 @@ export function createWebTelegramTransport(
     state.notifyDefaultsLoading = undefined;
     state.notifyDefaultsLoaded = false;
     state.eventHandlerClient = undefined;
+    state.phoneNumber = '';
+    state.phoneCodeHash = '';
   }
   async function flushSessionSave(client = state.client) {
     if (client) {
@@ -3620,9 +3665,32 @@ export function createWebTelegramTransport(
           : 'Unknown storage error.';
     throw new Error(`Could not persist the Telegram authorization session. ${detail}`);
   }
+  async function waitForOptionalEnrichment(operation: Promise<unknown>) {
+    const guarded = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    if (optionalEnrichmentDeadlineMs === 0) {
+      void guarded;
+      return;
+    }
+    let deadline: ReturnType<typeof globalThis.setTimeout> | undefined;
+    try {
+      await Promise.race([
+        guarded,
+        new Promise<void>((resolve) => {
+          deadline = globalThis.setTimeout(resolve, optionalEnrichmentDeadlineMs);
+        }),
+      ]);
+    } finally {
+      if (deadline !== undefined) globalThis.clearTimeout(deadline);
+    }
+  }
   async function ensureNotifyDefaults() {
     if (state.notifyDefaultsLoaded) return;
     if (state.notifyDefaultsLoading) return state.notifyDefaultsLoading;
+    const generation = state.connectionGeneration;
+    const client = getClient();
     const loading = (async () => {
       const requests = [
         ['users', Api.InputNotifyUsers()],
@@ -3630,8 +3698,9 @@ export function createWebTelegramTransport(
         ['channels', Api.InputNotifyBroadcasts()],
       ] as const;
       const results = await Promise.allSettled(
-        requests.map(([, peer]) => getClient().invoke(Api.account.GetNotifySettings({ peer }))),
+        requests.map(([, peer]) => client.invoke(Api.account.GetNotifySettings({ peer }))),
       );
+      if (generation !== state.connectionGeneration || state.client !== client) return;
       results.forEach((result, index) => {
         if (result.status === 'fulfilled' && Api.PeerNotifySettings.is(result.value)) {
           state.notifyDefaults.set(requests[index]![0], result.value);
@@ -3722,9 +3791,11 @@ export function createWebTelegramTransport(
     if (peer.kind !== 'channel' || state.channelRolesLoaded.has(peer.id)) return;
     const current = state.channelRolesLoading.get(peer.id);
     if (current) return current;
+    const generation = state.connectionGeneration;
+    const client = getClient();
     const loading = (async () => {
       try {
-        const result = await getClient().invoke(
+        const result = await client.invoke(
           Api.channels.GetParticipants({
             channel: inputChannel(peer),
             filter: Api.ChannelParticipantsAdmins(),
@@ -3733,6 +3804,7 @@ export function createWebTelegramTransport(
             hash: 0n,
           }),
         );
+        if (generation !== state.connectionGeneration || state.client !== client) return;
         if (Api.channels.ChannelParticipants.is(result)) {
           rememberEntities(result.users, result.chats);
           for (const participant of result.participants) {
@@ -3749,11 +3821,13 @@ export function createWebTelegramTransport(
             }
           }
         } else {
-          await fetchVisibleChannelSenderRoles(peer, senderIds);
+          await fetchVisibleChannelSenderRoles(peer, senderIds, client, generation);
         }
       } catch {
-        await fetchVisibleChannelSenderRoles(peer, senderIds);
-      } finally {
+        if (generation !== state.connectionGeneration || state.client !== client) return;
+        await fetchVisibleChannelSenderRoles(peer, senderIds, client, generation);
+      }
+      if (generation === state.connectionGeneration && state.client === client) {
         state.channelRolesLoaded.add(peer.id);
       }
     })();
@@ -3766,14 +3840,19 @@ export function createWebTelegramTransport(
       }
     }
   }
-  async function fetchVisibleChannelSenderRoles(peer: TelegramPeer, senderIds: readonly string[]) {
+  async function fetchVisibleChannelSenderRoles(
+    peer: TelegramPeer,
+    senderIds: readonly string[],
+    client = getClient(),
+    generation = state.connectionGeneration,
+  ) {
     const userIds = [...new Set(senderIds.filter((senderId) => senderId.startsWith('u:')))].slice(
       0,
       20,
     );
     const results = await Promise.allSettled(
       userIds.map((senderId) =>
-        getClient().invoke(
+        client.invoke(
           Api.channels.GetParticipant({
             channel: inputChannel(peer),
             participant: toInputPeer({ id: senderId, kind: 'user' }),
@@ -3781,6 +3860,7 @@ export function createWebTelegramTransport(
         ),
       ),
     );
+    if (generation !== state.connectionGeneration || state.client !== client) return;
     results.forEach((result, index) => {
       if (result.status !== 'fulfilled' || !Api.channels.ChannelParticipant.is(result.value)) {
         return;
@@ -3873,6 +3953,7 @@ export function createWebTelegramTransport(
     forwardMessage,
     subscribe,
   };
+  if (!exposeTestInternals) return transport satisfies TelegramTransport;
   Object.assign(transport, {
     connectClient,
     sharedMediaFilters,

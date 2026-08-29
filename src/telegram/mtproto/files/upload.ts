@@ -1,6 +1,7 @@
 import { bytesToBigInt } from '../bytes';
 import { createMtprotoError } from '../errors';
 import type { TlObject } from '../sender';
+import { reserveFileTransferCapacity } from './download';
 import type { FileRpc, UploadFileOptions } from './types';
 
 const KIB = 1_024;
@@ -32,24 +33,38 @@ export async function uploadFile(rpc: FileRpc, options: UploadFileOptions): Prom
       }
       const part = nextPart;
       nextPart += 1;
-      const bytes = new Uint8Array(
-        await file.slice(part * partSize, Math.min((part + 1) * partSize, file.size)).arrayBuffer(),
-      );
-      const request: TlObject = large
-        ? {
-            _: 'upload.saveBigFilePart',
-            fileId,
-            filePart: part,
-            fileTotalParts: partCount,
-            bytes,
-          }
-        : { _: 'upload.saveFilePart', fileId, filePart: part, bytes };
-      const accepted = await rpc.invokeOnDc<unknown>(rpc.currentDcId, request);
-      if (accepted !== true && (accepted as TlObject | undefined)?._ !== 'boolTrue') {
-        throw createMtprotoError('rpc', `Telegram rejected upload part ${part}.`);
+      const dcId = rpc.currentDcId;
+      const release = await reserveFileTransferCapacity(dcId, partSize);
+      try {
+        if (options.onProgress?.isCanceled) {
+          throw createMtprotoError('cancelled', 'Telegram upload was cancelled.');
+        }
+        const bytes = new Uint8Array(
+          await file
+            .slice(part * partSize, Math.min((part + 1) * partSize, file.size))
+            .arrayBuffer(),
+        );
+        const request: TlObject = large
+          ? {
+              _: 'upload.saveBigFilePart',
+              fileId,
+              filePart: part,
+              fileTotalParts: partCount,
+              bytes,
+            }
+          : { _: 'upload.saveFilePart', fileId, filePart: part, bytes };
+        const accepted = await rpc.invokeOnDc<unknown>(dcId, request);
+        if (options.onProgress?.isCanceled) {
+          throw createMtprotoError('cancelled', 'Telegram upload was cancelled.');
+        }
+        if (accepted !== true && (accepted as TlObject | undefined)?._ !== 'boolTrue') {
+          throw createMtprotoError('rpc', `Telegram rejected upload part ${part}.`);
+        }
+        completed += 1;
+        options.onProgress?.(completed / partCount);
+      } finally {
+        release();
       }
-      completed += 1;
-      options.onProgress?.(completed / partCount);
     }
   };
 

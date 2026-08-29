@@ -41,7 +41,9 @@ export interface MtprotoSenderOptions {
   timeOffset?: number | undefined;
   authorize(transport: PlainMtprotoTransport): Promise<AuthorizationResult>;
   onAuthKey(result: AuthorizationResult): void | Promise<void>;
+  onAuthKeyInvalidated?: (() => void | Promise<void>) | undefined;
   now?: (() => number) | undefined;
+  requestTimeoutMs?: number | undefined;
   reconnect?:
     | {
         retries?: number | undefined;

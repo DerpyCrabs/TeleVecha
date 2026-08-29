@@ -8,6 +8,54 @@ const MIN_PART_BYTES = 4 * KIB;
 const ONE_MIB = 1_024 * 1_024;
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 const REQUEST_ATTEMPTS = 2;
+const MAX_ACTIVE_PARTS_PER_DC = 3;
+const MAX_ACTIVE_BYTES_PER_DC = 9 * ONE_MIB;
+
+type CapacityWaiter = {
+  bytes: number;
+  resolve(release: () => void): void;
+};
+
+type DcTransferCapacity = {
+  activeParts: number;
+  activeBytes: number;
+  waiters: CapacityWaiter[];
+};
+
+const fileTransferCapacityByDc = new Map<number, DcTransferCapacity>();
+
+function drainCapacity(dcId: number, capacity: DcTransferCapacity) {
+  while (capacity.waiters.length && capacity.activeParts < MAX_ACTIVE_PARTS_PER_DC) {
+    const waiter = capacity.waiters[0]!;
+    if (capacity.activeBytes + waiter.bytes > MAX_ACTIVE_BYTES_PER_DC) return;
+    capacity.waiters.shift();
+    capacity.activeParts += 1;
+    capacity.activeBytes += waiter.bytes;
+    let released = false;
+    waiter.resolve(() => {
+      if (released) return;
+      released = true;
+      capacity.activeParts -= 1;
+      capacity.activeBytes -= waiter.bytes;
+      drainCapacity(dcId, capacity);
+      if (!capacity.activeParts && !capacity.waiters.length) {
+        fileTransferCapacityByDc.delete(dcId);
+      }
+    });
+  }
+}
+
+export function reserveFileTransferCapacity(dcId: number, bytes: number) {
+  let capacity = fileTransferCapacityByDc.get(dcId);
+  if (!capacity) {
+    capacity = { activeParts: 0, activeBytes: 0, waiters: [] };
+    fileTransferCapacityByDc.set(dcId, capacity);
+  }
+  return new Promise<() => void>((resolve) => {
+    capacity.waiters.push({ bytes, resolve });
+    drainCapacity(dcId, capacity);
+  });
+}
 
 function downloadPartSize(fileSize: number | undefined) {
   if (fileSize === undefined || fileSize <= 64 * KIB) return 64 * KIB;
@@ -37,36 +85,47 @@ async function requestPart(
   dcId: number,
   request: TlObject,
   requestTimeoutMs: number,
+  isCanceled: () => boolean,
 ) {
-  for (let attempt = 0; attempt < REQUEST_ATTEMPTS; attempt += 1) {
-    const controller = new AbortController();
-    const timer = globalThis.setTimeout(() => controller.abort(), requestTimeoutMs);
-    try {
-      return await rpc.invokeOnDc<unknown>(dcId, request, { signal: controller.signal });
-    } catch (error) {
-      if (!controller.signal.aborted) throw error;
-      if (attempt + 1 < REQUEST_ATTEMPTS) {
-        await rpc.recoverDc?.(dcId);
-        continue;
+  const requestBytes = typeof request.limit === 'number' ? request.limit : 0;
+  const release = await reserveFileTransferCapacity(dcId, requestBytes);
+  try {
+    for (let attempt = 0; attempt < REQUEST_ATTEMPTS; attempt += 1) {
+      if (isCanceled()) throw createMtprotoError('cancelled', 'Telegram download was cancelled.');
+      const controller = new AbortController();
+      const timer = globalThis.setTimeout(() => controller.abort(), requestTimeoutMs);
+      try {
+        return await rpc.invokeOnDc<unknown>(dcId, request, { signal: controller.signal });
+      } catch (error) {
+        if (!controller.signal.aborted) throw error;
+        if (attempt + 1 < REQUEST_ATTEMPTS) {
+          await rpc.recoverDc?.(dcId);
+          continue;
+        }
+        throw createMtprotoError('transport', 'Telegram file-part request timed out.', {
+          cause: error,
+        });
+      } finally {
+        globalThis.clearTimeout(timer);
       }
-      throw createMtprotoError('transport', 'Telegram file-part request timed out.', {
-        cause: error,
-      });
-    } finally {
-      globalThis.clearTimeout(timer);
     }
+    throw createMtprotoError('transport', 'Telegram file-part request timed out.');
+  } finally {
+    release();
   }
-  throw createMtprotoError('transport', 'Telegram file-part request timed out.');
 }
 
 export async function downloadFile(rpc: FileRpc, location: TlObject, options: DownloadFileOptions) {
   const start = Math.max(0, Math.trunc(options.start ?? 0));
+  const fileFinalByte =
+    options.fileSize === undefined ? undefined : Math.trunc(options.fileSize) - 1;
+  const requestedFinalByte = options.end === undefined ? undefined : Math.trunc(options.end);
   const finalByte =
-    options.end !== undefined
-      ? Math.trunc(options.end)
-      : options.fileSize !== undefined
-        ? options.fileSize - 1
-        : undefined;
+    requestedFinalByte === undefined
+      ? fileFinalByte
+      : fileFinalByte === undefined
+        ? requestedFinalByte
+        : Math.min(requestedFinalByte, fileFinalByte);
   if (finalByte !== undefined && finalByte < start) return new Uint8Array(0);
   const rangeSize = finalByte === undefined ? undefined : finalByte - start + 1;
   const preferred = options.partSizeKb
@@ -103,8 +162,11 @@ export async function downloadFile(rpc: FileRpc, location: TlObject, options: Do
             : {}),
         },
         requestTimeoutMs,
+        () => Boolean(progress?.isCanceled),
       );
       const bytes = resultBytes(response);
+      if (progress?.isCanceled)
+        throw createMtprotoError('cancelled', 'Telegram download was cancelled.');
       parts.push(bytes);
       offset += bytes.length;
       if (bytes.length < actualLimit) break;
@@ -151,8 +213,11 @@ export async function downloadFile(rpc: FileRpc, location: TlObject, options: Do
             : {}),
         },
         requestTimeoutMs,
+        () => Boolean(progress?.isCanceled),
       );
       const bytes = resultBytes(response);
+      if (progress?.isCanceled)
+        throw createMtprotoError('cancelled', 'Telegram download was cancelled.');
       if (bytes.length < chunk.outputLength) {
         throw createMtprotoError('protocol', 'Telegram returned a truncated file part.');
       }

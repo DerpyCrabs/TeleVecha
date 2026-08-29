@@ -61,6 +61,7 @@ export function createWebSocketPacketConnection(options: {
   const connect = () => {
     if (connected) return Promise.resolve();
     if (opening) return opening;
+    receiveChain = Promise.resolve();
 
     const operation = new Promise<void>((resolve, reject) => {
       codec =

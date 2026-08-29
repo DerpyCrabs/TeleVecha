@@ -24,15 +24,21 @@ const MESSAGE_CONTAINER_ID = 0x73f1f8dc;
 const RPC_RESULT_ID = 0xf35c6d01;
 const GZIP_PACKED_ID = 0x3072cfa1;
 const RPC_ERROR_ID = 0x2144ca19;
+const MSG_COPY_ID = 0xe06046b2;
+const MSGS_ACK_ID = 0x62d6b459;
+const NEW_SESSION_CREATED_ID = 0x9ec20908;
 const MAX_CONTAINER_MESSAGES = 1_024;
 const MAX_OUTGOING_CONTAINER_MESSAGES = 100;
 const MAX_OUTGOING_CONTAINER_BYTES = 1_044_456 - 8;
 const MAX_GZIP_BYTES = 64 * 1024 * 1024;
+const MAX_GZIP_NESTING = 16;
+const MAX_MESSAGE_COPY_NESTING = 16;
 const MAX_ACK_IDS = 8_192;
 const MAX_INCOMING_MESSAGE_HISTORY = 1_000;
 const PING_INTERVAL_MS = 3_000;
 const PING_TIMEOUT_MS = 5_000;
 const PING_DISCONNECT_SECONDS = 60;
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 const SEQUENTIAL_REQUESTS = new Set([
   'messages.sendMessage',
   'messages.sendMedia',
@@ -48,6 +54,7 @@ interface PendingRequest {
   reject(error: unknown): void;
   signal?: AbortSignal | undefined;
   abort?: (() => void) | undefined;
+  timeout?: ReturnType<typeof globalThis.setTimeout> | undefined;
   messageId?: bigint | undefined;
   sequenceNumber?: number | undefined;
   containerId?: bigint | undefined;
@@ -64,6 +71,12 @@ interface IncomingMessage {
   messageId: bigint;
   sequenceNumber: number;
   body: Uint8Array;
+}
+
+interface IncomingMessageState {
+  acknowledged: boolean;
+  contentRelated: boolean;
+  sequenceNumber: number;
 }
 
 function field<Value>(value: TlObject, camel: string, snake: string): Value | undefined {
@@ -135,6 +148,18 @@ function gunzipBody(wrapped: Uint8Array) {
   return output;
 }
 
+function unpackGzipBody(body: Uint8Array) {
+  let unpacked = body;
+  for (let depth = 0; depth < MAX_GZIP_NESTING; depth += 1) {
+    if (unpacked.length < 4 || readUint32Le(unpacked) !== GZIP_PACKED_ID) return unpacked;
+    unpacked = gunzipBody(unpacked);
+  }
+  if (unpacked.length >= 4 && readUint32Le(unpacked) === GZIP_PACKED_ID) {
+    throw createMtprotoError('protocol', 'Telegram nested gzip data too deeply.');
+  }
+  return unpacked;
+}
+
 function rpcError(record: TlObject, request: TlObject) {
   const code = field<number>(record, 'errorCode', 'error_code') ?? 0;
   const rpcMessage = field<string>(record, 'errorMessage', 'error_message') ?? 'UNKNOWN';
@@ -164,13 +189,19 @@ function timeout<Value>(promise: Promise<Value>, milliseconds: number, onTimeout
 }
 
 export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSender {
+  const requestTimeoutMs = Math.trunc(options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  if (requestTimeoutMs <= 0) {
+    throw createMtprotoError('configuration', 'Telegram request timeout must be positive.');
+  }
   const events = createMtprotoEventHub();
   const waiting: PendingRequest[] = [];
   const pendingByMessageId = new Map<bigint, PendingRequest>();
   const requestsByContainerId = new Map<bigint, PendingRequest[]>();
   const pendingAcks = new Set<bigint>();
   const incomingMessageIds: bigint[] = [];
-  const incomingMessages = new Map<bigint, { contentRelated: boolean; sequenceNumber: number }>();
+  const incomingMessages = new Map<bigint, IncomingMessageState>();
+  const copiedMessageIds: bigint[] = [];
+  const copiedMessages = new Map<bigint, IncomingMessageState>();
   let connection: ReturnType<MtprotoSenderOptions['connection']> | undefined;
   let encryptedState: EncryptedMessageState | undefined;
   let authKey = options.authKey;
@@ -187,6 +218,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
   let lastSessionFirstMessageId: bigint | undefined;
   let lastSessionUniqueId: bigint | undefined;
   let connectionGeneration = 0;
+  let terminalError: unknown;
 
   const clearPing = () => {
     if (pingTimer === undefined) return;
@@ -197,10 +229,17 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
   const resetIncomingTracking = () => {
     incomingMessageIds.length = 0;
     incomingMessages.clear();
+    copiedMessageIds.length = 0;
+    copiedMessages.clear();
     pendingAcks.clear();
   };
 
   const unlink = (request: PendingRequest) => {
+    if (request.queued) {
+      const waitingIndex = waiting.indexOf(request);
+      if (waitingIndex >= 0) waiting.splice(waitingIndex, 1);
+      request.queued = false;
+    }
     if (request.messageId !== undefined) pendingByMessageId.delete(request.messageId);
     if (request.containerId !== undefined) {
       const siblings = requestsByContainerId
@@ -215,6 +254,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     if (request.settled) return;
     request.settled = true;
     request.abort?.();
+    if (request.timeout !== undefined) globalThis.clearTimeout(request.timeout);
     unlink(request);
     if ('error' in result) request.reject(result.error);
     else request.resolve(result.value);
@@ -232,59 +272,12 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     waiting.push(request);
   };
 
-  const rememberIncomingMessage = (message: IncomingMessage, skipTimeValidation = false) => {
-    const serverSeconds = Number(message.messageId >> 32n);
-    const localSeconds = Math.floor((options.now ?? Date.now)() / 1_000) + timeOffset;
-    if (
-      message.sequenceNumber < 0 ||
-      (message.messageId & 1n) !== 1n ||
-      (!skipTimeValidation &&
-        (localSeconds - serverSeconds > 300 || serverSeconds - localSeconds > 30))
-    ) {
-      throw createMtprotoError('protocol', 'Telegram sent an invalid inner message header.');
-    }
-    if (incomingMessages.has(message.messageId)) {
-      throw createMtprotoError('protocol', 'Telegram replayed an inner message.');
-    }
-    const retainedFloor = incomingMessageIds[0];
-    if (retainedFloor !== undefined && message.messageId < retainedFloor) {
-      throw createMtprotoError('protocol', 'Telegram replayed an expired inner message.');
-    }
-    let start = 0;
-    let end = incomingMessageIds.length;
-    while (start < end) {
-      const middle = (start + end) >> 1;
-      if (incomingMessageIds[middle]! < message.messageId) start = middle + 1;
-      else end = middle;
-    }
-    const previous = incomingMessages.get(incomingMessageIds[start - 1]!);
-    const next = incomingMessages.get(incomingMessageIds[start]!);
-    const followsInvalidly =
-      previous &&
-      (previous.sequenceNumber > message.sequenceNumber ||
-        (previous.sequenceNumber === message.sequenceNumber &&
-          (previous.sequenceNumber & 1) === 1));
-    const precedesInvalidly =
-      next &&
-      (message.sequenceNumber > next.sequenceNumber ||
-        (message.sequenceNumber === next.sequenceNumber && (message.sequenceNumber & 1) === 1));
-    if (followsInvalidly || precedesInvalidly) {
-      throw createMtprotoError('protocol', 'Telegram sent invalid message sequence ordering.');
-    }
-    incomingMessageIds.splice(start, 0, message.messageId);
-    incomingMessages.set(message.messageId, {
-      contentRelated: (message.sequenceNumber & 1) === 1,
-      sequenceNumber: message.sequenceNumber,
-    });
-    while (incomingMessageIds.length > MAX_INCOMING_MESSAGE_HISTORY) {
-      incomingMessages.delete(incomingMessageIds.shift()!);
-    }
-  };
-
   const incomingMessageState = (messageId: bigint) => {
     if ((messageId & 1n) !== 1n) return 1;
-    const known = incomingMessages.get(messageId);
-    if (known) return 4 + (known.contentRelated ? 0 : 16);
+    const known = incomingMessages.get(messageId) ?? copiedMessages.get(messageId);
+    if (known) {
+      return 4 + (known.contentRelated ? (known.acknowledged ? 8 : 0) : 16);
+    }
     const first = incomingMessageIds[0];
     const last = incomingMessageIds.at(-1);
     if (first === undefined || messageId < first) return 1;
@@ -295,6 +288,16 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
   const requeue = (requests: readonly PendingRequest[], ownerGeneration?: number) => {
     for (const request of requests) {
       if (ownerGeneration !== undefined && request.sendGeneration !== ownerGeneration) continue;
+      if (
+        !request.expectResponse &&
+        ownerGeneration !== undefined &&
+        ownerGeneration !== connectionGeneration
+      ) {
+        settle(request, {
+          error: createMtprotoError('cancelled', 'Telegram connection was replaced.'),
+        });
+        continue;
+      }
       if (request.settled || request.signal?.aborted) {
         settle(request, {
           error: createMtprotoError('cancelled', 'Telegram request was cancelled.'),
@@ -356,6 +359,11 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
       let estimatedSize = 0;
       while (waiting.length > 0 && batch.length < MAX_OUTGOING_CONTAINER_MESSAGES) {
         const candidate = waiting[0]!;
+        if (candidate.settled) {
+          waiting.shift();
+          candidate.queued = false;
+          continue;
+        }
         if (candidate.signal?.aborted) {
           waiting.shift();
           candidate.queued = false;
@@ -449,6 +457,10 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
         }
         continue;
       }
+      if (batch.some(({ settled }) => settled)) {
+        requeue(batch, activeGeneration);
+        continue;
+      }
       if (
         !connected ||
         connection !== activeConnection ||
@@ -461,19 +473,33 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
       try {
         activeConnection.send(encrypted);
       } catch (error) {
-        requeue(batch, activeGeneration);
+        for (const request of batch) {
+          if (!request.expectResponse) settle(request, { error });
+        }
+        requeue(
+          batch.filter(({ expectResponse }) => expectResponse),
+          activeGeneration,
+        );
         void reconnect(error);
         return;
       }
       for (const request of batch) {
-        if (!request.expectResponse) settle(request, { value: undefined });
+        if (!request.expectResponse) {
+          if (request.request._ === 'msgs_ack') {
+            const ids = field<bigint[]>(request.request, 'msgIds', 'msg_ids') ?? [];
+            for (const id of ids) {
+              const incoming = incomingMessages.get(id) ?? copiedMessages.get(id);
+              if (incoming?.contentRelated) incoming.acknowledged = true;
+            }
+          }
+          settle(request, { value: undefined });
+        }
       }
     }
   }
 
   const decodeObject = (body: Uint8Array, expected?: unknown) => {
-    const unpacked =
-      body.length >= 4 && readUint32Le(body) === GZIP_PACKED_ID ? gunzipBody(body) : body;
+    const unpacked = unpackGzipBody(body);
     if (unpacked.length >= 4 && readUint32Le(unpacked) === MESSAGE_CONTAINER_ID) {
       throw createMtprotoError('protocol', 'Telegram sent a nested message container.');
     }
@@ -488,10 +514,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     if (!request) return;
     const resultBody = body.slice(12);
     try {
-      const unpacked =
-        resultBody.length >= 4 && readUint32Le(resultBody) === GZIP_PACKED_ID
-          ? gunzipBody(resultBody)
-          : resultBody;
+      const unpacked = unpackGzipBody(resultBody);
       if (unpacked.length >= 4 && readUint32Le(unpacked) === RPC_ERROR_ID) {
         const errorRecord = options.codec.decode(unpacked) as TlObject;
         const errorMessage = field<string>(errorRecord, 'errorMessage', 'error_message');
@@ -555,6 +578,147 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     return messages;
   };
 
+  const copiedMessage = (wrapper: IncomingMessage): IncomingMessage => {
+    if (wrapper.body.length < 20 || readUint32Le(wrapper.body) !== MSG_COPY_ID) {
+      throw createMtprotoError('protocol', 'Telegram sent a truncated message copy.');
+    }
+    const messageId = bytesToBigInt(wrapper.body.slice(4, 12), { littleEndian: true });
+    const sequenceNumber = readInt32Le(wrapper.body, 12);
+    const length = readInt32Le(wrapper.body, 16);
+    if (
+      messageId >= wrapper.messageId ||
+      length < 4 ||
+      length % 4 !== 0 ||
+      20 + length !== wrapper.body.length
+    ) {
+      throw createMtprotoError('protocol', 'Telegram sent an invalid message copy.');
+    }
+    return { messageId, sequenceNumber, body: wrapper.body.slice(20) };
+  };
+
+  const packetMessages = (message: IncomingMessage) => {
+    const wasGzip = message.body.length >= 4 && readUint32Le(message.body) === GZIP_PACKED_ID;
+    const body = unpackGzipBody(message.body);
+    if (body.length < 4 || readUint32Le(body) !== MESSAGE_CONTAINER_ID) return [message];
+    if (wasGzip) {
+      throw createMtprotoError('protocol', 'Telegram gzip-wrapped a message container.');
+    }
+    const container = { ...message, body };
+    return [...containerMessages(container), container];
+  };
+
+  const invalidSequenceOrder = (previous: number, next: number) =>
+    previous > next || (previous === next && (previous & 1) === 1);
+
+  const validateContentRelatedness = (message: IncomingMessage) => {
+    const body = unpackGzipBody(message.body);
+    const constructorId = readUint32Le(body);
+    const contentRelated = (message.sequenceNumber & 1) === 1;
+    if (
+      (constructorId === NEW_SESSION_CREATED_ID && !contentRelated) ||
+      (contentRelated &&
+        (constructorId === MESSAGE_CONTAINER_ID ||
+          constructorId === MSGS_ACK_ID ||
+          constructorId === MSG_COPY_ID))
+    ) {
+      throw createMtprotoError('protocol', 'Telegram sent invalid message content-relatedness.');
+    }
+  };
+
+  const copiedPacketMessages = (message: IncomingMessage) => {
+    const packet = packetMessages(message).sort((left, right) =>
+      left.messageId < right.messageId ? -1 : left.messageId > right.messageId ? 1 : 0,
+    );
+    const ids = new Set<bigint>();
+    for (const item of packet) {
+      if (item.sequenceNumber < 0 || (item.messageId & 1n) !== 1n || ids.has(item.messageId)) {
+        throw createMtprotoError('protocol', 'Telegram sent an invalid copied message header.');
+      }
+      validateContentRelatedness(item);
+      ids.add(item.messageId);
+    }
+    for (let index = 1; index < packet.length; index += 1) {
+      if (invalidSequenceOrder(packet[index - 1]!.sequenceNumber, packet[index]!.sequenceNumber)) {
+        throw createMtprotoError('protocol', 'Telegram sent invalid copied message ordering.');
+      }
+    }
+    return packet;
+  };
+
+  const rememberCopiedMessage = (message: IncomingMessage) => {
+    if (incomingMessages.has(message.messageId) || copiedMessages.has(message.messageId)) return;
+    copiedMessageIds.push(message.messageId);
+    copiedMessages.set(message.messageId, {
+      acknowledged: false,
+      contentRelated: (message.sequenceNumber & 1) === 1,
+      sequenceNumber: message.sequenceNumber,
+    });
+    while (copiedMessageIds.length > MAX_INCOMING_MESSAGE_HISTORY) {
+      copiedMessages.delete(copiedMessageIds.shift()!);
+    }
+  };
+
+  const rememberIncomingPacket = (message: IncomingMessage, skipTimeValidation = false) => {
+    const localSeconds = Math.floor((options.now ?? Date.now)() / 1_000) + timeOffset;
+    const retainedFloor = incomingMessageIds[0];
+    const packet = packetMessages(message).sort((left, right) =>
+      left.messageId < right.messageId ? -1 : left.messageId > right.messageId ? 1 : 0,
+    );
+    const packetIds = new Set<bigint>();
+    for (const item of packet) {
+      const serverSeconds = Number(item.messageId >> 32n);
+      if (
+        item.sequenceNumber < 0 ||
+        (item.messageId & 1n) !== 1n ||
+        (!skipTimeValidation &&
+          (localSeconds - serverSeconds > 300 || serverSeconds - localSeconds > 30))
+      ) {
+        throw createMtprotoError('protocol', 'Telegram sent an invalid inner message header.');
+      }
+      validateContentRelatedness(item);
+      if (
+        incomingMessages.has(item.messageId) ||
+        copiedMessages.has(item.messageId) ||
+        packetIds.has(item.messageId)
+      ) {
+        throw createMtprotoError('protocol', 'Telegram replayed an inner message.');
+      }
+      if (retainedFloor !== undefined && item.messageId < retainedFloor) {
+        throw createMtprotoError('protocol', 'Telegram replayed an expired inner message.');
+      }
+      packetIds.add(item.messageId);
+    }
+
+    const sequenceByMessageId = new Map(
+      packet.map((item) => [item.messageId, item.sequenceNumber] as const),
+    );
+    const orderedIds = [...incomingMessageIds, ...packetIds].sort((left, right) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    );
+    for (let index = 1; index < orderedIds.length; index += 1) {
+      const previousId = orderedIds[index - 1]!;
+      const nextId = orderedIds[index]!;
+      const previous =
+        sequenceByMessageId.get(previousId) ?? incomingMessages.get(previousId)!.sequenceNumber;
+      const next = sequenceByMessageId.get(nextId) ?? incomingMessages.get(nextId)!.sequenceNumber;
+      if (invalidSequenceOrder(previous, next)) {
+        throw createMtprotoError('protocol', 'Telegram sent invalid message sequence ordering.');
+      }
+    }
+
+    incomingMessageIds.splice(0, incomingMessageIds.length, ...orderedIds);
+    for (const item of packet) {
+      incomingMessages.set(item.messageId, {
+        acknowledged: false,
+        contentRelated: (item.sequenceNumber & 1) === 1,
+        sequenceNumber: item.sequenceNumber,
+      });
+    }
+    while (incomingMessageIds.length > MAX_INCOMING_MESSAGE_HISTORY) {
+      incomingMessages.delete(incomingMessageIds.shift()!);
+    }
+  };
+
   const isResponseMessageId = (message: IncomingMessage) => (message.messageId & 3n) === 1n;
   const isContentRelatedResponse = (message: IncomingMessage) =>
     isResponseMessageId(message) && (message.sequenceNumber & 1) === 1;
@@ -594,13 +758,14 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
 
   const containsApplicableTimeCorrection = (message: IncomingMessage): boolean => {
     const wasGzip = message.body.length >= 4 && readUint32Le(message.body) === GZIP_PACKED_ID;
-    const body = wasGzip ? gunzipBody(message.body) : message.body;
+    const body = unpackGzipBody(message.body);
     if (body.length >= 4 && readUint32Le(body) === MESSAGE_CONTAINER_ID) {
       if (wasGzip) {
         throw createMtprotoError('protocol', 'Telegram gzip-wrapped a message container.');
       }
       return containerMessages({ ...message, body }).some(containsApplicableTimeCorrection);
     }
+    if (body.length >= 4 && readUint32Le(body) === RPC_RESULT_ID) return false;
     return isApplicableTimeCorrection(options.codec.decode(body) as TlObject, message);
   };
 
@@ -633,7 +798,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     receivedSalt: bigint,
   ): boolean => {
     const wasGzip = message.body.length >= 4 && readUint32Le(message.body) === GZIP_PACKED_ID;
-    const body = wasGzip ? gunzipBody(message.body) : message.body;
+    const body = unpackGzipBody(message.body);
     if (body.length >= 4 && readUint32Le(body) === MESSAGE_CONTAINER_ID) {
       if (wasGzip) {
         throw createMtprotoError('protocol', 'Telegram gzip-wrapped a message container.');
@@ -660,23 +825,68 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     );
   };
 
-  const processContainer = async (message: IncomingMessage, skipTimeValidation: boolean) => {
+  const processCopiedMessage = async (wrapper: IncomingMessage, copyDepth: number) => {
+    if (copyDepth >= MAX_MESSAGE_COPY_NESTING) {
+      throw createMtprotoError('protocol', 'Telegram nested message copies too deeply.');
+    }
+    const original = copiedMessage(wrapper);
+    const packet = copiedPacketMessages(original);
+    const receivedBefore = new Set(
+      packet
+        .filter(({ messageId }) => incomingMessages.has(messageId) || copiedMessages.has(messageId))
+        .map(({ messageId }) => messageId),
+    );
+    pendingAcks.add(wrapper.messageId);
+    pendingAcks.add(original.messageId);
+    for (const item of packet) rememberCopiedMessage(item);
+    if (receivedBefore.has(original.messageId)) {
+      scheduleFlush();
+      return;
+    }
+    const body = unpackGzipBody(original.body);
+    if (body.length >= 4 && readUint32Le(body) === MESSAGE_CONTAINER_ID) {
+      for (const inner of containerMessages({ ...original, body })) {
+        if (!receivedBefore.has(inner.messageId)) {
+          await processMessage(inner, true, copyDepth + 1);
+        }
+      }
+    } else {
+      await processMessage(original, true, copyDepth + 1);
+    }
+    scheduleFlush();
+  };
+
+  const processContainer = async (
+    message: IncomingMessage,
+    skipTimeValidation: boolean,
+    copyDepth: number,
+  ) => {
     for (const inner of containerMessages(message)) {
-      await processMessage(inner, skipTimeValidation);
+      await processMessage(inner, skipTimeValidation, copyDepth);
     }
   };
 
-  async function processMessage(message: IncomingMessage, skipTimeValidation = false) {
-    rememberIncomingMessage(message, skipTimeValidation);
+  async function processMessage(
+    message: IncomingMessage,
+    skipTimeValidation = false,
+    copyDepth = 0,
+  ) {
     if ((message.sequenceNumber & 1) === 1) pendingAcks.add(message.messageId);
     const wasGzip = message.body.length >= 4 && readUint32Le(message.body) === GZIP_PACKED_ID;
-    const body = wasGzip ? gunzipBody(message.body) : message.body;
+    const body = unpackGzipBody(message.body);
     const constructorId = readUint32Le(body);
+    if (constructorId === MSG_COPY_ID) {
+      if (wasGzip) {
+        throw createMtprotoError('protocol', 'Telegram gzip-wrapped a message copy.');
+      }
+      await processCopiedMessage({ ...message, body }, copyDepth);
+      return;
+    }
     if (constructorId === MESSAGE_CONTAINER_ID) {
       if (wasGzip) {
         throw createMtprotoError('protocol', 'Telegram gzip-wrapped a message container.');
       }
-      await processContainer({ ...message, body }, skipTimeValidation);
+      await processContainer({ ...message, body }, skipTimeValidation, copyDepth);
       scheduleFlush();
       return;
     }
@@ -688,6 +898,12 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
 
     const record = decodeObject(body) as TlObject;
     if (!record || typeof record !== 'object' || typeof record._ !== 'string') return;
+    if (record._ === 'msgs_ack' || record._ === 'msgs_state_req' || record._ === 'msg_resend_req') {
+      const ids = field<bigint[]>(record, 'msgIds', 'msg_ids') ?? [];
+      if (ids.length > MAX_ACK_IDS) {
+        throw createMtprotoError('protocol', 'Telegram sent too many message IDs.');
+      }
+    }
     if (record._ === 'bad_server_salt') {
       if (!isApplicableBadServerSalt(record, message)) {
         throw createMtprotoError('protocol', 'Telegram sent an inapplicable bad-server-salt.');
@@ -763,6 +979,13 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
             throw createMtprotoError('protocol', 'Telegram returned a mismatched pong.');
           }
           settle(request, { value: record });
+          timeOffset =
+            Number(message.messageId >> 32n) - Math.floor((options.now ?? Date.now)() / 1_000);
+          const sessionReset = encryptedState?.updateTimeOffset(message.messageId) === true;
+          if (sessionReset) {
+            resetIncomingTracking();
+            requeue([...new Set(pendingByMessageId.values())]);
+          }
         }
       }
       return;
@@ -776,14 +999,16 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
           ? field<number>(request.request, 'num', 'num')
           : undefined;
       const rawSalts = field<unknown[]>(record, 'salts', 'salts') ?? [];
+      if (requestMessageId === undefined || !request) return;
       if (
-        requestMessageId === undefined ||
-        !request ||
         !Number.isSafeInteger(requestedCount) ||
         requestedCount! < 0 ||
         rawSalts.length > requestedCount!
       ) {
-        throw createMtprotoError('protocol', 'Telegram sent unsolicited future salts.');
+        settle(request, {
+          error: createMtprotoError('protocol', 'Telegram sent invalid future salts.'),
+        });
+        return;
       }
       const salts = rawSalts.flatMap((value) => {
         if (!value || typeof value !== 'object') return [];
@@ -796,7 +1021,10 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
           : [{ validSince, validUntil, salt: saltValue }];
       });
       if (salts.length !== rawSalts.length || encryptedState?.setFutureSalts(salts) !== true) {
-        throw createMtprotoError('protocol', 'Telegram sent invalid future salts.');
+        settle(request, {
+          error: createMtprotoError('protocol', 'Telegram sent invalid future salts.'),
+        });
+        return;
       }
       serverSalt = encryptedState.getServerSalt();
       settle(request, { value: record });
@@ -810,15 +1038,11 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     }
     if (record._ === 'msg_resend_req') {
       const ids = field<bigint[]>(record, 'msgIds', 'msg_ids') ?? [];
-      if (ids.length > MAX_ACK_IDS) {
-        throw createMtprotoError('protocol', 'Telegram requested too many message IDs.');
-      }
       for (const id of ids) requeue(takeRequests(id));
       return;
     }
     if (record._ === 'msgs_state_req') {
       const ids = field<bigint[]>(record, 'msgIds', 'msg_ids') ?? [];
-      if (ids.length > MAX_ACK_IDS) return;
       enqueue({
         request: {
           _: 'msgs_state_info',
@@ -857,9 +1081,33 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
         ) {
           return;
         }
-        if (packet.length === 4 && -readInt32Le(packet) === 404) {
+        if (packet.length === 4 && readInt32Le(packet) === -404) {
           authKey = undefined;
-          throw createMtprotoError('session', 'Telegram forgot this authorization key.');
+          const error = createMtprotoError('session', 'Telegram forgot this authorization key.', {
+            code: -404,
+          });
+          if (!options.onAuthKeyInvalidated) throw error;
+          terminalError = error;
+          clearPing();
+          const requests = new Set([...pendingByMessageId.values(), ...waiting]);
+          try {
+            void Promise.resolve(options.onAuthKeyInvalidated()).catch(() => undefined);
+          } catch {
+            // The authoritative -404 error must still reach every affected request.
+          }
+          const wasConnected = connected;
+          connected = false;
+          connection = undefined;
+          connectionGeneration += 1;
+          sourceConnection.disconnect();
+          encryptedState = undefined;
+          resetIncomingTracking();
+          if (wasConnected) events.emit(connectionStateEvent('disconnected'));
+          for (const request of requests) settle(request, { error });
+          waiting.length = 0;
+          pendingByMessageId.clear();
+          requestsByContainerId.clear();
+          return;
         }
         const message = await sourceState.decrypt(packet);
         if (
@@ -890,6 +1138,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
           serverSalt = message.serverSalt;
           sourceState.setServerSalt(message.serverSalt);
         }
+        rememberIncomingPacket(incoming, canCorrectTime);
         await processMessage(incoming, canCorrectTime);
       })
       .catch((error: unknown) => {
@@ -930,6 +1179,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     const nextConnection = options.connection();
     let fullyOpened = false;
     connection = nextConnection;
+    receiveChain = Promise.resolve();
     const assertCurrentConnection = () => {
       if (
         !userDisconnected &&
@@ -1017,6 +1267,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
   };
 
   const connect = () => {
+    if (terminalError !== undefined) return Promise.reject(terminalError);
     if (connected) return Promise.resolve();
     if (connecting) return connecting;
     if (reconnecting) return reconnecting;
@@ -1031,7 +1282,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
   };
 
   async function reconnect(_reason: unknown) {
-    if (userDisconnected) return;
+    if (userDisconnected || terminalError !== undefined) return;
     if (reconnecting) return reconnecting;
     clearPing();
     const wasConnected = connected;
@@ -1063,6 +1314,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     request: TlObject,
     invokeOptions: { signal?: AbortSignal } = {},
   ) {
+    if (terminalError !== undefined) return Promise.reject(terminalError);
     if (userDisconnected) {
       return Promise.reject(createMtprotoError('transport', 'Telegram sender is disconnected.'));
     }
@@ -1086,6 +1338,15 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
           });
         invokeOptions.signal.addEventListener('abort', abort, { once: true });
         pending.abort = () => invokeOptions.signal?.removeEventListener('abort', abort);
+      }
+      if (!invokeOptions.signal) {
+        pending.timeout = globalThis.setTimeout(
+          () =>
+            settle(pending, {
+              error: createMtprotoError('transport', 'Telegram request timed out.'),
+            }),
+          requestTimeoutMs,
+        );
       }
       enqueue(pending);
       if (connected) scheduleFlush();

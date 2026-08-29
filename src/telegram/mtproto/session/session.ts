@@ -146,6 +146,7 @@ export function createMtprotoSession(
     setMainDc(dcId: number, nextIsTest = false) {
       if (!isDcId(dcId)) throw new RangeError('Data-center ID must be positive.');
       if (dcId === mainDcId && nextIsTest === isTest) return;
+      if (nextIsTest !== isTest) keys.clear();
       mainDcId = dcId;
       isTest = nextIsTest;
       changed();

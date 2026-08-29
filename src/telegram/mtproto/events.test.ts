@@ -30,4 +30,16 @@ describe('MTProto client events', () => {
     hub.emit(connectionStateEvent('disconnected'));
     expect(listener).toHaveBeenCalledOnce();
   });
+
+  it('isolates transport state from a failing event subscriber', () => {
+    const hub = createMtprotoEventHub();
+    const healthy = vi.fn();
+    hub.subscribe(() => {
+      throw new Error('subscriber failed');
+    });
+    hub.subscribe(healthy);
+
+    expect(() => hub.emit(connectionStateEvent('connected'))).not.toThrow();
+    expect(healthy).toHaveBeenCalledWith(connectionStateEvent('connected'));
+  });
 });

@@ -23,6 +23,7 @@ interface DetailsPaneProps {
   chat: ChatSummary;
   counts?: SharedMediaCounts | undefined;
   online: boolean;
+  conversationReady: boolean;
   modal: boolean;
   media: MediaAssets;
   details: ContactDetailsSession;
@@ -130,37 +131,65 @@ export function DetailsPane(props: DetailsPaneProps) {
           </section>
         </Show>
         <section class="p-2">
-          <button class={detailRowClass} onClick={() => props.openShared('photos')}>
+          <button
+            class={detailRowClass}
+            disabled={!props.conversationReady}
+            onClick={() => props.openShared('photos')}
+          >
             <Image size={17} />
             <span>Photos</span>
             <b>{props.counts?.photos ?? '…'}</b>
           </button>
-          <button class={detailRowClass} onClick={() => props.openShared('videos')}>
+          <button
+            class={detailRowClass}
+            disabled={!props.conversationReady}
+            onClick={() => props.openShared('videos')}
+          >
             <Video size={17} />
             <span>Videos</span>
             <b>{props.counts?.videos ?? '…'}</b>
           </button>
-          <button class={detailRowClass} onClick={() => props.openShared('files')}>
+          <button
+            class={detailRowClass}
+            disabled={!props.conversationReady}
+            onClick={() => props.openShared('files')}
+          >
             <FileText size={17} />
             <span>Files</span>
             <b>{props.counts?.files ?? '…'}</b>
           </button>
-          <button class={detailRowClass} onClick={() => props.openShared('audio')}>
+          <button
+            class={detailRowClass}
+            disabled={!props.conversationReady}
+            onClick={() => props.openShared('audio')}
+          >
             <Headphones size={17} />
             <span>Audio files</span>
             <b>{props.counts?.audio ?? '…'}</b>
           </button>
-          <button class={detailRowClass} onClick={() => props.openShared('links')}>
+          <button
+            class={detailRowClass}
+            disabled={!props.conversationReady}
+            onClick={() => props.openShared('links')}
+          >
             <Link size={17} />
             <span>Links</span>
             <b>{props.counts?.links ?? '…'}</b>
           </button>
-          <button class={detailRowClass} onClick={() => props.openShared('voice')}>
+          <button
+            class={detailRowClass}
+            disabled={!props.conversationReady}
+            onClick={() => props.openShared('voice')}
+          >
             <Mic size={17} />
             <span>Voice messages</span>
             <b>{props.counts?.voice ?? '…'}</b>
           </button>
-          <button class={detailRowClass} onClick={() => props.openShared('gifs')}>
+          <button
+            class={detailRowClass}
+            disabled={!props.conversationReady}
+            onClick={() => props.openShared('gifs')}
+          >
             <FileImage size={17} />
             <span>GIFs</span>
             <b>{props.counts?.gifs ?? '…'}</b>
@@ -187,6 +216,7 @@ export function DetailsPane(props: DetailsPaneProps) {
             </Show>
             <button
               class="!text-red-400"
+              disabled={!props.conversationReady}
               onClick={() => props.setBlocked(!props.details.userDetails()?.blocked)}
             >
               <Hand size={17} />

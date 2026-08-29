@@ -1116,6 +1116,28 @@ describe('MessagingEngine', () => {
     await restarted.stop();
   });
 
+  it('generates random ids in the signed TL long domain', async () => {
+    const randomValues = vi
+      .spyOn(globalThis.crypto, 'getRandomValues')
+      .mockImplementation((array) => {
+        if (array instanceof Uint32Array) array.set([0x8000_0000, 0]);
+        return array;
+      });
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, new MemoryStore());
+
+    try {
+      await engine.start(credentials);
+      await engine.setDraft(peer.id, 'Signed random id');
+      await engine.sendDraft(peer, 'Signed random id');
+
+      expect(transport.sentRandomIds).toEqual(['-9223372036854775808']);
+    } finally {
+      randomValues.mockRestore();
+      await engine.stop();
+    }
+  });
+
   it('deduplicates and caches concurrent sticker downloads', async () => {
     const store = new MemoryStore();
     const transport = new FakeTransport();

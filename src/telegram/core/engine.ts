@@ -5179,7 +5179,8 @@ export class MessagingEngine {
 
   private randomId() {
     const bytes = crypto.getRandomValues(new Uint32Array(2));
-    return ((BigInt(bytes[0] ?? 0) << 32n) | BigInt(bytes[1] ?? 0)).toString();
+    const wireValue = (BigInt(bytes[0] ?? 0) << 32n) | BigInt(bytes[1] ?? 0);
+    return BigInt.asIntN(64, wireValue).toString();
   }
 
   private sortDialogs<T extends TelegramDialog>(dialogs: T[]) {

@@ -60,6 +60,12 @@ const internalFactories = [
   'users.GetUsers',
 ];
 
+const boundedServiceMessageVectors = new Set([
+  'msg_resend_req.msg_ids',
+  'msgs_ack.msg_ids',
+  'msgs_state_req.msg_ids',
+]);
+
 function crc32(value) {
   let crc = 0xffffffff;
   for (const byte of Buffer.from(value, 'utf8')) {
@@ -153,6 +159,9 @@ function parseDefinition(line, kind) {
       rawType = flag[3];
     }
     descriptor.type = parseType(rawType);
+    if (boundedServiceMessageVectors.has(`${name}.${wireName}`)) {
+      descriptor.decodeMaxVectorLength = 8_192;
+    }
     if (rawType === '#') descriptor.flagIndicator = true;
     fields.push(descriptor);
   }

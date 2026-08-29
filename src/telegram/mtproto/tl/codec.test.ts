@@ -24,6 +24,10 @@ function join(...chunks: readonly Uint8Array[]) {
   return output;
 }
 
+function uint32Le(value: number) {
+  return Uint8Array.of(value, value >>> 8, value >>> 16, value >>> 24);
+}
+
 describe('functional Telegram TL catalog', () => {
   it('keeps complete decode coverage behind a selected frozen request surface', () => {
     expect(tlDescriptors.filter(({ kind }) => kind === 'constructor')).toHaveLength(1_683);
@@ -164,5 +168,29 @@ describe('functional Telegram TL codec', () => {
       encodeTl(Api.UpdateDeleteMessages({ messages: [], pts: 0x80000000, ptsCount: 0 })),
     ).toThrow('outside the 32-bit range');
     expect(constructorDescriptorFor(0x59511722)?.name).toBe('peerUser');
+  });
+
+  it('rejects oversized service-message vectors before reading their elements', () => {
+    for (const name of ['msg_resend_req', 'msgs_ack', 'msgs_state_req']) {
+      const descriptor = descriptorFor(name)!;
+      expect(descriptor.fields[0]).toMatchObject({ decodeMaxVectorLength: 8_192 });
+      expect(() =>
+        decodeTl(join(uint32Le(descriptor.id), uint32Le(0x1cb5c415), uint32Le(8_193))),
+      ).toThrow('TL vector length 8193 is invalid');
+    }
+  });
+
+  it('keeps the service vector boundary local to the three protocol fields', () => {
+    const ids = Array.from({ length: 8_192 }, (_, index) => BigInt(index));
+    const acknowledgment = decodeTl(encodeTl(createTl('msgs_ack', { msgIds: ids }))) as {
+      msgIds: readonly bigint[];
+    };
+    expect(acknowledgment.msgIds).toHaveLength(8_192);
+
+    const messages = Array.from({ length: 8_193 }, (_, index) => index);
+    const unrelated = decodeTl(
+      encodeTl(Api.UpdateDeleteMessages({ messages, pts: 1, ptsCount: 1 })),
+    ) as Tl.UpdateDeleteMessages;
+    expect(unrelated.messages).toHaveLength(8_193);
   });
 });

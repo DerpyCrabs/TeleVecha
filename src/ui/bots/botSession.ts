@@ -165,12 +165,13 @@ export function createBotSession(options: BotSessionOptions) {
     const dialog = options.activeDialog();
     if (!dialog?.bot || starting()) return;
     const peerId = dialog.peer.id;
+    const generation = actionGeneration;
     setStarting(true);
     setMenuOpen(false);
     try {
       await currentConversation(peerId)?.startBot();
     } finally {
-      if (options.activePeerId() === peerId) setStarting(false);
+      if (isCurrent(peerId, generation)) setStarting(false);
     }
   };
   const sendCommand = (command: TelegramBotCommand) => {

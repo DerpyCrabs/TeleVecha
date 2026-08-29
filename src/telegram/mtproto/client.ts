@@ -1,6 +1,7 @@
 import {
   createAuthorizationKey,
   createAuthKey,
+  type AuthorizationResult,
   type AuthorizationHandshakeWire,
   type DhGenerationResult,
   type ResPq,
@@ -59,6 +60,8 @@ const DEFAULT_CONNECTION_RETRIES = 2;
 const DEFAULT_FLOOD_WAIT_SECONDS = 60;
 const MAX_DC_ID = 5;
 
+export type MtprotoConnectionPurpose = 'api' | 'media';
+
 export interface MtprotoClientIdentity {
   deviceModel: string;
   systemVersion: string;
@@ -92,6 +95,7 @@ export interface CreateMtprotoClientOptions {
         host: string;
         port: number;
         isTestServer: boolean;
+        purpose: MtprotoConnectionPurpose;
       }) => PacketConnection)
     | undefined;
   onSessionError?: ((error: unknown) => void) | undefined;
@@ -138,11 +142,15 @@ function defaultIdentity(): MtprotoClientIdentity {
   };
 }
 
-function endpoint(dcId: number) {
+function endpoint(dcId: number, dedicatedMedia = false) {
   if (!Number.isSafeInteger(dcId) || dcId < 1 || dcId > MAX_DC_ID) {
     throw createMtprotoError('configuration', `Telegram data center ${dcId} is not supported.`);
   }
-  return { dcId, host: `zws${dcId}.web.telegram.org`, port: 443 };
+  return {
+    dcId,
+    host: `zws${dcId}${dedicatedMedia ? '-1' : ''}.web.telegram.org`,
+    port: 443,
+  };
 }
 
 function field<Value>(value: TlObject, camel: string, snake: string): Value {
@@ -291,10 +299,17 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
   const events = createMtprotoEventHub();
   const senders = new Map<number, MtprotoSender>();
   const senderCreations = new Map<number, Promise<MtprotoSender>>();
+  const mediaSenders = new Map<number, MtprotoSender>();
+  const mediaSenderCreations = new Map<number, Promise<MtprotoSender>>();
   const senderSubscriptions = new Map<number, () => void>();
-  const imported = new Set<number>();
+  const readyMediaSenders = new WeakSet<MtprotoSender>();
   const importing = new Map<number, { sender: MtprotoSender; operation: Promise<void> }>();
   const auxiliaryRecoveries = new Map<number, Promise<MtprotoSender>>();
+  const mediaAuthInvalidations = new Map<
+    number,
+    { sender: MtprotoSender; operation: Promise<void> }
+  >();
+  const authorizations = new Map<number, Promise<AuthorizationResult>>();
   const sleep =
     options.sleep ??
     ((milliseconds: number) =>
@@ -317,7 +332,12 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
     const loading = persistence.load().then((stored) => {
       const parsed = parseStoredSession(stored);
       const model = createMtprotoSession(parsed, saves, options.defaultDcId ?? DEFAULT_DC_ID);
-      if (options.isTestServer && !parsed?.isTest) model.setMainDc(model.snapshot().mainDcId, true);
+      if (
+        options.isTestServer !== undefined &&
+        options.isTestServer !== (parsed?.isTest === true)
+      ) {
+        model.setMainDc(model.snapshot().mainDcId, options.isTestServer);
+      }
       session = model;
       return model;
     });
@@ -336,11 +356,15 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
     resultTypeFor,
   };
 
-  const makeConnection = (dcId: number) => {
-    const dc = endpoint(dcId);
+  const makeConnection = (
+    dcId: number,
+    purpose: MtprotoConnectionPurpose,
+    dedicatedMedia: boolean,
+  ) => {
+    const dc = endpoint(dcId, dedicatedMedia);
     const test = session?.snapshot().isTest === true;
     if (options.connectionFactory) {
-      return options.connectionFactory({ ...dc, isTestServer: test });
+      return options.connectionFactory({ ...dc, isTestServer: test, purpose });
     }
     return createWebSocketPacketConnection({
       url: telegramWebSocketUrl({ host: dc.host, port: dc.port, test }),
@@ -354,32 +378,87 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
     throw createMtprotoError('cancelled', 'Telegram connection attempt was superseded.');
   };
 
-  const createSender = async (dcId: number, generation: number) => {
+  const authorizeDc = (
+    dcId: number,
+    generation: number,
+    model: MtprotoSessionModel,
+    plain: PlainMtprotoTransport,
+  ) => {
+    const running = authorizations.get(dcId);
+    if (running) return running;
+    const operation = createAuthorizationKey({
+      dcId,
+      ...(model.snapshot().isTest ? { isTestServer: true } : {}),
+      wire: normalizedHandshakeWire(plain),
+      crypto,
+      ...(options.now ? { now: options.now } : {}),
+    }).then((authorization) => {
+      assertActive(generation);
+      return authorization;
+    });
+    const tracked = operation.finally(() => {
+      if (authorizations.get(dcId) === tracked) authorizations.delete(dcId);
+    });
+    authorizations.set(dcId, tracked);
+    return tracked;
+  };
+
+  const invalidateMediaAuthKey = (failedSender: MtprotoSender, generation: number) => {
+    const dcId = failedSender.dcId;
+    const running = mediaAuthInvalidations.get(dcId);
+    if (running) return running.operation;
+    const operation = (async () => {
+      assertActive(generation);
+      if (mediaSenders.get(dcId) !== failedSender) return;
+      const model = await loadSession();
+      assertActive(generation);
+      readyMediaSenders.delete(failedSender);
+      if (dcId !== model.snapshot().mainDcId) {
+        authorizations.delete(dcId);
+        model.setAuthKey(dcId, undefined);
+        await model.flush();
+        assertActive(generation);
+      }
+      if (mediaSenders.get(dcId) === failedSender) mediaSenders.delete(dcId);
+      const activeImport = importing.get(dcId);
+      if (activeImport?.sender === failedSender) importing.delete(dcId);
+    })();
+    const entry = { sender: failedSender, operation };
+    const tracked = operation.finally(() => {
+      if (mediaAuthInvalidations.get(dcId) === entry) mediaAuthInvalidations.delete(dcId);
+    });
+    entry.operation = tracked;
+    mediaAuthInvalidations.set(dcId, entry);
+    return tracked;
+  };
+
+  const createSender = async (
+    dcId: number,
+    generation: number,
+    purpose: MtprotoConnectionPurpose,
+  ) => {
     const model = await loadSession();
     const storedKey = model.authKey(dcId);
     const authKey = storedKey ? await createAuthKey(storedKey, crypto) : undefined;
+    const dedicatedMedia = purpose === 'media' && storedKey !== undefined;
     assertActive(generation);
-    const sender = createMtprotoSender({
+    let sender!: MtprotoSender;
+    sender = createMtprotoSender({
       dcId,
-      connection: () => makeConnection(dcId),
+      connection: () => makeConnection(dcId, purpose, dedicatedMedia),
       codec,
       crypto,
       ...(authKey ? { authKey } : {}),
-      authorize: (plain) =>
-        createAuthorizationKey({
-          dcId,
-          ...(model.snapshot().isTest ? { isTestServer: true } : {}),
-          wire: normalizedHandshakeWire(plain),
-          crypto,
-          ...(options.now ? { now: options.now } : {}),
-        }),
+      authorize: (plain) => authorizeDc(dcId, generation, model, plain),
       async onAuthKey(authorization) {
         assertActive(generation);
         model.setAuthKey(dcId, authorization.authKey.bytes);
-        if (dcId !== model.snapshot().mainDcId) imported.delete(dcId);
         await model.flush();
         assertActive(generation);
       },
+      ...(purpose === 'media'
+        ? { onAuthKeyInvalidated: () => invalidateMediaAuthKey(sender, generation) }
+        : {}),
       ...(options.now ? { now: options.now } : {}),
       reconnect: { retries: options.connectionRetries ?? DEFAULT_CONNECTION_RETRIES },
     });
@@ -387,21 +466,27 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
       sender.disconnect();
       assertActive(generation);
     }
-    senders.set(dcId, sender);
+    (purpose === 'media' ? mediaSenders : senders).set(dcId, sender);
     return sender;
   };
 
-  const senderFor = async (dcId: number, observeEvents = false) => {
+  const senderFor = async (
+    dcId: number,
+    observeEvents = false,
+    purpose: MtprotoConnectionPurpose = 'api',
+  ) => {
     const generation = lifecycleGeneration;
-    let sender = senders.get(dcId);
+    const senderMap = purpose === 'media' ? mediaSenders : senders;
+    const creationMap = purpose === 'media' ? mediaSenderCreations : senderCreations;
+    let sender = senderMap.get(dcId);
     if (!sender) {
-      let creating = senderCreations.get(dcId);
+      let creating = creationMap.get(dcId);
       if (!creating) {
-        const operation = createSender(dcId, generation);
+        const operation = createSender(dcId, generation, purpose);
         const tracked = operation.finally(() => {
-          if (senderCreations.get(dcId) === tracked) senderCreations.delete(dcId);
+          if (creationMap.get(dcId) === tracked) creationMap.delete(dcId);
         });
-        senderCreations.set(dcId, tracked);
+        creationMap.set(dcId, tracked);
         creating = tracked;
       }
       sender = await creating;
@@ -417,7 +502,7 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
     await sender.connect();
     if (disconnected || generation !== lifecycleGeneration) {
       sender.disconnect();
-      if (senders.get(dcId) === sender) senders.delete(dcId);
+      if (senderMap.get(dcId) === sender) senderMap.delete(dcId);
       assertActive(generation);
     }
     return sender;
@@ -453,11 +538,15 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
     for (const unsubscribe of senderSubscriptions.values()) unsubscribe();
     senderSubscriptions.clear();
     for (const sender of senders.values()) sender.disconnect();
+    for (const sender of mediaSenders.values()) sender.disconnect();
     senders.clear();
+    mediaSenders.clear();
     senderCreations.clear();
-    imported.clear();
+    mediaSenderCreations.clear();
     importing.clear();
     auxiliaryRecoveries.clear();
+    mediaAuthInvalidations.clear();
+    authorizations.clear();
     mainSender = undefined;
   };
 
@@ -493,34 +582,43 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
     return tracked;
   };
 
-  const discardAuxSender = async (failedSender: MtprotoSender, generation: number) => {
+  const discardMediaSender = async (
+    failedSender: MtprotoSender,
+    generation: number,
+    clearAuthKey = false,
+  ) => {
     const dcId = failedSender.dcId;
     assertActive(generation);
-    if (senders.get(dcId) !== failedSender) return;
-    imported.delete(dcId);
+    if (mediaSenders.get(dcId) !== failedSender) return;
+    readyMediaSenders.delete(failedSender);
     const activeImport = importing.get(dcId);
     if (activeImport?.sender === failedSender) importing.delete(dcId);
-    senderSubscriptions.get(dcId)?.();
-    senderSubscriptions.delete(dcId);
-    senders.delete(dcId);
+    mediaSenders.delete(dcId);
     failedSender.disconnect();
+    if (!clearAuthKey) return;
     const model = await loadSession();
     assertActive(generation);
+    if (dcId === model.snapshot().mainDcId) return;
+    authorizations.delete(dcId);
     model.setAuthKey(dcId, undefined);
     await model.flush();
     assertActive(generation);
   };
 
-  const recoverAuxSender = (failedSender: MtprotoSender, expectedGeneration?: number) => {
+  const recoverMediaSender = (
+    failedSender: MtprotoSender,
+    expectedGeneration?: number,
+    clearAuthKey = false,
+  ) => {
     const dcId = failedSender.dcId;
     const running = auxiliaryRecoveries.get(dcId);
     if (running) return running;
     const generation = expectedGeneration ?? lifecycleGeneration;
     assertActive(generation);
     const operation = (async () => {
-      await discardAuxSender(failedSender, generation);
+      await discardMediaSender(failedSender, generation, clearAuthKey);
       assertActive(generation);
-      return ensureExportedSender(dcId, generation);
+      return ensureMediaSender(dcId, generation);
     })();
     const tracked = operation.finally(() => {
       if (auxiliaryRecoveries.get(dcId) === tracked) auxiliaryRecoveries.delete(dcId);
@@ -529,17 +627,21 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
     return tracked;
   };
 
-  const ensureExportedSender = async (dcId: number, expectedGeneration: number) => {
+  const ensureMediaSender = async (dcId: number, expectedGeneration: number) => {
     assertActive(expectedGeneration);
     await connect();
     const generation = expectedGeneration;
     assertActive(generation);
     const model = await loadSession();
     assertActive(generation);
-    if (dcId === model.snapshot().mainDcId) return mainSender!;
-    const target = await senderFor(dcId);
+    const invalidation = mediaAuthInvalidations.get(dcId);
+    if (invalidation) {
+      await invalidation.operation;
+      assertActive(generation);
+    }
+    const target = await senderFor(dcId, false, 'media');
     assertActive(generation);
-    if (imported.has(dcId)) return target;
+    if (readyMediaSenders.has(target)) return target;
     const running = importing.get(dcId);
     if (running?.sender === target) {
       await running.operation;
@@ -547,6 +649,15 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
       return target;
     }
     const operation = (async () => {
+      if (dcId === model.snapshot().mainDcId) {
+        await initialize(target, createTl('help.getConfig'));
+        assertActive(generation);
+        if (mediaSenders.get(dcId) !== target) {
+          throw createMtprotoError('cancelled', 'Telegram media sender was superseded.');
+        }
+        readyMediaSenders.add(target);
+        return;
+      }
       let initializeMainBeforeExport = false;
       let lastError: unknown;
       for (let attempt = 0; attempt <= requestRetries; attempt += 1) {
@@ -575,10 +686,10 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
             }),
           );
           assertActive(generation);
-          if (senders.get(dcId) !== target) {
-            throw createMtprotoError('cancelled', 'Telegram auxiliary sender was superseded.');
+          if (mediaSenders.get(dcId) !== target) {
+            throw createMtprotoError('cancelled', 'Telegram media sender was superseded.');
           }
-          imported.add(dcId);
+          readyMediaSenders.add(target);
           return;
         } catch (error) {
           assertActive(generation);
@@ -639,11 +750,12 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
     request: TlObject,
     generation: number,
     invokeOptions: { signal?: AbortSignal } = {},
+    purpose: MtprotoConnectionPurpose = 'api',
   ): Promise<Result> => {
     let sender = initialSender;
     let lastError: unknown;
     let initializationRecoveries = 0;
-    let auxiliarySessionRecoveries = 0;
+    let mediaSessionRecoveries = 0;
     for (let attempt = 0; attempt <= requestRetries; attempt += 1) {
       try {
         assertActive(generation);
@@ -652,37 +764,51 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
         assertActive(generation);
         lastError = error;
         const rpcMessage = rpcErrorMessage(error);
+        const forgottenAuthKey =
+          isMtprotoError(error) && error.kind === 'session' && error.code === -404;
         if (rpcMessage === 'CONNECTION_NOT_INITED' && initializationRecoveries < 1) {
           initializationRecoveries += 1;
           const model = await loadSession();
           assertActive(generation);
-          if (sender.dcId === model.snapshot().mainDcId) {
+          if (purpose === 'media') {
+            sender = await recoverMediaSender(sender, generation);
+          } else if (sender.dcId === model.snapshot().mainDcId) {
             await initialize(sender, createTl('help.getConfig'));
             assertActive(generation);
           } else {
-            sender = await recoverAuxSender(sender, generation);
+            throw error;
           }
           continue;
         }
+        if (forgottenAuthKey && purpose === 'media' && mediaSessionRecoveries < 1) {
+          const model = await loadSession();
+          assertActive(generation);
+          mediaSessionRecoveries += 1;
+          sender = await recoverMediaSender(
+            sender,
+            generation,
+            sender.dcId !== model.snapshot().mainDcId,
+          );
+          continue;
+        }
         if (
-          auxiliarySessionRecoveries < 1 &&
+          mediaSessionRecoveries < 1 &&
           (rpcMessage === 'SESSION_REVOKED' ||
             rpcMessage === 'SESSION_EXPIRED' ||
             rpcMessage === 'AUTH_KEY_UNREGISTERED')
         ) {
           const model = await loadSession();
           assertActive(generation);
-          if (sender.dcId !== model.snapshot().mainDcId) {
-            auxiliarySessionRecoveries += 1;
-            sender = await recoverAuxSender(sender, generation);
-            continue;
-          }
+          if (purpose !== 'media' || sender.dcId === model.snapshot().mainDcId) throw error;
+          mediaSessionRecoveries += 1;
+          sender = await recoverMediaSender(sender, generation, true);
+          continue;
         }
         const moved = migration(error);
         if (moved) {
           sender =
             moved.kind === 'FILE'
-              ? await ensureExportedSender(moved.dcId, generation)
+              ? await ensureMediaSender(moved.dcId, generation)
               : await switchMainDc(moved.dcId, generation);
           continue;
         }
@@ -715,16 +841,9 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
     const generation = disconnected ? lifecycleGeneration + 1 : lifecycleGeneration;
     await connect();
     assertActive(generation);
-    const model = await loadSession();
+    const sender = await ensureMediaSender(dcId, generation);
     assertActive(generation);
-    let sender: MtprotoSender;
-    if (dcId === model.snapshot().mainDcId) {
-      sender = mainSender!;
-    } else {
-      sender = await ensureExportedSender(dcId, generation);
-    }
-    assertActive(generation);
-    return invokeWithRetry<Result>(sender, request, generation, invokeOptions);
+    return invokeWithRetry<Result>(sender, request, generation, invokeOptions, 'media');
   };
 
   const fileRpc: FileRpc = {
@@ -736,11 +855,8 @@ export function createMtprotoClient(options: CreateMtprotoClientOptions): Mtprot
     async recoverDc(dcId) {
       const generation = lifecycleGeneration;
       assertActive(generation);
-      const model = await loadSession();
-      assertActive(generation);
-      if (dcId === model.snapshot().mainDcId) return;
-      const sender = senders.get(dcId);
-      if (sender) await recoverAuxSender(sender, generation);
+      const sender = mediaSenders.get(dcId);
+      if (sender) await recoverMediaSender(sender, generation);
     },
   };
 

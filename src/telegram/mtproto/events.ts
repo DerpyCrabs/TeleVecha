@@ -67,7 +67,13 @@ export function createMtprotoEventHub(): MtprotoEventHub {
 
   return {
     emit(event) {
-      for (const listener of Array.from(listeners)) listener(event);
+      for (const listener of Array.from(listeners)) {
+        try {
+          listener(event);
+        } catch {
+          continue;
+        }
+      }
     },
     subscribe(listener) {
       listeners.add(listener);

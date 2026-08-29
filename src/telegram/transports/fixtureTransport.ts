@@ -265,6 +265,7 @@ interface FixtureStats {
   getReadOutboxMaxId: number;
   downloadMedia: number;
   downloadAvatar: number;
+  releaseAvatarDownload: number;
   getThemes: number;
   getWallpapers: number;
   getChatAppearance: number;
@@ -306,6 +307,8 @@ declare global {
       releaseConnect(): void;
       releaseSend(): void;
       releaseUpload(): void;
+      changeAndHoldReleaseAvatar(): void;
+      failPendingAvatar(): void;
       releaseHistoryAround(): void;
       releaseSharedMediaCounts(): void;
     };
@@ -372,6 +375,9 @@ export class FixtureTelegramTransport implements TelegramTransport {
   private releasePendingConnect: (() => void) | undefined;
   private releasePendingSend: (() => void) | undefined;
   private releasePendingUpload: (() => void) | undefined;
+  private avatarFailureArmed = false;
+  private avatarFailureReleased = false;
+  private readonly pendingAvatarFailures = new Set<(error: Error) => void>();
   private releasePendingHistoryAround: (() => void) | undefined;
   private sharedMediaCountsReleased = false;
   private readonly pendingSharedMediaCountReleases = new Set<() => void>();
@@ -395,6 +401,7 @@ export class FixtureTelegramTransport implements TelegramTransport {
     getReadOutboxMaxId: 0,
     downloadMedia: 0,
     downloadAvatar: 0,
+    releaseAvatarDownload: 0,
     getThemes: 0,
     getWallpapers: 0,
     getChatAppearance: 0,
@@ -437,6 +444,23 @@ export class FixtureTelegramTransport implements TelegramTransport {
       releaseConnect: () => this.releasePendingConnect?.(),
       releaseSend: () => this.releasePendingSend?.(),
       releaseUpload: () => this.releasePendingUpload?.(),
+      changeAndHoldReleaseAvatar: () => {
+        this.avatarFailureArmed = true;
+        const dialog = {
+          ...fixtureDialog(peers[1]!, 'Release Channel', '#4ca184'),
+          avatarId: 'fixture-c:202-updated',
+        };
+        for (const listener of this.listeners) {
+          listener({ updates: [{ type: 'dialog-changed', dialog }] });
+        }
+      },
+      failPendingAvatar: () => {
+        this.avatarFailureReleased = true;
+        for (const fail of this.pendingAvatarFailures) {
+          fail(new Error('Fixture avatar download failed'));
+        }
+        this.pendingAvatarFailures.clear();
+      },
       releaseHistoryAround: () => this.releasePendingHistoryAround?.(),
       releaseSharedMediaCounts: () => {
         this.sharedMediaCountsReleased = true;
@@ -982,6 +1006,13 @@ export class FixtureTelegramTransport implements TelegramTransport {
   }
   async downloadAvatar(peer: TelegramPeer) {
     this.stats.downloadAvatar += 1;
+    if (this.avatarFailureArmed && peer.id === peers[1]!.id) {
+      this.stats.releaseAvatarDownload += 1;
+      if (this.avatarFailureReleased) throw new Error('Fixture avatar download failed');
+      await new Promise<never>((_resolve, reject) => {
+        this.pendingAvatarFailures.add(reject);
+      });
+    }
     const label = peer.id === peers[0]!.id ? 'A' : 'R';
     return new Blob(
       [

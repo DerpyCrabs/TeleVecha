@@ -13,6 +13,9 @@ interface Window {
   __releaseFixtureEdit?: () => void;
   __releaseFixtureCallback?: () => void;
   __releaseFixtureAddPeer?: () => void;
+  __releaseFixtureOpenConversation?: () => void;
+  __releaseFixtureBotStartOne?: () => void;
+  __releaseFixtureBotStartTwo?: () => void;
   __openedBotUrl?: string;
   __acceptedUrlAuthOptions?: import('../src/telegram/types').TelegramUrlAuthAcceptOptions;
   __intersectionObserverConstructions?: number;
@@ -35,6 +38,7 @@ interface Window {
       getReadOutboxMaxId: number;
       downloadMedia: number;
       downloadAvatar: number;
+      releaseAvatarDownload: number;
       getThemes: number;
       getWallpapers: number;
       getChatAppearance: number;
@@ -69,6 +73,8 @@ interface Window {
     releaseConnect(): void;
     releaseSend(): void;
     releaseUpload(): void;
+    changeAndHoldReleaseAvatar(): void;
+    failPendingAvatar(): void;
     releaseHistoryAround(): void;
     releaseSharedMediaCounts(): void;
   };

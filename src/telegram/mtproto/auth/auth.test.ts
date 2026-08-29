@@ -5,6 +5,7 @@ import { aesIgeEncrypt, createBrowserCryptoAdapter, type CryptoAdapter } from '.
 import {
   createAuthKey,
   createAuthorizationKey,
+  computePasswordDigest,
   computePasswordHash,
   computePasswordSrpCheck,
   deriveTemporaryAes,
@@ -97,6 +98,25 @@ describe('MTProto authorization security', () => {
     expect(bytesToHex(result.M1)).toBe(
       '45955eaede61aadf732bc1257b542e25b29fcc3b4e6ef78aef69388726eb75db',
     );
+  });
+
+  it('rejects an SRP generator that is incompatible with the pinned modulus', async () => {
+    const algorithm = {
+      salt1: new Uint8Array([1]),
+      salt2: new Uint8Array([2]),
+      g: 5,
+      p: TELEGRAM_DH_PRIME,
+    };
+
+    await expect(computePasswordDigest(algorithm, 'password')).rejects.toThrow(
+      'Unsupported password generator',
+    );
+    await expect(
+      computePasswordSrpCheck(
+        { currentAlgo: algorithm, srpB: new Uint8Array(256), srpId: 1n },
+        'x',
+      ),
+    ).rejects.toThrow('Unsupported password generator');
   });
 
   it('runs the complete handshake through a normalized TL wire seam', async () => {

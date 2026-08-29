@@ -11,7 +11,7 @@ import {
 } from '../bytes';
 import { browserCrypto, type CryptoAdapter } from '../crypto';
 import { createMtprotoError } from '../errors';
-import { TELEGRAM_DH_PRIME } from './dh';
+import { TELEGRAM_DH_PRIME, validateDhParameters } from './dh';
 
 const HASH_NUMBER_BYTES = 256;
 const PRIVATE_RANDOM_ATTEMPTS = 128;
@@ -119,7 +119,9 @@ function validatePasswordAlgorithm(algorithm: PasswordKdfAlgorithm) {
   if (!equalBytesConstantTime(algorithm.p, TELEGRAM_DH_PRIME)) {
     throw createMtprotoError('protocol', 'Unsupported password modulus.');
   }
-  if (![3, 4, 5, 7].includes(algorithm.g)) {
+  try {
+    validateDhParameters(algorithm.p, algorithm.g);
+  } catch {
     throw createMtprotoError('protocol', 'Unsupported password generator.');
   }
 }

@@ -28,6 +28,14 @@ function codecDouble(): PacketCodec {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('Telegram WebSocket packet connection', () => {
   it('uses the expected browser endpoint suffixes', () => {
     expect(telegramWebSocketUrl({ host: 'zws2.web.telegram.org' })).toBe(
@@ -96,5 +104,45 @@ describe('Telegram WebSocket packet connection', () => {
 
     socket.onclose?.({} as CloseEvent);
     expect(states).toEqual([true, false]);
+  });
+
+  it('does not let a stalled message from an old socket block a reconnect', async () => {
+    const sockets: ReturnType<typeof socketDouble>[] = [];
+    const packets: Uint8Array[] = [];
+    const stalledBuffer = deferred<ArrayBuffer>();
+    const stalledBlob = new Blob([Uint8Array.of(1)]);
+    Object.defineProperty(stalledBlob, 'arrayBuffer', { value: () => stalledBuffer.promise });
+    const connection = createWebSocketPacketConnection({
+      url: 'wss://example.test/apiws',
+      randomBytes: (length) => new Uint8Array(length),
+      createCipher: () => ({ transform: (bytes) => bytes }),
+      createCodec: codecDouble,
+      socketFactory: () => {
+        const socket = socketDouble();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    connection.subscribePackets((packet) => packets.push(packet));
+
+    const firstOpening = connection.connect();
+    sockets[0]!.readyState = 1;
+    sockets[0]!.onopen?.({} as Event);
+    await firstOpening;
+    sockets[0]!.onmessage?.({ data: stalledBlob } as MessageEvent);
+    await Promise.resolve();
+
+    connection.disconnect();
+    const secondOpening = connection.connect();
+    sockets[1]!.readyState = 1;
+    sockets[1]!.onopen?.({} as Event);
+    await secondOpening;
+    sockets[1]!.onmessage?.({ data: Uint8Array.of(7, 8) } as MessageEvent);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(packets).toEqual([Uint8Array.of(7, 8)]);
+    stalledBuffer.resolve(new ArrayBuffer(1));
+    await Promise.resolve();
   });
 });

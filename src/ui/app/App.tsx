@@ -234,12 +234,14 @@ export function App(props: AppProps) {
   let openingMessage = false;
   let visibilityFrame: number | undefined;
   let selectionGeneration = 0;
+  let conversationRetryGeneration = 0;
   let openMessageGeneration = 0;
   let viewport!: ReturnType<typeof createConversationViewport>;
   let history!: ReturnType<typeof createConversationHistorySession>;
 
   onCleanup(() => {
     selectionGeneration += 1;
+    conversationRetryGeneration += 1;
     openMessageGeneration += 1;
   });
 
@@ -259,8 +261,10 @@ export function App(props: AppProps) {
     const peerId = activeChatId();
     return peerId !== 'empty' && snapshot().activePeerId === peerId;
   };
+  const activeConversationReady = () =>
+    activePeerMatches() && activeConversation()?.peerId === activeChatId();
   const hasCachedWorkspace = () => snapshot().dialogs.length > 0;
-  const canSend = () => online() && activePeerMatches();
+  const canSend = () => online() && activeConversationReady();
 
   const visibleChats = createMemo<ChatSummary[]>((previous) => {
     const next = snapshot()
@@ -310,7 +314,18 @@ export function App(props: AppProps) {
   onCleanup(() => {
     document.title = 'TeleVecha';
   });
-  const activeSharedCounts = createMemo(() => snapshot().sharedMediaCounts);
+  const activeSharedCounts = createMemo(() =>
+    activePeerMatches() ? snapshot().sharedMediaCounts : undefined,
+  );
+  const activeHistoryError = createMemo(() =>
+    activePeerMatches() ? snapshot().historyError : undefined,
+  );
+  const activeLoadingOlderMessages = createMemo(
+    () => activePeerMatches() && snapshot().loadingOlderMessages,
+  );
+  const conversationSwitching = createMemo(
+    () => activeChatId() !== 'empty' && !activePeerMatches(),
+  );
   createEffect(() => {
     const peerId = activeChatId();
     const current = snapshot();
@@ -363,6 +378,15 @@ export function App(props: AppProps) {
     clearReply: composer.clearReply,
   });
   const expressionPickerVisible = expressions.visible;
+  const closeConversationOverlays = () => {
+    expressions.close();
+    setMessageContextMenu(undefined);
+    setReactionPickerMessageId('');
+    setForwardingMessage(undefined);
+    setSearchOpen(false);
+    setSharedMediaKind(undefined);
+    setDeleteTarget(undefined);
+  };
   const contactDetails = createContactDetailsSession({
     source: engine,
     dialog: activeDialog,
@@ -474,6 +498,9 @@ export function App(props: AppProps) {
     pinnedIndex: pinnedMessageIndex,
     setPinnedIndex: setPinnedMessageIndex,
   } = conversationHeader;
+  const activePinnedCount = createMemo(() =>
+    activePeerMatches() ? snapshot().pinnedMessages.length : 0,
+  );
   const activeConversationLoaded = createMemo(() => {
     const current = snapshot();
     return (
@@ -522,16 +549,16 @@ export function App(props: AppProps) {
     const previousPeerId = activeChatId();
     const changingPeer = id !== previousPeerId;
     if (changingPeer) {
+      conversationRetryGeneration += 1;
       setActiveConversation(undefined);
+      setConversationRetrying(false);
       viewport.resetForPeer();
       history.reset();
     }
     setConversationLoadError('');
     setActiveChatId(id);
     setMobileSidebarOpen(false);
-    expressions.close();
-    setSearchOpen(false);
-    setReactionPickerMessageId('');
+    closeConversationOverlays();
     composer.switchPeer(previousPeerId, id, changingPeer);
     try {
       const conversation = await engine.openConversation(id);
@@ -572,22 +599,42 @@ export function App(props: AppProps) {
   });
 
   const retryConversation = async () => {
-    if (conversationRetrying() || activeChatId() === 'empty') return;
+    const peerId = activeChatId();
+    const conversation = activeConversation();
+    if (
+      conversationRetrying() ||
+      peerId === 'empty' ||
+      !conversation ||
+      conversation.peerId !== peerId
+    ) {
+      return;
+    }
+    const generation = ++conversationRetryGeneration;
+    const stillCurrent = () =>
+      generation === conversationRetryGeneration &&
+      activeChatId() === peerId &&
+      activeConversation() === conversation;
     setConversationRetrying(true);
     setConversationLoadError('');
     viewport.setReady(false);
     try {
       if (!engine.snapshot().online) await engine.retrySync();
-      await activeConversation()?.retryHistory();
+      if (!stillCurrent()) return;
+      await conversation.retryHistory();
+      if (!stillCurrent()) return;
       const current = engine.snapshot();
       if (!current.loadingMessages && current.messages.length === 0 && current.historyError) {
         setConversationLoadError(current.historyError);
       }
     } catch (cause) {
-      setConversationLoadError(cause instanceof Error ? cause.message : String(cause));
+      if (stillCurrent()) {
+        setConversationLoadError(cause instanceof Error ? cause.message : String(cause));
+      }
     } finally {
-      setConversationRetrying(false);
-      viewport.setReady(true);
+      if (stillCurrent()) {
+        setConversationRetrying(false);
+        viewport.setReady(true);
+      }
     }
   };
 
@@ -607,8 +654,12 @@ export function App(props: AppProps) {
     setLoggingOut(true);
     try {
       await engine.logOut();
+      conversationRetryGeneration += 1;
       setActiveChatId('empty');
       setActiveConversation(undefined);
+      setConversationLoadError('');
+      setConversationRetrying(false);
+      closeConversationOverlays();
       composer.reset();
       setMobileSidebarOpen(false);
     } finally {
@@ -623,8 +674,12 @@ export function App(props: AppProps) {
     try {
       mediaAssets.dispose();
       await engine.clearCache();
+      conversationRetryGeneration += 1;
       setActiveChatId('empty');
       setActiveConversation(undefined);
+      setConversationLoadError('');
+      setConversationRetrying(false);
+      closeConversationOverlays();
       setSettingsOpen(false);
     } finally {
       setClearingCache(false);
@@ -857,12 +912,14 @@ export function App(props: AppProps) {
         if (currentPeerId !== 'empty') {
           viewport.resetForPeer();
           selectionGeneration += 1;
+          conversationRetryGeneration += 1;
           history.reset();
           setActiveChatId('empty');
           setActiveConversation(undefined);
+          setConversationLoadError('');
+          setConversationRetrying(false);
+          closeConversationOverlays();
           composer.reset();
-          setSearchOpen(false);
-          setSharedMediaKind(undefined);
         }
       } else if (next.phase !== 'unauthorized' && !currentExists) {
         const requestedPeerExists = next.dialogs.some(({ peer }) => peer.id === initialUrlPeerId);
@@ -1148,7 +1205,7 @@ export function App(props: AppProps) {
                 class="icon-button"
                 onClick={() => setSearchOpen(true)}
                 aria-label="Search messages"
-                disabled={!activePeerMatches()}
+                disabled={!activeConversationReady()}
               >
                 <Search size={18} />
               </button>
@@ -1193,25 +1250,23 @@ export function App(props: AppProps) {
                 <button
                   class="pinned-message-open"
                   onClick={() => runInBackground(openMessage(message()))}
-                  aria-label={`Pinned message ${pinnedMessageIndex() + 1} of ${snapshot().pinnedMessages.length}: ${message().text || message().media?.name || 'Message'}`}
+                  aria-label={`Pinned message ${pinnedMessageIndex() + 1} of ${activePinnedCount()}: ${message().text || message().media?.name || 'Message'}`}
                 >
                   <Pin size={15} />
                   <span>
                     <strong>
-                      Pinned message {pinnedMessageIndex() + 1} of{' '}
-                      {snapshot().pinnedMessages.length}
+                      Pinned message {pinnedMessageIndex() + 1} of {activePinnedCount()}
                     </strong>
                     {message().text || message().media?.name}
                   </span>
                 </button>
-                <Show when={snapshot().pinnedMessages.length > 1}>
+                <Show when={activePinnedCount() > 1}>
                   <span class="pinned-message-navigation">
                     <button
                       aria-label="Previous pinned message"
                       onClick={() =>
                         setPinnedMessageIndex(
-                          (pinnedMessageIndex() - 1 + snapshot().pinnedMessages.length) %
-                            snapshot().pinnedMessages.length,
+                          (pinnedMessageIndex() - 1 + activePinnedCount()) % activePinnedCount(),
                         )
                       }
                     >
@@ -1220,9 +1275,7 @@ export function App(props: AppProps) {
                     <button
                       aria-label="Next pinned message"
                       onClick={() =>
-                        setPinnedMessageIndex(
-                          (pinnedMessageIndex() + 1) % snapshot().pinnedMessages.length,
-                        )
+                        setPinnedMessageIndex((pinnedMessageIndex() + 1) % activePinnedCount())
                       }
                     >
                       <ChevronDown size={16} />
@@ -1251,7 +1304,9 @@ export function App(props: AppProps) {
                 classList={{ 'conversation-ready': viewport.ready() }}
               >
                 <Show
-                  when={snapshot().loadingMessages && snapshot().activePeerId === activeChatId()}
+                  when={
+                    conversationSwitching() || (snapshot().loadingMessages && activePeerMatches())
+                  }
                 >
                   <div class="conversation-state" role="status">
                     Loading messages…
@@ -1259,13 +1314,13 @@ export function App(props: AppProps) {
                 </Show>
                 <Show
                   when={
-                    (conversationLoadError() || snapshot().historyError) &&
+                    (conversationLoadError() || activeHistoryError()) &&
                     activeMessages().length === 0
                   }
                 >
                   <div class="conversation-state conversation-state-error" role="alert">
                     <strong>Messages could not be loaded</strong>
-                    <span>{conversationLoadError() || snapshot().historyError}</span>
+                    <span>{conversationLoadError() || activeHistoryError()}</span>
                     <button
                       disabled={conversationRetrying()}
                       onClick={() => void retryConversation()}
@@ -1274,14 +1329,14 @@ export function App(props: AppProps) {
                     </button>
                   </div>
                 </Show>
-                <Show when={snapshot().loadingOlderMessages}>
+                <Show when={activeLoadingOlderMessages()}>
                   <div class="history-loader" role="status">
                     Loading older messages…
                   </div>
                 </Show>
-                <Show when={snapshot().historyError && activeMessages().length > 0}>
+                <Show when={activeHistoryError() && activeMessages().length > 0}>
                   <div class="history-error" role="alert">
-                    <span>{snapshot().historyError}</span>
+                    <span>{activeHistoryError()}</span>
                     <button
                       disabled={conversationRetrying()}
                       onClick={() => void retryConversation()}
@@ -1296,8 +1351,9 @@ export function App(props: AppProps) {
                     <Show
                       when={
                         !snapshot().loadingMessages &&
+                        activePeerMatches() &&
                         !conversationLoadError() &&
-                        !snapshot().historyError &&
+                        !activeHistoryError() &&
                         activeMessages().length === 0 &&
                         activeChatId() !== 'empty'
                       }
@@ -1920,14 +1976,20 @@ export function App(props: AppProps) {
           chat={activeChat()}
           counts={activeSharedCounts()}
           online={online()}
+          conversationReady={activeConversationReady()}
           modal={detailsOpen() && viewportWidth() <= 1100}
           media={mediaAssets}
           details={contactDetails}
           close={() => updateDetailsOpen(false)}
-          openShared={setSharedMediaKind}
+          openShared={(kind) => {
+            if (activeConversationReady()) setSharedMediaKind(kind);
+          }}
           setBlocked={(blocked) => {
-            if (activeDialog()?.peer.kind === 'user')
-              runInBackground(activeConversation()!.setBlocked(blocked));
+            const dialog = activeDialog();
+            const conversation = activeConversation();
+            if (dialog?.peer.kind === 'user' && conversation?.peerId === dialog.peer.id) {
+              runInBackground(conversation.setBlocked(blocked));
+            }
           }}
         />
       </div>

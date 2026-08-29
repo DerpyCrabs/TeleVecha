@@ -35,6 +35,7 @@ export function createReplyKeyboardSession(options: {
 
   const botStarted = createMemo(() => {
     const snapshot = options.snapshot();
+    if (snapshot.activePeerId !== options.activePeerId()) return false;
     return (
       snapshot.messages.some(({ outgoing }) => outgoing) ||
       snapshot.pending.some(

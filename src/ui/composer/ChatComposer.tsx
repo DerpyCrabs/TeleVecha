@@ -82,6 +82,8 @@ export function ChatComposer(props: ChatComposerProps) {
 
   createEffect(() => {
     void props.conversationId;
+    setEditingAttachmentId('');
+    setFormatMenu(undefined);
     closeExpression();
   });
   onMount(() => {

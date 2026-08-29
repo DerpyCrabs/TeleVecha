@@ -23,6 +23,7 @@ export type TlFieldDescriptor = Readonly<{
   name: string;
   wireName: string;
   type: TlTypeRef;
+  decodeMaxVectorLength?: number;
   flag?: Readonly<{ field: string; bit: number }>;
   flagIndicator?: true;
 }>;

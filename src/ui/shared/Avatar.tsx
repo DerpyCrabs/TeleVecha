@@ -54,14 +54,18 @@ export function Avatar(props: AvatarProps) {
         }
       : false,
   );
-  const [source] = createResource(request, async ({ loadCached, load }) => {
+  const [loadedSource] = createResource(request, async ({ identity, loadCached, load }) => {
     const cached = await loadCached?.().catch(() => undefined);
-    if (cached || !load) return cached;
+    if (cached || !load) return { identity, url: cached };
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const loaded = await load().catch(() => undefined);
-      if (loaded) return loaded;
+      if (loaded) return { identity, url: loaded };
     }
-    return undefined;
+    return { identity, url: undefined };
+  });
+  const source = createMemo(() => {
+    const loaded = loadedSource();
+    return loaded?.identity === props.identity ? loaded.url : undefined;
   });
 
   onMount(() => {

@@ -1,16 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { gzipSync, strToU8 } from 'fflate';
 
+import type { CreateMtprotoClientOptions, MtprotoClient } from '../mtproto';
 import { Api, type Tl } from '../mtproto/tl';
 import { connectionStateEvent, sessionGapEvent, updateEvent } from '../mtproto/events';
 import type { TransportUpdate, TransportUpdateBatch } from '../types';
 import {
   createWebTelegramTransport,
+  createWebTelegramTransportForTesting,
   type WebTelegramTransportDependencies,
 } from './webTelegramTransport';
 
 function transport(dependencies: WebTelegramTransportDependencies = {}) {
-  return createWebTelegramTransport(
+  return createWebTelegramTransportForTesting(
     {
       loadTransportSession: async () => undefined,
       saveTransportSession: async () => undefined,
@@ -40,12 +42,22 @@ function anyTl(factory: { is(value: unknown): boolean; tlName: string }) {
 type TransportInternals = {
   client: {
     invoke(request: unknown): Promise<unknown>;
+    disconnect?(): void;
+    isConnected?(): boolean;
+    flushSession?(): Promise<void>;
     uploadFile?(options: unknown): Promise<Tl.TypeInputFile>;
     getMe?(): Promise<Tl.TypeUser | undefined>;
     downloadMedia?(media: unknown, options: unknown): Promise<Uint8Array | undefined>;
     downloadProfilePhoto?(entity: unknown): Promise<Uint8Array | undefined>;
     subscribe?(handler: unknown): void | (() => void);
   };
+  phoneNumber: string;
+  phoneCodeHash: string;
+  wallpaperDocuments: Map<string, Tl.Document>;
+  notifyDefaults: Map<string, Tl.TypePeerNotifySettings>;
+  notifyDefaultsLoading?: Promise<void>;
+  notifyDefaultsLoaded: boolean;
+  channelRolesLoading: Map<string, Promise<void>>;
   installEventHandler(): void;
   mapUpdateEnvelope(update: unknown): TransportUpdateBatch;
   mapMessage(
@@ -59,6 +71,17 @@ function mappedUpdates(target: TransportInternals, update: unknown) {
 }
 
 describe('web Telegram transport mapping', () => {
+  it('does not expose mutable white-box internals from the application factory', () => {
+    const target = createWebTelegramTransport({
+      loadTransportSession: async () => undefined,
+      saveTransportSession: async () => undefined,
+    });
+
+    expect('client' in target).toBe(false);
+    expect('mapMessage' in target).toBe(false);
+    expect('clearRuntimeCaches' in target).toBe(false);
+  });
+
   it('coalesces connection setup and invalidates it when disconnect wins the race', async () => {
     const session = deferred<unknown>();
     const loadTransportSession = vi.fn(() => session.promise);
@@ -78,6 +101,75 @@ describe('web Telegram transport mapping', () => {
     session.resolve(undefined);
     await Promise.all([firstResult, secondResult, disconnecting]);
     expect(loadTransportSession).toHaveBeenCalledOnce();
+  });
+
+  it('clears account-scoped transient state when a disconnected client is replaced', async () => {
+    const firstUnsubscribe = vi.fn();
+    const firstDisconnect = vi.fn();
+    let firstConnected = false;
+    const firstClient = {
+      apiId: 1,
+      apiHash: 'hash',
+      connect: vi.fn(async () => {
+        firstConnected = true;
+      }),
+      disconnect: firstDisconnect.mockImplementation(() => {
+        firstConnected = false;
+      }),
+      isConnected: vi.fn(() => firstConnected),
+      flushSession: vi.fn(async () => undefined),
+      subscribe: vi.fn(() => firstUnsubscribe),
+    } as unknown as MtprotoClient;
+    let secondConnected = false;
+    const secondClient = {
+      apiId: 1,
+      apiHash: 'hash',
+      connect: vi.fn(async () => {
+        secondConnected = true;
+      }),
+      disconnect: vi.fn(() => {
+        secondConnected = false;
+      }),
+      isConnected: vi.fn(() => secondConnected),
+      flushSession: vi.fn(async () => undefined),
+      subscribe: vi.fn(() => vi.fn()),
+    } as unknown as MtprotoClient;
+    const clients = [firstClient, secondClient];
+    const createClient = vi.fn((_options: CreateMtprotoClientOptions) => {
+      const client = clients.shift();
+      if (!client) throw new Error('Unexpected client creation');
+      return client;
+    });
+    const target = transport({ createClient });
+
+    await target.connect({ apiId: 1, apiHash: 'hash' });
+    const internals = target as unknown as TransportInternals;
+    internals.phoneNumber = '+15551234567';
+    internals.phoneCodeHash = 'stale-code-hash';
+    internals.wallpaperDocuments.set(
+      '99',
+      Api.Document({
+        id: 99n,
+        accessHash: 199n,
+        fileReference: new Uint8Array(),
+        date: 1,
+        mimeType: 'image/jpeg',
+        size: 1n,
+        dcId: 2,
+        attributes: [],
+      }),
+    );
+    firstConnected = false;
+
+    await target.connect({ apiId: 1, apiHash: 'hash' });
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(firstDisconnect).toHaveBeenCalledOnce();
+    expect(firstUnsubscribe).toHaveBeenCalledOnce();
+    expect(internals.phoneNumber).toBe('');
+    expect(internals.phoneCodeHash).toBe('');
+    expect(internals.wallpaperDocuments.size).toBe(0);
+    await target.disconnect();
   });
 
   it('returns the raw Telegram user id for the authorized account', async () => {
@@ -737,6 +829,127 @@ describe('web Telegram transport mapping', () => {
     await expect(target.getDialogs(100)).resolves.toMatchObject({
       dialogs: [expect.objectContaining({ unreadCount: 5, muted: true })],
     });
+  });
+
+  it('returns dialogs when optional notification defaults do not answer', async () => {
+    vi.useFakeTimers();
+    const peer = Api.PeerUser({ userId: 11n });
+    const dialogPage = Api.messages.Dialogs({
+      dialogs: [
+        Api.Dialog({
+          peer,
+          topMessage: 1,
+          readInboxMaxId: 0,
+          readOutboxMaxId: 0,
+          unreadCount: 2,
+          unreadMentionsCount: 0,
+          unreadReactionsCount: 0,
+          unreadPollVotesCount: 0,
+          notifySettings: Api.PeerNotifySettings(),
+        }),
+      ],
+      messages: [
+        Api.Message({
+          id: 1,
+          peerId: peer,
+          date: 1,
+          message: 'Available before defaults',
+        }),
+      ],
+      chats: [],
+      users: [Api.User({ id: 11n, accessHash: 91n, firstName: 'Ready' })],
+    });
+    const notificationDefaults = deferred<Tl.TypePeerNotifySettings>();
+    const invoke = vi.fn((request: unknown) => {
+      if (Api.account.GetNotifySettings.is(request)) return notificationDefaults.promise;
+      if (Api.messages.GetDialogs.is(request)) return Promise.resolve(dialogPage);
+      throw new Error('Unexpected dialogs request');
+    });
+    const target = transport({ optionalEnrichmentDeadlineMs: 50 });
+    const internals = target as unknown as TransportInternals;
+    internals.client = {
+      invoke,
+      disconnect: vi.fn(),
+      flushSession: vi.fn(async () => undefined),
+    };
+
+    try {
+      const dialogs = target.getDialogs(1);
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(dialogs).resolves.toMatchObject({
+        dialogs: [
+          expect.objectContaining({
+            title: 'Ready',
+            unreadCount: 2,
+            muted: false,
+            topMessage: expect.objectContaining({ text: 'Available before defaults' }),
+          }),
+        ],
+      });
+      const staleLoading = internals.notifyDefaultsLoading;
+      expect(staleLoading).toBeDefined();
+
+      await target.disconnect();
+      notificationDefaults.resolve(Api.PeerNotifySettings({ muteUntil: 2_147_483_647 }));
+      await staleLoading;
+
+      expect(internals.notifyDefaults.size).toBe(0);
+      expect(internals.notifyDefaultsLoaded).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns one dialog when optional notification defaults do not answer', async () => {
+    const peer = Api.PeerUser({ userId: 12n });
+    const dialogPage = Api.messages.PeerDialogs({
+      dialogs: [
+        Api.Dialog({
+          peer,
+          topMessage: 2,
+          readInboxMaxId: 0,
+          readOutboxMaxId: 0,
+          unreadCount: 0,
+          unreadMentionsCount: 0,
+          unreadReactionsCount: 0,
+          unreadPollVotesCount: 0,
+          notifySettings: Api.PeerNotifySettings(),
+        }),
+      ],
+      messages: [
+        Api.Message({
+          id: 2,
+          peerId: peer,
+          date: 2,
+          message: 'One ready dialog',
+        }),
+      ],
+      chats: [],
+      users: [Api.User({ id: 12n, accessHash: 92n, firstName: 'Single' })],
+      state: Api.updates.State({ pts: 1, qts: 1, date: 1, seq: 1, unreadCount: 0 }),
+    });
+    const notificationDefaults = deferred<Tl.TypePeerNotifySettings>();
+    const invoke = vi.fn((request: unknown) => {
+      if (Api.account.GetNotifySettings.is(request)) return notificationDefaults.promise;
+      if (Api.messages.GetPeerDialogs.is(request)) return Promise.resolve(dialogPage);
+      throw new Error('Unexpected peer-dialog request');
+    });
+    const target = transport({ optionalEnrichmentDeadlineMs: 0 });
+    const internals = target as unknown as TransportInternals;
+    internals.client = { invoke };
+
+    await expect(
+      target.getDialog({ id: 'u:12', kind: 'user', accessHash: '92' }),
+    ).resolves.toMatchObject({
+      title: 'Single',
+      muted: false,
+      topMessage: expect.objectContaining({ text: 'One ready dialog' }),
+    });
+    const loading = internals.notifyDefaultsLoading;
+    expect(loading).toBeDefined();
+    notificationDefaults.resolve(Api.PeerNotifySettings());
+    await loading;
   });
 
   it('treats the dialog limit as a total result cap', async () => {
@@ -2102,6 +2315,60 @@ describe('web Telegram transport mapping', () => {
       senderRoleKind: 'owner',
     });
     expect(Api.channels.GetParticipants.is(invoke.mock.calls[1]?.[0])).toBe(true);
+  });
+
+  it('returns channel history when optional administrator enrichment does not answer', async () => {
+    const author = Api.User({
+      id: 405n,
+      accessHash: 1405n,
+      firstName: 'Unblocked',
+    });
+    const history = Api.messages.Messages({
+      messages: [
+        Api.Message({
+          id: 10,
+          fromId: Api.PeerUser({ userId: 405n }),
+          peerId: Api.PeerChannel({ channelId: 304n }),
+          date: 101,
+          message: 'History before roles',
+        }),
+      ],
+      topics: [],
+      users: [author],
+      chats: [],
+    });
+    const administrators = deferred<Tl.channels.ChannelParticipants>();
+    const invoke = vi.fn((request: unknown) => {
+      if (Api.channels.GetParticipants.is(request)) return administrators.promise;
+      if (Api.messages.GetHistory.is(request)) return Promise.resolve(history);
+      throw new Error('Unexpected history request');
+    });
+    const target = transport({ optionalEnrichmentDeadlineMs: 0 });
+    const internals = target as unknown as TransportInternals;
+    internals.client = { invoke };
+
+    await expect(
+      target.getHistory({ id: 'c:304', kind: 'channel', accessHash: '1304' }, 50),
+    ).resolves.toMatchObject({
+      messages: [
+        expect.objectContaining({
+          senderId: 'u:405',
+          senderName: 'Unblocked',
+          text: 'History before roles',
+        }),
+      ],
+    });
+    const loading = internals.channelRolesLoading.get('c:304');
+    expect(loading).toBeDefined();
+    administrators.resolve(
+      Api.channels.ChannelParticipants({
+        count: 0,
+        participants: [],
+        users: [],
+        chats: [],
+      }),
+    );
+    await loading;
   });
 
   it('requests bounded history before the oldest id and maps the returned messages', async () => {
@@ -3588,7 +3855,10 @@ describe('web Telegram transport mapping', () => {
     const internals = target as unknown as {
       messageMedia: Map<string, unknown>;
       stickerDocuments: Map<string, unknown>;
+      wallpaperDocuments: Map<string, Tl.Document>;
       entities: Map<string, unknown>;
+      phoneNumber: string;
+      phoneCodeHash: string;
       mapMessage(message: Tl.TypeMessage): unknown;
     };
     for (let id = 1; id <= 1_005; id += 1) {
@@ -3607,13 +3877,19 @@ describe('web Telegram transport mapping', () => {
     expect(internals.messageMedia.has('u:11:1')).toBe(false);
     expect(internals.messageMedia.has('u:11:1005')).toBe(true);
     internals.stickerDocuments.set('sticker', document);
+    internals.wallpaperDocuments.set('wallpaper', document);
     internals.entities.set('u:11', Api.User({ id: 11n }));
+    internals.phoneNumber = '+15551234567';
+    internals.phoneCodeHash = 'stale-code-hash';
 
     await target.disconnect();
 
     expect(internals.messageMedia.size).toBe(0);
     expect(internals.stickerDocuments.size).toBe(0);
+    expect(internals.wallpaperDocuments.size).toBe(0);
     expect(internals.entities.size).toBe(0);
+    expect(internals.phoneNumber).toBe('');
+    expect(internals.phoneCodeHash).toBe('');
   });
 
   it('maps inline and reply bot keyboards without exposing unsupported button actions', () => {
@@ -3968,6 +4244,49 @@ describe('web Telegram transport mapping', () => {
     expect(invoke.mock.calls[1]?.[0]).toMatchObject({
       id: [expect.objectContaining({ id: 45 })],
     });
+  });
+
+  it('correlates a persisted unsigned random id with its decoded signed TL long', async () => {
+    const target = transport();
+    const peer = { id: 'u:7', kind: 'user' as const, accessHash: '77' };
+    const persistedRandomId = '9223372036854775808';
+    const invoke = vi.fn(async (request: unknown) => {
+      if (Api.messages.StartBot.is(request)) {
+        return Api.Updates({
+          updates: [Api.UpdateMessageID({ id: 46, randomId: -9_223_372_036_854_775_808n })],
+          users: [],
+          chats: [],
+          date: 12,
+          seq: 2,
+        });
+      }
+      if (Api.messages.GetMessages.is(request)) {
+        return Api.messages.Messages({
+          messages: [
+            Api.Message({
+              id: 46,
+              out: true,
+              peerId: Api.PeerUser({ userId: 7n }),
+              date: 12,
+              message: '/start legacy',
+            }),
+          ],
+          topics: [],
+          chats: [],
+          users: [],
+        });
+      }
+      throw new Error('Unexpected bot-start request');
+    });
+    (target as unknown as TransportInternals).client = { invoke };
+
+    await expect(target.startBot(peer, 'legacy', persistedRandomId)).resolves.toMatchObject({
+      message: { id: 46, randomId: persistedRandomId },
+    });
+    expect(invoke.mock.calls[0]?.[0]).toMatchObject({
+      randomId: -9_223_372_036_854_775_808n,
+    });
+    expect(Api.messages.GetMessages.is(invoke.mock.calls[1]?.[0])).toBe(true);
   });
 
   it('surfaces a failed authorization-session write when the transport is flushed', async () => {

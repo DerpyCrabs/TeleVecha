@@ -106,4 +106,27 @@ describe('MTProto session persistence', () => {
     await session.flush();
     expect(clear).toHaveBeenCalledOnce();
   });
+
+  it('keeps keys across DC migrations but clears them across production/test networks', async () => {
+    const save = vi.fn();
+    const queue = createSessionSaveQueue({
+      load: async () => undefined,
+      save,
+      clear: async () => undefined,
+    });
+    const session = createMtprotoSession(
+      { mainDcId: 2, keys: { 2: encodedKey, 4: 'cd'.repeat(256) } },
+      queue,
+    );
+
+    session.setMainDc(4);
+    expect(session.snapshot().keys).toEqual({ 2: encodedKey, 4: 'cd'.repeat(256) });
+
+    session.setMainDc(3, true);
+    expect(session.snapshot()).toEqual({ mainDcId: 3, keys: {}, isTest: true });
+    expect(session.authKey(2)).toBeUndefined();
+    expect(session.authKey(4)).toBeUndefined();
+    await session.flush();
+    expect(save).toHaveBeenLastCalledWith({ mainDcId: 3, keys: {}, isTest: true });
+  });
 });

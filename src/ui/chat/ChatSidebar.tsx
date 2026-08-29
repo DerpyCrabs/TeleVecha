@@ -170,6 +170,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
     on(
       () => props.activeChatId,
       (activeChatId) => {
+        setContextMenu(undefined);
+        setContextUser(undefined);
         if (!activeChatId) return;
         const index = filteredChats().findIndex(({ id }) => id === activeChatId);
         if (index < 0) return;
@@ -421,7 +423,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
                   void props.directory
                     .details(chat.id)
                     .then((details) => {
-                      if (contextMenu()?.chatId === chat.id) setContextUser(details);
+                      if (contextMenu() === menu) setContextUser(details);
                     })
                     .catch(() => undefined);
                 }

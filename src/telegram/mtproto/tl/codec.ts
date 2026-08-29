@@ -359,6 +359,7 @@ function readVector(
   reader: TlReader,
   type: Extract<TlTypeRef, { kind: 'vector' }>,
   options: DecodeTlOptions,
+  fieldLimit?: number,
 ) {
   if (!type.bare) {
     const constructorId = readUint32(reader);
@@ -367,7 +368,8 @@ function readVector(
     }
   }
   const count = readInt32(reader);
-  if (count < 0 || count > limits(options).maxVectorLength) {
+  const maxVectorLength = Math.min(limits(options).maxVectorLength, fieldLimit ?? Infinity);
+  if (count < 0 || count > maxVectorLength) {
     throw Error(`TL vector length ${count} is invalid.`);
   }
   const values: unknown[] = [];
@@ -441,7 +443,10 @@ function readDescriptor(
         continue;
       }
     }
-    fields[field.name] = readValue(reader, field.type, options);
+    fields[field.name] =
+      field.type.kind === 'vector'
+        ? readVector(reader, field.type, options, field.decodeMaxVectorLength)
+        : readValue(reader, field.type, options);
   }
   return Object.freeze(fields) as AnyTlObject;
 }
