@@ -269,7 +269,11 @@ export interface TelegramSearchOffset {
 }
 
 export type SharedMediaKind = 'photos' | 'videos' | 'files' | 'audio' | 'links' | 'voice' | 'gifs';
-export type TelegramResourceKind = 'expressions' | 'bot-commands' | 'group-members';
+export type TelegramResourceKind =
+  | 'expressions'
+  | 'bot-commands'
+  | 'group-members'
+  | 'peer-metadata';
 export interface TelegramResourceInvalidation {
   kind: TelegramResourceKind;
   peerId?: string | undefined;
@@ -424,6 +428,10 @@ export type TransportUpdate =
     }
   | {
       type: 'dialog-list-invalidated';
+    }
+  | {
+      type: 'peer-metadata-changed';
+      peerId: string;
     }
   | {
       type: 'channel-too-long';

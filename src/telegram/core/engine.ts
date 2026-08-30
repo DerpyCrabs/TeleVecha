@@ -40,7 +40,7 @@ import type {
 
 const GLOBAL_DIFFERENCE_LIMIT = 100;
 const CHANNEL_DIFFERENCE_LIMIT = 500;
-const ALL_DIALOGS_LIMIT = Number.MAX_SAFE_INTEGER;
+const DIALOG_PAGE_LIMIT = 100;
 const HISTORY_LIMIT = 50;
 const MAX_LOADED_HISTORIES = 8;
 const MAX_MESSAGES_PER_HISTORY = 500;
@@ -137,6 +137,7 @@ export class MessagingEngine {
   private readonly historyAnchors = new Map<string, number>();
   private readonly pendingInboxReadMax = new Map<string, number>();
   private readonly inboxReadRequests = new Map<string, Promise<void>>();
+  private readonly inboxReadRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly pendingQueue: PendingSendQueue;
   private readonly channelRefreshes = new Map<string, Promise<void>>();
   private refreshingUpdates: Promise<void> | undefined;
@@ -225,6 +226,21 @@ export class MessagingEngine {
     } finally {
       this.readReceiptRefreshes.delete(peerId);
     }
+  }
+
+  async retryMarkRead(peerId = this.snapshotValue.activePeerId) {
+    if (!peerId) return;
+    const timer = this.inboxReadRetryTimers.get(peerId);
+    if (timer) clearTimeout(timer);
+    this.inboxReadRetryTimers.delete(peerId);
+    const dialog = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
+    if (dialog) await this.markRead(dialog, dialog.topMessageId, true);
+  }
+
+  async markConversationRead(peerId: string) {
+    if (this.inboxReadRetryTimers.has(peerId)) return;
+    const dialog = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
+    if (dialog) await this.markRead(dialog, dialog.topMessageId, true);
   }
 
   async refreshUpdates() {
@@ -337,14 +353,20 @@ export class MessagingEngine {
       );
       const orderedPending = await this.pendingQueue.restore(compatiblePending);
       if (!this.isLifecycleCurrent(generation)) return;
-      this.patch({
-        dialogs: this.sortDialogs(compatibleDialogs),
-        drafts,
-        pending: orderedPending,
-        ...(lastPeerId ? { activePeerId: lastPeerId } : {}),
-      });
-
-      await this.connectWithDeadline(credentials);
+      const publishCachedWorkspace = () => {
+        this.patch({
+          dialogs: this.sortDialogs(compatibleDialogs),
+          drafts,
+          pending: orderedPending,
+          ...(lastPeerId ? { activePeerId: lastPeerId } : {}),
+        });
+      };
+      try {
+        await this.connectWithDeadline(credentials);
+      } catch (error) {
+        if (this.isLifecycleCurrent(generation)) publishCachedWorkspace();
+        throw error;
+      }
       if (!this.isLifecycleCurrent(generation)) return;
       if (!(await this.transport.isAuthorized())) {
         if (!this.isLifecycleCurrent(generation)) return;
@@ -353,6 +375,11 @@ export class MessagingEngine {
         return;
       }
       if (!this.isLifecycleCurrent(generation)) return;
+      const authorizedAccountId = await this.transport.getAuthorizedAccountId();
+      if (!this.isLifecycleCurrent(generation)) return;
+      if (accountId === undefined || accountId === authorizedAccountId) {
+        publishCachedWorkspace();
+      }
       await this.activateAuthorizedSession(this.mayClaimLegacyAccount, generation);
     } catch (error) {
       if (!this.isLifecycleCurrent(generation)) return;
@@ -481,6 +508,8 @@ export class MessagingEngine {
     this.unsubscribeTransport = undefined;
     for (const timer of this.activityTimers.values()) clearTimeout(timer);
     this.activityTimers.clear();
+    for (const timer of this.inboxReadRetryTimers.values()) clearTimeout(timer);
+    this.inboxReadRetryTimers.clear();
     let disconnectError: unknown;
     try {
       this.patch({
@@ -2125,7 +2154,12 @@ export class MessagingEngine {
     generation: number,
     accountId: string | undefined,
   ) {
-    const cached = await this.store.loadBlob(cacheKey);
+    let cached: Blob | undefined;
+    try {
+      cached = await this.store.loadBlob(cacheKey);
+    } catch (error) {
+      this.reportFailure('cache', 'Could not read cached media; downloading it again.', error);
+    }
     if (!this.isOperationCurrent(generation, accountId)) {
       throw new Error('The media request no longer belongs to the active account.');
     }
@@ -2136,7 +2170,11 @@ export class MessagingEngine {
         this.isOperationCurrent(generation, accountId) &&
         this.resources.version(mediaSlot) === mediaVersion
       ) {
-        await this.store.saveBlob(cacheKey, blob);
+        try {
+          await this.store.saveBlob(cacheKey, blob);
+        } catch (error) {
+          this.reportFailure('cache', 'Could not cache downloaded media.', error);
+        }
       }
       return blob;
     } catch (firstError) {
@@ -2153,7 +2191,11 @@ export class MessagingEngine {
         this.isOperationCurrent(generation, accountId) &&
         this.resources.version(mediaSlot) === mediaVersion
       ) {
-        await this.store.saveBlob(cacheKey, blob);
+        try {
+          await this.store.saveBlob(cacheKey, blob);
+        } catch (error) {
+          this.reportFailure('cache', 'Could not cache downloaded media.', error);
+        }
       }
       return blob;
     }
@@ -2964,6 +3006,8 @@ export class MessagingEngine {
       this.historyModes.clear();
       this.historyAnchors.clear();
       this.pendingInboxReadMax.clear();
+      for (const timer of this.inboxReadRetryTimers.values()) clearTimeout(timer);
+      this.inboxReadRetryTimers.clear();
       this.messageMutations.clear();
       this.draftWrites.clear();
       this.draftVersions.clear();
@@ -3025,7 +3069,7 @@ export class MessagingEngine {
   }
 
   private async refreshDialogHeads(generation = this.lifecycleGeneration) {
-    const page = await this.transport.getDialogs(ALL_DIALOGS_LIMIT);
+    const page = await this.transport.getDialogs(DIALOG_PAGE_LIMIT);
     if (!this.isLifecycleCurrent(generation)) return;
     const cachedDetails = new Map(
       this.snapshotValue.dialogs.map((dialog) => [dialog.peer.id, dialog.userDetails]),
@@ -3071,7 +3115,7 @@ export class MessagingEngine {
     const fresh =
       storedPeer && this.transport.getDialog
         ? await this.transport.getDialog(storedPeer)
-        : (await this.transport.getDialogs(ALL_DIALOGS_LIMIT)).dialogs.find(
+        : (await this.transport.getDialogs(DIALOG_PAGE_LIMIT)).dialogs.find(
             ({ peer }) => peer.id === peerId,
           );
     if (!fresh) {
@@ -3108,7 +3152,7 @@ export class MessagingEngine {
     const accountId = this.accountId;
     const reloadPeerId = await this.queueDialogStateOperation(async () => {
       if (!this.isOperationCurrent(generation, accountId)) return undefined;
-      const page = await this.transport.getDialogs(ALL_DIALOGS_LIMIT);
+      const page = await this.transport.getDialogs(DIALOG_PAGE_LIMIT);
       if (!this.isOperationCurrent(generation, accountId)) return undefined;
 
       const stagedActivePeerId = this.snapshotValue.activePeerId;
@@ -3203,6 +3247,8 @@ export class MessagingEngine {
       this.historyModes.clear();
       this.historyAnchors.clear();
       this.pendingInboxReadMax.clear();
+      for (const timer of this.inboxReadRetryTimers.values()) clearTimeout(timer);
+      this.inboxReadRetryTimers.clear();
       this.messageMutations.clear();
       for (const timer of this.activityTimers.values()) clearTimeout(timer);
       this.activityTimers.clear();
@@ -3849,6 +3895,16 @@ export class MessagingEngine {
       await this.refreshDialogHeads();
       return;
     }
+    if (update.type === 'peer-metadata-changed') {
+      this.userDetails.delete(update.peerId);
+      const dialogs = this.snapshotValue.dialogs.map((dialog) =>
+        dialog.peer.id === update.peerId ? { ...dialog, userDetails: undefined } : dialog,
+      );
+      this.patch({ dialogs });
+      await this.refreshDialogHead(update.peerId);
+      this.invalidateResource({ kind: 'peer-metadata', peerId: update.peerId });
+      return;
+    }
     if (update.type === 'pts-advanced') return;
     if (update.type === 'pinned-messages') {
       const pinVersion = this.nextMutationVersion(this.pinnedMessageVersions, update.peerId);
@@ -4445,8 +4501,8 @@ export class MessagingEngine {
     this.replacePending({ ...current, uploadProgress: Math.max(0, Math.min(1, progress)) });
   }
 
-  private async markRead(dialog: TelegramDialog, maxMessageId: number) {
-    if (!this.snapshotValue.online || !this.canMarkRead(dialog.peer.id)) return;
+  private async markRead(dialog: TelegramDialog, maxMessageId: number, force = false) {
+    if (!this.snapshotValue.online || (!force && !this.canMarkRead(dialog.peer.id))) return;
     if (maxMessageId <= dialog.readInboxMaxId && dialog.unreadCount === 0) return;
     const peerId = dialog.peer.id;
     this.pendingInboxReadMax.set(
@@ -4455,24 +4511,29 @@ export class MessagingEngine {
     );
     const currentRequest = this.inboxReadRequests.get(peerId);
     if (currentRequest) return currentRequest;
-    const request = this.flushInboxReads(peerId).finally(() => {
+    const request = this.flushInboxReads(peerId, force).finally(() => {
       if (this.inboxReadRequests.get(peerId) === request) {
         this.inboxReadRequests.delete(peerId);
       }
       const pendingMax = this.pendingInboxReadMax.get(peerId);
       const current = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
-      if (pendingMax !== undefined && current && this.canMarkRead(peerId)) {
-        void this.markRead(current, pendingMax);
+      if (
+        pendingMax !== undefined &&
+        current &&
+        !this.inboxReadRetryTimers.has(peerId) &&
+        (force || this.canMarkRead(peerId))
+      ) {
+        void this.markRead(current, pendingMax, force);
       }
     });
     this.inboxReadRequests.set(peerId, request);
     return request;
   }
 
-  private async flushInboxReads(peerId: string) {
+  private async flushInboxReads(peerId: string, force = false) {
     const generation = this.lifecycleGeneration;
     const accountId = this.accountId;
-    while (this.snapshotValue.online && this.canMarkRead(peerId)) {
+    while (this.snapshotValue.online && (force || this.canMarkRead(peerId))) {
       const maxMessageId = this.pendingInboxReadMax.get(peerId);
       if (maxMessageId === undefined) return;
       this.pendingInboxReadMax.delete(peerId);
@@ -4486,9 +4547,23 @@ export class MessagingEngine {
         await this.acceptMutationUpdateBatches(result.updateBatches, generation, accountId);
         if (!this.isOperationCurrent(generation, accountId)) return;
       } catch (error) {
-        this.pendingInboxReadMax.delete(peerId);
+        this.pendingInboxReadMax.set(peerId, maxMessageId);
         if (this.isOperationCurrent(generation, accountId)) {
           this.fail('sync', `Could not mark ${current.title} as read.`, error, false);
+          if (!this.inboxReadRetryTimers.has(peerId)) {
+            const timer = setTimeout(() => {
+              this.inboxReadRetryTimers.delete(peerId);
+              const latest = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
+              if (latest && this.snapshotValue.online) {
+                void this.markRead(
+                  latest,
+                  this.pendingInboxReadMax.get(peerId) ?? maxMessageId,
+                  force,
+                );
+              }
+            }, 500);
+            this.inboxReadRetryTimers.set(peerId, timer);
+          }
         }
         return;
       }
@@ -4509,6 +4584,9 @@ export class MessagingEngine {
           ),
         });
       });
+      if (this.snapshotValue.operationError?.startsWith('Could not mark ')) {
+        this.clearOperationError();
+      }
     }
     this.pendingInboxReadMax.delete(peerId);
   }
@@ -5069,7 +5147,17 @@ export class MessagingEngine {
   }
 
   private errorMessage(error: unknown) {
-    return error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (/\bFLOOD_WAIT(?:_\d+)?\b/u.test(message)) {
+      return 'Telegram asked TeleVecha to wait before trying again.';
+    }
+    if (/\bCHAT_ADMIN_REQUIRED\b/u.test(message)) {
+      return 'Telegram did not allow this change for this chat.';
+    }
+    if (/\b[A-Z][A-Z0-9_]{2,}\b/u.test(message) || /\([a-z]+\.[A-Za-z]+\)/u.test(message)) {
+      return 'Telegram rejected this request. Try again or check your permissions.';
+    }
+    return message;
   }
 
   private nextMutationVersion(versions: Map<string, number>, key: string) {

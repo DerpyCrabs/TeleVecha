@@ -7,6 +7,7 @@ export class ResourceCache {
   private readonly requests = new Map<string, Promise<unknown>>();
   private readonly values = new Map<string, unknown>();
   private readonly versions = new Map<string, number>();
+  private epoch = 0;
 
   async load<T>(key: string, loader: () => Promise<T>): Promise<T> {
     const current = this.requests.get(key) as Promise<T> | undefined;
@@ -23,9 +24,11 @@ export class ResourceCache {
 
   async cached<T>(key: string, loader: () => Promise<T>): Promise<T> {
     if (this.values.has(key)) return this.values.get(key) as T;
+    const epoch = this.epoch;
+    const version = this.version(key);
     return this.load(key, async () => {
       const value = await loader();
-      this.values.set(key, value);
+      if (this.epoch === epoch && this.version(key) === version) this.values.set(key, value);
       return value;
     });
   }
@@ -33,6 +36,7 @@ export class ResourceCache {
   forget(key: string) {
     this.requests.delete(key);
     this.values.delete(key);
+    this.versions.set(key, this.version(key) + 1);
   }
 
   version(key: string) {
@@ -49,6 +53,7 @@ export class ResourceCache {
   }
 
   clear() {
+    this.epoch += 1;
     this.requests.clear();
     this.values.clear();
     this.versions.clear();

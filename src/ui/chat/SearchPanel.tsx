@@ -34,6 +34,7 @@ export function SearchPanel(props: SearchPanelProps) {
   const [hasMore, setHasMore] = createSignal(false);
   const [nextOffset, setNextOffset] = createSignal<TelegramSearchPage['nextOffset']>();
   const [error, setError] = createSignal('');
+  const [submitted, setSubmitted] = createSignal(false);
   let overlay: HTMLDivElement | undefined;
   let searchVersion = 0;
   useModalDialog(() => overlay, props.close);
@@ -47,6 +48,7 @@ export function SearchPanel(props: SearchPanelProps) {
       setError('');
       return;
     }
+    setSubmitted(true);
     const version = ++searchVersion;
     if (append) setLoadingMore(true);
     else setLoading(true);
@@ -93,6 +95,7 @@ export function SearchPanel(props: SearchPanelProps) {
     setError('');
     setLoading(false);
     setLoadingMore(false);
+    setSubmitted(false);
   };
 
   const title = (peerId: string) =>
@@ -170,7 +173,11 @@ export function SearchPanel(props: SearchPanelProps) {
                     when={error()}
                     fallback={
                       <p class="text-[0.78rem] text-muted">
-                        {query().trim() ? 'No messages found' : 'Enter a search term'}
+                        {query().trim()
+                          ? submitted()
+                            ? 'No messages found'
+                            : 'Press Enter to search'
+                          : 'Enter a search term'}
                       </p>
                     }
                   >

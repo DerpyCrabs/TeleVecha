@@ -28,6 +28,7 @@ export function createExpressionSession(options: {
   const [stickerLoading, setStickerLoading] = createSignal(false);
   const [gifOpen, setGifOpen] = createSignal(false);
   const [gifLoading, setGifLoading] = createSignal(false);
+  const [gifError, setGifError] = createSignal('');
   const [visible, setVisible] = createSignal(false);
   const [gifs, setGifs] = createSignal<TelegramSticker[]>([]);
   const [stickerPacks, setStickerPacks] = createSignal<TelegramStickerPack[]>([]);
@@ -52,8 +53,11 @@ export function createExpressionSession(options: {
   const loadGifs = async () => {
     if (gifLoading()) return;
     setGifLoading(true);
+    setGifError('');
     try {
       setGifs(await options.source.getSavedGifs());
+    } catch {
+      setGifError('GIFs could not be loaded.');
     } finally {
       setGifLoading(false);
     }
@@ -97,12 +101,14 @@ export function createExpressionSession(options: {
     stickerLoading,
     gifOpen,
     gifLoading,
+    gifError,
     visible,
     setVisible,
     gifs,
     stickerPacks,
     toggleStickers,
     toggleGifs,
+    retryGifs: loadGifs,
     sendSticker,
     sendGif: async (gif: TelegramSticker) => {
       setGifOpen(false);

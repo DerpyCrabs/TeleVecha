@@ -48,11 +48,13 @@ function GifOption(props: {
 export function GifPicker(props: {
   gifs: TelegramSticker[];
   loading: boolean;
+  error: string;
   query: string;
   load: (gif: TelegramSticker) => Promise<string>;
   cachedUrl: (gif: TelegramSticker) => string | undefined;
   search: (query: string) => Promise<TelegramSticker[]>;
   send: (gif: TelegramSticker) => void;
+  retry: () => Promise<void>;
 }) {
   const [searchResults, setSearchResults] = createSignal<TelegramSticker[]>([]);
   const [searching, setSearching] = createSignal(false);
@@ -90,19 +92,29 @@ export function GifPicker(props: {
   return (
     <div class="gif-picker" aria-label="GIFs">
       <Show when={!props.loading} fallback={<p>Loading GIF index…</p>}>
-        <For
-          each={results()}
-          fallback={<p>{searching() ? 'Searching Telegram…' : 'No GIFs found'}</p>}
+        <Show
+          when={!props.error}
+          fallback={
+            <div role="alert">
+              <p>{props.error}</p>
+              <button onClick={() => void props.retry()}>Retry GIFs</button>
+            </div>
+          }
         >
-          {(gif) => (
-            <GifOption
-              gif={gif}
-              load={() => props.load(gif)}
-              cachedUrl={() => props.cachedUrl(gif)}
-              send={() => props.send(gif)}
-            />
-          )}
-        </For>
+          <For
+            each={results()}
+            fallback={<p>{searching() ? 'Searching Telegram…' : 'No GIFs found'}</p>}
+          >
+            {(gif) => (
+              <GifOption
+                gif={gif}
+                load={() => props.load(gif)}
+                cachedUrl={() => props.cachedUrl(gif)}
+                send={() => props.send(gif)}
+              />
+            )}
+          </For>
+        </Show>
       </Show>
     </div>
   );

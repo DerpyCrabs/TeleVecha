@@ -192,6 +192,7 @@ export function ChatComposer(props: ChatComposerProps) {
             setTab={selectExpressionTab}
             stickersLoading={props.expressions.stickerLoading()}
             gifsLoading={props.expressions.gifLoading()}
+            gifError={props.expressions.gifError()}
             gifs={props.expressions.gifs()}
             packs={props.expressions.stickerPacks()}
             insertEmoji={insertEmoji}
@@ -206,6 +207,7 @@ export function ChatComposer(props: ChatComposerProps) {
               void props.expressions.sendGif(gif);
             }}
             searchGifs={props.expressions.searchGifs}
+            retryGifs={props.expressions.retryGifs}
           />
         </div>
       </Show>

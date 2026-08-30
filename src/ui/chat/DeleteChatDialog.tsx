@@ -1,4 +1,5 @@
 import X from 'lucide-solid/icons/x';
+import { Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
 import type { ChatSummary } from '../../domain/models';
@@ -9,6 +10,8 @@ export function DeleteChatDialog(props: {
   chat: ChatSummary;
   close: () => void;
   confirm: () => void;
+  hasDraft: boolean;
+  queuedCount: number;
 }) {
   let overlay: HTMLDivElement | undefined;
   useModalDialog(() => overlay, props.close);
@@ -43,6 +46,14 @@ export function DeleteChatDialog(props: {
             {props.chat.kind === 'user'
               ? `Delete your chat history with ${props.chat.title}?`
               : `You will leave ${props.chat.title} and remove it from the chat list.`}
+            <Show when={props.hasDraft || props.queuedCount > 0}>
+              {' '}
+              {props.hasDraft && props.queuedCount > 0
+                ? 'This also removes your draft and cancels queued messages.'
+                : props.hasDraft
+                  ? 'This also removes your draft.'
+                  : 'This also cancels queued messages.'}
+            </Show>
           </p>
           <button
             class="danger mx-[0.7rem] my-[0.2rem] rounded-[0.6rem] border-0 bg-[#20232a] p-[0.7rem] text-red-300"

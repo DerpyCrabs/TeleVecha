@@ -61,4 +61,27 @@ describe('asset URL loading', () => {
     expect(cachedAssetUrl('new')).toBe('blob:new');
     expect(revoke).not.toHaveBeenCalledWith('blob:new');
   });
+
+  it('does not revoke a media URL that is mounted in an audio element', () => {
+    class FakeAudio {
+      constructor(readonly src: string) {}
+    }
+    const mountedAudio = new FakeAudio('blob:voice');
+    assetGlobals.__televechaAssetUrls = new Map([
+      ['voice', mountedAudio.src],
+      ...Array.from({ length: 256 }, (_, index) => [`old:${index}`, `blob:old-${index}`] as const),
+    ]);
+    vi.stubGlobal('HTMLImageElement', class FakeImage {});
+    vi.stubGlobal('HTMLVideoElement', class FakeVideo {});
+    vi.stubGlobal('HTMLAudioElement', FakeAudio);
+    vi.stubGlobal('HTMLAnchorElement', class FakeAnchor {});
+    vi.stubGlobal('document', { querySelectorAll: () => [mountedAudio] });
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:new');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL');
+
+    rememberAssetUrl('new', new Blob(['new']));
+
+    expect(revoke).not.toHaveBeenCalledWith('blob:voice');
+    expect(cachedAssetUrl('voice')).toBe('blob:voice');
+  });
 });

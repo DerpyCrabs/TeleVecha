@@ -333,7 +333,7 @@ test('uses cached avatars and media after reload instead of downloading again', 
   expect(stats?.downloadAvatar).toBe(0);
 });
 
-test('shows cached avatars during startup without an outage warning', async ({ page }) => {
+test('reveals cached avatars only after startup verifies the account', async ({ page }) => {
   await page.goto('/?scenario=held-connect');
   await expect(page.getByText('Connecting to Telegram')).toBeVisible();
   await page.evaluate(() => window.__televechaFixture?.releaseConnect());
@@ -341,13 +341,15 @@ test('shows cached avatars during startup without an outage warning', async ({ p
 
   await page.reload();
 
-  await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
-  await expect(page.getByRole('status').filter({ hasText: 'connecting' })).toBeVisible();
-  await expect(page.getByText('Connecting to Telegram. Showing cached data.')).toHaveCount(0);
+  await expect(page.locator('[data-testid="chat-list"] img')).toHaveCount(0);
+  await expect(page.getByText('Connecting to Telegram')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
-  expect((await fixtureStats(page))?.downloadAvatar).toBe(0);
 
   await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+
+  await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
+  await expect(page.getByText('Connecting to Telegram. Showing cached data.')).toHaveCount(0);
+  expect((await fixtureStats(page))?.downloadAvatar).toBe(0);
 });
 
 test('loads cached-dialog avatars after a delayed Telegram connection becomes ready', async ({

@@ -13,6 +13,7 @@ interface ExpressionPickerProps {
   setTab: (tab: ExpressionTab) => void;
   stickersLoading: boolean;
   gifsLoading: boolean;
+  gifError: string;
   gifs: TelegramSticker[];
   packs: TelegramStickerPack[];
   insertEmoji: (emoji: string) => void;
@@ -21,6 +22,7 @@ interface ExpressionPickerProps {
   sendSticker: (sticker: TelegramSticker) => void;
   sendGif: (gif: TelegramSticker) => void;
   searchGifs: (query: string) => Promise<TelegramSticker[]>;
+  retryGifs: () => Promise<void>;
 }
 
 export function ExpressionPicker(props: ExpressionPickerProps) {
@@ -74,11 +76,13 @@ export function ExpressionPicker(props: ExpressionPickerProps) {
           <GifPicker
             gifs={props.gifs}
             loading={props.gifsLoading}
+            error={props.gifError}
             load={props.load}
             send={props.sendGif}
             query={query()}
             cachedUrl={props.stickerUrl}
             search={props.searchGifs}
+            retry={props.retryGifs}
           />
         </Show>
         <Show when={props.tab === 'stickers'}>

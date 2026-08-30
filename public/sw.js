@@ -1,4 +1,5 @@
-const CACHE_NAME = 'televecha-shell-v1';
+const CACHE_PREFIX = 'televecha-shell-';
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
 const SHELL_URLS = ['/', '/index.html', '/site.webmanifest', '/favicon.svg'];
 
 self.addEventListener('install', (event) => {
@@ -12,9 +13,9 @@ self.addEventListener('install', (event) => {
         .map((match) => match[1])
         .filter((url) => url?.startsWith('/'));
       await cache.addAll(assetUrls);
+      await self.skipWaiting();
     }),
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -22,10 +23,14 @@ self.addEventListener('activate', (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
-      ),
+        Promise.all(
+          keys
+            .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+            .map((key) => caches.delete(key)),
+        ),
+      )
+      .then(() => self.clients.claim()),
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {

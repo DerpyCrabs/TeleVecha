@@ -11,7 +11,6 @@ import type {
 const PROTOCOL_VERSION = 3;
 const OWNER_HEARTBEAT_MS = 2_000;
 const OWNER_TIMEOUT_MS = 7_000;
-const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_COMPLETED_REQUESTS = 128;
 const CHANNEL_ERROR = 'This browser cannot provide the channel required for safe multi-tab sync.';
 const LOCKS_ERROR = 'This browser cannot provide the locking required for safe multi-tab sync.';
@@ -61,7 +60,6 @@ type CoordinatorMessage =
 interface PendingRequest {
   resolve(value: unknown): void;
   reject(error: unknown): void;
-  timer: ReturnType<typeof setTimeout>;
 }
 
 interface VisibilityReport {
@@ -130,7 +128,19 @@ const viewMutationMethods = new Set([
 // a draft typed while an edit is saving must become canonical promptly, and a
 // newer chat selection must be able to supersede a slow message jump. Ordinary
 // conversation opens stay serialized so failover restoration cannot race a send.
-const concurrentMethods = new Set(['openMessage', 'setDraft', 'setTyping']);
+const concurrentMethods = new Set([
+  'getBotCommands',
+  'getChatAppearance',
+  'getGroupMembers',
+  'getRecentStickers',
+  'getSavedGifs',
+  'getStickerPacks',
+  'getUserDetails',
+  'openMessage',
+  'searchPeers',
+  'setDraft',
+  'setTyping',
+]);
 
 const coalescedMethods = new Set([
   'ensureSharedMediaCounts',
@@ -141,14 +151,6 @@ const coalescedMethods = new Set([
   'refreshReadReceipt',
   'refreshUpdates',
   'retryOutbox',
-]);
-
-const cacheOnlyMethods = new Set([
-  'downloadAvatar',
-  'downloadCustomEmoji',
-  'downloadMedia',
-  'downloadSticker',
-  'downloadWallpaper',
 ]);
 
 function sharedSnapshot(previous: EngineSnapshot, next: EngineSnapshot): EngineSnapshot {
@@ -181,6 +183,28 @@ function sharedSnapshot(previous: EngineSnapshot, next: EngineSnapshot): EngineS
     operationError: next.operationError,
     error: next.error,
   };
+}
+
+function inactiveConversationSnapshot(
+  previous: EngineSnapshot,
+  next: EngineSnapshot,
+): EngineSnapshot {
+  const shared = sharedSnapshot(previous, next);
+  const peerId = previous.activePeerId;
+  if (!peerId) return shared;
+  const topMessage = next.dialogs.find(({ peer }) => peer.id === peerId)?.topMessage;
+  if (!topMessage) return shared;
+  const known = previous.messages.some(
+    (message) => message.peerId === peerId && String(message.id) === String(topMessage.id),
+  );
+  const messages = known
+    ? previous.messages.map((message) =>
+        message.peerId === peerId && String(message.id) === String(topMessage.id)
+          ? topMessage
+          : message,
+      )
+    : [...previous.messages, topMessage];
+  return { ...shared, messages };
 }
 
 function transferableSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
@@ -497,7 +521,6 @@ export class TabCoordinator {
         if (message.to !== this.clientId || message.from !== this.ownerId) break;
         const pending = this.pending.get(message.id);
         if (!pending) break;
-        clearTimeout(pending.timer);
         this.pending.delete(message.id);
         if (message.error) pending.reject(new Error(message.error));
         else pending.resolve(message.result);
@@ -572,9 +595,13 @@ export class TabCoordinator {
         });
       }
       if (this.electionPending) return;
-      if (!this.ownerId || Date.now() - this.ownerSeenAt > OWNER_TIMEOUT_MS) {
+      if (!this.ownerId) {
         this.ownerId = undefined;
         this.markReconnecting();
+        void this.electOwner();
+      } else if (Date.now() - this.ownerSeenAt > OWNER_TIMEOUT_MS) {
+        // A suspended tab delays both heartbeat timers. Ask Web Locks who owns
+        // the lease before changing visible connection state.
         void this.electOwner();
       }
     }, OWNER_HEARTBEAT_MS);
@@ -737,12 +764,13 @@ export class TabCoordinator {
       const next =
         ownsActiveView || (clientId === this.clientId && previous.activePeerId === undefined)
           ? snapshot
-          : sharedSnapshot(previous, snapshot);
+          : inactiveConversationSnapshot(previous, snapshot);
       if (next === previous) continue;
       this.clientSnapshots.set(clientId, next);
       if (clientId === this.clientId) this.setSnapshot(next);
       else this.queueState(clientId);
     }
+    for (const { peerId } of this.visibility.values()) void this.applyVisibility(peerId);
   }
 
   private sendState(clientId: string) {
@@ -903,21 +931,24 @@ export class TabCoordinator {
     );
     if (clientId === this.clientId) this.setSnapshot(this.clientSnapshots.get(clientId)!);
     else this.sendState(clientId);
-    return cacheOnlyMethods.has(method) && clientId !== this.clientId ? undefined : result;
+    return result;
   }
 
   private async applyVisibility(peerId: string) {
     const engine = this.owner?.engine;
-    if (!engine || engine.snapshot().activePeerId !== peerId) return;
+    if (!engine) return;
     const cutoff = Date.now() - OWNER_TIMEOUT_MS;
     const reports = [...this.visibility.entries()]
       .filter(([clientId]) => (this.clientSeenAt.get(clientId) ?? 0) >= cutoff)
       .map(([, report]) => report)
       .filter((report) => report.peerId === peerId);
-    await engine.setActiveConversationVisibility(peerId, {
-      visible: reports.some((report) => report.visible),
-      atBottom: reports.some((report) => report.visible && report.atBottom),
-    });
+    const visible = reports.some((report) => report.visible);
+    const atBottom = reports.some((report) => report.visible && report.atBottom);
+    if (engine.snapshot().activePeerId === peerId) {
+      await engine.setActiveConversationVisibility(peerId, { visible, atBottom });
+    } else if (visible && atBottom) {
+      await engine.markConversationRead(peerId);
+    }
   }
 
   private invoke(method: string, args: unknown[]) {
@@ -943,20 +974,15 @@ export class TabCoordinator {
       );
       return operation;
     }
-    if (!this.ownerId || Date.now() - this.ownerSeenAt > OWNER_TIMEOUT_MS) {
+    if (!this.ownerId) {
       this.markReconnecting();
+      void this.electOwner();
+    } else if (Date.now() - this.ownerSeenAt > OWNER_TIMEOUT_MS) {
       void this.electOwner();
     }
     const id = crypto.randomUUID();
     return new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        this.ownerId = undefined;
-        this.markReconnecting();
-        void this.electOwner();
-        reject(new Error('The active TeleVecha tab did not acknowledge the command.'));
-      }, REQUEST_TIMEOUT_MS);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject });
       this.post({
         type: 'request',
         version: PROTOCOL_VERSION,
@@ -982,7 +1008,6 @@ export class TabCoordinator {
 
   private rejectPending(error: Error) {
     for (const request of this.pending.values()) {
-      clearTimeout(request.timer);
       request.reject(error);
     }
     this.pending.clear();

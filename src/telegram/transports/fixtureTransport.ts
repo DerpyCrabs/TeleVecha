@@ -262,6 +262,7 @@ interface FixtureStats {
   sendFile: number;
   sendAlbum: number;
   readHistory: number;
+  readHistoryPeers: string[];
   getReadOutboxMaxId: number;
   downloadMedia: number;
   downloadAvatar: number;
@@ -309,6 +310,7 @@ declare global {
       releaseUpload(): void;
       changeAndHoldReleaseAvatar(): void;
       failPendingAvatar(): void;
+      releaseHistory(): void;
       releaseHistoryAround(): void;
       releaseSharedMediaCounts(): void;
     };
@@ -378,6 +380,7 @@ export class FixtureTelegramTransport implements TelegramTransport {
   private avatarFailureArmed = false;
   private avatarFailureReleased = false;
   private readonly pendingAvatarFailures = new Set<(error: Error) => void>();
+  private releasePendingHistory: (() => void) | undefined;
   private releasePendingHistoryAround: (() => void) | undefined;
   private sharedMediaCountsReleased = false;
   private readonly pendingSharedMediaCountReleases = new Set<() => void>();
@@ -398,6 +401,7 @@ export class FixtureTelegramTransport implements TelegramTransport {
     sendFile: 0,
     sendAlbum: 0,
     readHistory: 0,
+    readHistoryPeers: [],
     getReadOutboxMaxId: 0,
     downloadMedia: 0,
     downloadAvatar: 0,
@@ -461,6 +465,7 @@ export class FixtureTelegramTransport implements TelegramTransport {
         }
         this.pendingAvatarFailures.clear();
       },
+      releaseHistory: () => this.releasePendingHistory?.(),
       releaseHistoryAround: () => this.releasePendingHistoryAround?.(),
       releaseSharedMediaCounts: () => {
         this.sharedMediaCountsReleased = true;
@@ -546,6 +551,16 @@ export class FixtureTelegramTransport implements TelegramTransport {
   }
   async getHistory(peer: TelegramPeer, limit: number, beforeMessageId?: number) {
     this.stats.getHistory += 1;
+    if (
+      this.scenario === 'held-history' &&
+      peer.id === peers[1]?.id &&
+      beforeMessageId === undefined
+    ) {
+      await new Promise<void>((resolve) => {
+        this.releasePendingHistory = resolve;
+      });
+      this.releasePendingHistory = undefined;
+    }
     const history = messages.get(peer.id) ?? [];
     const eligible = beforeMessageId ? history.filter(({ id }) => id < beforeMessageId) : history;
     const pageLimit =
@@ -598,8 +613,12 @@ export class FixtureTelegramTransport implements TelegramTransport {
     const start = Math.max(0, target - Math.floor(limit / 2));
     return history.slice(start, start + limit);
   }
-  async readHistory() {
+  async readHistory(peer: TelegramPeer) {
     this.stats.readHistory += 1;
+    this.stats.readHistoryPeers.push(peer.id);
+    if (this.scenario === 'read-receipt-fails') {
+      throw new Error('fixture read receipt failure');
+    }
     return {};
   }
   async getReadOutboxMaxId() {
@@ -658,6 +677,7 @@ export class FixtureTelegramTransport implements TelegramTransport {
 
   async searchPeers(query: string, limit = 50): Promise<TelegramPeerSearchResult[]> {
     this.stats.searchPeers += 1;
+    if (this.scenario === 'peer-search-fails') throw new Error('fixture peer search failed');
     const candidates: TelegramPeerSearchResult[] = [
       {
         peer: peers[0]!,
@@ -782,6 +802,9 @@ export class FixtureTelegramTransport implements TelegramTransport {
   }
   async setMuted(peer: TelegramPeer, muted: boolean) {
     this.stats.setMuted += 1;
+    if (this.scenario === 'technical-mute-error') {
+      throw new Error('CHAT_ADMIN_REQUIRED (account.updateNotifySettings)');
+    }
     const update = fixtureDialog(
       peer,
       peer.id === peers[0]?.id
@@ -1168,6 +1191,7 @@ export class FixtureTelegramTransport implements TelegramTransport {
   }
   async getSavedGifs(): Promise<TelegramSticker[]> {
     this.stats.getSavedGifs += 1;
+    if (this.scenario === 'gif-index-fails') throw new Error('fixture GIF index failure');
     return [
       {
         id: 'gif-1',

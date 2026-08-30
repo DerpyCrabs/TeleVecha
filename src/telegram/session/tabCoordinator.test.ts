@@ -837,4 +837,138 @@ describe('TabCoordinator', () => {
     expect(releaseOwnerLock).toHaveBeenCalledOnce();
     expect(internals.channel?.closed).toBe(true);
   });
+
+  it('accepts a late response for a command that legitimately exceeds 30 seconds', async () => {
+    vi.useFakeTimers();
+    installBrowserFakes();
+    const target = coordinator();
+    const internals = target as unknown as CoordinatorInternals;
+    internals.receive({ type: 'owner', version: 3, from: 'owner', at: Date.now() });
+    const operation = target.client.refreshUpdates();
+    const outcome = operation.then(
+      (value) => ({ status: 'resolved' as const, value }),
+      (error: unknown) => ({ status: 'rejected' as const, error }),
+    );
+    const request = internals.channel?.sent.find(
+      (message) => (message as { type?: string }).type === 'request',
+    ) as { id: string };
+
+    try {
+      await vi.advanceTimersByTimeAsync(31_000);
+      internals.receive({
+        type: 'response',
+        version: 3,
+        from: 'owner',
+        to: internals.clientId,
+        id: request.id,
+        result: 'done',
+      });
+      await expect(outcome).resolves.toEqual({ status: 'resolved', value: 'done' });
+    } finally {
+      vi.useRealTimers();
+      await target.stop();
+    }
+  });
+
+  it('does not declare a Web Lock owner dead because background timers were delayed', async () => {
+    vi.useFakeTimers();
+    installBrowserFakes();
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: vi.fn(
+          async (
+            _name: string,
+            _options: unknown,
+            callback: (lock: null) => Promise<void> | void,
+          ) => callback(null),
+        ),
+      },
+    });
+    const target = coordinator();
+    const internals = target as unknown as CoordinatorInternals;
+
+    try {
+      await target.start({ apiId: 1, apiHash: 'test' });
+      internals.receive({ type: 'owner', version: 3, from: 'owner', at: Date.now() });
+      internals.receive({
+        type: 'state',
+        version: 3,
+        from: 'owner',
+        to: internals.clientId,
+        snapshot: snapshot(),
+      });
+
+      await vi.advanceTimersByTimeAsync(8_000);
+
+      expect(target.client.snapshot()).toMatchObject({ phase: 'ready', online: true });
+    } finally {
+      vi.useRealTimers();
+      await target.stop();
+    }
+  });
+
+  it('does not block metadata work behind an unrelated slow operation', async () => {
+    installBrowserFakes();
+    const slow = deferred<void>();
+    const getSavedGifs = vi.fn(async () => []);
+    const target = coordinator();
+    const internals = target as unknown as CoordinatorInternals;
+    internals.owner = {
+      engine: ownerEngine({
+        refreshUpdates: vi.fn(() => slow.promise),
+        getSavedGifs,
+      }),
+    };
+    const first = target.client.refreshUpdates();
+    const second = target.client.getSavedGifs();
+
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(getSavedGifs).toHaveBeenCalledOnce();
+    } finally {
+      slow.resolve();
+      await Promise.all([first, second]);
+      await target.stop();
+    }
+  });
+
+  it('returns downloaded media to a follower when the shared cache has no entry', async () => {
+    installBrowserFakes();
+    const target = coordinator();
+    const internals = target as unknown as CoordinatorInternals;
+    internals.owner = {
+      engine: ownerEngine({ downloadMedia: vi.fn(async () => new Blob(['large media'])) }),
+    };
+    internals.receive({
+      type: 'request',
+      version: 3,
+      from: 'follower',
+      id: 'download-without-cache',
+      method: 'downloadMedia',
+      args: [
+        {
+          id: 7,
+          peerId: 'peer-1',
+          senderId: 'peer-1',
+          text: '',
+          date: 1,
+          outgoing: false,
+        },
+      ],
+    });
+
+    try {
+      await vi.waitFor(() => {
+        const response = internals.channel?.sent.find(
+          (message) =>
+            (message as { type?: string; id?: string }).type === 'response' &&
+            (message as { id?: string }).id === 'download-without-cache',
+        ) as { result?: unknown };
+        expect(response.result).toBeInstanceOf(Blob);
+      });
+    } finally {
+      await target.stop();
+    }
+  });
 });

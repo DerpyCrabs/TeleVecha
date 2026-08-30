@@ -40,4 +40,36 @@ describe('ResourceCache', () => {
 
     expect(loader).toHaveBeenCalledOnce();
   });
+
+  it('does not let a forgotten in-flight load restore stale data', async () => {
+    let resolve!: (value: string) => void;
+    const stale = new Promise<string>((settle) => {
+      resolve = settle;
+    });
+    const cache = new ResourceCache();
+    const first = cache.cached('appearance:1', () => stale);
+
+    cache.forget('appearance:1');
+    resolve('stale');
+    await first;
+
+    await expect(cache.cached('appearance:1', async () => 'fresh')).resolves.toBe('fresh');
+  });
+
+  it('does not let an in-flight load repopulate the cache after clear', async () => {
+    let resolve!: (value: string) => void;
+    const stale = new Promise<string>((settle) => {
+      resolve = settle;
+    });
+    const cache = new ResourceCache();
+    const first = cache.cached('account-scoped', () => stale);
+
+    cache.clear();
+    resolve('old account');
+    await first;
+
+    await expect(cache.cached('account-scoped', async () => 'new account')).resolves.toBe(
+      'new account',
+    );
+  });
 });

@@ -37,6 +37,7 @@ interface Window {
       sendFile: number;
       sendAlbum: number;
       readHistory: number;
+      readHistoryPeers: string[];
       getReadOutboxMaxId: number;
       downloadMedia: number;
       downloadAvatar: number;
@@ -77,6 +78,7 @@ interface Window {
     releaseUpload(): void;
     changeAndHoldReleaseAvatar(): void;
     failPendingAvatar(): void;
+    releaseHistory(): void;
     releaseHistoryAround(): void;
     releaseSharedMediaCounts(): void;
   };

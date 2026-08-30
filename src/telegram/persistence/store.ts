@@ -146,45 +146,76 @@ export class IndexedDbCacheStore implements CacheStore {
   private readonly database: Promise<IDBPDatabase<TeleVechaSchema>>;
 
   constructor(name = 'televecha') {
-    this.database = openDB<TeleVechaSchema>(name, 6, {
-      upgrade(database, oldVersion, _newVersion, transaction) {
-        if (oldVersion < 1) {
-          database.createObjectStore('meta');
-          database.createObjectStore('dialogs', { keyPath: 'peer.id' });
-          const messages = database.createObjectStore('messages', {
-            keyPath: ['peerId', 'id'],
-          });
-          messages.createIndex('byPeer', 'peerId');
-          messages.createIndex('byMessageId', 'id');
-          messages.createIndex('byDate', 'date');
-          database.createObjectStore('drafts', { keyPath: 'peerId' });
-          const outbox = database.createObjectStore('outbox', { keyPath: 'id' });
-          outbox.createIndex('byCreatedAt', 'createdAt');
-        }
-        // Version 2 stored raw Blob values under out-of-line keys. Files are a
-        // disposable cache, so recreate only this store when moving to records
-        // with timestamps instead of attempting an unsafe in-place migration.
-        if (oldVersion < 3) {
-          if (database.objectStoreNames.contains('files')) database.deleteObjectStore('files');
-          database.createObjectStore('files', { keyPath: 'key' });
-        }
-        if (oldVersion < 4) {
-          const messages = transaction.objectStore('messages');
-          if (!messages.indexNames.contains('byMessageId')) {
+    this.database = new Promise((resolve, reject) => {
+      let settled = false;
+      let databaseConnection: IDBPDatabase<TeleVechaSchema> | undefined;
+      const opening = openDB<TeleVechaSchema>(name, 6, {
+        blocked() {
+          if (settled) return;
+          settled = true;
+          reject(
+            new Error(
+              'TeleVecha storage is open in another tab. Close or reload the other tab, then try again.',
+            ),
+          );
+        },
+        blocking() {
+          databaseConnection?.close();
+        },
+        upgrade(database, oldVersion, _newVersion, transaction) {
+          if (oldVersion < 1) {
+            database.createObjectStore('meta');
+            database.createObjectStore('dialogs', { keyPath: 'peer.id' });
+            const messages = database.createObjectStore('messages', {
+              keyPath: ['peerId', 'id'],
+            });
+            messages.createIndex('byPeer', 'peerId');
             messages.createIndex('byMessageId', 'id');
+            messages.createIndex('byDate', 'date');
+            database.createObjectStore('drafts', { keyPath: 'peerId' });
+            const outbox = database.createObjectStore('outbox', { keyPath: 'id' });
+            outbox.createIndex('byCreatedAt', 'createdAt');
           }
-          if (!messages.indexNames.contains('byDate')) messages.createIndex('byDate', 'date');
-        }
-        if (oldVersion === 4) {
-          void transaction.objectStore('dialogs').clear();
-          void transaction.objectStore('messages').clear();
-          void transaction.objectStore('files').clear();
-          const meta = transaction.objectStore('meta');
-          void meta.delete('cursor');
-          void meta.delete('epoch');
-          void meta.delete('last-peer-id');
-        }
-      },
+          // Version 2 stored raw Blob values under out-of-line keys. Files are a
+          // disposable cache, so recreate only this store when moving to records
+          // with timestamps instead of attempting an unsafe in-place migration.
+          if (oldVersion < 3) {
+            if (database.objectStoreNames.contains('files')) database.deleteObjectStore('files');
+            database.createObjectStore('files', { keyPath: 'key' });
+          }
+          if (oldVersion < 4) {
+            const messages = transaction.objectStore('messages');
+            if (!messages.indexNames.contains('byMessageId')) {
+              messages.createIndex('byMessageId', 'id');
+            }
+            if (!messages.indexNames.contains('byDate')) messages.createIndex('byDate', 'date');
+          }
+          if (oldVersion === 4) {
+            void transaction.objectStore('dialogs').clear();
+            void transaction.objectStore('messages').clear();
+            void transaction.objectStore('files').clear();
+            const meta = transaction.objectStore('meta');
+            void meta.delete('cursor');
+            void meta.delete('epoch');
+            void meta.delete('last-peer-id');
+          }
+        },
+      });
+      void opening.then(
+        (database) => {
+          databaseConnection = database;
+          if (settled) database.close();
+          else {
+            settled = true;
+            resolve(database);
+          }
+        },
+        (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          reject(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
     });
   }
 

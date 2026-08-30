@@ -5,7 +5,9 @@ import type {
   TelegramPeer,
   TelegramSticker,
 } from '../../telegram/types';
-import { cachedAssetUrl, loadAssetUrl, rememberAssetUrl } from './assetUrls';
+import { cachedAssetUrl, clearAssetUrls, loadAssetUrl, rememberAssetUrl } from './assetUrls';
+
+const MAX_AVATAR_URLS = 256;
 
 export interface MediaAsset {
   readonly revision: string;
@@ -26,7 +28,7 @@ type MediaSource = Pick<
 export class MediaAssets {
   private readonly avatarLoads = new Map<string, Promise<string | undefined>>();
   private readonly customEmojiLoads = new Map<string, Promise<{ url: string; mimeType: string }>>();
-  private readonly avatarUrls = new Set<string>();
+  private readonly avatarUrls = new Map<string, string>();
 
   constructor(
     private readonly engine: MediaSource,
@@ -49,7 +51,14 @@ export class MediaAssets {
     const loading = blob.then((value) => {
       if (!value) return undefined;
       const url = URL.createObjectURL(value);
-      this.avatarUrls.add(url);
+      this.avatarUrls.set(key, url);
+      while (this.avatarUrls.size > MAX_AVATAR_URLS) {
+        const oldest = this.avatarUrls.entries().next().value as [string, string] | undefined;
+        if (!oldest) break;
+        this.avatarUrls.delete(oldest[0]);
+        this.avatarLoads.delete(oldest[0]);
+        URL.revokeObjectURL(oldest[1]);
+      }
       return url;
     });
     this.avatarLoads.set(key, loading);
@@ -118,9 +127,10 @@ export class MediaAssets {
   }
 
   dispose() {
-    for (const url of this.avatarUrls) URL.revokeObjectURL(url);
+    for (const url of this.avatarUrls.values()) URL.revokeObjectURL(url);
     this.avatarUrls.clear();
     this.avatarLoads.clear();
     this.customEmojiLoads.clear();
+    clearAssetUrls();
   }
 }

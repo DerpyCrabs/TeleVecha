@@ -702,13 +702,13 @@ class FakeTransport implements TelegramTransport {
 const credentials = { apiId: 1, apiHash: 'hash' };
 
 describe('MessagingEngine', () => {
-  it('requests the complete dialog list during synchronization', async () => {
+  it('requests a bounded dialog page during synchronization', async () => {
     const transport = new FakeTransport();
     const engine = new MessagingEngine(transport, new MemoryStore());
 
     await engine.start(credentials);
 
-    expect(transport.dialogLimits).toEqual([Number.MAX_SAFE_INTEGER]);
+    expect(transport.dialogLimits).toEqual([100]);
     await engine.stop();
   });
 
@@ -5839,5 +5839,90 @@ describe('MessagingEngine', () => {
     await starting;
     expect(store.outbox).toEqual([]);
     await engine.stop();
+  });
+
+  it('becomes ready after a bounded first dialog page', async () => {
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, new MemoryStore());
+
+    await engine.start(credentials);
+    try {
+      expect(transport.dialogLimits.every((limit) => limit <= 100)).toBe(true);
+    } finally {
+      await engine.stop();
+    }
+  });
+
+  it('does not publish another account cached workspace before identity verification', async () => {
+    const store = new MemoryStore();
+    store.accountId = 'account-a';
+    store.dialogs = [{ ...dialog, title: 'Account A private chat', cacheEpoch: 1 }];
+    store.drafts = { [peer.id]: 'Account A private draft' };
+    const transport = new (class extends FakeTransport {
+      override accountId = 'account-b';
+
+      override async getDialogs() {
+        return { dialogs: [] };
+      }
+    })();
+    const engine = new MessagingEngine(transport, store);
+    const observed: string[] = [];
+    const unsubscribe = engine.subscribe((value) => {
+      observed.push(...value.dialogs.map(({ title }) => title));
+    });
+
+    await engine.start(credentials);
+    try {
+      expect(observed).not.toContain('Account A private chat');
+      expect(engine.snapshot().drafts).not.toHaveProperty(peer.id);
+    } finally {
+      unsubscribe();
+      await engine.stop();
+    }
+  });
+
+  it('treats a media cache read failure as a cache miss', async () => {
+    class FailedReadStore extends MemoryStore {
+      override async loadBlob(_key: string): Promise<Blob | undefined> {
+        throw new Error('IndexedDB read failed');
+      }
+    }
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, new FailedReadStore());
+
+    await expect(engine.downloadMedia(dialog.topMessage!)).resolves.toBeInstanceOf(Blob);
+    expect(transport.downloadMediaCalls).toBe(1);
+  });
+
+  it('returns downloaded media when the disposable cache write fails', async () => {
+    class FailedWriteStore extends MemoryStore {
+      override async saveBlob() {
+        throw new Error('Storage quota exceeded');
+      }
+    }
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, new FailedWriteStore());
+
+    await expect(engine.downloadMedia(dialog.topMessage!)).resolves.toBeInstanceOf(Blob);
+    expect(transport.downloadMediaCalls).toBe(1);
+  });
+
+  it('maps raw RPC method names to user-facing operation errors', async () => {
+    const transport = new (class extends FakeTransport {
+      override async setMuted() {
+        throw new Error('CHAT_ADMIN_REQUIRED (account.updateNotifySettings)');
+      }
+    })();
+    const engine = new MessagingEngine(transport, new MemoryStore());
+    await engine.start(credentials);
+
+    try {
+      await engine.setMuted(peer, true);
+      expect(engine.snapshot().operationError).not.toMatch(
+        /CHAT_ADMIN_REQUIRED|account\.updateNotifySettings/u,
+      );
+    } finally {
+      await engine.stop();
+    }
   });
 });

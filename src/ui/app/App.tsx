@@ -1150,6 +1150,9 @@ export function App(props: AppProps) {
       x: event.clientX || anchor?.right || 8,
       y: event.clientY || anchor?.bottom || 8,
     });
+    queueMicrotask(() =>
+      document.querySelector<HTMLButtonElement>('.message-context-menu [role="menuitem"]')?.focus(),
+    );
   };
   const messageContextTarget = createMemo(() => {
     const menu = messageContextMenu();
@@ -1170,6 +1173,9 @@ export function App(props: AppProps) {
       return `Offline. Showing cached data.${current.error ? ` ${current.error}` : ''}`;
     return '';
   });
+  const readReceiptFailed = createMemo(() =>
+    /^Could not mark .+ as read\./u.test(snapshot().operationError ?? ''),
+  );
 
   return (
     <main class="h-dvh overflow-hidden bg-canvas text-ink">
@@ -1290,6 +1296,11 @@ export function App(props: AppProps) {
                     {syncRetrying() ? 'Retrying…' : 'Retry queued'}
                   </button>
                 </Show>
+                <Show when={readReceiptFailed()}>
+                  <button onClick={() => void engine.retryMarkRead(activeChatId())}>
+                    Retry marking as read
+                  </button>
+                </Show>
                 <button onClick={() => engine.clearOperationError()}>Dismiss</button>
               </div>
             )}
@@ -1352,7 +1363,12 @@ export function App(props: AppProps) {
               <div
                 ref={(element) => (messageContent = element)}
                 class="conversation-content relative mx-auto flex max-w-3xl flex-col"
-                classList={{ 'conversation-ready': viewport.ready() }}
+                classList={{
+                  'conversation-ready':
+                    viewport.ready() ||
+                    conversationSwitching() ||
+                    (snapshot().loadingMessages && activePeerMatches()),
+                }}
               >
                 <Show
                   when={
@@ -1980,6 +1996,8 @@ export function App(props: AppProps) {
           {(chat) => (
             <DeleteChatDialog
               chat={chat()}
+              hasDraft={Boolean(snapshot().drafts[chat().id]?.trim())}
+              queuedCount={snapshot().pending.filter(({ peer }) => peer.id === chat().id).length}
               close={() => setDeleteChatTarget(undefined)}
               confirm={() => {
                 const peerId = chat().id;

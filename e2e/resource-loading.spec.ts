@@ -45,5 +45,5 @@ test('serves the TeleVecha browser identity', async ({ page, request }) => {
 
   const serviceWorkerResponse = await request.get('/sw.js');
   expect(serviceWorkerResponse.ok()).toBe(true);
-  expect(await serviceWorkerResponse.text()).toContain('televecha-shell-v1');
+  expect(await serviceWorkerResponse.text()).toContain('CACHE_NAME = `${CACHE_PREFIX}v2`');
 });

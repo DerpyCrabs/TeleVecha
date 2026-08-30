@@ -662,6 +662,31 @@ describe('IndexedDbCacheStore', () => {
     ]);
   });
 
+  it('settles a blocked schema upgrade with an actionable failure', async () => {
+    const name = databaseName();
+    const request = indexedDB.open(name, 5);
+    const oldConnection = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const store = new IndexedDbCacheStore(name);
+    let outcome: 'settled' | 'blocked';
+
+    try {
+      outcome = await Promise.race([
+        store.loadWorkspace().then(
+          () => 'settled' as const,
+          () => 'settled' as const,
+        ),
+        new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 50)),
+      ]);
+    } finally {
+      oldConnection.close();
+    }
+
+    expect(outcome).toBe('settled');
+  });
+
   it('bounds the binary cache by entry count', async () => {
     const store = new IndexedDbCacheStore(databaseName());
     for (let index = 0; index < 257; index += 1) {

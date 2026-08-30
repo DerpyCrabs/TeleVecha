@@ -49,7 +49,7 @@ function CustomReaction(props: {
 }
 
 export function MessageActions(props: MessageActionsProps) {
-  const reply = (event: PointerEvent & { currentTarget: HTMLButtonElement }) => {
+  const reply = (event: { preventDefault(): void; currentTarget: HTMLButtonElement }) => {
     event.preventDefault();
     const article = event.currentTarget.closest<HTMLElement>('article.message');
     if (article) props.reply(article);
@@ -78,6 +78,11 @@ export function MessageActions(props: MessageActionsProps) {
         <button
           class="reply-message"
           onPointerDown={reply}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            reply(event);
+          }}
           aria-label={`Reply to message ${props.message.id}`}
           title="Reply; select text first to quote it"
         >

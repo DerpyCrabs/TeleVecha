@@ -87,6 +87,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
   const [peerResults, setPeerResults] = createSignal<TelegramPeerSearchResult[]>([]);
   const [searchingPeers, setSearchingPeers] = createSignal(false);
   const [peerSearchFailed, setPeerSearchFailed] = createSignal(false);
+  const [peerSearchRetry, setPeerSearchRetry] = createSignal(0);
   const [listScrollTop, setListScrollTop] = createSignal(0);
   const [listViewportHeight, setListViewportHeight] = createSignal(640);
   const [contextMenu, setContextMenu] = createSignal<{
@@ -201,7 +202,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 
   createEffect(
     on(
-      () => [query().trim(), props.online, archiveOpen(), filter()] as const,
+      () => [query().trim(), props.online, archiveOpen(), filter(), peerSearchRetry()] as const,
       ([term, online, archived, selectedFilter]) => {
         const generation = ++peerSearchGeneration;
         setPeerResults([]);
@@ -407,6 +408,13 @@ export function ChatSidebar(props: ChatSidebarProps) {
                 void props.directory.select(chat.id);
                 props.layout.setMobileOpen(false);
               }}
+              onKeyDown={(event) => {
+                if (event.key !== ' ') return;
+                event.preventDefault();
+                setContextMenu(undefined);
+                void props.directory.select(chat.id);
+                props.layout.setMobileOpen(false);
+              }}
               onContextMenu={(event) => {
                 event.preventDefault();
                 const menu = {
@@ -551,9 +559,10 @@ export function ChatSidebar(props: ChatSidebarProps) {
           <p class="px-4 py-5 text-center text-sm text-[var(--muted)]">Searching Telegram…</p>
         </Show>
         <Show when={peerSearchFailed()}>
-          <p class="px-4 py-5 text-center text-sm text-[var(--muted)]">
-            Telegram search is unavailable. Try again.
-          </p>
+          <div class="px-4 py-5 text-center text-sm text-[var(--muted)]" role="alert">
+            <p>Telegram search is unavailable. Try again.</p>
+            <button onClick={() => setPeerSearchRetry((retry) => retry + 1)}>Retry search</button>
+          </div>
         </Show>
         <Show
           when={

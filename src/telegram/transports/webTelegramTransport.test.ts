@@ -4298,4 +4298,30 @@ describe('web Telegram transport mapping', () => {
       'Could not persist the Telegram authorization session. IndexedDB is unavailable',
     );
   });
+
+  it('maps username changes to a peer metadata invalidation', () => {
+    const target = transport() as unknown as TransportInternals;
+
+    const updates = mappedUpdates(target, {
+      _: 'updateUserName',
+      userId: 7n,
+      firstName: 'New',
+      lastName: 'Name',
+      usernames: [],
+    } as Tl.UpdateUserName);
+
+    expect(updates).not.toEqual([]);
+  });
+
+  it('maps remote blocked-state changes to a peer metadata invalidation', () => {
+    const target = transport() as unknown as TransportInternals;
+
+    const updates = mappedUpdates(target, {
+      _: 'updatePeerBlocked',
+      blocked: true,
+      peerId: Api.PeerUser({ userId: 7n }),
+    } as Tl.UpdatePeerBlocked);
+
+    expect(updates).not.toEqual([]);
+  });
 });

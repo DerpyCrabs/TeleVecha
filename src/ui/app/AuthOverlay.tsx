@@ -94,11 +94,17 @@ export function AuthOverlay(props: AuthOverlayProps) {
                   fallback={
                     <div>
                       <h2 id="auth-title" class="text-xl font-semibold">
-                        {props.configurationError ? 'Configuration required' : 'Telegram connected'}
+                        {props.configurationError
+                          ? 'Configuration required'
+                          : props.snapshot.phase === 'idle'
+                            ? 'Starting TeleVecha'
+                            : 'Telegram connected'}
                       </h2>
                       <p class="mt-2 text-sm leading-5 text-[var(--muted)]">
                         {props.configurationError ??
-                          'The application credentials came from the local Vite environment.'}
+                          (props.snapshot.phase === 'idle'
+                            ? 'Waiting for this tab to join the active Telegram session.'
+                            : 'The application credentials came from the local Vite environment.')}
                       </p>
                       <Show when={props.configurationError}>
                         <pre class="mt-5 overflow-x-auto rounded-[0.7rem] border border-[var(--line-strong)] bg-surface p-3 text-xs leading-5 text-violet-300 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

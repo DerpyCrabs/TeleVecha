@@ -1963,6 +1963,18 @@ function createWebTelegramTransportImplementation(
         },
       ];
     }
+    if (update._ === 'updateUserName') {
+      return [
+        {
+          type: 'peer-metadata-changed',
+          peerId: `u:${(update as Tl.UpdateUserName).userId}`,
+        },
+      ];
+    }
+    if (update._ === 'updatePeerBlocked') {
+      const peerId = toPeerId((update as Tl.UpdatePeerBlocked).peerId);
+      return peerId ? [{ type: 'peer-metadata-changed', peerId }] : [];
+    }
     if (
       Api.UpdateNotifySettings.is(update) &&
       Api.NotifyPeer.is(update.peer) &&

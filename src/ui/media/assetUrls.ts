@@ -30,13 +30,23 @@ function activeObjectUrls() {
   if (typeof document === 'undefined') return new Set<string>();
   const active = new Set<string>();
   for (const element of document.querySelectorAll<HTMLElement>('[src], [href]')) {
-    if (element instanceof HTMLImageElement || element instanceof HTMLVideoElement) {
+    if (
+      element instanceof HTMLImageElement ||
+      element instanceof HTMLVideoElement ||
+      element instanceof HTMLAudioElement
+    ) {
       if (element.src.startsWith('blob:')) active.add(element.src);
     } else if (element instanceof HTMLAnchorElement && element.href.startsWith('blob:')) {
       active.add(element.href);
     }
   }
   return active;
+}
+
+export function clearAssetUrls() {
+  for (const url of registry().values()) URL.revokeObjectURL(url);
+  registry().clear();
+  pendingRegistry().clear();
 }
 
 export function pruneAssetUrls(protectedUrls: ReadonlySet<string> = new Set()) {
