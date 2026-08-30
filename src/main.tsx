@@ -1,6 +1,7 @@
 import { render } from 'solid-js/web';
 
 import { App } from './ui/app/App';
+import { applyReproUiState, injectedReproBundle } from './debug/reproRuntime';
 import { defaultAppEnvironment } from './ui/app/appRuntime';
 import { applyThemePreferences, readThemePreferences } from './ui/theme/themePreferences';
 import './styles.css';
@@ -16,6 +17,8 @@ import './ui/bots/bot.css';
 
 const root = document.querySelector<HTMLDivElement>('#root');
 
+const reproBundle = injectedReproBundle();
+if (reproBundle) applyReproUiState(reproBundle.state);
 applyThemePreferences(readThemePreferences());
 
 if (!root) {
@@ -25,7 +28,7 @@ if (!root) {
 const environment = defaultAppEnvironment();
 render(() => <App environment={environment} />, root);
 
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+if (!environment.replay && import.meta.env.PROD && 'serviceWorker' in navigator) {
   void navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
     console.warn('TeleVecha could not register its offline application shell.', error);
   });

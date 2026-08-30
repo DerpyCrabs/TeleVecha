@@ -54,6 +54,23 @@ export interface WorkspaceCache {
   pending: PendingSend[];
 }
 
+/**
+ * A logical, account-free checkpoint for deterministic debugging. It excludes
+ * the transport session and cached file bytes by construction.
+ */
+export interface CacheCheckpoint {
+  cursor?: SyncCursor | undefined;
+  dialogs: CachedDialog[];
+  draftRevisions: Record<string, number>;
+  drafts: Record<string, string>;
+  epoch: number;
+  groupMembers: Record<string, TimedCacheValue<TelegramGroupMember[]>>;
+  lastPeerId?: string | undefined;
+  messages: CachedMessage[];
+  pending: PendingSend[];
+  pinnedMessages: Record<string, TimedCacheValue<TelegramMessage[]>>;
+}
+
 interface TeleVechaSchema extends DBSchema {
   meta: {
     key: string;
@@ -169,6 +186,76 @@ export class IndexedDbCacheStore implements CacheStore {
         }
       },
     });
+  }
+
+  async captureCheckpoint(): Promise<CacheCheckpoint> {
+    const database = await this.database;
+    const transaction = database.transaction(
+      ['meta', 'dialogs', 'messages', 'drafts', 'outbox'],
+      'readonly',
+    );
+    const meta = transaction.objectStore('meta');
+    const drafts = transaction.objectStore('drafts');
+    const pinnedRange = IDBKeyRange.bound(
+      PINNED_MESSAGES_KEY_PREFIX,
+      `${PINNED_MESSAGES_KEY_PREFIX}\uffff`,
+    );
+    const membersRange = IDBKeyRange.bound(
+      GROUP_MEMBERS_KEY_PREFIX,
+      `${GROUP_MEMBERS_KEY_PREFIX}\uffff`,
+    );
+    const [
+      cursor,
+      epoch,
+      lastPeerId,
+      dialogs,
+      messages,
+      draftRecords,
+      pending,
+      pinnedKeys,
+      pinnedValues,
+      memberKeys,
+      memberValues,
+    ] = await Promise.all([
+      meta.get('cursor') as Promise<SyncCursor | undefined>,
+      meta.get('epoch') as Promise<number | undefined>,
+      meta.get('last-peer-id') as Promise<string | undefined>,
+      transaction.objectStore('dialogs').getAll(),
+      transaction.objectStore('messages').getAll(),
+      drafts.getAll(),
+      transaction.objectStore('outbox').getAll(),
+      meta.getAllKeys(pinnedRange),
+      meta.getAll(pinnedRange) as Promise<TimedCacheValue<TelegramMessage[]>[]>,
+      meta.getAllKeys(membersRange),
+      meta.getAll(membersRange) as Promise<TimedCacheValue<TelegramGroupMember[]>[]>,
+    ]);
+    const pinnedMessages: Record<string, TimedCacheValue<TelegramMessage[]>> = {};
+    const groupMembers: Record<string, TimedCacheValue<TelegramGroupMember[]>> = {};
+    pinnedKeys.forEach((key, index) => {
+      const value = pinnedValues[index];
+      if (value) pinnedMessages[key.slice(PINNED_MESSAGES_KEY_PREFIX.length)] = value;
+    });
+    memberKeys.forEach((key, index) => {
+      const value = memberValues[index];
+      if (value) groupMembers[key.slice(GROUP_MEMBERS_KEY_PREFIX.length)] = value;
+    });
+    await transaction.done;
+    return {
+      cursor,
+      dialogs,
+      draftRevisions: Object.fromEntries(
+        draftRecords.map(({ peerId, revision }) => [peerId, revision ?? 0]),
+      ),
+      drafts: Object.fromEntries(draftRecords.map(({ peerId, text }) => [peerId, text])),
+      epoch: epoch ?? 0,
+      groupMembers,
+      lastPeerId,
+      messages,
+      pending: pending.sort(
+        (left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+      ),
+      pinnedMessages,
+    };
   }
 
   async loadTransportSession() {

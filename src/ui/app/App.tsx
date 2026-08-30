@@ -27,6 +27,7 @@ import {
 } from 'solid-js';
 import { createStore, reconcile, type SetStoreFunction } from 'solid-js/store';
 
+import { completeReproReplay, waitForReproSequence } from '../../debug/reproRuntime';
 import type { ChatMessage, ChatSummary } from '../../domain/models';
 import { messageTextForClipboard } from '../../domain/messageText';
 import { telegramPeerColor } from '../../domain/peerColor';
@@ -196,6 +197,8 @@ export function App(props: AppProps) {
   const [syncRetrying, setSyncRetrying] = createSignal(false);
   const [loggingOut, setLoggingOut] = createSignal(false);
   const [clearingCache, setClearingCache] = createSignal(false);
+  const [debugReportBusy, setDebugReportBusy] = createSignal(false);
+  const [debugReportError, setDebugReportError] = createSignal('');
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const appearanceSession = createAppearanceSession({
     getWallpapers: () => engine.getWallpapers(),
@@ -236,6 +239,7 @@ export function App(props: AppProps) {
   let selectionGeneration = 0;
   let conversationRetryGeneration = 0;
   let openMessageGeneration = 0;
+  let replaySelectionsStarted = false;
   let viewport!: ReturnType<typeof createConversationViewport>;
   let history!: ReturnType<typeof createConversationHistorySession>;
 
@@ -249,6 +253,8 @@ export function App(props: AppProps) {
     setMobileSidebarOpen(false);
     setSettingsOpen(true);
     if (!telegramWallpapers().length && !appearanceCatalogLoading()) {
+      // Loading the export UI must not become part of the bug being exported.
+      environment.runtime.debugReports?.ignoreNextTransportCall?.('getWallpapers');
       void appearanceSession.loadCatalog();
     }
   };
@@ -529,6 +535,9 @@ export function App(props: AppProps) {
     linkedOpenGeneration?: number,
     urlMode: 'push' | 'replace' | 'none' = 'push',
   ) => {
+    if (urlMode === 'push' && !environment.replay) {
+      environment.runtime.debugReports?.recordPeerSelection?.(id);
+    }
     if (linkedOpenGeneration === undefined) {
       openMessageGeneration += 1;
       openingMessage = false;
@@ -683,6 +692,28 @@ export function App(props: AppProps) {
       setSettingsOpen(false);
     } finally {
       setClearingCache(false);
+    }
+  };
+
+  const downloadDebugReport = async () => {
+    const reports = environment.runtime.debugReports;
+    if (!reports || debugReportBusy()) return;
+    setDebugReportBusy(true);
+    setDebugReportError('');
+    try {
+      const { file } = await reports.prepare();
+      const url = URL.createObjectURL(file);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = file.name;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (cause) {
+      setDebugReportError(
+        cause instanceof Error ? cause.message : 'TeleVecha could not prepare the debug report.',
+      );
+    } finally {
+      setDebugReportBusy(false);
     }
   };
 
@@ -935,7 +966,27 @@ export function App(props: AppProps) {
           window.history.replaceState({}, '', url);
         }
         initialUrlPeerId = undefined;
-        if (target) runInBackground(selectChat(target, undefined, 'replace'));
+        if (target) {
+          const initialSelection = selectChat(target, undefined, 'replace');
+          if (environment.replay && !replaySelectionsStarted) {
+            replaySelectionsStarted = true;
+            runInBackground(
+              initialSelection.then(async () => {
+                for (const selection of environment.replayPeerSelections ?? []) {
+                  await waitForReproSequence(selection.afterSequence);
+                  if (engine.snapshot().dialogs.some(({ peer }) => peer.id === selection.peerId)) {
+                    await selectChat(selection.peerId);
+                  }
+                }
+                completeReproReplay();
+              }),
+            );
+          } else {
+            runInBackground(initialSelection);
+          }
+        } else if (environment.replay && next.phase === 'ready') {
+          completeReproReplay();
+        }
       }
     });
     if (credentials && engine.snapshot().phase === 'idle') void engine.start(credentials);
@@ -1954,8 +2005,13 @@ export function App(props: AppProps) {
           <SettingsDialog
             loggingOut={loggingOut()}
             clearingCache={clearingCache()}
+            debugReportBusy={debugReportBusy()}
+            debugReportError={debugReportError()}
             close={() => !loggingOut() && !clearingCache() && setSettingsOpen(false)}
             clearCache={() => void clearCache()}
+            downloadDebugReport={
+              environment.runtime.debugReports ? () => void downloadDebugReport() : undefined
+            }
             logOut={() => void logOut()}
             appearance={appearance()}
             telegramWallpapers={telegramWallpapers()}

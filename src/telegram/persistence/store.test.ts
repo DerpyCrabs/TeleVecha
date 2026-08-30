@@ -53,6 +53,34 @@ function pending(id: string, createdAt: number): PendingSend {
 }
 
 describe('IndexedDbCacheStore', () => {
+  it('captures an atomic logical checkpoint without session or file bytes', async () => {
+    const store = new IndexedDbCacheStore(databaseName());
+    await store.saveTransportSession({ authKey: 'must-not-leave-the-browser' });
+    await store.claimAccount('account-secret');
+    await store.saveCursor({ pts: 4, qts: 3, date: 2, seq: 1 });
+    await store.beginNewEpoch();
+    await store.replaceDialogs([cachedDialog(peer, 'Private title')]);
+    await store.putMessage({ ...cachedMessage(peer, 7), text: 'Private message' });
+    await store.saveDraft(peer.id, 'Private draft', 3);
+    await store.commitOutbox(pending('private pending', 10));
+    await store.saveBlob('media:secret', new Blob(['private bytes']));
+
+    const checkpoint = await store.captureCheckpoint();
+
+    expect(checkpoint).toMatchObject({
+      cursor: { pts: 4, qts: 3, date: 2, seq: 1 },
+      epoch: 1,
+      dialogs: [expect.objectContaining({ title: 'Private title' })],
+      messages: [expect.objectContaining({ id: 7, text: 'Private message' })],
+      drafts: { [peer.id]: 'Private draft' },
+      draftRevisions: { [peer.id]: 3 },
+      pending: [expect.objectContaining({ id: 'private pending' })],
+    });
+    expect(JSON.stringify(checkpoint)).not.toContain('must-not-leave-the-browser');
+    expect(JSON.stringify(checkpoint)).not.toContain('account-secret');
+    expect(JSON.stringify(checkpoint)).not.toContain('private bytes');
+  });
+
   it('round-trips transport session, cursor, epoch, and the last peer', async () => {
     const store = new IndexedDbCacheStore(databaseName());
     const cursor = { pts: 4, qts: 3, date: 2, seq: 1 };

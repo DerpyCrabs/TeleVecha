@@ -1,5 +1,7 @@
 import { MessagingEngine } from '../../telegram/core/engine';
 import type { MessagingClient } from '../../telegram/core/client';
+import { BrowserDebugReportRecorder } from '../../debug/reproReports';
+import { createReproEngine, injectedReproBundle } from '../../debug/reproRuntime';
 import { IndexedDbCacheStore } from '../../telegram/persistence/store';
 import { TabCoordinator, type TabCoordinatorOwner } from '../../telegram/session/tabCoordinator';
 import { FixtureTelegramTransport } from '../../telegram/transports/fixtureTransport';
@@ -8,6 +10,24 @@ import { createWebTelegramTransport } from '../../telegram/transports/webTelegra
 
 export interface AppRuntime {
   engine: MessagingClient;
+  debugReports?: DebugReportModule | undefined;
+}
+
+export interface PreparedDebugReport {
+  file: File;
+  preview: {
+    compressedBytes: number;
+    diagnosticCount: number;
+    messageCount: number;
+    timelineCount: number;
+    truncated: boolean;
+  };
+}
+
+export interface DebugReportModule {
+  prepare(): Promise<PreparedDebugReport>;
+  recordPeerSelection?(peerId: string): void;
+  ignoreNextTransportCall?(method: string): void;
 }
 
 interface ControlledRuntime extends AppRuntime {
@@ -18,6 +38,8 @@ export interface AppEnvironment {
   runtime: AppRuntime;
   credentials?: TelegramCredentials | undefined;
   configurationError?: string | undefined;
+  replay?: boolean | undefined;
+  replayPeerSelections?: readonly { peerId: string; afterSequence: number }[] | undefined;
 }
 
 function environmentCredentials(): TelegramCredentials | undefined {
@@ -41,6 +63,8 @@ function runtime(fixtureMode: boolean, fixtureScenario: string | null): Controll
     : 'televecha';
   const created: ControlledRuntime = { engine: undefined as unknown as MessagingClient };
   const reader = new IndexedDbCacheStore(databaseName);
+  const debugReports = new BrowserDebugReportRecorder(reader);
+  created.debugReports = debugReports;
   const pendingPayloads = new Map<string, PendingSend>();
   const coordinator = new TabCoordinator({
     key,
@@ -67,12 +91,17 @@ function runtime(fixtureMode: boolean, fixtureScenario: string | null): Controll
     },
     createOwner(): TabCoordinatorOwner {
       const store = new IndexedDbCacheStore(databaseName);
-      const transport: TelegramTransport = fixtureMode
+      const sourceTransport: TelegramTransport = fixtureMode
         ? new FixtureTelegramTransport()
         : createWebTelegramTransport(store);
+      const recordedTransport = debugReports.wrapTransport(sourceTransport);
+      const engine = new MessagingEngine(recordedTransport, store, { manageTabLease: false });
+      debugReports.attachEngine(engine);
       return {
-        engine: new MessagingEngine(transport, store, { manageTabLease: false }),
-        transport,
+        engine,
+        // Keep the controllable live transport available to fixture tooling. Exposing the
+        // recording proxy here would make a test override call back into its own wrapper.
+        transport: sourceTransport,
       };
     },
     ownerChanged(owner) {
@@ -85,6 +114,33 @@ function runtime(fixtureMode: boolean, fixtureScenario: string | null): Controll
 }
 
 export function defaultAppEnvironment(search = window.location.search): AppEnvironment {
+  const reproBundle = injectedReproBundle();
+  if (reproBundle) {
+    const root = globalThis as typeof globalThis & { __televechaReproRuntime?: AppRuntime };
+    const replayRuntime = (root.__televechaReproRuntime ??= {
+      engine: createReproEngine(reproBundle),
+    });
+    return {
+      runtime: replayRuntime,
+      credentials: { apiId: 1, apiHash: 'offline-replay' },
+      replay: true,
+      replayPeerSelections: reproBundle.timeline.flatMap((event, index) => {
+        if (event.kind !== 'ui' || event.method !== 'select-chat') return [];
+        if (!event.value || Array.isArray(event.value) || typeof event.value !== 'object')
+          return [];
+        const peerId = event.value.peerId;
+        if (typeof peerId !== 'string') return [];
+        let afterSequence = 0;
+        for (let priorIndex = index - 1; priorIndex >= 0; priorIndex -= 1) {
+          const candidate = reproBundle.timeline[priorIndex]!;
+          if (!['call', 'resolve', 'reject', 'push'].includes(candidate.kind)) continue;
+          afterSequence = candidate.seq;
+          break;
+        }
+        return [{ peerId, afterSequence }];
+      }),
+    };
+  }
   const fixtureMode = import.meta.env.VITE_TELEVECHA_E2E === '1';
   const credentials = fixtureMode ? { apiId: 1, apiHash: 'fixture' } : environmentCredentials();
   const fixtureScenario = new URLSearchParams(search).get('scenario');

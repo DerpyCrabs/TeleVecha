@@ -13,6 +13,7 @@
     "fetch:telegram-tl": "node scripts/fetch-telegram-tl.mjs",
     "check:telegram-tl-sources": "node scripts/fetch-telegram-tl.mjs --check",
     "generate:telegram-tl": "node scripts/generate-telegram-tl.mjs",
+    "replay": "node scripts/replay-tvbug.mjs",
     "check:telegram-tl": "node scripts/generate-telegram-tl.mjs --check",
     "test": "vp test --run",
     "test:coverage": "vp test --run --coverage",

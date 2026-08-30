@@ -1,7 +1,10 @@
+import Bug from 'lucide-solid/icons/bug';
+import Download from 'lucide-solid/icons/download';
 import LogOut from 'lucide-solid/icons/log-out';
 import RotateCcw from 'lucide-solid/icons/rotate-ccw';
 import Settings from 'lucide-solid/icons/settings';
 import X from 'lucide-solid/icons/x';
+import { Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
 import type { TelegramWallpaper } from '../../telegram/types';
@@ -13,8 +16,11 @@ import type { ThemePreferences, ThemePresetId } from '../theme/themePreferences'
 export function SettingsDialog(props: {
   loggingOut: boolean;
   clearingCache: boolean;
+  debugReportBusy: boolean;
+  debugReportError: string;
   close: () => void;
   clearCache: () => void;
+  downloadDebugReport?: (() => void) | undefined;
   logOut: () => void;
   appearance: ThemePreferences;
   telegramWallpapers: TelegramWallpaper[];
@@ -81,6 +87,35 @@ export function SettingsDialog(props: {
               setEffects={props.setWallpaperEffects}
               uploadWallpaper={props.uploadWallpaper}
             />
+            <Show when={props.downloadDebugReport} keyed>
+              {(downloadDebugReport) => (
+                <div class="settings-section flex items-center justify-between gap-4 p-4 [&_p]:mt-[0.35rem] [&_p]:mb-0 [&_p]:max-w-80 [&_p]:text-[0.78rem] [&_p]:leading-[1.2rem] [&_p]:text-muted">
+                  <div>
+                    <strong class="flex items-center gap-2">
+                      <Bug size={17} /> Debug report
+                    </strong>
+                    <p>
+                      Download an offline reproduction of this browser session. Message text is
+                      replaced with generated text of the same length. Login data and media files
+                      are excluded.
+                    </p>
+                    <Show when={props.debugReportError}>
+                      <p class="text-red-300" role="alert">
+                        {props.debugReportError}
+                      </p>
+                    </Show>
+                  </div>
+                  <button
+                    class="settings-cache-action flex shrink-0 items-center gap-[0.45rem] rounded-[0.6rem] border border-blue-400/25 bg-blue-800/15 px-3 py-[0.6rem] text-blue-300 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={props.loggingOut || props.clearingCache || props.debugReportBusy}
+                    onClick={downloadDebugReport}
+                  >
+                    <Download size={17} />
+                    {props.debugReportBusy ? 'Preparing…' : 'Download report'}
+                  </button>
+                </div>
+              )}
+            </Show>
             <div class="settings-section flex items-center justify-between gap-4 p-4 [&_p]:mt-[0.35rem] [&_p]:mb-0 [&_p]:max-w-76 [&_p]:text-[0.78rem] [&_p]:leading-[1.2rem] [&_p]:text-muted">
               <div>
                 <strong>Local cache</strong>
