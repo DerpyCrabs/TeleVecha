@@ -14,6 +14,13 @@ test('exports account-free rendering data and replays it without Telegram', asyn
   await openReady(page);
   await selectAlice(page);
 
+  const source = page.locator('article[data-message-id="79"]');
+  await source.getByRole('button', { name: 'Reply to message 79' }).click();
+  const replayedReplyText = 'First replay line\nSecond replay line';
+  await page.getByRole('textbox', { name: 'Message' }).fill(replayedReplyText);
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.locator('article[data-message-id="81"]')).toContainText('First replay line');
+
   const capturedPhoto = await page.locator('article[data-message-id="78"]').boundingBox();
   expect(capturedPhoto).not.toBeNull();
   await page.getByRole('button', { name: 'Open settings' }).click();
@@ -39,6 +46,7 @@ test('exports account-free rendering data and replays it without Telegram', asyn
 
   expect(serialized).not.toContain('Alice Fixture');
   expect(serialized).not.toContain('Newest message from fixture');
+  expect(serialized).not.toContain(replayedReplyText);
   expect(serialized).not.toContain('u:101');
   expect(serialized).not.toContain('"year":1994');
   expect(serialized).toContain('"senderColor":"#408acf"');
@@ -49,6 +57,24 @@ test('exports account-free rendering data and replays it without Telegram', asyn
     `"textMetrics":{"utf16Length":${'Newest message from fixture'.length}`,
   );
   expect(timeline.some((event) => event.kind === 'call')).toBe(true);
+  expect(timeline.some((event) => event.kind === 'call' && event.method === 'setTyping')).toBe(
+    false,
+  );
+  expect(timeline.some((event) => event.kind === 'ui' && event.method === 'composer-reply')).toBe(
+    true,
+  );
+  expect(timeline.some((event) => event.kind === 'ui' && event.method === 'composer-send')).toBe(
+    true,
+  );
+  expect(timeline.some((event) => event.kind === 'ui' && event.method === 'composer-focus')).toBe(
+    true,
+  );
+  expect(
+    timeline.some((event) => event.kind === 'ui' && event.method === 'conversation-viewport'),
+  ).toBe(true);
+  expect((state.ui as { bootstrapActivePeerId?: string } | undefined)?.bootstrapActivePeerId).toBe(
+    'c:1',
+  );
   expect(state.lastPeerId).toBeUndefined();
 
   const replay = await page.context().newPage();
@@ -66,6 +92,13 @@ test('exports account-free rendering data and replays it without Telegram', asyn
     throw new Error(`Replay did not become ready: ${JSON.stringify(replayStatus)}`);
   }
   await expect(replay.getByTestId('message-scroller')).toBeVisible();
+
+  const replayedReply = replay.locator('article[data-message-id="81"]');
+  await expect(replayedReply).toBeVisible();
+  await expect(replayedReply.locator('.message-body')).toHaveText(
+    new RegExp(`^[\\s\\S]{${replayedReplyText.length}}$`, 'u'),
+  );
+  await expect(replayedReply.getByRole('button', { name: /Jump/ })).toBeVisible();
 
   const generatedText = await replay
     .locator('article[data-message-id="80"] .message-body')

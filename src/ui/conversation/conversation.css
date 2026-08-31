@@ -1193,7 +1193,7 @@
   max-height: 12rem;
   background: transparent;
 }
-.media-file {
+:is(button, a).media-file {
   display: grid;
   width: min(22rem, 100%);
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1207,19 +1207,19 @@
   text-align: left;
   text-decoration: none;
 }
-.media-file span,
-.media-file strong,
-.media-file small {
+:is(button, a).media-file span,
+:is(button, a).media-file strong,
+:is(button, a).media-file small {
   display: block;
   min-width: 0;
 }
-.media-file strong {
+:is(button, a).media-file strong {
   overflow: hidden;
   font-size: calc(0.76rem * var(--chat-font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.media-file small {
+:is(button, a).media-file small {
   margin-top: 0.1rem;
   color: var(--muted);
   font-size: calc(0.65rem * var(--chat-font-scale, 1));

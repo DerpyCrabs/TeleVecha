@@ -41,6 +41,29 @@ test('sends adjacent media as a Telegram album and a file-mode item separately',
   );
 });
 
+test('renders a generic file with one attachment card', async ({ page }) => {
+  await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  const message = page.locator('article[data-media-kind="file"]').last();
+  await expect(message).toContainText('report.txt');
+
+  const framing = await message.evaluate((article) => {
+    const wrapper = article.querySelector<HTMLElement>(':scope > .media-attachment.media-file')!;
+    const control = wrapper.querySelector<HTMLElement>(':scope > :is(button, a).media-file')!;
+    return {
+      wrapperBorder: getComputedStyle(wrapper).borderTopWidth,
+      wrapperBackground: getComputedStyle(wrapper).backgroundColor,
+      controlBorder: getComputedStyle(control).borderTopWidth,
+    };
+  });
+
+  expect(framing).toEqual({
+    wrapperBorder: '0px',
+    wrapperBackground: 'rgba(0, 0, 0, 0)',
+    controlBorder: '1px',
+  });
+});
+
 test('renders a staged album as one group while its upload is pending', async ({ page }) => {
   await page.goto('/?scenario=held-upload');
   await selectAlice(page);

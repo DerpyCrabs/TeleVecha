@@ -683,6 +683,29 @@ describe('repro Telegram transport', () => {
     expect(replayProgress).toHaveBeenCalledWith(0.75);
   });
 
+  it('matches generated send IDs and returns the replay caller ID for optimistic correlation', async () => {
+    const events: ReproTransportEvent[] = [];
+    const recording = createRecordingTelegramTransport(
+      transport({
+        subscribe: () => () => undefined,
+        sendText: async (target: TelegramPeer, text: string, randomId: string) => ({
+          message: { ...message(15, text), peerId: target.id, randomId },
+        }),
+      }),
+      events,
+      { sanitizer: sanitizer() },
+    );
+    await recording.sendText(peer, 'same layout', 'recorded-random');
+
+    const replay = createReplayTelegramTransport(events, {
+      timeScale: 0,
+      sanitizer: sanitizer(),
+    });
+    const result = await replay.sendText(peer, 'same layout', 'fresh-random');
+
+    expect(result.message.randomId).toBe('fresh-random');
+  });
+
   it('leaves calls unresolved when the recording has no settlement', async () => {
     const never = new Promise<HistoryPage>(() => undefined);
     const events: ReproTransportEvent[] = [];

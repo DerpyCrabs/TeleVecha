@@ -68,6 +68,8 @@ type EventSourceInput = ReproTransportEventSource | readonly ReproTimelineEventV
 interface PendingReplayCall {
   resolve(value: unknown): void;
   reject(reason: unknown): void;
+  method: string;
+  args: unknown[];
 }
 
 const UPDATE_PUSH_METHOD = 'updates';
@@ -343,7 +345,8 @@ export function createReplayTelegramTransport(
       method,
       claimedCalls,
       (event) =>
-        sameJson(event.args ?? null, actualArgs) || sameJson(event.args ?? null, alreadySafeArgs),
+        sameReplayCall(method, event.args ?? null, actualArgs) ||
+        sameReplayCall(method, event.args ?? null, alreadySafeArgs),
       isReplayAssetMethod(method),
     );
     const expected = matchIndex >= 0 ? events[matchIndex] : undefined;
@@ -368,7 +371,7 @@ export function createReplayTelegramTransport(
     claimedCalls.add(expected.callId);
     const progress = findProgressCallbacks(args);
     const promise = new Promise<unknown>((resolve, reject) => {
-      pending.set(expected.callId!, { resolve, reject });
+      pending.set(expected.callId!, { resolve, reject, method, args });
       progressCallbacks.set(expected.callId!, progress);
     });
     if (isReusableReplayMethod(method)) {
@@ -427,7 +430,7 @@ function dispatchReplayEvent(
   if (!call) throw mismatch(`${event.kind} refers to unknown ${event.callId}.`);
   pending.delete(event.callId);
   if (event.kind === 'resolve') {
-    call.resolve(hydrateValue(event.value));
+    call.resolve(restoreReplayRandomIds(call.method, call.args, hydrateValue(event.value)));
   } else {
     call.reject(hydrateError(event.error));
   }
@@ -881,6 +884,74 @@ function writeEvent(sink: EventSinkInput, event: ReproTransportEvent) {
 
 function sameJson(left: unknown, right: unknown) {
   return stableJson(left) === stableJson(right);
+}
+
+function sameReplayCall(method: string, left: unknown, right: unknown) {
+  return sameJson(normalizeReplayRandomIds(method, left), normalizeReplayRandomIds(method, right));
+}
+
+function normalizeReplayRandomIds(method: string, value: unknown) {
+  if (!Array.isArray(value)) return value;
+  const copy = structuredClone(value) as unknown[];
+  const replaceAt = (index: number) => {
+    if (index < copy.length) copy[index] = '$replay-random-id';
+  };
+  if (method === 'sendText' || method === 'sendSticker' || method === 'startBot') replaceAt(2);
+  if (method === 'forwardMessage') replaceAt(3);
+  if (method === 'sendFile' && isRecord(copy[2])) copy[2].randomId = '$replay-random-id';
+  if (method === 'sendAlbum' && Array.isArray(copy[1])) {
+    for (const attachment of copy[1]) {
+      if (isRecord(attachment)) attachment.randomId = '$replay-random-id';
+    }
+  }
+  return copy;
+}
+
+function restoreReplayRandomIds(method: string, args: unknown[], value: unknown) {
+  const randomIds = replayRandomIds(method, args);
+  if (randomIds.length === 0 || !value || typeof value !== 'object') return value;
+  const copy = structuredClone(value);
+  const recorded = new Map<string, string>();
+  let next = 0;
+  const visit = (current: unknown) => {
+    if (Array.isArray(current)) {
+      for (const child of current) visit(child);
+      return;
+    }
+    if (!isRecord(current)) return;
+    if (typeof current.randomId === 'string') {
+      let replacement = recorded.get(current.randomId);
+      if (!replacement) {
+        replacement = randomIds[Math.min(next, randomIds.length - 1)]!;
+        recorded.set(current.randomId, replacement);
+        next += 1;
+      }
+      current.randomId = replacement;
+    }
+    for (const child of Object.values(current)) visit(child);
+  };
+  visit(copy);
+  return copy;
+}
+
+function replayRandomIds(method: string, args: unknown[]) {
+  if (method === 'sendText' || method === 'sendSticker' || method === 'startBot') {
+    return typeof args[2] === 'string' ? [args[2]] : [];
+  }
+  if (method === 'forwardMessage') return typeof args[3] === 'string' ? [args[3]] : [];
+  if (method === 'sendFile' && isRecord(args[2]) && typeof args[2].randomId === 'string') {
+    return [args[2].randomId];
+  }
+  if (method === 'sendAlbum' && Array.isArray(args[1])) {
+    return args[1].flatMap((attachment) =>
+      isRecord(attachment) && typeof attachment.randomId === 'string' ? [attachment.randomId] : [],
+    );
+  }
+  return [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function stableJson(value: unknown): string {

@@ -363,8 +363,40 @@ export function App(props: AppProps) {
       if (!scroller) return;
       viewport.preserveReadingPosition(scroller);
     },
+    beforeSend: () => viewport.jumpToPresent(),
     focus: () =>
       document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.focus(),
+    onReply: (messageId) => {
+      const peerId = activeChatId();
+      const reports = environment.runtime.debugReports;
+      reports?.recordComposerReply?.(peerId, messageId);
+      requestAnimationFrame(() => {
+        const input = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]');
+        reports?.recordComposerFocus?.(peerId, document.activeElement === input);
+      });
+    },
+    onSend: (text) => {
+      const peerId = activeChatId();
+      const reports = environment.runtime.debugReports;
+      reports?.recordComposerSend?.(peerId, text);
+      const record = (phase: 'before-send' | 'after-send', sample: number) => {
+        const scroller = messageScroller;
+        if (!scroller) return;
+        reports?.recordViewport?.(peerId, phase, sample, {
+          scrollTop: scroller.scrollTop,
+          scrollHeight: scroller.scrollHeight,
+          clientHeight: scroller.clientHeight,
+        });
+      };
+      record('before-send', 0);
+      let sample = 0;
+      const sampleFrames = () => {
+        sample += 1;
+        record('after-send', sample);
+        if (sample < 8) requestAnimationFrame(sampleFrames);
+      };
+      requestAnimationFrame(sampleFrames);
+    },
   });
   const canonicalDraft = createMemo(() => {
     const peerId = activeChatId();
@@ -535,7 +567,7 @@ export function App(props: AppProps) {
     linkedOpenGeneration?: number,
     urlMode: 'push' | 'replace' | 'none' = 'push',
   ) => {
-    if (urlMode === 'push' && !environment.replay) {
+    if (!environment.replay) {
       environment.runtime.debugReports?.recordPeerSelection?.(id);
     }
     if (linkedOpenGeneration === undefined) {
@@ -583,6 +615,7 @@ export function App(props: AppProps) {
       ) {
         setConversationLoadError(current.historyError);
       }
+      if (changingPeer) composer.focus();
       return current.activePeerId === id;
     } catch (cause) {
       if (generation === selectionGeneration && activeChatId() === id) {
@@ -972,11 +1005,28 @@ export function App(props: AppProps) {
             replaySelectionsStarted = true;
             runInBackground(
               initialSelection.then(async () => {
-                for (const selection of environment.replayPeerSelections ?? []) {
-                  await waitForReproSequence(selection.afterSequence);
-                  if (engine.snapshot().dialogs.some(({ peer }) => peer.id === selection.peerId)) {
-                    await selectChat(selection.peerId);
+                for (const action of environment.replayUiActions ?? []) {
+                  await waitForReproSequence(action.afterSequence);
+                  if (!engine.snapshot().dialogs.some(({ peer }) => peer.id === action.peerId)) {
+                    continue;
                   }
+                  if (activeChatId() !== action.peerId) await selectChat(action.peerId);
+                  if (action.type === 'select-chat') continue;
+                  if (action.type === 'composer-reply') {
+                    await nextFrame();
+                    const message = renderedMessages().find(
+                      ({ id }) => Number(id) === action.messageId,
+                    );
+                    const element = messageScroller?.querySelector<HTMLElement>(
+                      `article[data-message-id="${CSS.escape(String(action.messageId))}"]`,
+                    );
+                    if (message && element) composer.beginReply(message, element);
+                    await nextFrame();
+                    continue;
+                  }
+                  composer.replaceDraft(action.text);
+                  await nextFrame();
+                  await composer.send();
                 }
                 completeReproReplay();
               }),

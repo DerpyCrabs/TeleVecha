@@ -44,7 +44,7 @@ export interface PreparedDebugReport {
 export class BrowserDebugReportRecorder {
   private readonly startedAt = performance.now();
   private readonly sourceEpochMs = Math.floor(Date.now() / 1_000) * 1_000;
-  private readonly bootstrapActivePeerId = currentUrlPeerId();
+  private bootstrapActivePeerId = currentUrlPeerId();
   private readonly sanitizer = createReproSanitizer({ sourceEpochMs: this.sourceEpochMs });
   private readonly checkpoint: Promise<CacheCheckpoint>;
   private readonly timeline: StoredTimelineEvent[] = [];
@@ -99,12 +99,61 @@ export class BrowserDebugReportRecorder {
   }
 
   recordPeerSelection(peerId: string) {
+    this.bootstrapActivePeerId ??= peerId;
     this.append({
       seq: 0,
       tMs: this.elapsed(),
       kind: 'ui',
       method: 'select-chat',
       value: { peerId: this.sanitizer.alias(peerAliasCategory(peerId), peerId) },
+    });
+  }
+
+  recordComposerReply(peerId: string, messageId: number) {
+    this.append({
+      seq: 0,
+      tMs: this.elapsed(),
+      kind: 'ui',
+      method: 'composer-reply',
+      value: this.sanitizer.sanitizeValue({ peerId, messageId }, 'ui.composer-reply'),
+    });
+  }
+
+  recordComposerSend(peerId: string, text: string) {
+    this.append({
+      seq: 0,
+      tMs: this.elapsed(),
+      kind: 'ui',
+      method: 'composer-send',
+      value: this.sanitizer.sanitizeValue({ peerId, text }, 'ui.composer-send'),
+    });
+  }
+
+  recordComposerFocus(peerId: string, focused: boolean) {
+    this.append({
+      seq: 0,
+      tMs: this.elapsed(),
+      kind: 'ui',
+      method: 'composer-focus',
+      value: this.sanitizer.sanitizeValue({ peerId, focused }, 'ui.composer-focus'),
+    });
+  }
+
+  recordViewport(
+    peerId: string,
+    phase: 'before-send' | 'after-send',
+    sample: number,
+    geometry: { scrollTop: number; scrollHeight: number; clientHeight: number },
+  ) {
+    this.append({
+      seq: 0,
+      tMs: this.elapsed(),
+      kind: 'ui',
+      method: 'conversation-viewport',
+      value: this.sanitizer.sanitizeValue(
+        { peerId, phase, sample, ...geometry },
+        'ui.conversation-viewport',
+      ),
     });
   }
 
@@ -133,6 +182,7 @@ export class BrowserDebugReportRecorder {
         this.truncated = true;
       },
       shouldRecord: (method) => {
+        if (method === 'setTyping') return false;
         const remaining = this.ignoredTransportCalls.get(method) ?? 0;
         if (remaining === 0) return true;
         if (remaining === 1) this.ignoredTransportCalls.delete(method);

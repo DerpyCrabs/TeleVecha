@@ -220,6 +220,68 @@ test('sends a whole-message reply and renders its reply preview', async ({ page 
   expect(inlineTime.verticalOverlap).toBeGreaterThan(0);
 });
 
+test('holding Reply does not leave the present edge', async ({ page }) => {
+  const source = page.locator('article[data-message-id="79"]');
+  const reply = source.getByRole('button', { name: 'Reply to message 79' });
+  await source.hover();
+  const box = await reply.boundingBox();
+  expect(box).not.toBeNull();
+
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await expect(page.getByTestId('composer-reply')).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await page.mouse.up();
+
+  await expect(page.getByRole('button', { name: 'Jump to present' })).toHaveCount(0);
+});
+
+test('focuses the composer after choosing Reply from the context menu', async ({ page }) => {
+  const source = page.locator('article[data-message-id="79"]');
+  await source.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Reply' }).click();
+
+  await expect(page.getByTestId('composer-reply')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
+});
+
+test('focuses the composer after switching dialogs', async ({ page }) => {
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Release Channel/ })
+    .click();
+
+  await expect(page.getByTestId('conversation-header')).toContainText('Release Channel');
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
+});
+
+test('an outgoing reply rejoins the present edge after reading older messages', async ({
+  page,
+}) => {
+  const scroller = page.getByTestId('message-scroller');
+  await scroller.dispatchEvent('wheel', { deltaY: -1 });
+  await scroller.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect(page.getByRole('button', { name: 'Jump to present' })).toBeVisible();
+
+  const source = page.locator('article[data-message-id="79"]');
+  await source.getByRole('button', { name: 'Reply to message 79' }).click();
+  const input = page.getByRole('textbox', { name: 'Message' });
+  await input.fill('Reply from history');
+  await input.press('Enter');
+
+  await expect(page.locator('article.message', { hasText: 'Reply from history' })).toBeVisible();
+  await expect
+    .poll(() =>
+      scroller.evaluate(
+        (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+      ),
+    )
+    .toBeLessThan(0.5);
+  await expect(page.getByRole('button', { name: 'Jump to present' })).toHaveCount(0);
+});
+
 test('cancels a composer reply without changing the draft', async ({ page }) => {
   const source = page.locator('article[data-message-id="79"]');
   await source.getByRole('button', { name: 'Reply to message 79' }).click();

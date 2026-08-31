@@ -47,6 +47,13 @@ export function createConversationViewport(options: ConversationViewportOptions)
   let touchY: number | undefined;
   let pointerScrollCandidate = false;
 
+  const isScrollbarPointer = (scroller: HTMLDivElement, event: PointerEvent) => {
+    if (event.target !== scroller || event.pointerType === 'touch') return false;
+    const bounds = scroller.getBoundingClientRect();
+    const scrollbarStart = Math.min(bounds.left + scroller.clientWidth, bounds.right - 12);
+    return event.clientX >= scrollbarStart;
+  };
+
   const atPresent = (scroller: HTMLDivElement) => {
     const marker = scroller.querySelector<HTMLElement>('.present-scroll-anchor');
     if (!marker) return options.messages().length === 0;
@@ -151,7 +158,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
       }
     };
     const handlePointerDown = (event: PointerEvent) => {
-      pointerScrollCandidate = event.button === 0;
+      pointerScrollCandidate = event.button === 0 && isScrollbarPointer(scroller, event);
       if (event.pointerType === 'touch') {
         touchY = event.clientY;
         return;

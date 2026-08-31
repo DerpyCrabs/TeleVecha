@@ -38,7 +38,10 @@ interface ComposerSessionOptions {
   activeDialog: Accessor<TelegramDialog | undefined>;
   canSend: Accessor<boolean>;
   beforeUiChange: () => void;
+  beforeSend: () => void;
   focus: () => void;
+  onReply?: ((messageId: number) => void) | undefined;
+  onSend?: ((text: string) => void) | undefined;
 }
 
 function cloneAttachments(attachments: readonly StagedAttachment[]) {
@@ -62,6 +65,18 @@ export function createComposerSession(options: ComposerSessionOptions) {
   let typingTimer: ReturnType<typeof setTimeout> | undefined;
   let typingPeerId = '';
   let typingConversation: Conversation | undefined;
+  let focusFrame: number | undefined;
+
+  const focusComposer = () => {
+    queueMicrotask(() => {
+      options.focus();
+      if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
+      focusFrame = requestAnimationFrame(() => {
+        focusFrame = undefined;
+        options.focus();
+      });
+    });
+  };
 
   const rememberAttachments = (peerId: string, next: readonly StagedAttachment[]) => {
     if (!peerId || peerId === 'empty') return;
@@ -212,6 +227,8 @@ export function createComposerSession(options: ComposerSessionOptions) {
     const preserveDraftAuthority = draftAuthorityPeerId === peerId;
     const pendingDraft = flushDraftWrite(peerId);
 
+    options.beforeSend();
+    options.onSend?.(body);
     stopTyping();
     const clearedAuthorityVersion = takeDraftAuthority(peerId);
     setDraft('');
@@ -318,6 +335,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
   };
   const beginReply = (message: ChatMessage, element: HTMLElement) => {
     options.beforeUiChange();
+    options.onReply?.(Number(message.id));
     const selection = window.getSelection();
     const selected = selection?.toString().trim() ?? '';
     const anchorNode = selection?.anchorNode;
@@ -333,7 +351,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
       ...(selectionInside ? { quoteText: selected } : {}),
     });
     selection?.removeAllRanges();
-    queueMicrotask(options.focus);
+    focusComposer();
   };
   const beginEdit = (message: ChatMessage) => {
     if (!editing()) {
@@ -374,6 +392,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
   };
 
   onCleanup(() => {
+    if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
     stopTyping();
     void flushDraftWrite().catch(() => undefined);
   });
@@ -395,8 +414,9 @@ export function createComposerSession(options: ComposerSessionOptions) {
     beginReply,
     forceReply: (messageId: number, preview: string) => {
       setReply({ messageId, preview });
-      queueMicrotask(options.focus);
+      focusComposer();
     },
+    focus: focusComposer,
     beginEdit,
     cancelEdit,
     clearReply: () => setReply(undefined),

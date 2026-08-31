@@ -27,8 +27,22 @@ export interface PreparedDebugReport {
 export interface DebugReportModule {
   prepare(): Promise<PreparedDebugReport>;
   recordPeerSelection?(peerId: string): void;
+  recordComposerReply?(peerId: string, messageId: number): void;
+  recordComposerSend?(peerId: string, text: string): void;
+  recordComposerFocus?(peerId: string, focused: boolean): void;
+  recordViewport?(
+    peerId: string,
+    phase: 'before-send' | 'after-send',
+    sample: number,
+    geometry: { scrollTop: number; scrollHeight: number; clientHeight: number },
+  ): void;
   ignoreNextTransportCall?(method: string): void;
 }
+
+export type ReplayUiAction =
+  | { type: 'select-chat'; peerId: string; afterSequence: number }
+  | { type: 'composer-reply'; peerId: string; messageId: number; afterSequence: number }
+  | { type: 'composer-send'; peerId: string; text: string; afterSequence: number };
 
 interface ControlledRuntime extends AppRuntime {
   transport?: TelegramTransport | undefined;
@@ -39,7 +53,7 @@ export interface AppEnvironment {
   credentials?: TelegramCredentials | undefined;
   configurationError?: string | undefined;
   replay?: boolean | undefined;
-  replayPeerSelections?: readonly { peerId: string; afterSequence: number }[] | undefined;
+  replayUiActions?: readonly ReplayUiAction[] | undefined;
 }
 
 function environmentCredentials(): TelegramCredentials | undefined {
@@ -124,8 +138,8 @@ export function defaultAppEnvironment(search = window.location.search): AppEnvir
       runtime: replayRuntime,
       credentials: { apiId: 1, apiHash: 'offline-replay' },
       replay: true,
-      replayPeerSelections: reproBundle.timeline.flatMap((event, index) => {
-        if (event.kind !== 'ui' || event.method !== 'select-chat') return [];
+      replayUiActions: reproBundle.timeline.flatMap((event, index): ReplayUiAction[] => {
+        if (event.kind !== 'ui') return [];
         if (!event.value || Array.isArray(event.value) || typeof event.value !== 'object')
           return [];
         const peerId = event.value.peerId;
@@ -137,7 +151,22 @@ export function defaultAppEnvironment(search = window.location.search): AppEnvir
           afterSequence = candidate.seq;
           break;
         }
-        return [{ peerId, afterSequence }];
+        if (event.method === 'select-chat') {
+          return [{ type: 'select-chat', peerId, afterSequence }];
+        }
+        if (event.method === 'composer-reply') {
+          const messageId = event.value.messageId;
+          return typeof messageId === 'number' && Number.isSafeInteger(messageId)
+            ? [{ type: 'composer-reply', peerId, messageId, afterSequence }]
+            : [];
+        }
+        if (event.method === 'composer-send') {
+          const text = event.value.text;
+          return typeof text === 'string'
+            ? [{ type: 'composer-send', peerId, text, afterSequence }]
+            : [];
+        }
+        return [];
       }),
     };
   }
