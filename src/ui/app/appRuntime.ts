@@ -1,6 +1,7 @@
 import { MessagingEngine } from '../../telegram/core/engine';
 import type { MessagingClient } from '../../telegram/core/client';
 import { BrowserDebugReportRecorder } from '../../debug/reproReports';
+import type { ReproBundleV1 } from '../../debug/reproFormat';
 import { createReproEngine, injectedReproBundle } from '../../debug/reproRuntime';
 import { IndexedDbCacheStore } from '../../telegram/persistence/store';
 import { TabCoordinator, type TabCoordinatorOwner } from '../../telegram/session/tabCoordinator';
@@ -144,13 +145,7 @@ export function defaultAppEnvironment(search = window.location.search): AppEnvir
           return [];
         const peerId = event.value.peerId;
         if (typeof peerId !== 'string') return [];
-        let afterSequence = 0;
-        for (let priorIndex = index - 1; priorIndex >= 0; priorIndex -= 1) {
-          const candidate = reproBundle.timeline[priorIndex]!;
-          if (!['call', 'resolve', 'reject', 'push'].includes(candidate.kind)) continue;
-          afterSequence = candidate.seq;
-          break;
-        }
+        const afterSequence = replayActionAfterSequence(reproBundle.timeline, index, peerId);
         if (event.method === 'select-chat') {
           return [{ type: 'select-chat', peerId, afterSequence }];
         }
@@ -180,4 +175,34 @@ export function defaultAppEnvironment(search = window.location.search): AppEnvir
       ? undefined
       : 'TeleVecha could not find VITE_TELEGRAM_API_ID and VITE_TELEGRAM_API_HASH.',
   };
+}
+
+export function replayActionAfterSequence(
+  timeline: ReproBundleV1['timeline'],
+  actionIndex: number,
+  peerId: string,
+) {
+  const transportKinds = new Set(['call', 'resolve', 'reject', 'push']);
+  for (let index = actionIndex + 1; index < timeline.length; index += 1) {
+    const event = timeline[index]!;
+    if (event.kind !== 'call' || !reproValueReferencesPeer(event.args, peerId)) continue;
+    for (let priorIndex = index - 1; priorIndex >= 0; priorIndex -= 1) {
+      const prior = timeline[priorIndex]!;
+      if (transportKinds.has(prior.kind)) return prior.seq;
+    }
+    return 0;
+  }
+  for (let index = actionIndex - 1; index >= 0; index -= 1) {
+    const event = timeline[index]!;
+    if (transportKinds.has(event.kind)) return event.seq;
+  }
+  return 0;
+}
+
+function reproValueReferencesPeer(value: unknown, peerId: string): boolean {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some((item) => reproValueReferencesPeer(item, peerId));
+  const record = value as Record<string, unknown>;
+  if (record.id === peerId || record.peerId === peerId) return true;
+  return Object.values(record).some((item) => reproValueReferencesPeer(item, peerId));
 }

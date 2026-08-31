@@ -13,6 +13,7 @@ import type {
   TelegramChatAppearance,
   TelegramActivityKind,
   TelegramDialog,
+  TelegramDownloadOptions,
   TelegramMedia,
   TelegramMessage,
   TelegramPeer,
@@ -265,6 +266,8 @@ interface FixtureStats {
   readHistoryPeers: string[];
   getReadOutboxMaxId: number;
   downloadMedia: number;
+  downloadMediaPreview: number;
+  downloadMediaFull: number;
   downloadAvatar: number;
   releaseAvatarDownload: number;
   getThemes: number;
@@ -404,6 +407,8 @@ export class FixtureTelegramTransport implements TelegramTransport {
     readHistoryPeers: [],
     getReadOutboxMaxId: 0,
     downloadMedia: 0,
+    downloadMediaPreview: 0,
+    downloadMediaFull: 0,
     downloadAvatar: 0,
     releaseAvatarDownload: 0,
     getThemes: 0,
@@ -643,7 +648,46 @@ export class FixtureTelegramTransport implements TelegramTransport {
     offset?: TelegramSearchOffset,
   ): Promise<TelegramSearchPage> {
     this.stats.getSharedMedia += 1;
-    const found = (messages.get(peer.id) ?? []).filter((message) =>
+    const sharedImageDocument: TelegramMessage = {
+      id: 81,
+      peerId: peer.id,
+      senderId: peer.id,
+      senderName: 'Alice Fixture',
+      text: 'Shared diagram',
+      date: 1_700_002_000,
+      outgoing: false,
+      media: {
+        kind: 'file',
+        name: 'shared-diagram.png',
+        mimeType: 'image/png',
+        size: 42_000,
+      },
+    };
+    const sharedVideo: TelegramMessage = {
+      id: 82,
+      peerId: peer.id,
+      senderId: peer.id,
+      senderName: 'Alice Fixture',
+      text: 'Large shared video',
+      date: 1_700_002_100,
+      outgoing: false,
+      media: {
+        kind: 'video',
+        name: 'shared-video.mp4',
+        mimeType: 'video/mp4',
+        size: 590_000_000,
+        width: 1920,
+        height: 1080,
+        duration: 690,
+      },
+    };
+    const source =
+      this.scenario === 'shared-image-document' && kind === 'files'
+        ? [sharedImageDocument, ...(messages.get(peer.id) ?? [])]
+        : this.scenario === 'shared-video' && kind === 'videos'
+          ? [sharedVideo, ...(messages.get(peer.id) ?? [])]
+          : (messages.get(peer.id) ?? []);
+    const found = source.filter((message) =>
       kind === 'links'
         ? Boolean(message.links?.length || /https?:\/\//u.test(message.text))
         : kind === 'files'
@@ -1004,8 +1048,11 @@ export class FixtureTelegramTransport implements TelegramTransport {
     messages.set(peer.id, [...history, ...sent]);
     return { messages: sent };
   }
-  async downloadMedia(message: TelegramMessage) {
+  async downloadMedia(message: TelegramMessage, options?: TelegramDownloadOptions) {
     this.stats.downloadMedia += 1;
+    if (options?.preview) this.stats.downloadMediaPreview += 1;
+    else this.stats.downloadMediaFull += 1;
+    options?.progress?.(0);
     if (
       this.scenario === 'media-download-retry' &&
       message.media?.name === 'fixture.jpg' &&
@@ -1017,15 +1064,30 @@ export class FixtureTelegramTransport implements TelegramTransport {
     if (['delayed-layout.tgs', 'delayed-history-layout.tgs'].includes(message.media?.name ?? '')) {
       await new Promise((resolve) => window.setTimeout(resolve, 400));
     }
+    if (this.scenario === 'held-media-download' && message.media?.name === 'held-image.png') {
+      options?.progress?.(0.25);
+      await new Promise<never>((_resolve, reject) => {
+        const poll = () => {
+          if (options?.progress?.isCanceled) {
+            reject(new Error('Fixture media download was cancelled'));
+          } else {
+            window.setTimeout(poll, 10);
+          }
+        };
+        poll();
+      });
+    }
     if (message.media?.mimeType === 'application/x-tgsticker') return fixtureTgsBlob();
     const width = message.media?.width ?? 320;
     const height = message.media?.height ?? 180;
-    return new Blob(
+    const blob = new Blob(
       [
         `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="#6650d8"/></svg>`,
       ],
       { type: 'image/svg+xml' },
     );
+    options?.progress?.(1);
+    return blob;
   }
   async downloadAvatar(peer: TelegramPeer) {
     this.stats.downloadAvatar += 1;

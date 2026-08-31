@@ -34,7 +34,7 @@ interface AvatarProps {
   identity: string;
   initials: string;
   color: string;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   online?: boolean;
   loadCached?: (() => Promise<string | undefined>) | undefined;
   load?: (() => Promise<string | undefined>) | undefined;
@@ -44,7 +44,12 @@ export function Avatar(props: AvatarProps) {
   let root: HTMLDivElement | undefined;
   const [visible, setVisible] = createSignal(false);
   const size = () =>
-    ({ sm: 'size-9 text-xs', md: 'size-12 text-sm', lg: 'size-20 text-xl' })[props.size ?? 'md'];
+    ({
+      xs: 'size-4 text-[0.42rem]',
+      sm: 'size-9 text-xs',
+      md: 'size-12 text-sm',
+      lg: 'size-20 text-xl',
+    })[props.size ?? 'md'];
   const request = createMemo(() =>
     visible() && (props.loadCached || props.load)
       ? {
@@ -78,6 +83,7 @@ export function Avatar(props: AvatarProps) {
   return (
     <div ref={(element) => (root = element)} class="relative shrink-0">
       <div
+        data-avatar-identity={props.identity}
         class={`relative grid overflow-hidden place-items-center rounded-full font-semibold tracking-tight text-white shadow-inner ${size()}`}
         style={{
           background: `linear-gradient(145deg, ${props.color}, color-mix(in srgb, ${props.color} 60%, #15171c))`,

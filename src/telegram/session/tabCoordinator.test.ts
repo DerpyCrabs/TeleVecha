@@ -933,6 +933,47 @@ describe('TabCoordinator', () => {
     }
   });
 
+  it('does not serialize independent media downloads behind commands or each other', async () => {
+    installBrowserFakes();
+    const command = deferred<void>();
+    const media = [deferred<Blob>(), deferred<Blob>()];
+    const downloadMedia = vi
+      .fn()
+      .mockImplementationOnce(() => media[0]!.promise)
+      .mockImplementationOnce(() => media[1]!.promise);
+    const target = coordinator();
+    const internals = target as unknown as CoordinatorInternals;
+    internals.owner = {
+      engine: ownerEngine({
+        refreshUpdates: vi.fn(() => command.promise),
+        downloadMedia,
+      }),
+    };
+    const slowCommand = target.client.refreshUpdates();
+    const message = (id: number) => ({
+      id,
+      peerId: 'peer-1',
+      senderId: 'peer-1',
+      text: '',
+      date: id,
+      outgoing: false,
+    });
+    const first = target.client.downloadMedia(message(7));
+    const second = target.client.downloadMedia(message(8));
+
+    try {
+      await vi.waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(2));
+      media[1]!.resolve(new Blob(['second']));
+      await expect(second).resolves.toBeInstanceOf(Blob);
+      media[0]!.resolve(new Blob(['first']));
+      await expect(first).resolves.toBeInstanceOf(Blob);
+    } finally {
+      command.resolve();
+      await slowCommand;
+      await target.stop();
+    }
+  });
+
   it('returns downloaded media to a follower when the shared cache has no entry', async () => {
     installBrowserFakes();
     const target = coordinator();
@@ -967,6 +1008,36 @@ describe('TabCoordinator', () => {
         ) as { result?: unknown };
         expect(response.result).toBeInstanceOf(Blob);
       });
+    } finally {
+      await target.stop();
+    }
+  });
+
+  it('preserves progress and cancellation options for an owner-tab media download', async () => {
+    installBrowserFakes();
+    const progress = Object.assign(vi.fn(), { isCanceled: false });
+    const downloadMedia = vi.fn(async (_message, options) => {
+      options?.progress?.(0.5);
+      return new Blob(['media']);
+    });
+    const target = coordinator();
+    const internals = target as unknown as CoordinatorInternals;
+    internals.owner = { engine: ownerEngine({ downloadMedia }) };
+    const message = {
+      id: 7,
+      peerId: 'peer-1',
+      senderId: 'peer-1',
+      text: '',
+      date: 1,
+      outgoing: false,
+    };
+
+    try {
+      await expect(target.client.downloadMedia(message, { progress })).resolves.toBeInstanceOf(
+        Blob,
+      );
+      expect(downloadMedia).toHaveBeenCalledWith(message, { progress });
+      expect(progress).toHaveBeenCalledWith(0.5);
     } finally {
       await target.stop();
     }

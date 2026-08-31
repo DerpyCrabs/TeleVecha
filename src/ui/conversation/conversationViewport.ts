@@ -55,11 +55,15 @@ export function createConversationViewport(options: ConversationViewportOptions)
   };
 
   const atPresent = (scroller: HTMLDivElement) => {
+    const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    if (distance <= 2) return true;
     const marker = scroller.querySelector<HTMLElement>('.present-scroll-anchor');
     if (!marker) return options.messages().length === 0;
     const markerBounds = marker.getBoundingClientRect();
     const viewportBounds = scroller.getBoundingClientRect();
-    return markerBounds.top >= viewportBounds.top && markerBounds.bottom <= viewportBounds.bottom;
+    return (
+      markerBounds.top >= viewportBounds.top - 2 && markerBounds.bottom <= viewportBounds.bottom + 2
+    );
   };
 
   const captureReadingAnchors = (scroller: HTMLDivElement) => {

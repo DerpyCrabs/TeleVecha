@@ -5,8 +5,16 @@ import X from 'lucide-solid/icons/x';
 import { For, Show, createSignal, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
-import type { SharedMediaKind, TelegramMessage, TelegramSearchPage } from '../../telegram/types';
-import { MediaAttachment } from '../media/MediaAttachment';
+import type {
+  SharedMediaKind,
+  TelegramMessage,
+  TelegramSearchPage,
+  TelegramTransferProgress,
+} from '../../telegram/types';
+import { MediaAttachment, type MediaPreview } from '../media/MediaAttachment';
+import { MediaViewer } from '../media/MediaViewer';
+import { saveMediaUrl } from '../media/mediaActions';
+import { mediaPresentation } from '../media/mediaPresentation';
 import {
   panelClass,
   panelCloseButtonClass,
@@ -23,9 +31,13 @@ interface SharedMediaPanelProps {
     kind: SharedMediaKind,
     offset?: TelegramSearchPage['nextOffset'],
   ) => Promise<TelegramSearchPage>;
-  loadMedia: (message: TelegramMessage) => Promise<string>;
+  loadMedia: (message: TelegramMessage, progress?: TelegramTransferProgress) => Promise<string>;
+  loadMediaPreview: (message: TelegramMessage) => Promise<string>;
   cachedMedia: (message: TelegramMessage) => string | undefined;
+  cachedMediaPreview: (message: TelegramMessage) => string | undefined;
   openMessage: (message: TelegramMessage) => void;
+  forwardMessage?: ((message: TelegramMessage) => void) | undefined;
+  deleteMessage?: ((message: TelegramMessage) => void) | undefined;
   close: () => void;
 }
 
@@ -60,6 +72,9 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
   const [hasMore, setHasMore] = createSignal(false);
   const [nextOffset, setNextOffset] = createSignal<TelegramSearchPage['nextOffset']>();
   const [error, setError] = createSignal('');
+  const [viewer, setViewer] = createSignal<
+    { index: number; preview: MediaPreview; loading: boolean } | undefined
+  >();
   let overlay: HTMLDivElement | undefined;
   let loadVersion = 0;
   useModalDialog(() => overlay, props.close);
@@ -94,6 +109,47 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
 
   onMount(() => void loadItems(false));
   const links = (text: string) => [...text.matchAll(/https?:\/\/[^\s]+/gu)].map(([url]) => url);
+  const previewableItems = () =>
+    items().filter(
+      (message) => message.media && mediaPresentation(message.media).preview === 'image',
+    );
+  const openPreview = (message: TelegramMessage, preview: MediaPreview) => {
+    if (preview.kind !== 'image') return false;
+    const index = previewableItems().findIndex(({ id }) => id === message.id);
+    setViewer({ index: Math.max(0, index), preview, loading: false });
+    return true;
+  };
+  const navigatePreview = async (index: number) => {
+    const current = viewer();
+    const message = previewableItems()[index];
+    if (!current || !message?.media || current.loading) return;
+    setViewer({ ...current, loading: true });
+    try {
+      const url = props.cachedMedia(message) ?? (await props.loadMedia(message));
+      setViewer({
+        index,
+        loading: false,
+        preview: { kind: 'image', name: message.media.name, url },
+      });
+    } catch {
+      setViewer(current);
+    }
+  };
+  const downloadMessage = async (message: TelegramMessage) => {
+    if (!message.media || message.protected) return;
+    const url = props.cachedMedia(message) ?? (await props.loadMedia(message));
+    saveMediaUrl(url, message.media.name);
+  };
+  const openFilePreview = async (message: TelegramMessage, origin: HTMLElement) => {
+    if (!message.media || mediaPresentation(message.media).preview !== 'image') return;
+    const url = props.cachedMedia(message) ?? (await props.loadMedia(message));
+    openPreview(message, {
+      kind: 'image',
+      name: message.media.name,
+      url,
+      origin: origin.getBoundingClientRect(),
+    });
+  };
 
   return (
     <Portal>
@@ -158,7 +214,22 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
                             <span class="shared-kind-icon grid size-10 place-items-center rounded-[0.55rem] bg-white/[0.055] text-muted">
                               <FileText size={20} />
                             </span>
-                            <div class="grid min-w-0 gap-[0.18rem] [&_small]:text-[0.68rem] [&_small]:text-muted [&_time]:text-[0.68rem] [&_time]:text-muted">
+                            <button
+                              class="grid min-w-0 gap-[0.18rem] border-0 bg-transparent text-left [&_small]:text-[0.68rem] [&_small]:text-muted [&_time]:text-[0.68rem] [&_time]:text-muted"
+                              disabled={
+                                !message.media ||
+                                mediaPresentation(message.media).preview !== 'image'
+                              }
+                              onClick={(event) =>
+                                void openFilePreview(message, event.currentTarget)
+                              }
+                              aria-label={
+                                message.media &&
+                                mediaPresentation(message.media).preview === 'image'
+                                  ? `Open ${message.media.name} fullscreen preview`
+                                  : undefined
+                              }
+                            >
                               <strong>{message.media?.name}</strong>
                               <small>
                                 {[fileSize(message.media?.size), message.media?.mimeType]
@@ -166,14 +237,25 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
                                   .join(' · ')}
                               </small>
                               <time>{messageTime(message)}</time>
-                            </div>
-                            <button
-                              class="grid size-8 place-items-center rounded-full border-0 bg-transparent text-muted"
-                              onClick={() => props.openMessage(message)}
-                              aria-label="Go to file message"
-                            >
-                              <ExternalLink size={16} />
                             </button>
+                            <div class="flex items-center gap-1">
+                              <Show when={!message.protected}>
+                                <button
+                                  class="grid size-8 place-items-center rounded-full border-0 bg-transparent text-muted"
+                                  onClick={() => void downloadMessage(message)}
+                                  aria-label={`Download ${message.media?.name ?? 'file'}`}
+                                >
+                                  <FileText size={16} />
+                                </button>
+                              </Show>
+                              <button
+                                class="grid size-8 place-items-center rounded-full border-0 bg-transparent text-muted"
+                                onClick={() => props.openMessage(message)}
+                                aria-label="Go to file message"
+                              >
+                                <ExternalLink size={16} />
+                              </button>
+                            </div>
                           </article>
                         }
                       >
@@ -212,9 +294,13 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
                         {(media) => (
                           <MediaAttachment
                             media={media()}
-                            load={() => props.loadMedia(message)}
+                            load={(progress) => props.loadMedia(message, progress)}
+                            loadPreview={() => props.loadMediaPreview(message)}
                             cachedUrl={() => props.cachedMedia(message)}
+                            cachedPreviewUrl={() => props.cachedMediaPreview(message)}
                             compact
+                            protected={message.protected}
+                            onOpenPreview={(preview) => openPreview(message, preview)}
                           />
                         )}
                       </Show>
@@ -247,6 +333,65 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
               </Show>
             </Show>
           </div>
+          <Show when={viewer()}>
+            {(current) => {
+              const message = () => previewableItems()[current().index]!;
+              return (
+                <MediaViewer
+                  kind={current().preview.kind}
+                  name={current().preview.name}
+                  url={current().preview.url}
+                  origin={current().preview.origin}
+                  author={message().senderName || message().senderId}
+                  time={messageTime(message())}
+                  caption={message().text}
+                  protected={message().protected}
+                  position={current().index + 1}
+                  count={previewableItems().length}
+                  loading={current().loading}
+                  previous={
+                    current().index > 0
+                      ? () => void navigatePreview(current().index - 1)
+                      : undefined
+                  }
+                  next={
+                    current().index < previewableItems().length - 1
+                      ? () => void navigatePreview(current().index + 1)
+                      : undefined
+                  }
+                  download={
+                    message().protected
+                      ? undefined
+                      : () => saveMediaUrl(current().preview.url, current().preview.name)
+                  }
+                  forward={
+                    message().protected || !props.forwardMessage
+                      ? undefined
+                      : () => {
+                          const target = message();
+                          setViewer(undefined);
+                          props.forwardMessage?.(target);
+                        }
+                  }
+                  delete={
+                    props.deleteMessage
+                      ? () => {
+                          const target = message();
+                          setViewer(undefined);
+                          props.deleteMessage?.(target);
+                        }
+                      : undefined
+                  }
+                  goToMessage={() => {
+                    const target = message();
+                    setViewer(undefined);
+                    props.openMessage(target);
+                  }}
+                  close={() => setViewer(undefined)}
+                />
+              );
+            }}
+          </Show>
         </section>
       </div>
     </Portal>

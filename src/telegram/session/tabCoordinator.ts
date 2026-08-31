@@ -4,6 +4,7 @@ import type { MessagingEngine } from '../core/engine';
 import type {
   EngineSnapshot,
   TelegramCredentials,
+  TelegramDownloadOptions,
   TelegramMessage,
   TelegramResourceInvalidation,
 } from '../types';
@@ -129,6 +130,11 @@ const viewMutationMethods = new Set([
 // newer chat selection must be able to supersede a slow message jump. Ordinary
 // conversation opens stay serialized so failover restoration cannot race a send.
 const concurrentMethods = new Set([
+  'downloadAvatar',
+  'downloadCustomEmoji',
+  'downloadMedia',
+  'downloadSticker',
+  'downloadWallpaper',
   'getBotCommands',
   'getChatAppearance',
   'getGroupMembers',
@@ -327,11 +333,19 @@ export class TabCoordinator {
         if (downloaded instanceof Blob) return downloaded;
         return this.options.loadBlob(key);
       },
-      downloadMedia: async (message: TelegramMessage) => {
-        const key = this.mediaAssetKey(message);
+      downloadMedia: async (message: TelegramMessage, options?: TelegramDownloadOptions) => {
+        const key = `${options?.preview ? 'preview:' : ''}${this.mediaAssetKey(message)}`;
         const cached = await this.options.loadBlob(key);
         if (cached) return cached;
-        const downloaded = await this.invokeCoalesced('downloadMedia', [message]);
+        // Progress callbacks cannot cross BroadcastChannel. The elected owner can
+        // preserve the interactive transfer contract by calling its engine directly.
+        if (options?.progress && this.owner) {
+          return this.owner.engine.downloadMedia(message, options);
+        }
+        const downloaded = await this.invokeCoalesced('downloadMedia', [
+          message,
+          options?.preview ? { preview: true } : undefined,
+        ]);
         if (downloaded instanceof Blob) return downloaded;
         const blob = await this.options.loadBlob(key);
         if (!blob) throw new Error('The downloaded media was not committed to the shared cache.');

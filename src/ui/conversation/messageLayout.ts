@@ -57,6 +57,16 @@ function sameSender(first: ChatMessage | undefined, second: ChatMessage | undefi
   );
 }
 
+function captionMediaWidth(parts: Array<string | undefined>) {
+  const longestLine = parts
+    .flatMap((part) => (part ?? '').split('\n'))
+    .reduce((longest, line) => Math.max(longest, Array.from(line).length), 0);
+  // Telegram Desktop expands bubble media to textualMaxWidth, while still
+  // clamping it to the message/media maximum. This approximates its font
+  // measurement in rem without coupling layout code to a canvas.
+  return Math.min(24, 1.3 + longestLine * 0.48);
+}
+
 export function layoutMessages(
   messages: ChatMessage[],
   chat: ChatSummary,
@@ -147,8 +157,11 @@ export function layoutMessages(
       }
       const width = message.media?.width;
       const height = message.media?.height;
-      if (!width || !height) return 'min(20rem, 100%)';
-      return `min(${Math.max(12, Math.min(20, (24 * width) / height))}rem, 100%)`;
+      const photoWidth = width && height ? Math.max(12, Math.min(20, (24 * width) / height)) : 20;
+      const textWidth = captionedMedia
+        ? captionMediaWidth([caption.body, messageAuthor, forwardedFrom?.name, message.replyTo])
+        : 0;
+      return `min(${Math.max(photoWidth, textWidth)}rem, 100%)`;
     })();
     const cropped = (() => {
       if (album.length > 1 || !isVisualMedia(message)) return false;

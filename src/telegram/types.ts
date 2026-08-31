@@ -94,6 +94,7 @@ export interface TelegramMessage {
   text: string;
   date: number;
   outgoing: boolean;
+  protected?: boolean | undefined;
   editedAt?: number | undefined;
   replyToId?: number | undefined;
   replyQuote?: string | undefined;
@@ -116,6 +117,9 @@ export interface TelegramForwardedFrom {
   name: string;
   peerId?: string | undefined;
   messageId?: number | undefined;
+  hasAvatar?: boolean | undefined;
+  avatarId?: string | undefined;
+  color?: string | undefined;
 }
 
 export interface TelegramBotCommand {
@@ -326,6 +330,16 @@ export interface TelegramMedia {
   height?: number | undefined;
   duration?: number | undefined;
   cacheKey?: string | undefined;
+  spoiler?: boolean | undefined;
+}
+
+export type TelegramTransferProgress = ((progress: number) => void) & {
+  isCanceled?: boolean | undefined;
+};
+
+export interface TelegramDownloadOptions {
+  progress?: TelegramTransferProgress | undefined;
+  preview?: boolean | undefined;
 }
 
 export type TransportUpdate =
@@ -634,7 +648,7 @@ export interface TelegramTransport {
     attachments: SendAlbumAttachment[],
     options: SendAlbumOptions,
   ): Promise<SendAlbumResult>;
-  downloadMedia(message: TelegramMessage): Promise<Blob>;
+  downloadMedia(message: TelegramMessage, options?: TelegramDownloadOptions): Promise<Blob>;
   downloadAvatar(peer: TelegramPeer): Promise<Blob | undefined>;
   getThemes?(): Promise<TelegramTheme[]>;
   getWallpapers?(): Promise<TelegramWallpaper[]>;

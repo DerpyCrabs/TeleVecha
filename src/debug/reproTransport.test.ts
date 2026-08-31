@@ -234,6 +234,170 @@ describe('repro Telegram transport', () => {
     await expect(second).resolves.toHaveProperty('size', 3);
   });
 
+  it('lets a fixed client query captured history without preserving the broken call sequence', async () => {
+    const channel = { id: 'c:1', kind: 'channel' } as const;
+    const recovered = {
+      id: 101115,
+      peerId: channel.id,
+      senderId: 'u:1',
+      text: 'recovered',
+      date: 101115,
+      outgoing: false,
+    };
+    const events: ReproTransportEvent[] = [
+      {
+        seq: 1,
+        tMs: 0,
+        kind: 'call',
+        callId: 'call:1',
+        method: 'getPinnedMessages',
+        args: [channel],
+      },
+      {
+        seq: 2,
+        tMs: 0,
+        kind: 'call',
+        callId: 'call:2',
+        method: 'getHistoryAround',
+        args: [channel, 101116, 50],
+      },
+      { seq: 3, tMs: 0, kind: 'resolve', callId: 'call:1', value: [] },
+      { seq: 4, tMs: 0, kind: 'resolve', callId: 'call:2', value: [recovered] },
+    ];
+    const replay = createReplayTelegramTransport(events, {
+      timeScale: 0,
+      sanitizer: sanitizer(),
+    });
+
+    await expect(replay.getHistory(channel, 50)).resolves.toMatchObject({
+      messages: [recovered],
+      hasOlder: false,
+    });
+    const pinned = replay.getPinnedMessages?.(channel);
+    const around = replay.getHistoryAround?.(channel, 101116, 50);
+    await expect(pinned).resolves.toEqual([]);
+    await expect(around).resolves.toEqual([recovered]);
+  });
+
+  it('still diverges instead of inventing history absent from the report', async () => {
+    const replay = createReplayTelegramTransport([], {
+      timeScale: 0,
+      sanitizer: sanitizer(),
+    });
+
+    await expect(
+      replay.getHistory({ id: 'c:missing', kind: 'channel' }, 50),
+    ).rejects.toBeInstanceOf(ReproReplayMismatchError);
+  });
+
+  it('treats an uncaptured optional avatar as unavailable instead of invalidating replay', async () => {
+    const replay = createReplayTelegramTransport([], {
+      timeScale: 0,
+      sanitizer: sanitizer(),
+    });
+
+    await expect(
+      replay.downloadAvatar({ id: 'c:optional', kind: 'channel' }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('keeps background difference polling on the captured final server state', async () => {
+    const finalCursor = { pts: 12, qts: 0, date: 20, seq: 4 };
+    const events: ReproTransportEvent[] = [
+      {
+        seq: 1,
+        tMs: 0,
+        kind: 'call',
+        callId: 'call:1',
+        method: 'getDifference',
+        args: [{ pts: 10, qts: 0, date: 10, seq: 3 }, 100],
+      },
+      {
+        seq: 2,
+        tMs: 0,
+        kind: 'resolve',
+        callId: 'call:1',
+        value: { type: 'complete', cursor: finalCursor, updates: [] },
+      },
+    ];
+    const replay = createReplayTelegramTransport(events, {
+      timeScale: 0,
+      sanitizer: sanitizer(),
+    });
+
+    await expect(replay.getDifference({ pts: 10, qts: 0, date: 10, seq: 3 }, 100)).resolves.toEqual(
+      { type: 'complete', cursor: finalCursor, updates: [] },
+    );
+    await expect(replay.getDifference(finalCursor, 100)).resolves.toEqual({
+      type: 'complete',
+      cursor: finalCursor,
+      updates: [],
+    });
+  });
+
+  it('matches a media call after sanitized display-only message fields are hydrated', async () => {
+    const events: ReproTransportEvent[] = [
+      {
+        seq: 1,
+        tMs: 0,
+        kind: 'call',
+        callId: 'call:1',
+        method: 'downloadMedia',
+        args: [
+          {
+            id: 101116,
+            peerId: 'c:1',
+            senderAvatarId: 'senderavatar:3',
+            editedAt: { type: 'repro-undefined' },
+            media: {
+              cacheKey: 'media:19',
+              kind: 'video',
+              mimeType: 'video/mp4',
+              name: 'clip.mp4',
+              size: 54_412_569,
+              width: 2324,
+              height: 1320,
+              duration: 41.716,
+            },
+          },
+          {},
+        ],
+      },
+      {
+        seq: 2,
+        tMs: 0,
+        kind: 'resolve',
+        callId: 'call:1',
+        value: { type: 'repro-binary', byteSize: 1, mimeType: 'video/mp4' },
+      },
+    ];
+    const replay = createReplayTelegramTransport(events, {
+      timeScale: 0,
+      sanitize: (value) => value,
+    });
+
+    await expect(
+      replay.downloadMedia(
+        {
+          ...message(101116, ''),
+          peerId: 'c:1',
+          senderAvatarId: 'avatar:5',
+          media: {
+            cacheKey: 'media:19',
+            kind: 'video',
+            mimeType: 'video/mp4',
+            name: 'clip.mp4',
+            size: 54_412_569,
+            width: 2324,
+            height: 1320,
+            duration: 41.716,
+          },
+        },
+        {},
+      ),
+    ).resolves.toHaveProperty('size', 1);
+  });
+
   it('allows a distinct method to overtake an earlier settled startup request', async () => {
     const safePeer: TelegramPeer = { id: 'u:1', kind: 'user' };
     const events: ReproTransportEvent[] = [
@@ -273,6 +437,74 @@ describe('repro Telegram transport', () => {
     await expect(members).resolves.toEqual([]);
     await expect(appearance).resolves.toEqual({});
     expect(settlementOrder).toEqual(['members', 'appearance']);
+  });
+
+  it('allows independent peer metadata reads to start before their recorded order', async () => {
+    const firstPeer: TelegramPeer = { id: 'u:1', kind: 'user' };
+    const secondPeer: TelegramPeer = { id: 'c:1', kind: 'channel' };
+    const events: ReproTransportEvent[] = [
+      {
+        seq: 1,
+        tMs: 0,
+        kind: 'call',
+        callId: 'call:1',
+        method: 'getDifference',
+        args: [{ pts: 10, qts: 0, date: 1_700_000_000, seq: 2 }, 100],
+      },
+      {
+        seq: 2,
+        tMs: 0,
+        kind: 'resolve',
+        callId: 'call:1',
+        value: {
+          type: 'complete',
+          cursor: { pts: 10, qts: 0, date: 1_700_000_000, seq: 2 },
+          updates: [],
+        },
+      },
+      {
+        seq: 3,
+        tMs: 0,
+        kind: 'call',
+        callId: 'call:2',
+        method: 'getSharedMediaCounts',
+        args: [{ id: 'u:1', kind: 'user' }],
+      },
+      {
+        seq: 4,
+        tMs: 0,
+        kind: 'resolve',
+        callId: 'call:2',
+        value: { media: 1, files: 0, links: 0, music: 0, voice: 0 },
+      },
+      {
+        seq: 5,
+        tMs: 0,
+        kind: 'call',
+        callId: 'call:3',
+        method: 'getSharedMediaCounts',
+        args: [{ id: 'c:1', kind: 'channel' }],
+      },
+      {
+        seq: 6,
+        tMs: 0,
+        kind: 'resolve',
+        callId: 'call:3',
+        value: { media: 4, files: 0, links: 0, music: 0, voice: 0 },
+      },
+    ];
+    const replay = createReplayTelegramTransport(events, {
+      timeScale: 0,
+      sanitize: (value) => value,
+    });
+
+    const secondCounts = replay.getSharedMediaCounts(secondPeer);
+    const difference = replay.getDifference(cursor, 100);
+    const firstCounts = replay.getSharedMediaCounts(firstPeer);
+
+    await expect(difference).resolves.toMatchObject({ type: 'complete' });
+    await expect(firstCounts).resolves.toMatchObject({ media: 1 });
+    await expect(secondCounts).resolves.toMatchObject({ media: 4 });
   });
 
   it('invokes a live replacement when a cached proxy method is monkey-patched', async () => {

@@ -1,16 +1,20 @@
 import { For, Show, createSignal } from 'solid-js';
 
 import type { ChatMessage } from '../../domain/models';
+import type { TelegramTransferProgress } from '../../telegram/types';
 import { MediaAttachment, type MediaPreview } from '../media/MediaAttachment';
 import { MediaViewer } from '../media/MediaViewer';
 
 interface MessageAlbumProps {
   messages: ChatMessage[];
-  load: (message: ChatMessage) => Promise<string>;
+  load: (message: ChatMessage, progress?: TelegramTransferProgress) => Promise<string>;
+  loadPreview?: ((message: ChatMessage) => Promise<string>) | undefined;
   cachedUrl: (message: ChatMessage) => string | undefined;
+  cachedPreviewUrl?: ((message: ChatMessage) => string | undefined) | undefined;
   revision?: ((message: ChatMessage) => string | number | undefined) | undefined;
   progress?: ((message: ChatMessage) => number | undefined) | undefined;
   openActions: (message: ChatMessage, event: MouseEvent) => void;
+  openPreview?: ((message: ChatMessage, preview: MediaPreview) => boolean | void) | undefined;
 }
 
 export function MessageAlbum(props: MessageAlbumProps) {
@@ -29,6 +33,7 @@ export function MessageAlbum(props: MessageAlbumProps) {
   const previewKind = (message: ChatMessage) =>
     message.media?.kind === 'photo' ? ('image' as const) : ('video' as const);
   const openPreview = (message: ChatMessage, preview: MediaPreview) => {
+    if (props.openPreview?.(message, preview) !== false && props.openPreview) return;
     const index = previewableMessages().findIndex(({ id }) => id === message.id);
     if (index >= 0) setViewer({ index, message, preview });
   };
@@ -63,6 +68,7 @@ export function MessageAlbum(props: MessageAlbumProps) {
     return width && height ? width / height : 1;
   };
   const rows = () => {
+    if (props.messages.length === 3) return [props.messages.slice(0, 1), props.messages.slice(1)];
     const result: ChatMessage[][] = [];
     for (let index = 0; index < props.messages.length;) {
       const remaining = props.messages.length - index;
@@ -126,8 +132,16 @@ export function MessageAlbum(props: MessageAlbumProps) {
                     <MediaAttachment
                       media={message.media}
                       cachedUrl={() => props.cachedUrl(message)}
-                      load={() => props.load(message)}
+                      cachedPreviewUrl={() => props.cachedPreviewUrl?.(message)}
+                      load={(progress) => props.load(message, progress)}
+                      loadPreview={
+                        props.loadPreview &&
+                        (message.media?.kind === 'photo' || message.media?.kind === 'video')
+                          ? () => props.loadPreview!(message)
+                          : undefined
+                      }
                       revision={props.revision?.(message)}
+                      protected={message.protected}
                       onOpenPreview={(preview) => openPreview(message, preview)}
                     />
                   ) : null}

@@ -109,6 +109,7 @@ export function presentMessage(
     date: message.date,
     editedAt: message.editedAt,
     outgoing: message.outgoing,
+    protected: message.protected,
     status: message.outgoing && message.id <= readOutboxMaxId ? 'read' : 'sent',
     groupedId: message.groupedId,
     forwardedFrom: message.forwardedFrom,

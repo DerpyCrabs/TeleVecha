@@ -112,7 +112,55 @@ test('opens the selected shared-content type directly with useful message contex
   shared = page.getByRole('dialog', { name: 'Shared files' });
   await expect(shared.getByText('fixture-document.pdf')).toBeVisible();
   await expect(shared.getByText(/41 KB.*application\/pdf/)).toBeVisible();
+  await expect(shared.getByRole('button', { name: 'Download fixture-document.pdf' })).toBeVisible();
   expect((await fixtureStats(page))?.getSharedMedia).toBeGreaterThanOrEqual(3);
+});
+
+test('navigates through the complete shared-photo result set', async ({ page }) => {
+  await page.getByRole('button', { name: /Photos.*128/ }).click();
+  const shared = page.getByRole('dialog', { name: 'Shared photos' });
+  await shared.getByRole('button', { name: 'Open old-fixture.jpg fullscreen preview' }).click();
+  let viewer = page.getByRole('dialog', { name: 'Media preview: old-fixture.jpg' });
+  await expect(viewer.getByRole('button', { name: 'Previous attachment' })).toBeEnabled();
+  await viewer.getByRole('button', { name: 'Previous attachment' }).click();
+  viewer = page.getByRole('dialog', { name: 'Media preview: fixture.jpg' });
+  await expect(viewer).toBeVisible();
+});
+
+test('previews image documents directly from shared files with message actions', async ({
+  page,
+}) => {
+  await openReady(page, '/?scenario=shared-image-document');
+  await selectAlice(page);
+  await page.getByRole('button', { name: /^Files/u }).click();
+  const shared = page.getByRole('dialog', { name: 'Shared files' });
+  await shared.getByRole('button', { name: 'Open shared-diagram.png fullscreen preview' }).click();
+  const viewer = page.getByRole('dialog', { name: 'Media preview: shared-diagram.png' });
+  await expect(viewer.getByRole('img', { name: 'shared-diagram.png' })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Download shared-diagram.png' })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Forward message' })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Delete message' })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Go to message' })).toBeVisible();
+});
+
+test('loads shared-video thumbnails without downloading the original file', async ({ page }) => {
+  await openReady(page, '/?scenario=shared-video');
+  await selectAlice(page);
+  const before = await fixtureStats(page);
+
+  await page.getByRole('button', { name: /^Videos/u }).click();
+  const shared = page.getByRole('dialog', { name: 'Shared videos' });
+  await expect(shared.getByRole('img', { name: 'shared-video.mp4' })).toBeVisible();
+  await expect
+    .poll(async () => (await fixtureStats(page))?.downloadMediaPreview ?? 0)
+    .toBeGreaterThan(before?.downloadMediaPreview ?? 0);
+  expect((await fixtureStats(page))?.downloadMediaFull).toBe(before?.downloadMediaFull ?? 0);
+
+  await shared.getByRole('button', { name: 'Open shared-video.mp4 fullscreen preview' }).click();
+  await expect(page.getByRole('dialog', { name: 'Media preview: shared-video.mp4' })).toBeVisible();
+  await expect
+    .poll(async () => (await fixtureStats(page))?.downloadMediaFull ?? 0)
+    .toBe((before?.downloadMediaFull ?? 0) + 1);
 });
 
 test('Escape closes only the topmost media viewer before its shared-media dialog', async ({

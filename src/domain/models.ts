@@ -38,6 +38,7 @@ export interface ChatMessage {
   date?: number | undefined;
   editedAt?: number | undefined;
   outgoing: boolean;
+  protected?: boolean | undefined;
   status: MessageStatus;
   groupedId?: string | undefined;
   forwardedFrom?:
@@ -45,6 +46,9 @@ export interface ChatMessage {
         name: string;
         peerId?: string | undefined;
         messageId?: number | undefined;
+        hasAvatar?: boolean | undefined;
+        avatarId?: string | undefined;
+        color?: string | undefined;
       }
     | undefined;
   service?:
@@ -146,6 +150,7 @@ export interface ChatMessage {
         height?: number | undefined;
         duration?: number | undefined;
         cacheKey?: string | undefined;
+        spoiler?: boolean | undefined;
       }
     | undefined;
 }

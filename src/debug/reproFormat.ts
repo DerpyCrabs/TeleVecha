@@ -328,6 +328,9 @@ export interface ReproMessageV1 {
     name: ReproTextV1;
     peerId?: string | undefined;
     messageId?: number | undefined;
+    hasAvatar?: boolean | undefined;
+    avatarId?: string | undefined;
+    color?: string | undefined;
   };
   service?: ReproServiceMessageV1 | undefined;
   botKeyboard?: ReproBotKeyboardV1 | undefined;
@@ -1316,6 +1319,11 @@ function hydrateMessage(message: ReproMessageV1, epoch: number): CachedMessage {
             ...(message.forwardedFrom.messageId !== undefined
               ? { messageId: message.forwardedFrom.messageId }
               : {}),
+            ...(message.forwardedFrom.hasAvatar !== undefined
+              ? { hasAvatar: message.forwardedFrom.hasAvatar }
+              : {}),
+            ...(message.forwardedFrom.avatarId ? { avatarId: message.forwardedFrom.avatarId } : {}),
+            ...(message.forwardedFrom.color ? { color: message.forwardedFrom.color } : {}),
           },
         }
       : {}),
@@ -1894,6 +1902,13 @@ class StateSanitizer {
                     ),
                   }
                 : {}),
+              ...(message.forwardedFrom.hasAvatar !== undefined
+                ? { hasAvatar: message.forwardedFrom.hasAvatar }
+                : {}),
+              ...(message.forwardedFrom.avatarId
+                ? { avatarId: this.aliases.get('avatar', message.forwardedFrom.avatarId) }
+                : {}),
+              ...(message.forwardedFrom.color ? { color: message.forwardedFrom.color } : {}),
             },
           }
         : {}),

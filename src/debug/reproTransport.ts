@@ -5,7 +5,12 @@ import {
   type ReproSanitizerV1,
   type ReproTimelineEventV1,
 } from './reproFormat';
-import type { TelegramMedia, TelegramTransport, TransportUpdateBatch } from '../telegram/types';
+import type {
+  TelegramMedia,
+  TelegramMessage,
+  TelegramTransport,
+  TransportUpdateBatch,
+} from '../telegram/types';
 
 type TransportEventKind = 'call' | 'resolve' | 'reject' | 'push';
 
@@ -48,6 +53,8 @@ export interface ReplayTelegramTransportOptions {
   onMismatch?: ((error: ReproReplayMismatchError) => void) | undefined;
   onEvent?: ((event: ReproTransportEvent) => void) | undefined;
   onComplete?: (() => void) | undefined;
+  /** Cached messages captured with the report, used to model read-only history queries. */
+  initialMessages?: readonly TelegramMessage[] | undefined;
 }
 
 export interface ReproPlaceholderOptions {
@@ -81,6 +88,7 @@ const VALUE_BIGINT = 'repro-bigint';
 const VALUE_NONFINITE = 'repro-number';
 const TAG = 'type';
 const MAX_PLACEHOLDER_BYTES = 16 * 1024 * 1024;
+const CAUSAL_CALL_TIMEOUT_MS = 500;
 
 const SECRET_METHODS = new Set(['connect', 'requestCode', 'submitCode', 'submitPassword']);
 const OPTIONAL_METHODS = new Set<string>([
@@ -269,10 +277,19 @@ export function createReplayTelegramTransport(
   const progressCallbacks = new Map<string, Array<(value: number) => void>>();
   const claimedCalls = new Set<string>();
   const reusableCalls = new Map<string, Promise<unknown>>();
+  const readCallIds = new Set(
+    events.flatMap((event) =>
+      event.kind === 'call' && event.callId && isReplayReadMethod(event.method)
+        ? [event.callId]
+        : [],
+    ),
+  );
+  const capturedHistory = capturedHistoryMessages(events, options.initialMessages ?? []);
   const firstTime = events[0]?.tMs ?? 0;
   const startedAt = now();
   let cursor = 0;
   let scheduled = false;
+  let waitingCallTimer: ReturnType<typeof setTimeout> | undefined;
   let fatal: Error | undefined;
   let completed = false;
 
@@ -280,6 +297,8 @@ export function createReplayTelegramTransport(
     sanitizeTransportValue(value, context, sanitizer, options.sanitize);
 
   const fail = (error: Error) => {
+    if (waitingCallTimer) clearTimeout(waitingCallTimer);
+    waitingCallTimer = undefined;
     fatal = error;
     if (error instanceof ReproReplayMismatchError) options.onMismatch?.(error);
     for (const call of pending.values()) call.reject(error);
@@ -300,7 +319,26 @@ export function createReplayTelegramTransport(
       return;
     }
     if (event.kind === 'call') {
-      if (!event.callId || !claimedCalls.has(event.callId)) return;
+      if (event.callId && readCallIds.has(event.callId)) {
+        cursor += 1;
+        options.onEvent?.(event);
+        queueMicrotask(pump);
+        return;
+      }
+      if (!event.callId || !claimedCalls.has(event.callId)) {
+        waitingCallTimer ??= setTimeout(() => {
+          waitingCallTimer = undefined;
+          if (events[cursor] !== event || fatal) return;
+          fail(
+            mismatch(
+              `Replay reached event ${event.seq}, but the client did not perform ${formatCall(event.method, event.args)}.`,
+            ),
+          );
+        }, CAUSAL_CALL_TIMEOUT_MS);
+        return;
+      }
+      if (waitingCallTimer) clearTimeout(waitingCallTimer);
+      waitingCallTimer = undefined;
       cursor += 1;
       options.onEvent?.(event);
       queueMicrotask(pump);
@@ -314,7 +352,12 @@ export function createReplayTelegramTransport(
       if (events[cursor] !== event || fatal) return;
       cursor += 1;
       try {
-        dispatchReplayEvent(event, pending, progressCallbacks, listeners);
+        if (
+          !isIndexedReadEvent(event, readCallIds) ||
+          (event.callId !== undefined && pending.has(event.callId))
+        ) {
+          dispatchReplayEvent(event, pending, progressCallbacks, listeners);
+        }
         options.onEvent?.(event);
       } catch (error) {
         fail(asError(error));
@@ -339,15 +382,16 @@ export function createReplayTelegramTransport(
     );
     const safeSignature = callSignature(method, alreadySafeArgs);
     const sanitizedSignature = callSignature(method, actualArgs);
+    const indexedRead = isReplayReadMethod(method);
     const matchIndex = findReplayCall(
       events,
-      cursor,
+      indexedRead ? 0 : cursor,
       method,
       claimedCalls,
       (event) =>
         sameReplayCall(method, event.args ?? null, actualArgs) ||
         sameReplayCall(method, event.args ?? null, alreadySafeArgs),
-      isReplayAssetMethod(method),
+      isReplayReorderableMethod(method),
     );
     const expected = matchIndex >= 0 ? events[matchIndex] : undefined;
     if (!expected || expected.kind !== 'call') {
@@ -355,6 +399,11 @@ export function createReplayTelegramTransport(
         const existing = reusableCalls.get(safeSignature) ?? reusableCalls.get(sanitizedSignature);
         if (existing) return existing;
       }
+      const modeledRead = readCapturedHistory(capturedHistory, method, actualArgs);
+      if (modeledRead !== undefined) return Promise.resolve(modeledRead);
+      const capturedSyncRead = readCapturedSyncState(events, method, actualArgs);
+      if (capturedSyncRead !== undefined) return Promise.resolve(capturedSyncRead);
+      if (method === 'downloadAvatar') return Promise.resolve(undefined);
       const nextCall = events.slice(cursor).find((event) => event.kind === 'call');
       return rejectMismatch(
         mismatch(
@@ -369,6 +418,23 @@ export function createReplayTelegramTransport(
       return rejectMismatch(mismatch(`Recorded ${method} call has no callId.`), options.onMismatch);
     }
     claimedCalls.add(expected.callId);
+    if (events[cursor] === expected && waitingCallTimer) {
+      clearTimeout(waitingCallTimer);
+      waitingCallTimer = undefined;
+    }
+    if (indexedRead) {
+      const outcomeIndex = events.findIndex(
+        (event) =>
+          event.callId === expected.callId && (event.kind === 'resolve' || event.kind === 'reject'),
+      );
+      if (outcomeIndex >= 0 && outcomeIndex < cursor) {
+        const promise = settleIndexedRead(events, expected, method, args);
+        reusableCalls.set(safeSignature, promise);
+        reusableCalls.set(sanitizedSignature, promise);
+        reusableCalls.set(callSignature(method, expected.args ?? null), promise);
+        return promise;
+      }
+    }
     const progress = findProgressCallbacks(args);
     const promise = new Promise<unknown>((resolve, reject) => {
       pending.set(expected.callId!, { resolve, reject, method, args });
@@ -844,6 +910,51 @@ function isReplayAssetMethod(method: string) {
   ].includes(method);
 }
 
+function isReplayReorderableMethod(method: string) {
+  return (
+    isReplayAssetMethod(method) ||
+    [
+      'getBotCommands',
+      'getChatAppearance',
+      'getDialog',
+      'getGroupMembers',
+      'getHistory',
+      'getHistoryAround',
+      'getPinnedMessages',
+      'getReadOutboxMaxId',
+      'getSharedMedia',
+      'getSharedMediaCounts',
+      'getUserDetails',
+    ].includes(method)
+  );
+}
+
+function isReplayReadMethod(method: string | undefined) {
+  return Boolean(method && /^(?:download|get|isAuthorized|search)/u.test(method));
+}
+
+function isIndexedReadEvent(event: ReproTransportEvent, readCallIds: ReadonlySet<string>) {
+  if (!event.callId || !readCallIds.has(event.callId)) return false;
+  return event.kind === 'resolve' || event.kind === 'reject' || event.kind === 'push';
+}
+
+function settleIndexedRead(
+  events: readonly ReproTransportEvent[],
+  call: ReproTransportEvent,
+  method: string,
+  args: unknown[],
+) {
+  const outcome = events.find(
+    (event) =>
+      event.callId === call.callId && (event.kind === 'resolve' || event.kind === 'reject'),
+  );
+  if (!outcome) {
+    return Promise.reject(mismatch(`Recorded ${method} call has no outcome.`));
+  }
+  if (outcome.kind === 'reject') return Promise.reject(hydrateError(outcome.error));
+  return Promise.resolve(restoreReplayRandomIds(method, args, hydrateValue(outcome.value)));
+}
+
 function isEventSource(input: EventSourceInput): input is ReproTransportEventSource {
   return !Array.isArray(input);
 }
@@ -887,7 +998,33 @@ function sameJson(left: unknown, right: unknown) {
 }
 
 function sameReplayCall(method: string, left: unknown, right: unknown) {
-  return sameJson(normalizeReplayRandomIds(method, left), normalizeReplayRandomIds(method, right));
+  return sameJson(
+    normalizeReplayCallArgs(method, normalizeReplayRandomIds(method, left)),
+    normalizeReplayCallArgs(method, normalizeReplayRandomIds(method, right)),
+  );
+}
+
+function normalizeReplayCallArgs(method: string, value: unknown) {
+  if (method !== 'downloadMedia' || !Array.isArray(value)) return value;
+  const message = value[0];
+  if (!message || Array.isArray(message) || typeof message !== 'object') return value;
+  const media = message.media;
+  const stableMedia =
+    media && !Array.isArray(media) && typeof media === 'object'
+      ? Object.fromEntries(
+          ['cacheKey', 'kind', 'mimeType', 'name', 'size', 'width', 'height', 'duration']
+            .filter((key) => key in media)
+            .map((key) => [key, media[key]]),
+        )
+      : undefined;
+  return [
+    {
+      id: message.id,
+      peerId: message.peerId,
+      ...(stableMedia ? { media: stableMedia } : {}),
+    },
+    ...value.slice(1),
+  ];
 }
 
 function normalizeReplayRandomIds(method: string, value: unknown) {
@@ -974,7 +1111,133 @@ function callSignature(method: string, args: unknown) {
 }
 
 function isReusableReplayMethod(method: string) {
-  return /^(?:download|get|isAuthorized|search)/u.test(method);
+  return isReplayReadMethod(method);
+}
+
+function capturedHistoryMessages(
+  events: readonly ReproTransportEvent[],
+  initialMessages: readonly TelegramMessage[],
+) {
+  const messages = new Map<string, TelegramMessage>();
+  const remember = (message: TelegramMessage) => {
+    messages.set(`${message.peerId}\0${message.id}`, message);
+  };
+  for (const message of initialMessages) remember(message);
+  const historyCalls = new Map<string, 'getHistory' | 'getHistoryAround'>();
+  for (const event of events) {
+    if (
+      event.kind === 'call' &&
+      event.callId &&
+      (event.method === 'getHistory' || event.method === 'getHistoryAround')
+    ) {
+      historyCalls.set(event.callId, event.method);
+      continue;
+    }
+    if (event.kind !== 'resolve' || !event.callId || !historyCalls.has(event.callId)) continue;
+    const hydrated = hydrateValue(event.value);
+    const hydratedRecord = hydrated as { messages?: unknown } | undefined;
+    const candidates = Array.isArray(hydrated)
+      ? hydrated
+      : hydratedRecord && Array.isArray(hydratedRecord.messages)
+        ? hydratedRecord.messages
+        : [];
+    for (const candidate of candidates) {
+      if (!isCapturedMessage(candidate)) continue;
+      remember(candidate);
+    }
+  }
+  return messages;
+}
+
+function isCapturedMessage(value: unknown): value is TelegramMessage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const message = value as Partial<TelegramMessage>;
+  return (
+    typeof message.id === 'number' &&
+    typeof message.peerId === 'string' &&
+    typeof message.text === 'string' &&
+    typeof message.date === 'number' &&
+    typeof message.outgoing === 'boolean'
+  );
+}
+
+function readCapturedHistory(
+  captured: ReadonlyMap<string, TelegramMessage>,
+  method: string,
+  args: ReproJsonValue,
+) {
+  if ((method !== 'getHistory' && method !== 'getHistoryAround') || !Array.isArray(args)) {
+    return undefined;
+  }
+  const peer = args[0];
+  if (!peer || typeof peer !== 'object' || Array.isArray(peer) || typeof peer.id !== 'string') {
+    return undefined;
+  }
+  const messages = [...captured.values()]
+    .filter((message) => message.peerId === peer.id)
+    .sort((left, right) => right.id - left.id);
+  if (messages.length === 0) return undefined;
+  if (method === 'getHistory') {
+    const limit = typeof args[1] === 'number' ? args[1] : 0;
+    const before = typeof args[2] === 'number' ? args[2] : undefined;
+    if (limit <= 0) return undefined;
+    const eligible = before === undefined ? messages : messages.filter(({ id }) => id < before);
+    const page = eligible.slice(0, limit);
+    return {
+      messages: page,
+      hasOlder: eligible.length > page.length,
+      ...(page.length > 0 ? { nextBeforeMessageId: page.at(-1)!.id } : {}),
+    };
+  }
+  const messageId = typeof args[1] === 'number' ? args[1] : undefined;
+  const limit = typeof args[2] === 'number' ? args[2] : 0;
+  if (messageId === undefined || limit <= 0) return undefined;
+  const target = messages.findIndex(({ id }) => id === messageId);
+  if (target < 0) return undefined;
+  const start = Math.max(0, Math.min(target - Math.floor(limit / 2), messages.length - limit));
+  return messages.slice(start, start + limit);
+}
+
+function readCapturedSyncState(
+  events: readonly ReproTransportEvent[],
+  method: string,
+  args: ReproJsonValue,
+) {
+  if (method !== 'getDifference' && method !== 'getChannelDifference') return undefined;
+  const peerId =
+    method === 'getChannelDifference' &&
+    Array.isArray(args) &&
+    args[0] &&
+    typeof args[0] === 'object' &&
+    !Array.isArray(args[0]) &&
+    typeof args[0].id === 'string'
+      ? args[0].id
+      : undefined;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const call = events[index]!;
+    if (call.kind !== 'call' || call.method !== method || !call.callId) continue;
+    if (method === 'getChannelDifference') {
+      const recordedPeer = Array.isArray(call.args) ? call.args[0] : undefined;
+      if (
+        !recordedPeer ||
+        typeof recordedPeer !== 'object' ||
+        Array.isArray(recordedPeer) ||
+        recordedPeer.id !== peerId
+      ) {
+        continue;
+      }
+    }
+    const outcome = events.find(
+      (event) => event.kind === 'resolve' && event.callId === call.callId,
+    );
+    if (!outcome) continue;
+    const value = hydrateValue(outcome.value);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const updates = (value as { updates?: unknown }).updates;
+    if (updates !== undefined && (!Array.isArray(updates) || updates.length > 0)) continue;
+    return value;
+  }
+  return undefined;
 }
 
 function mismatch(message: string) {

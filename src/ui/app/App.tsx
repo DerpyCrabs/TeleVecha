@@ -67,9 +67,12 @@ import {
 } from '../conversation/conversationPresentation';
 import { createConversationViewport } from '../conversation/conversationViewport';
 import { layoutMessages } from '../conversation/messageLayout';
-import { presentDialog } from '../conversation/presentation';
-import { MediaAttachment } from '../media/MediaAttachment';
+import { presentDialog, presentMessage } from '../conversation/presentation';
+import { MediaAttachment, type MediaPreview } from '../media/MediaAttachment';
 import { MediaAssets, type MediaAsset } from '../media/mediaAssets';
+import { MediaViewer } from '../media/MediaViewer';
+import { copyImageUrl, saveMediaUrl } from '../media/mediaActions';
+import { mediaPresentation } from '../media/mediaPresentation';
 import { Avatar } from '../shared/Avatar';
 import { modalVisible } from '../shared/focusScope';
 import { createAppearanceSession } from '../theme/appearanceSession';
@@ -227,6 +230,15 @@ export function App(props: AppProps) {
   const [searchOpen, setSearchOpen] = createSignal(false);
   const [sharedMediaKind, setSharedMediaKind] = createSignal<SharedMediaKind>();
   const [deleteTarget, setDeleteTarget] = createSignal<ChatMessage>();
+  const [mediaViewer, setMediaViewer] = createSignal<
+    | {
+        messages: ChatMessage[];
+        index: number;
+        preview: MediaPreview;
+        loading: boolean;
+      }
+    | undefined
+  >();
   const [deleteChatTarget, setDeleteChatTarget] = createSignal<ChatSummary>();
   const mediaAssets = new MediaAssets(engine, () => snapshot().dialogs);
   const dialogViews = new Map<string, StoredView<ChatSummary>>();
@@ -845,7 +857,58 @@ export function App(props: AppProps) {
     const sticker = pendingSendForMessage(id)?.sticker;
     return sticker ? mediaAssets.sticker(sticker) : undefined;
   };
-
+  const mediaPreviewAssetFor = (messageId: string | number): MediaAsset | undefined => {
+    const source = mediaSourceFor(messageId);
+    return source?.media?.kind === 'photo' || source?.media?.kind === 'video'
+      ? mediaAssets.messagePreview(source)
+      : mediaAssetFor(messageId);
+  };
+  const imageViewerMessages = () =>
+    renderedMessages().filter(
+      (message) => message.media && mediaPresentation(message.media).preview === 'image',
+    );
+  const openImageViewer = (
+    message: ChatMessage,
+    preview: MediaPreview,
+    candidates = imageViewerMessages(),
+  ) => {
+    if (preview.kind !== 'image') return false;
+    const messages = candidates.filter(
+      (candidate) => candidate.media && mediaPresentation(candidate.media).preview === 'image',
+    );
+    const index = messages.findIndex(({ id }) => id === message.id);
+    setMediaViewer({
+      messages: index >= 0 ? messages : [message],
+      index: Math.max(0, index),
+      preview,
+      loading: false,
+    });
+    return true;
+  };
+  const navigateImageViewer = async (index: number) => {
+    const current = mediaViewer();
+    const message = current?.messages[index];
+    if (!current || !message?.media || current.loading) return;
+    setMediaViewer({ ...current, loading: true });
+    try {
+      const asset = mediaAssetFor(message.id);
+      if (!asset) return;
+      const url = asset.cached() ?? (await asset.load());
+      const latest = mediaViewer();
+      if (!latest || latest.messages !== current.messages) return;
+      setMediaViewer({
+        messages: current.messages,
+        index,
+        loading: false,
+        preview: { kind: 'image', name: message.media.name, url },
+      });
+    } finally {
+      const latest = mediaViewer();
+      if (latest?.messages === current.messages && latest.loading) {
+        setMediaViewer({ ...latest, loading: false });
+      }
+    }
+  };
   const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
   onMount(() => {
@@ -1185,8 +1248,6 @@ export function App(props: AppProps) {
 
   const openMessageActions = (message: ChatMessage, event: MouseEvent) => {
     if (message.service || !Number.isSafeInteger(Number(message.id))) return;
-    if (event.target instanceof HTMLImageElement || event.target instanceof HTMLVideoElement)
-      return;
     event.preventDefault();
     event.stopPropagation();
     expressions.close();
@@ -1212,6 +1273,30 @@ export function App(props: AppProps) {
     const text = messageTextForClipboard(message);
     setMessageContextMenu(undefined);
     if (text) await navigator.clipboard.writeText(text);
+  };
+  const saveMessageMedia = async (message: ChatMessage) => {
+    setMessageContextMenu(undefined);
+    if (!message.media || message.protected) return;
+    const asset = mediaAssetFor(message.id);
+    if (!asset) return;
+    saveMediaUrl(asset.cached() ?? (await asset.load()), message.media.name);
+  };
+  const copyMessageImage = async (message: ChatMessage) => {
+    setMessageContextMenu(undefined);
+    if (
+      !message.media ||
+      message.protected ||
+      mediaPresentation(message.media).preview !== 'image'
+    ) {
+      return;
+    }
+    const asset = mediaAssetFor(message.id);
+    if (!asset) return;
+    await copyImageUrl(asset.cached() ?? (await asset.load()));
+  };
+  const copyMediaFilename = async (message: ChatMessage) => {
+    setMessageContextMenu(undefined);
+    if (message.media?.name) await navigator.clipboard.writeText(message.media.name);
   };
 
   const connectionNotice = createMemo(() => {
@@ -1608,7 +1693,41 @@ export function App(props: AppProps) {
                                   }
                                 }}
                               >
-                                Forwarded from <span>{forwarded().name}</span>
+                                <span class="message-forwarded-label">Forwarded from</span>
+                                <Show when={forwarded().peerId}>
+                                  {(peerId) => (
+                                    <span class="message-forwarded-avatar" aria-hidden="true">
+                                      <Avatar
+                                        identity={`forwarded:${peerId()}:${forwarded().avatarId ?? 'none'}`}
+                                        initials={senderInitials(forwarded().name)}
+                                        color={forwarded().color ?? telegramPeerColor(peerId())}
+                                        size="xs"
+                                        loadCached={
+                                          forwarded().hasAvatar !== false
+                                            ? () =>
+                                                mediaAssets.loadPeerAvatar(
+                                                  peerFromId(peerId()),
+                                                  true,
+                                                  forwarded().avatarId,
+                                                  true,
+                                                )
+                                            : undefined
+                                        }
+                                        load={
+                                          online() && forwarded().hasAvatar !== false
+                                            ? () =>
+                                                mediaAssets.loadPeerAvatar(
+                                                  peerFromId(peerId()),
+                                                  true,
+                                                  forwarded().avatarId,
+                                                )
+                                            : undefined
+                                        }
+                                      />
+                                    </span>
+                                  )}
+                                </Show>
+                                <span class="message-forwarded-name">{forwarded().name}</span>
                               </button>
                             )}
                           </Show>
@@ -1626,13 +1745,29 @@ export function App(props: AppProps) {
                                   <MediaAttachment
                                     media={message.replyMedia!}
                                     revision={mediaAssetFor(message.replyToId!)?.revision}
-                                    load={() => {
+                                    load={(progress) => {
                                       const asset = mediaAssetFor(message.replyToId!);
                                       return asset
-                                        ? asset.load()
+                                        ? asset.load(progress)
                                         : Promise.reject(new Error('Reply media is unavailable.'));
                                     }}
                                     cachedUrl={() => mediaAssetFor(message.replyToId!)?.cached()}
+                                    cachedPreviewUrl={() =>
+                                      mediaPreviewAssetFor(message.replyToId!)?.cached()
+                                    }
+                                    loadPreview={
+                                      message.replyMedia?.kind === 'photo' ||
+                                      message.replyMedia?.kind === 'video'
+                                        ? () => {
+                                            const asset = mediaPreviewAssetFor(message.replyToId!);
+                                            return asset
+                                              ? asset.load()
+                                              : Promise.reject(
+                                                  new Error('Reply media preview is unavailable.'),
+                                                );
+                                          }
+                                        : undefined
+                                    }
                                     compact
                                     decorative
                                   />
@@ -1647,14 +1782,26 @@ export function App(props: AppProps) {
                               revision={(albumMessage) => mediaAssetFor(albumMessage.id)?.revision}
                               progress={(albumMessage) => albumMessage.uploadProgress}
                               cachedUrl={(albumMessage) => mediaAssetFor(albumMessage.id)?.cached()}
-                              load={(albumMessage) => {
-                                const asset = mediaAssetFor(albumMessage.id);
+                              cachedPreviewUrl={(albumMessage) =>
+                                mediaPreviewAssetFor(albumMessage.id)?.cached()
+                              }
+                              loadPreview={(albumMessage) => {
+                                const asset = mediaPreviewAssetFor(albumMessage.id);
                                 return asset
                                   ? asset.load()
+                                  : Promise.reject(new Error('Album preview is unavailable.'));
+                              }}
+                              load={(albumMessage, progress) => {
+                                const asset = mediaAssetFor(albumMessage.id);
+                                return asset
+                                  ? asset.load(progress)
                                   : Promise.reject(new Error('Album media is unavailable.'));
                               }}
                               openActions={(albumMessage, event) =>
                                 openMessageActions(albumMessage, event)
+                              }
+                              openPreview={(albumMessage, preview) =>
+                                openImageViewer(albumMessage, preview, layout().album)
                               }
                             />
                           </Show>
@@ -1682,16 +1829,33 @@ export function App(props: AppProps) {
                               >
                                 <MediaAttachment
                                   media={media()}
+                                  protected={message.protected}
                                   revision={mediaAssetFor(message.id)?.revision}
                                   cachedUrl={() => mediaAssetFor(message.id)?.cached()}
-                                  load={() => {
+                                  cachedPreviewUrl={() =>
+                                    mediaPreviewAssetFor(message.id)?.cached()
+                                  }
+                                  loadPreview={
+                                    media().kind === 'photo' || media().kind === 'video'
+                                      ? () => {
+                                          const asset = mediaPreviewAssetFor(message.id);
+                                          return asset
+                                            ? asset.load()
+                                            : Promise.reject(
+                                                new Error('Attachment preview is unavailable.'),
+                                              );
+                                        }
+                                      : undefined
+                                  }
+                                  load={(progress) => {
                                     const asset = mediaAssetFor(message.id);
                                     return asset
-                                      ? asset.load()
+                                      ? asset.load(progress)
                                       : Promise.reject(
                                           new Error('Attachment data is unavailable.'),
                                         );
                                   }}
+                                  onOpenPreview={(preview) => openImageViewer(message, preview)}
                                 />
                               </Show>
                             )}
@@ -1852,20 +2016,46 @@ export function App(props: AppProps) {
                           >
                             <Reply size={15} /> Reply
                           </button>
+                          <Show when={target().media && !target().protected}>
+                            <button role="menuitem" onClick={() => void saveMessageMedia(target())}>
+                              <Copy size={15} /> Save media as
+                            </button>
+                          </Show>
+                          <Show
+                            when={
+                              target().media &&
+                              !target().protected &&
+                              mediaPresentation(target().media!).preview === 'image'
+                            }
+                          >
+                            <button role="menuitem" onClick={() => void copyMessageImage(target())}>
+                              <Copy size={15} /> Copy image
+                            </button>
+                          </Show>
+                          <Show when={target().media?.kind === 'file'}>
+                            <button
+                              role="menuitem"
+                              onClick={() => void copyMediaFilename(target())}
+                            >
+                              <Copy size={15} /> Copy filename
+                            </button>
+                          </Show>
                           <Show when={messageTextForClipboard(target())}>
                             <button role="menuitem" onClick={() => void copyMessageText(target())}>
                               <Copy size={15} /> Copy text
                             </button>
                           </Show>
-                          <button
-                            role="menuitem"
-                            onClick={() => {
-                              setMessageContextMenu(undefined);
-                              setForwardingMessage(target());
-                            }}
-                          >
-                            <Forward size={15} /> Forward
-                          </button>
+                          <Show when={!target().protected}>
+                            <button
+                              role="menuitem"
+                              onClick={() => {
+                                setMessageContextMenu(undefined);
+                                setForwardingMessage(target());
+                              }}
+                            >
+                              <Forward size={15} /> Forward
+                            </button>
+                          </Show>
                           <button
                             role="menuitem"
                             onClick={() => {
@@ -1980,6 +2170,76 @@ export function App(props: AppProps) {
           />
         </section>
 
+        <Show when={mediaViewer()}>
+          {(viewer) => {
+            const message = () => viewer().messages[viewer().index]!;
+            return (
+              <MediaViewer
+                kind={viewer().preview.kind}
+                name={viewer().preview.name}
+                url={viewer().preview.url}
+                origin={viewer().preview.origin}
+                author={message().author}
+                time={message().time}
+                caption={message().body}
+                protected={message().protected}
+                position={viewer().index + 1}
+                count={viewer().messages.length}
+                loading={viewer().loading}
+                previous={
+                  viewer().index > 0
+                    ? () => void navigateImageViewer(viewer().index - 1)
+                    : undefined
+                }
+                next={
+                  viewer().index < viewer().messages.length - 1
+                    ? () => void navigateImageViewer(viewer().index + 1)
+                    : undefined
+                }
+                download={
+                  message().protected
+                    ? undefined
+                    : () => saveMediaUrl(viewer().preview.url, viewer().preview.name)
+                }
+                forward={
+                  message().protected
+                    ? undefined
+                    : () => {
+                        const target = message();
+                        setMediaViewer(undefined);
+                        setForwardingMessage(target);
+                      }
+                }
+                edit={
+                  message().outgoing
+                    ? () => {
+                        const target = message();
+                        setMediaViewer(undefined);
+                        composer.beginEdit(target);
+                      }
+                    : undefined
+                }
+                delete={() => {
+                  const target = message();
+                  setMediaViewer(undefined);
+                  setDeleteTarget(target);
+                }}
+                goToMessage={() => {
+                  const target = message();
+                  setMediaViewer(undefined);
+                  queueMicrotask(() => {
+                    const element = document.querySelector<HTMLElement>(
+                      `:is(article.message, .media-album-item)[data-message-id="${CSS.escape(target.id)}"]`,
+                    );
+                    if (element) viewport.reveal(element);
+                  });
+                }}
+                close={() => setMediaViewer(undefined)}
+              />
+            );
+          }}
+        </Show>
+
         <Show when={forwardingMessage()}>
           <ForwardMessageDialog
             chats={visibleChats()}
@@ -2017,11 +2277,27 @@ export function App(props: AppProps) {
             <SharedMediaPanel
               initialKind={kind}
               loadItems={(selected, offset) => activeConversation()!.sharedMedia(selected, offset)}
-              loadMedia={(message) => mediaAssets.loadMedia(message)}
+              loadMedia={(message, progress) => mediaAssets.loadMedia(message, progress)}
+              loadMediaPreview={(message) => mediaAssets.messagePreview(message).load()}
               cachedMedia={(message) => mediaAssets.message(message).cached()}
+              cachedMediaPreview={(message) => mediaAssets.messagePreview(message).cached()}
               openMessage={(message) => {
                 setSharedMediaKind(undefined);
                 runInBackground(openMessage(message));
+              }}
+              forwardMessage={(message) => {
+                setSharedMediaKind(undefined);
+                const readOutboxMaxId =
+                  snapshot().dialogs.find(({ peer }) => peer.id === message.peerId)
+                    ?.readOutboxMaxId ?? 0;
+                setForwardingMessage(presentMessage(message, readOutboxMaxId));
+              }}
+              deleteMessage={(message) => {
+                setSharedMediaKind(undefined);
+                const readOutboxMaxId =
+                  snapshot().dialogs.find(({ peer }) => peer.id === message.peerId)
+                    ?.readOutboxMaxId ?? 0;
+                setDeleteTarget(presentMessage(message, readOutboxMaxId));
               }}
               close={() => setSharedMediaKind(undefined)}
             />

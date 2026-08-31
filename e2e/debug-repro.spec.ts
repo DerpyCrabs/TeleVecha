@@ -111,7 +111,7 @@ test('exports account-free rendering data and replays it without Telegram', asyn
   expect(replayedPhoto!.height).toBeCloseTo(capturedPhoto!.height, 1);
 
   const lastEvent = timeline.at(-1);
-  const incompleteBundle = {
+  const removedReadBundle = {
     manifest,
     state,
     timeline: [
@@ -126,22 +126,51 @@ test('exports account-free rendering data and replays it without Telegram', asyn
       },
     ],
   };
-  const incompleteReplay = await page.context().newPage();
-  await incompleteReplay.addInitScript((injected) => {
+  const removedReadReplay = await page.context().newPage();
+  await removedReadReplay.addInitScript((injected) => {
     window.__televechaReproBundle = injected as unknown as NonNullable<
       typeof window.__televechaReproBundle
     >;
-  }, incompleteBundle);
-  await incompleteReplay.goto('/');
+  }, removedReadBundle);
+  await removedReadReplay.goto('/');
   await expect
-    .poll(() => incompleteReplay.evaluate(() => window.__televechaReproStatus?.state), {
+    .poll(() => removedReadReplay.evaluate(() => window.__televechaReproStatus?.state), {
+      timeout: 5_000,
+    })
+    .toBe('ready');
+  await removedReadReplay.close();
+
+  const missingMutationBundle = {
+    manifest,
+    state,
+    timeline: [
+      ...timeline,
+      {
+        seq: Number(lastEvent?.seq ?? 0) + 1,
+        tMs: Number(lastEvent?.tMs ?? 0),
+        kind: 'call',
+        callId: 'unclaimed:mutation:1',
+        method: 'sendText',
+        args: [{ id: 'c:1', kind: 'channel' }, 'missing mutation', 'random:1'],
+      },
+    ],
+  };
+  const missingMutationReplay = await page.context().newPage();
+  await missingMutationReplay.addInitScript((injected) => {
+    window.__televechaReproBundle = injected as unknown as NonNullable<
+      typeof window.__televechaReproBundle
+    >;
+  }, missingMutationBundle);
+  await missingMutationReplay.goto('/');
+  await expect
+    .poll(() => missingMutationReplay.evaluate(() => window.__televechaReproStatus?.state), {
       timeout: 5_000,
     })
     .toBe('diverged');
   await expect
-    .poll(() => incompleteReplay.evaluate(() => window.__televechaReproStatus?.message))
-    .toContain('before consuming the recorded transport timeline');
-  await incompleteReplay.close();
+    .poll(() => missingMutationReplay.evaluate(() => window.__televechaReproStatus?.message))
+    .toContain('did not perform sendText');
+  await missingMutationReplay.close();
 
   const { stdout } = await execFileAsync(
     process.execPath,

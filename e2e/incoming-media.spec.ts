@@ -169,8 +169,15 @@ test('renders voice notes, rectangular video messages, service events, and album
         }),
       ),
     )
-    .toEqual([133, 75, 133]);
-  await expect(album.locator('img').first()).toHaveCSS('object-fit', 'contain');
+    .toEqual([178, 177, 177]);
+  await expect(album.locator('.media-album-row')).toHaveCount(2);
+  await expect(album.locator('.media-album-row').first().locator('.media-album-item')).toHaveCount(
+    1,
+  );
+  await expect(album.locator('.media-album-row').last().locator('.media-album-item')).toHaveCount(
+    2,
+  );
+  await expect(album.locator('img').first()).toHaveCSS('object-fit', 'cover');
   await expect(album.locator('.media-album-actions')).toHaveCount(0);
   await expect(page.locator('article[data-message-id="83"]')).toContainText(
     'Three photos from Telegram',
@@ -245,4 +252,172 @@ test('renders voice notes, rectangular video messages, service events, and album
     footerPosition: 'absolute',
     widthDelta: 0,
   });
+});
+
+test('keeps the actual sender avatar beside a forwarded channel post', async ({ page }) => {
+  await openReady(page, '/?chat=c%3A202');
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 91,
+        peerId: 'c:202',
+        senderId: 'u:101',
+        text: 'Forwarded channel media',
+        date: 1_700_005_000,
+        outgoing: false,
+        forwardedFrom: {
+          name: 'Release Channel',
+          peerId: 'c:202',
+          messageId: 70,
+          hasAvatar: true,
+          avatarId: 'fixture-c:202',
+          color: '#4ca184',
+        },
+        media: {
+          kind: 'photo',
+          name: 'forwarded.jpg',
+          mimeType: 'image/jpeg',
+          width: 640,
+          height: 360,
+        },
+      },
+    }),
+  );
+
+  await expect(
+    page.locator(
+      'article[data-message-id="91"] .message-sender-avatar [data-avatar-identity^="u:101:"]',
+    ),
+  ).toBeVisible();
+  await expect(
+    page.locator('article[data-message-id="91"] .message-sender-avatar img'),
+  ).toBeVisible();
+  await expect(
+    page.locator(
+      'article[data-message-id="91"] .message-sender-avatar [data-avatar-identity^="forwarded:"]',
+    ),
+  ).toHaveCount(0);
+  await expect(
+    page.locator(
+      'article[data-message-id="91"] .message-forwarded-avatar [data-avatar-identity="forwarded:c:202:fixture-c:202"]',
+    ),
+  ).toBeVisible();
+  await expect(
+    page.locator('article[data-message-id="91"] .message-forwarded-avatar img'),
+  ).toBeVisible();
+  const forwardedHeaderGeometry = await page
+    .locator('article[data-message-id="91"] .message-forwarded-from')
+    .evaluate((header) => {
+      const avatar = header.querySelector<HTMLElement>('.message-forwarded-avatar');
+      const label = header.querySelector<HTMLElement>('.message-forwarded-label');
+      if (!avatar || !label) throw new Error('Forwarded header geometry is incomplete.');
+      const avatarBox = avatar.getBoundingClientRect();
+      const labelBox = label.getBoundingClientRect();
+      return {
+        avatarWidth: avatarBox.width,
+        avatarHeight: avatarBox.height,
+        centerDelta: Math.abs(
+          avatarBox.top + avatarBox.height / 2 - (labelBox.top + labelBox.height / 2),
+        ),
+      };
+    });
+  expect(forwardedHeaderGeometry.avatarWidth).toBeCloseTo(16, 0);
+  expect(forwardedHeaderGeometry.avatarHeight).toBeCloseTo(16, 0);
+  expect(forwardedHeaderGeometry.centerDelta).toBeLessThan(0.5);
+});
+
+test('centers a forwarded header vertically above its media', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 91,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: '',
+        date: 1_700_005_000,
+        outgoing: false,
+        forwardedFrom: { name: 'Release Channel', peerId: 'c:202', messageId: 70 },
+        media: {
+          kind: 'photo',
+          name: 'forwarded.jpg',
+          mimeType: 'image/jpeg',
+          width: 640,
+          height: 360,
+        },
+      },
+    }),
+  );
+
+  const gaps = await page.locator('article[data-message-id="91"]').evaluate((article) => {
+    const header = article.querySelector<HTMLElement>('.message-forwarded-from');
+    const media = article.querySelector<HTMLElement>('.media-attachment');
+    if (!header || !media) throw new Error('Forwarded media geometry is incomplete.');
+    const articleBox = article.getBoundingClientRect();
+    const headerBox = header.getBoundingClientRect();
+    const mediaBox = media.getBoundingClientRect();
+    return {
+      top: headerBox.top - articleBox.top,
+      bottom: mediaBox.top - headerBox.bottom,
+    };
+  });
+  expect(Math.abs(gaps.top - gaps.bottom)).toBeLessThan(0.5);
+});
+
+test('loads a video thumbnail without downloading the full video until preview opens', async ({
+  page,
+}) => {
+  await openReady(page);
+  await selectAlice(page);
+  const before = await page.evaluate(() => ({
+    preview: window.__televechaFixture?.stats.downloadMediaPreview ?? 0,
+    full: window.__televechaFixture?.stats.downloadMediaFull ?? 0,
+  }));
+
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 91,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: '',
+        date: 1_700_005_000,
+        outgoing: false,
+        media: {
+          kind: 'video',
+          name: 'large-video.mp4',
+          mimeType: 'video/mp4',
+          size: 590_000_000,
+          width: 1920,
+          height: 1080,
+          duration: 690,
+        },
+      },
+    }),
+  );
+
+  const message = page.locator('article[data-message-id="91"]');
+  await expect(message.getByRole('img', { name: 'large-video.mp4' })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture?.stats.downloadMediaPreview ?? 0))
+    .toBeGreaterThan(before.preview);
+  expect(await page.evaluate(() => window.__televechaFixture?.stats.downloadMediaFull ?? 0)).toBe(
+    before.full,
+  );
+
+  await message.getByRole('button', { name: 'Open large-video.mp4 fullscreen preview' }).click();
+  await expect(page.getByRole('dialog', { name: 'Media preview: large-video.mp4' })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture?.stats.downloadMediaFull ?? 0))
+    .toBe(before.full + 1);
 });

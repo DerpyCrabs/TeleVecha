@@ -58,6 +58,7 @@ export function createReproEngine(bundle: ReproBundleV1) {
     let stoppingAfterMismatch = false;
     const transport = createReplayTelegramTransport(bundle.timeline, {
       timeScale: 0,
+      initialMessages: hydrated.messages,
       onMismatch: (error) => {
         if (window.__televechaReproStatus?.state !== 'diverged') {
           setReproStatus({ state: 'diverged', message: error.message });
@@ -99,9 +100,23 @@ function seedReproAssetCache(
 ) {
   const recordedMedia = recordedAssetIds(timeline, 'downloadMedia', true);
   const recordedAvatars = recordedAssetIds(timeline, 'downloadAvatar', false);
+  const seedPreview = (message: TelegramMessage) => {
+    if (message.media?.kind !== 'photo' && message.media?.kind !== 'video') return;
+    void store.saveBlob(
+      `preview:${engine.mediaAssetKey(message)}`,
+      createReproPlaceholder({
+        byteSize: Math.min(message.media.size ?? 65_536, 65_536),
+        mimeType: 'image/svg+xml',
+        width: message.media.width,
+        height: message.media.height,
+        mediaKind: 'photo',
+      }),
+    );
+  };
 
   for (const message of messages) {
     if (!message.media && !message.linkPreview?.hasPhoto) continue;
+    seedPreview(message);
     if (recordedMedia.has(`${message.peerId}\0${message.id}`)) continue;
     const media = message.media;
     const previewSize = message.linkPreview?.photoSize === 'small' ? 96 : 640;
@@ -113,6 +128,47 @@ function seedReproAssetCache(
         width: media?.width ?? previewSize,
         height: media?.height ?? (message.linkPreview?.photoSize === 'small' ? 96 : 360),
         mediaKind: media?.kind ?? 'photo',
+      }),
+    );
+  }
+  for (const message of recordedTimelineMedia(timeline)) {
+    seedPreview(message);
+    if (recordedMedia.has(`${message.peerId}\0${message.id}`)) continue;
+    void store.saveBlob(
+      engine.mediaAssetKey(message),
+      createReproPlaceholder({
+        byteSize: message.media!.size ?? 4_096,
+        mimeType: message.media!.mimeType,
+        width: message.media!.width,
+        height: message.media!.height,
+        mediaKind: message.media!.kind,
+      }),
+    );
+  }
+
+  for (const message of messages) {
+    if (!message.senderHasAvatar || recordedAvatars.has(message.senderId)) continue;
+    void store.saveBlob(
+      `avatar:${message.senderId}:${message.senderAvatarId ?? 'unknown'}`,
+      createReproPlaceholder({
+        byteSize: 1_024,
+        mimeType: 'image/svg+xml',
+        width: 96,
+        height: 96,
+        mediaKind: 'photo',
+      }),
+    );
+  }
+  for (const [senderId, avatarId] of recordedSenderAvatarKeys(timeline)) {
+    if (recordedAvatars.has(senderId)) continue;
+    void store.saveBlob(
+      `avatar:${senderId}:${avatarId}`,
+      createReproPlaceholder({
+        byteSize: 1_024,
+        mimeType: 'image/svg+xml',
+        width: 96,
+        height: 96,
+        mediaKind: 'photo',
       }),
     );
   }
@@ -130,6 +186,61 @@ function seedReproAssetCache(
       }),
     );
   }
+}
+
+function recordedSenderAvatarKeys(timeline: ReproBundleV1['timeline']) {
+  const result = new Map<string, [string, string]>();
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    if (typeof record.senderId === 'string' && typeof record.senderAvatarId === 'string') {
+      result.set(`${record.senderId}\0${record.senderAvatarId}`, [
+        record.senderId,
+        record.senderAvatarId,
+      ]);
+    }
+    for (const item of Object.values(record)) visit(item);
+  };
+  for (const event of timeline) {
+    visit(event.args);
+    visit(event.value);
+  }
+  return result.values();
+}
+
+function recordedTimelineMedia(timeline: ReproBundleV1['timeline']) {
+  const result = new Map<string, TelegramMessage>();
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    const media = record.media;
+    const mediaRecord = media as Record<string, unknown> | undefined;
+    if (
+      typeof record.id === 'number' &&
+      typeof record.peerId === 'string' &&
+      media &&
+      !Array.isArray(media) &&
+      typeof media === 'object' &&
+      typeof mediaRecord?.kind === 'string' &&
+      typeof mediaRecord.mimeType === 'string'
+    ) {
+      result.set(`${record.peerId}\0${record.id}`, record as unknown as TelegramMessage);
+    }
+    for (const item of Object.values(record)) visit(item);
+  };
+  for (const event of timeline) {
+    visit(event.args);
+    visit(event.value);
+  }
+  return result.values();
 }
 
 function recordedAssetIds(
@@ -209,12 +320,16 @@ export function applyReproUiState(state: ReproStateV1) {
   } catch {
     // Replay still works when browser storage is disabled.
   }
-  const activePeerId = ui.bootstrapActivePeerId ?? state.lastPeerId;
+  const activePeerId = replayBootstrapPeerId(state);
   const url = new URL(window.location.href);
   if (ui.route?.startsWith('/')) url.pathname = ui.route;
   url.searchParams.set('repro', '1');
   if (activePeerId) url.searchParams.set('chat', activePeerId);
   window.history.replaceState({}, '', url);
+}
+
+export function replayBootstrapPeerId(state: ReproStateV1) {
+  return state.lastPeerId ?? state.ui?.bootstrapActivePeerId;
 }
 
 function setReproStatus(status: ReproStatus) {

@@ -7,15 +7,18 @@ test.beforeEach(async ({ page }) => {
   await selectAlice(page);
 });
 
-test('keeps the browser context menu available on image content', async ({ page }) => {
+test('opens message actions from image content', async ({ page }) => {
   const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
   await expect(image).toBeVisible();
 
   const inlineAllowed = await image.evaluate((element) =>
     element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })),
   );
-  expect(inlineAllowed).toBe(true);
-  await expect(page.getByRole('menu', { name: 'Message actions' })).toHaveCount(0);
+  expect(inlineAllowed).toBe(false);
+  await expect(page.getByRole('menu', { name: 'Message actions' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Save media as' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Copy image' })).toBeVisible();
+  await page.keyboard.press('Escape');
 
   await image.click();
   const preview = page.getByRole('dialog', { name: /Media preview:/ }).getByRole('img');
@@ -23,7 +26,8 @@ test('keeps the browser context menu available on image content', async ({ page 
   const previewAllowed = await preview.evaluate((element) =>
     element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })),
   );
-  expect(previewAllowed).toBe(true);
+  expect(previewAllowed).toBe(false);
+  await expect(page.getByRole('menu', { name: 'Media actions' })).toBeVisible();
 });
 
 test('copies regular and rich message text from the context menu', async ({ page, context }) => {

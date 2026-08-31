@@ -1294,9 +1294,12 @@ describe('web Telegram transport mapping', () => {
 
   it('maps Telegram document attributes and image documents to visible media', () => {
     const target = transport() as unknown as {
-      mapMessage(
-        message: Tl.TypeMessage,
-      ): { media?: { kind: string; name: string; cacheKey?: string } } | undefined;
+      mapMessage(message: Tl.TypeMessage):
+        | {
+            protected?: boolean;
+            media?: { kind: string; name: string; cacheKey?: string; spoiler?: boolean };
+          }
+        | undefined;
     };
     const kinds = [
       Api.DocumentAttributeSticker({
@@ -1340,17 +1343,17 @@ describe('web Telegram transport mapping', () => {
       dcId: 2,
       attributes: [Api.DocumentAttributeFilename({ fileName: 'telegram-image.png' })],
     });
-    mapped.push(
-      target.mapMessage(
-        Api.Message({
-          id: 5,
-          peerId: Api.PeerUser({ userId: 1n }),
-          date: 1,
-          message: '',
-          media: Api.MessageMediaDocument({ document: png }),
-        }),
-      )?.media,
+    const protectedImageDocument = target.mapMessage(
+      Api.Message({
+        id: 5,
+        peerId: Api.PeerUser({ userId: 1n }),
+        date: 1,
+        message: '',
+        noforwards: true,
+        media: Api.MessageMediaDocument({ document: png, spoiler: true }),
+      }),
     );
+    mapped.push(protectedImageDocument?.media);
 
     expect(mapped.map((media) => media?.kind)).toEqual([
       'sticker',
@@ -1362,6 +1365,8 @@ describe('web Telegram transport mapping', () => {
     expect(mapped[3]?.name).toBe('plain.bin');
     expect(mapped[4]?.name).toBe('telegram-image.png');
     expect(mapped[4]?.cacheKey).toBe('document:5');
+    expect(mapped[4]?.spoiler).toBe(true);
+    expect(protectedImageDocument?.protected).toBe(true);
 
     const photo = target.mapMessage(
       Api.Message({
@@ -1587,16 +1592,25 @@ describe('web Telegram transport mapping', () => {
   it('maps forwarded message authors and original channel posts', () => {
     const target = transport() as unknown as {
       entities: Map<string, Tl.TypeUser | Tl.TypeChat>;
-      mapMessage(
-        message: Tl.TypeMessage,
-      ): { forwardedFrom?: { name: string; peerId?: string; messageId?: number } } | undefined;
+      mapMessage(message: Tl.TypeMessage):
+        | {
+            forwardedFrom?: {
+              name: string;
+              peerId?: string;
+              messageId?: number;
+              hasAvatar?: boolean;
+              avatarId?: string;
+              color?: string;
+            };
+          }
+        | undefined;
     };
     target.entities.set(
       'c:202',
       Api.Channel({
         id: 202n,
         title: 'Release Channel',
-        photo: Api.ChatPhotoEmpty(),
+        photo: Api.ChatPhoto({ photoId: 77n, dcId: 2 }),
         date: 100,
       }),
     );
@@ -1619,6 +1633,9 @@ describe('web Telegram transport mapping', () => {
       name: 'Release Channel',
       peerId: 'c:202',
       messageId: 17,
+      hasAvatar: true,
+      avatarId: '77',
+      color: '#d95574',
     });
   });
 
@@ -3831,10 +3848,21 @@ describe('web Telegram transport mapping', () => {
     ).mapMessage(telegramMessage);
     if (!mapped) throw new Error('Expected mapped fixture message');
 
-    const blob = await target.downloadMedia(mapped);
+    const progress = Object.assign(vi.fn(), { isCanceled: false });
+    const blob = await target.downloadMedia(mapped, { progress });
     expect(blob.size).toBe(3);
     expect(blob.type).toBe('text/plain');
-    expect(downloadMedia).toHaveBeenCalledOnce();
+    expect(downloadMedia).toHaveBeenCalledWith(expect.anything(), {
+      workers: 1,
+      progressCallback: progress,
+    });
+    const preview = await target.downloadMedia(mapped, { preview: true });
+    expect(preview.type).toBe('image/jpeg');
+    expect(downloadMedia).toHaveBeenLastCalledWith(expect.anything(), {
+      workers: 1,
+      sizeType: 'm',
+      progressCallback: undefined,
+    });
     await expect(target.downloadMedia({ ...mapped, id: 8 })).rejects.toThrow(
       'Media data is no longer in memory',
     );

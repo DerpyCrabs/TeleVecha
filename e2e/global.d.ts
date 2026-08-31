@@ -40,6 +40,8 @@ interface Window {
       readHistoryPeers: string[];
       getReadOutboxMaxId: number;
       downloadMedia: number;
+      downloadMediaPreview: number;
+      downloadMediaFull: number;
       downloadAvatar: number;
       releaseAvatarDownload: number;
       getThemes: number;

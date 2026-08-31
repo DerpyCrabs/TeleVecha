@@ -637,6 +637,13 @@ export class MessagingEngine {
       if (this.canMarkRead(peerId)) void this.markRead(dialog, dialog.topMessageId);
       if (this.snapshotValue.online) void this.loadSharedMediaCounts(dialog);
       void this.loadPinnedMessages(dialog);
+      // A channel cursor can legitimately be newer than an incomplete local cache
+      // (for example after another tab refreshed dialog metadata first). Reconcile
+      // the newest page in the background so the cache remains instant to render
+      // but missing middle messages are restored without requiring a reconnect.
+      if (this.snapshotValue.online && this.cachedChannelNeedsRepair(dialog, messages)) {
+        void this.refreshActiveConversationAfterConnect(generation, accountId);
+      }
       return;
     }
 
@@ -699,6 +706,9 @@ export class MessagingEngine {
       if (this.canMarkRead(peerId)) void this.markRead(dialog, dialog.topMessageId);
       if (this.snapshotValue.online) void this.loadSharedMediaCounts(dialog);
       void this.loadPinnedMessages(dialog);
+      if (this.snapshotValue.online && this.cachedChannelNeedsRepair(dialog, messages)) {
+        void this.refreshActiveConversationAfterConnect(generation, accountId);
+      }
       return;
     }
 
@@ -2118,15 +2128,27 @@ export class MessagingEngine {
     });
   }
 
-  async downloadMedia(message: TelegramMessage) {
+  async downloadMedia(
+    message: TelegramMessage,
+    options?: import('../types').TelegramDownloadOptions,
+  ) {
     const generation = this.lifecycleGeneration;
     const accountId = this.accountId;
-    const cacheKey = this.mediaAssetKey(message);
-    const mediaSlot = `${message.peerId}:${message.id}`;
+    const assetKey = this.mediaAssetKey(message);
+    const cacheKey = options?.preview ? `preview:${assetKey}` : assetKey;
+    const mediaSlot = `${options?.preview ? 'preview:' : ''}${message.peerId}:${message.id}`;
     const mediaVersion = this.resources.version(mediaSlot);
-    return this.resources.load(`media:${cacheKey}`, () =>
-      this.downloadAndCacheMedia(cacheKey, message, mediaSlot, mediaVersion, generation, accountId),
-    );
+    const load = () =>
+      this.downloadAndCacheMedia(
+        cacheKey,
+        message,
+        mediaSlot,
+        mediaVersion,
+        generation,
+        accountId,
+        options,
+      );
+    return options?.progress ? load() : this.resources.load(`media:${cacheKey}`, load);
   }
 
   mediaAssetKey(message: TelegramMessage) {
@@ -2153,6 +2175,7 @@ export class MessagingEngine {
     mediaVersion: number,
     generation: number,
     accountId: string | undefined,
+    options?: import('../types').TelegramDownloadOptions,
   ) {
     let cached: Blob | undefined;
     try {
@@ -2165,7 +2188,7 @@ export class MessagingEngine {
     }
     if (cached) return cached;
     try {
-      const blob = await this.transport.downloadMedia(message);
+      const blob = await this.transport.downloadMedia(message, options);
       if (
         this.isOperationCurrent(generation, accountId) &&
         this.resources.version(mediaSlot) === mediaVersion
@@ -2178,15 +2201,51 @@ export class MessagingEngine {
       }
       return blob;
     } catch (firstError) {
+      if (options?.progress?.isCanceled) throw firstError;
       if (!this.isOperationCurrent(generation, accountId)) throw firstError;
       const dialog = this.snapshotValue.dialogs.find(({ peer }) => peer.id === message.peerId);
       if (!dialog) throw firstError;
+      const requestRevision = this.messageRevision;
       const context = this.transport.getHistoryAround
         ? await this.transport.getHistoryAround(dialog.peer, message.id, HISTORY_LIMIT)
         : (await this.transport.getHistory(dialog.peer, HISTORY_LIMIT)).messages;
+      if (!this.isOperationCurrent(generation, accountId)) throw firstError;
+      const fetched = this.filterFetchedMessages(
+        message.peerId,
+        context.map((item) => ({ ...item, cacheEpoch: this.epoch })),
+        requestRevision,
+      );
+      await this.store.putMessages(fetched);
+      if (!this.isOperationCurrent(generation, accountId)) throw firstError;
+      const loaded = this.loadedHistories.get(message.peerId);
+      if (loaded) {
+        loaded.messages = this.boundHistoryMessages(
+          message.peerId,
+          this.mergeFetchedMessages(message.peerId, loaded.messages, fetched, requestRevision),
+          this.historyModes.get(message.peerId) ?? 'newest',
+        );
+      }
+      if (this.snapshotValue.activePeerId === message.peerId) {
+        const previousMessages = this.snapshotValue.messages;
+        const messages = this.mergeFetchedMessages(
+          message.peerId,
+          previousMessages,
+          fetched,
+          requestRevision,
+        );
+        this.recordLoadedHistoryRange(message.peerId, previousMessages, fetched);
+        this.patch({
+          messages: this.boundHistoryMessages(
+            message.peerId,
+            messages,
+            this.historyModes.get(message.peerId) ?? 'newest',
+          ),
+          historyGaps: this.historyGaps.get(message.peerId) ?? [],
+        });
+      }
       const refreshed = context.find(({ id }) => id === message.id);
       if (!refreshed) throw firstError;
-      const blob = await this.transport.downloadMedia(refreshed);
+      const blob = await this.transport.downloadMedia(refreshed, options);
       if (
         this.isOperationCurrent(generation, accountId) &&
         this.resources.version(mediaSlot) === mediaVersion
@@ -2971,6 +3030,28 @@ export class MessagingEngine {
     }
   }
 
+  private cachedChannelNeedsRepair(dialog: TelegramDialog, messages: readonly TelegramMessage[]) {
+    if (dialog.peer.kind !== 'channel' || messages.length === 0) return false;
+    if (
+      dialog.topMessageId !== undefined &&
+      !messages.some(({ id }) => id === dialog.topMessageId)
+    ) {
+      return true;
+    }
+    const albums = new Map<string, number[]>();
+    for (const message of messages) {
+      if (!message.groupedId) continue;
+      const ids = albums.get(message.groupedId) ?? [];
+      ids.push(message.id);
+      albums.set(message.groupedId, ids);
+    }
+    for (const ids of albums.values()) {
+      ids.sort((left, right) => left - right);
+      if (ids.some((id, index) => index > 0 && id !== ids[index - 1]! + 1)) return true;
+    }
+    return false;
+  }
+
   private async confirmAuthorizedAccount(claimLegacyAccount: boolean, generation: number) {
     const accountId = await this.transport.getAuthorizedAccountId();
     if (!this.isLifecycleCurrent(generation)) return false;
@@ -3132,6 +3213,7 @@ export class MessagingEngine {
     const previous = this.snapshotValue.dialogs.find(({ peer }) => peer.id === peerId);
     const dialog: CachedDialog = {
       ...fresh,
+      ...(previous?.channelPts !== undefined ? { channelPts: previous.channelPts } : {}),
       ...(previous?.userDetails ? { userDetails: previous.userDetails } : {}),
       cacheEpoch: this.epoch,
     };
@@ -5226,10 +5308,18 @@ export class MessagingEngine {
     const nextKey = this.mediaAssetKey(next);
     if (previousKey === nextKey && previousKey !== legacyKey) return;
     const mediaSlot = `${next.peerId}:${next.id}`;
+    const previewSlot = `preview:${mediaSlot}`;
     this.resources.invalidate(mediaSlot, `media:${previousKey}`, `media:${legacyKey}`);
+    this.resources.invalidate(
+      previewSlot,
+      `media:preview:${previousKey}`,
+      `media:preview:${legacyKey}`,
+    );
     await Promise.all([
       this.store.deleteBlob(previousKey),
+      this.store.deleteBlob(`preview:${previousKey}`),
       ...(previousKey === legacyKey ? [] : [this.store.deleteBlob(legacyKey)]),
+      ...(previousKey === legacyKey ? [] : [this.store.deleteBlob(`preview:${legacyKey}`)]),
     ]);
   }
 

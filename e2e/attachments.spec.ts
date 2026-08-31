@@ -7,7 +7,182 @@ test.beforeEach(async ({ page }) => {
   await selectAlice(page);
 });
 
-test('loads photo media and stores the blob in IndexedDB', async ({ page }) => {
+test('opens image documents from a file card and keeps download separate', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 81,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        senderName: 'Alice Fixture',
+        text: 'Original diagram',
+        date: 1_700_002_000,
+        outgoing: false,
+        media: {
+          kind: 'file',
+          name: 'diagram.png',
+          mimeType: 'image/png',
+          size: 42_000,
+          width: 320,
+          height: 180,
+        },
+      },
+    }),
+  );
+
+  const message = page.locator('article[data-message-id="81"]');
+  const card = message.getByRole('button', { name: 'Open diagram.png fullscreen preview' });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('41 KB · image/png');
+  await expect(message.getByRole('img', { name: 'diagram.png' })).toHaveCount(0);
+
+  const downloadsBefore = (await fixtureStats(page))?.downloadMedia ?? 0;
+  await card.click();
+  const viewer = page.getByRole('dialog', { name: 'Media preview: diagram.png' });
+  const previewImage = viewer.getByRole('img', { name: 'diagram.png' });
+  await expect(previewImage).toBeVisible();
+  await expect(previewImage).toHaveClass(/media-viewer-origin/u);
+  await expect(previewImage).toHaveCSS('animation-name', 'media-viewer-open');
+  await expect(viewer).toContainText('Alice Fixture');
+  await expect(viewer).toContainText('Original diagram');
+  expect((await fixtureStats(page))?.downloadMedia).toBe(downloadsBefore + 1);
+
+  await viewer.getByRole('button', { name: 'Close media preview' }).click();
+  await expect(card).toBeFocused();
+  await card.press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Media preview: diagram.png' })).toBeVisible();
+  expect((await fixtureStats(page))?.downloadMedia).toBe(downloadsBefore + 1);
+});
+
+test('offers image viewer actions, zoom, and adjacent-message navigation', async ({ page }) => {
+  await page.evaluate(() => {
+    for (const [id, name] of [
+      [81, 'first.png'],
+      [82, 'second.png'],
+    ] as const) {
+      window.__televechaFixture?.emit({
+        type: 'new-message',
+        pts: id - 70,
+        ptsCount: 1,
+        message: {
+          id,
+          peerId: 'u:101',
+          senderId: 'u:101',
+          senderName: 'Alice Fixture',
+          text: `Caption for ${name}`,
+          date: 1_700_002_000 + id,
+          outgoing: false,
+          media: { kind: 'file', name, mimeType: 'image/png', size: 4_096 },
+        },
+      });
+    }
+  });
+
+  await page.getByRole('button', { name: 'Open first.png fullscreen preview' }).click();
+  let viewer = page.getByRole('dialog', { name: 'Media preview: first.png' });
+  await expect(viewer.getByRole('button', { name: 'Download first.png' })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Forward message' })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Delete message' })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Go to message' })).toBeVisible();
+
+  const image = viewer.getByRole('img', { name: 'first.png' });
+  await viewer.getByRole('button', { name: 'Zoom in' }).click();
+  await expect(image).toHaveAttribute('data-zoom', '2');
+  await image.dblclick();
+  await expect(image).toHaveAttribute('data-zoom', '1');
+
+  await viewer.getByRole('button', { name: 'Next attachment' }).click();
+  viewer = page.getByRole('dialog', { name: 'Media preview: second.png' });
+  await expect(viewer).toContainText('Caption for second.png');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.getByRole('dialog', { name: 'Media preview: first.png' })).toBeVisible();
+});
+
+test('reveals media spoilers and suppresses export actions for protected media', async ({
+  page,
+}) => {
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 81,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        senderName: 'Alice Fixture',
+        text: 'Protected spoiler',
+        date: 1_700_002_000,
+        outgoing: false,
+        protected: true,
+        media: {
+          kind: 'photo',
+          name: 'secret.jpg',
+          mimeType: 'image/jpeg',
+          spoiler: true,
+          width: 320,
+          height: 180,
+        },
+      },
+    }),
+  );
+
+  const message = page.locator('article[data-message-id="81"]');
+  await expect(
+    message.getByRole('button', { name: 'Reveal media spoiler secret.jpg' }),
+  ).toBeVisible();
+  await expect(
+    message.getByRole('button', { name: 'Open secret.jpg fullscreen preview' }),
+  ).toHaveCount(0);
+  await message.getByRole('button', { name: 'Reveal media spoiler secret.jpg' }).click();
+  await message.getByRole('button', { name: 'Open secret.jpg fullscreen preview' }).click();
+
+  const viewer = page.getByRole('dialog', { name: 'Media preview: secret.jpg' });
+  await expect(viewer.getByRole('button', { name: 'Download secret.jpg' })).toHaveCount(0);
+  await expect(viewer.getByRole('button', { name: 'Forward message' })).toHaveCount(0);
+  await expect(viewer.getByRole('button', { name: 'Copy image' })).toHaveCount(0);
+});
+
+test('reports and cancels an attachment download', async ({ page }) => {
+  await page.goto('/?scenario=held-media-download');
+  await selectAlice(page);
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 81,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: '',
+        date: 1_700_002_000,
+        outgoing: false,
+        media: {
+          kind: 'file',
+          name: 'held-image.png',
+          mimeType: 'image/png',
+          size: 1_000_000,
+        },
+      },
+    }),
+  );
+
+  const message = page.locator('article[data-message-id="81"]');
+  await message.getByRole('button', { name: 'Open held-image.png fullscreen preview' }).click();
+  await expect.poll(async () => (await fixtureStats(page))?.downloadMedia ?? 0).toBeGreaterThan(0);
+  await expect(message.getByText('25% downloaded')).toBeVisible();
+  await message.getByRole('button', { name: 'Cancel download held-image.png' }).click();
+  await expect(page.getByRole('dialog', { name: 'Media preview: held-image.png' })).toHaveCount(0);
+  await expect(
+    message.getByRole('button', { name: 'Open held-image.png fullscreen preview' }),
+  ).toBeEnabled();
+});
+
+test('loads photo previews and stores the lightweight blob in IndexedDB', async ({ page }) => {
   await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
   expect((await fixtureStats(page))?.downloadMedia).toBe(2);
 
@@ -24,7 +199,7 @@ test('loads photo media and stores the blob in IndexedDB', async ({ page }) => {
           lookup.onsuccess = () => resolve(lookup.result);
           lookup.onerror = () => reject(lookup.error);
         });
-        const value = records.find((record) => record.key.startsWith('media:u:101:78:'));
+        const value = records.find((record) => record.key.startsWith('preview:media:u:101:78:'));
         return value?.blob.size ?? 0;
       }),
     )
@@ -254,6 +429,44 @@ test('keeps decorated and extreme portrait photos free of an outer frame', async
   await fullscreenImage.press('Escape');
 });
 
+test('widens an extreme portrait preview when its caption needs more room', async ({ page }) => {
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 85,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: 'A long caption that should determine the bubble width instead of forcing every line into an extremely narrow portrait column.',
+        date: 1_700_002_004,
+        outgoing: false,
+        forwardedFrom: { name: 'A channel with a long title' },
+        media: {
+          kind: 'photo',
+          name: 'captioned-extreme-portrait.jpg',
+          mimeType: 'image/jpeg',
+          width: 100,
+          height: 1_000,
+        },
+      },
+    }),
+  );
+
+  const message = page.locator('article[data-message-id="85"]');
+  await expect(message.getByRole('img', { name: 'captioned-extreme-portrait.jpg' })).toBeVisible();
+  const geometry = await message.evaluate((element) => {
+    const media = element.querySelector<HTMLElement>('.media-visual')!;
+    return {
+      bubbleWidth: element.getBoundingClientRect().width,
+      previewRatio: media.getBoundingClientRect().width / media.getBoundingClientRect().height,
+    };
+  });
+  expect(geometry.bubbleWidth).toBeGreaterThanOrEqual(380);
+  expect(geometry.previewRatio).toBeGreaterThanOrEqual(1);
+});
+
 test('shows a retry control when automatic media loading fails', async ({ page }) => {
   await openReady(page, '/?scenario=media-download-retry');
   await selectAlice(page);
@@ -268,13 +481,13 @@ test('shows a retry control when automatic media loading fails', async ({ page }
 test('opens photo and video attachments in a fullscreen viewer', async ({ page }) => {
   const photoTrigger = page.getByRole('button', { name: 'Open fixture.jpg fullscreen preview' });
   await expect(photoTrigger).toBeVisible();
-  const downloadsBefore = (await fixtureStats(page))?.downloadMedia;
+  const fullDownloadsBefore = (await fixtureStats(page))?.downloadMediaFull ?? 0;
   await photoTrigger.click();
   const photoViewer = page.getByRole('dialog', { name: 'Media preview: fixture.jpg' });
   const fullscreenPhoto = photoViewer.getByRole('img', { name: 'fixture.jpg' });
   await expect(fullscreenPhoto).toBeVisible();
   await expect(photoViewer.getByRole('button', { name: 'Close media preview' })).toBeFocused();
-  expect((await fixtureStats(page))?.downloadMedia).toBe(downloadsBefore);
+  expect((await fixtureStats(page))?.downloadMediaFull).toBe(fullDownloadsBefore + 1);
   await fullscreenPhoto.click({ position: { x: 160, y: 90 } });
   await expect(photoViewer).toBeVisible();
   const viewerContent = photoViewer.locator('.media-viewer-content');
@@ -300,12 +513,18 @@ test('opens photo and video attachments in a fullscreen viewer', async ({ page }
           kind: 'video',
           name: 'fixture.mp4',
           mimeType: 'video/mp4',
+          size: 17_428_252,
           width: 320,
           height: 180,
+          duration: 45.369,
         },
       },
     }),
   );
+  const videoMessage = page.locator('article[data-message-id="81"]');
+  await expect(videoMessage.getByText('16.6 MB')).toBeVisible();
+  await expect(videoMessage.getByText('0:45')).toBeVisible();
+  await expect(videoMessage.locator('.media-video-play')).toBeVisible();
   await page.getByRole('button', { name: 'Open fixture.mp4 fullscreen preview' }).click();
   const videoViewer = page.getByRole('dialog', { name: 'Media preview: fixture.mp4' });
   const video = videoViewer.locator('video[controls]');
@@ -411,9 +630,8 @@ test('classifies WebP uploads as stickers', async ({ page }) => {
   await page.evaluate(() => window.__televechaFixture?.releaseUpload());
 });
 
-test('downloads a generic file on demand and replaces the button with a download link', async ({
-  page,
-}) => {
+test('downloads a generic file on demand from its file card', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -441,8 +659,13 @@ test('downloads a generic file on demand and replaces the button with a download
     .poll(async () => (await fixtureStats(page))?.downloadMedia ?? 0)
     .toBeGreaterThanOrEqual(2);
   const downloadsBefore = (await fixtureStats(page))?.downloadMedia ?? 0;
-  await attachment.getByRole('button', { name: /report.pdf/ }).click();
-  const link = attachment.getByRole('link', { name: /report.pdf/ });
-  await expect(link).toHaveAttribute('download', 'report.pdf');
+  const download = page.waitForEvent('download');
+  await attachment.getByRole('button', { name: 'Download report.pdf' }).click();
+  expect((await download).suggestedFilename()).toBe('report.pdf');
+  await expect(attachment.getByRole('button', { name: 'Download report.pdf' })).toBeVisible();
   expect((await fixtureStats(page))?.downloadMedia).toBe(downloadsBefore + 1);
+
+  await attachment.getByRole('button', { name: 'Download report.pdf' }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy filename' }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('report.pdf');
 });

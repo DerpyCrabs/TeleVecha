@@ -21,6 +21,7 @@ import type {
   SyncCursor,
   TelegramCredentials,
   TelegramDialog,
+  TelegramDownloadOptions,
   TelegramGroupMember,
   TelegramMessage,
   TelegramPeer,
@@ -580,7 +581,7 @@ class FakeTransport implements TelegramTransport {
       })),
     };
   }
-  async downloadMedia(_message: TelegramMessage) {
+  async downloadMedia(_message: TelegramMessage, _options?: TelegramDownloadOptions) {
     this.downloadMediaCalls += 1;
     return new Blob();
   }
@@ -2373,6 +2374,53 @@ describe('MessagingEngine', () => {
     await engine.stop();
   });
 
+  it('revalidates a cached channel and restores a missing middle album message', async () => {
+    const channelPeer: TelegramPeer = { id: 'c:1', kind: 'channel', accessHash: '1' };
+    const album = [101114, 101115, 101116, 101117].map((id) => ({
+      ...dialog.topMessage!,
+      id,
+      peerId: channelPeer.id,
+      groupedId: 'album:reported-gap',
+      text: `Album item ${id}`,
+      cacheEpoch: 0,
+    }));
+    const channelDialog: TelegramDialog = {
+      ...dialog,
+      peer: channelPeer,
+      channelPts: 106911,
+      topMessageId: 101117,
+      topMessage: album[3],
+    };
+    class CachedChannelTransport extends FakeTransport {
+      override async getDialogs() {
+        return { dialogs: [channelDialog] };
+      }
+
+      override async getHistory(): Promise<HistoryPage> {
+        this.historyCalls.push(undefined);
+        return { messages: album, hasOlder: true };
+      }
+    }
+    const store = new MemoryStore();
+    store.messages = album.filter(({ id }) => id !== 101115);
+    const transport = new CachedChannelTransport();
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+
+    await engine.selectChat(channelPeer.id);
+
+    await vi.waitFor(() =>
+      expect(engine.snapshot().messages.map(({ id }) => id)).toEqual([
+        101114, 101115, 101116, 101117,
+      ]),
+    );
+    expect(transport.historyCalls).toEqual([undefined]);
+    expect(store.messages.map(({ id }) => id).sort((left, right) => left - right)).toEqual([
+      101114, 101115, 101116, 101117,
+    ]);
+    await engine.stop();
+  });
+
   it('keeps a partial cached conversation eligible for older-history requests', async () => {
     const store = new MemoryStore();
     store.messages = Array.from({ length: 30 }, (_, index) => ({
@@ -2684,6 +2732,29 @@ describe('MessagingEngine', () => {
     expect(await first).toBe(blob);
     expect(await second).toBe(blob);
     expect(await engine.downloadMedia(message)).toBe(blob);
+    expect(transport.downloadMediaCalls).toBe(1);
+  });
+
+  it('forwards interactive download progress and does not retry a cancelled transfer', async () => {
+    const progress = Object.assign(vi.fn(), { isCanceled: false });
+    class CancelledMediaTransport extends FakeTransport {
+      override async downloadMedia(
+        _message: TelegramMessage,
+        options?: TelegramDownloadOptions,
+      ): Promise<Blob> {
+        this.downloadMediaCalls += 1;
+        options?.progress?.(0.25);
+        progress.isCanceled = true;
+        throw new Error('cancelled');
+      }
+    }
+    const transport = new CancelledMediaTransport();
+    const engine = new MessagingEngine(transport, new MemoryStore());
+
+    await expect(engine.downloadMedia(dialog.topMessage!, { progress })).rejects.toThrow(
+      'cancelled',
+    );
+    expect(progress).toHaveBeenCalledWith(0.25);
     expect(transport.downloadMediaCalls).toBe(1);
   });
 
@@ -3503,6 +3574,54 @@ describe('MessagingEngine', () => {
     await engine.stop();
   });
 
+  it('persists and publishes messages recovered while refreshing expired album media', async () => {
+    const album = [101114, 101115, 101116, 101117].map((id) => ({
+      ...dialog.topMessage!,
+      id,
+      groupedId: 'album:reported-gap',
+      text: `Album item ${id}`,
+      media: {
+        kind: 'video' as const,
+        name: `${id}.mp4`,
+        mimeType: 'video/mp4',
+        size: id,
+      },
+    }));
+    class ReportedAlbumGapTransport extends FakeTransport {
+      override async getHistory(): Promise<HistoryPage> {
+        return {
+          messages: album.filter(({ id }) => id !== 101115),
+          hasOlder: true,
+        };
+      }
+
+      override async downloadMedia(message: TelegramMessage) {
+        this.downloadMediaCalls += 1;
+        if (this.downloadMediaCalls === 1) throw new Error('expired file reference');
+        return new Blob([message.text]);
+      }
+
+      async getHistoryAround() {
+        return album;
+      }
+    }
+    const store = new MemoryStore();
+    const transport = new ReportedAlbumGapTransport();
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+    await engine.selectChat(peer.id);
+
+    await engine.downloadMedia(album[2]!);
+
+    expect(engine.snapshot().messages.map(({ id }) => id)).toEqual([
+      101114, 101115, 101116, 101117,
+    ]);
+    expect(store.messages.map(({ id }) => id).sort((left, right) => left - right)).toEqual([
+      101114, 101115, 101116, 101117,
+    ]);
+    await engine.stop();
+  });
+
   it('merges mark-read completion into newer dialog state', async () => {
     const read = deferred<void>();
     const readStarted = deferred<void>();
@@ -3872,6 +3991,79 @@ describe('MessagingEngine', () => {
 
     await vi.waitFor(() => expect(engine.snapshot().dialogs[0]?.channelPts).toBe(13));
     expect(store.messages.map(({ id }) => id).sort((left, right) => left - right)).toEqual([8, 9]);
+    await engine.stop();
+  });
+
+  it('does not let dialog metadata advance channel pts past an unapplied message', async () => {
+    const channelPeer: TelegramPeer = { id: 'c:1', kind: 'channel', accessHash: '1' };
+    const channelMessage = (id: number): TelegramMessage => ({
+      ...dialog.topMessage!,
+      id,
+      peerId: channelPeer.id,
+      groupedId: 'album:reported-gap',
+      text: `Channel message ${id}`,
+    });
+    const channelDialog: TelegramDialog = {
+      ...dialog,
+      peer: channelPeer,
+      channelPts: 106907,
+      topMessageId: 101113,
+      topMessage: channelMessage(101113),
+    };
+    class AheadDialogTransport extends FakeTransport {
+      dialogReads = 0;
+
+      override async getDialogs() {
+        return { dialogs: [channelDialog] };
+      }
+
+      async getDialog() {
+        this.dialogReads += 1;
+        return {
+          ...channelDialog,
+          channelPts: 106909,
+          topMessageId: 101115,
+          topMessage: channelMessage(101115),
+        };
+      }
+    }
+    const store = new MemoryStore();
+    const transport = new AheadDialogTransport();
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+    await engine.selectChat(channelPeer.id);
+
+    transport.emit({
+      type: 'new-message',
+      pts: 106908,
+      ptsCount: 1,
+      channelScoped: true,
+      message: channelMessage(101114),
+    });
+    await vi.waitFor(() => expect(transport.dialogReads).toBe(1));
+    expect(engine.snapshot().dialogs[0]?.channelPts).toBe(106908);
+
+    transport.emitBatch({
+      updates: [
+        { id: 101115, pts: 106909 },
+        { id: 101116, pts: 106910 },
+        { id: 101117, pts: 106911 },
+      ].map(({ id, pts }) => ({
+        type: 'new-message' as const,
+        pts,
+        ptsCount: 1,
+        channelScoped: true,
+        message: channelMessage(id),
+      })),
+    });
+
+    await vi.waitFor(() => expect(engine.snapshot().dialogs[0]?.channelPts).toBe(106911));
+    expect(
+      store.messages
+        .filter(({ peerId }) => peerId === channelPeer.id)
+        .map(({ id }) => id)
+        .sort((left, right) => left - right),
+    ).toEqual([101114, 101115, 101116, 101117]);
     await engine.stop();
   });
 
@@ -5892,6 +6084,23 @@ describe('MessagingEngine', () => {
 
     await expect(engine.downloadMedia(dialog.topMessage!)).resolves.toBeInstanceOf(Blob);
     expect(transport.downloadMediaCalls).toBe(1);
+  });
+
+  it('caches a lightweight media preview separately from the full attachment', async () => {
+    const store = new MemoryStore();
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, store);
+    const message = dialog.topMessage!;
+
+    await engine.downloadMedia(message, { preview: true });
+    await engine.downloadMedia(message);
+    expect(transport.downloadMediaCalls).toBe(2);
+    expect(store.blobs.has(`preview:${engine.mediaAssetKey(message)}`)).toBe(true);
+    expect(store.blobs.has(engine.mediaAssetKey(message))).toBe(true);
+
+    await engine.downloadMedia(message, { preview: true });
+    await engine.downloadMedia(message);
+    expect(transport.downloadMediaCalls).toBe(2);
   });
 
   it('returns downloaded media when the disposable cache write fails', async () => {

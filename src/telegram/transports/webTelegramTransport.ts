@@ -24,6 +24,7 @@ import type {
   TelegramCredentials,
   TelegramActivityKind,
   TelegramDialog,
+  TelegramDownloadOptions,
   TelegramLink,
   TelegramMessage,
   TelegramPeer,
@@ -1125,14 +1126,18 @@ function createWebTelegramTransportImplementation(
       updateBatches: toUpdateBatches(result, sentMessages),
     };
   }
-  async function downloadMedia(message: TelegramMessage) {
+  async function downloadMedia(message: TelegramMessage, options?: TelegramDownloadOptions) {
     const key = `${message.peerId}:${message.id}`;
     const media = state.linkPreviewPhotos.get(key) ?? state.messageMedia.get(key);
     if (!media) throw new Error('Media data is no longer in memory. Reopen the chat and retry.');
-    const bytes = await getClient().downloadMedia(media, { workers: 1 });
+    const bytes = await getClient().downloadMedia(media, {
+      workers: 1,
+      ...(options?.preview ? { sizeType: 'm' } : {}),
+      progressCallback: options?.progress,
+    });
     if (!bytes) throw new Error('Telegram returned no media bytes.');
     return new Blob([bytes as BlobPart], {
-      type: message.media?.mimeType || 'application/octet-stream',
+      type: options?.preview ? 'image/jpeg' : message.media?.mimeType || 'application/octet-stream',
     });
   }
   async function downloadAvatar(peer: TelegramPeer) {
@@ -2167,6 +2172,7 @@ function createWebTelegramTransportImplementation(
     const links = mapLinks(message.entities);
     const senderId = toPeerId(message.fromId) ?? (message.out ? 'self' : peerId);
     const sender = state.entities.get(senderId);
+    const peerEntity = state.entities.get(peerId);
     const senderName = entityTitle(sender);
     const keyboardBot = state.entities.get(
       message.viaBotId !== undefined ? `u:${message.viaBotId}` : senderId,
@@ -2183,6 +2189,10 @@ function createWebTelegramTransportImplementation(
       text: message.message,
       date: message.date,
       outgoing: Boolean(message.out),
+      protected: Boolean(
+        message.noforwards ||
+        ((Api.Chat.is(peerEntity) || Api.Channel.is(peerEntity)) && peerEntity.noforwards),
+      ),
       editedAt: message.editDate,
       groupedId: message.groupedId?.toString(),
       forwardedFrom: mapForwardedFrom(message.fwdFrom),
@@ -2217,10 +2227,29 @@ function createWebTelegramTransportImplementation(
       peerId;
     if (!name) return undefined;
     const messageId = header.channelPost ?? header.savedFromMsgId;
+    const entity = peerId ? state.entities.get(peerId) : undefined;
+    const avatar = peerId ? forwardedAvatar(peerId, entity) : undefined;
     return {
       name,
       ...(peerId ? { peerId } : {}),
       ...(messageId !== undefined ? { messageId } : {}),
+      ...avatar,
+    };
+  }
+  function forwardedAvatar(peerId: string, entity: Tl.TypeUser | Tl.TypeChat | undefined) {
+    const photo = Api.User.is(entity)
+      ? Api.UserProfilePhoto.is(entity.photo)
+        ? entity.photo
+        : undefined
+      : Api.Chat.is(entity) || Api.Channel.is(entity)
+        ? Api.ChatPhoto.is(entity.photo)
+          ? entity.photo
+          : undefined
+        : undefined;
+    return {
+      hasAvatar: Boolean(photo),
+      ...(photo ? { avatarId: photo.photoId.toString() } : {}),
+      color: peerColor(peerId, entity),
     };
   }
   function mapServiceAction(
@@ -3203,6 +3232,7 @@ function createWebTelegramTransportImplementation(
         name: `photo-${media.photo.id}.jpg`,
         mimeType: 'image/jpeg',
         cacheKey: `photo:${media.photo.id}`,
+        ...(media.spoiler ? { spoiler: true } : {}),
         ...(dimensions ? { width: dimensions.w, height: dimensions.h } : {}),
       };
     }
@@ -3268,6 +3298,7 @@ function createWebTelegramTransportImplementation(
           ? { duration: videoAttribute.duration }
           : {}),
       cacheKey: `document:${document.id}`,
+      ...(media.spoiler ? { spoiler: true } : {}),
     };
   }
   function entityMap(users: readonly Tl.TypeUser[], chats: readonly Tl.TypeChat[]) {

@@ -4,6 +4,7 @@ import type {
   TelegramMessage,
   TelegramPeer,
   TelegramSticker,
+  TelegramTransferProgress,
 } from '../../telegram/types';
 import { cachedAssetUrl, clearAssetUrls, loadAssetUrl, rememberAssetUrl } from './assetUrls';
 
@@ -12,7 +13,7 @@ const MAX_AVATAR_URLS = 256;
 export interface MediaAsset {
   readonly revision: string;
   cached(): string | undefined;
-  load(): Promise<string>;
+  load(progress?: TelegramTransferProgress): Promise<string>;
 }
 
 type MediaSource = Pick<
@@ -83,16 +84,28 @@ export class MediaAssets {
     return `${peerId}:${dialog?.avatarId ?? 'none'}`;
   }
 
-  private asset(revision: string, load: () => Promise<Blob>): MediaAsset {
+  private asset(
+    revision: string,
+    load: (progress?: TelegramTransferProgress) => Promise<Blob>,
+  ): MediaAsset {
     return {
       revision,
       cached: () => cachedAssetUrl(revision),
-      load: () => loadAssetUrl(revision, load),
+      load: (progress) => loadAssetUrl(revision, () => load(progress)),
     };
   }
 
   message(message: TelegramMessage) {
-    return this.asset(this.engine.mediaAssetKey(message), () => this.engine.downloadMedia(message));
+    return this.asset(this.engine.mediaAssetKey(message), (progress) =>
+      progress
+        ? this.engine.downloadMedia(message, { progress })
+        : this.engine.downloadMedia(message),
+    );
+  }
+
+  messagePreview(message: TelegramMessage) {
+    const revision = `preview:${this.engine.mediaAssetKey(message)}`;
+    return this.asset(revision, () => this.engine.downloadMedia(message, { preview: true }));
   }
 
   pending(peerId: string, messageId: string, blob: Blob) {
@@ -104,8 +117,8 @@ export class MediaAssets {
     return this.asset(`sticker:${sticker.id}`, () => this.engine.downloadSticker(sticker));
   }
 
-  loadMedia(message: TelegramMessage) {
-    return this.message(message).load();
+  loadMedia(message: TelegramMessage, progress?: TelegramTransferProgress) {
+    return this.message(message).load(progress);
   }
 
   loadSticker(sticker: TelegramSticker) {

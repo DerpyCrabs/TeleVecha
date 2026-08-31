@@ -194,7 +194,9 @@
   text-overflow: ellipsis;
 }
 .message-forwarded-from {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
   max-width: 100%;
   overflow: hidden;
   border: 0;
@@ -211,8 +213,26 @@
 .message-forwarded-from:not(:disabled) {
   cursor: pointer;
 }
-.message-forwarded-from:not(:disabled):hover span {
+.message-forwarded-from:not(:disabled):hover .message-forwarded-name {
   text-decoration: underline;
+}
+.message-forwarded-label,
+.message-forwarded-avatar {
+  flex: none;
+}
+.message-forwarded-avatar {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  line-height: 1;
+}
+.message-forwarded-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .message-forwarded-from:disabled {
   opacity: 1;
@@ -822,6 +842,7 @@
   transition: width 120ms linear;
 }
 .media-attachment {
+  position: relative;
   margin-top: 0.35rem;
   overflow: hidden;
   border-radius: 0.7rem;
@@ -864,7 +885,7 @@
   margin: 0.48rem 0.65rem 0.12rem;
 }
 .message-captioned-media > .message-forwarded-from {
-  margin: 0.48rem 0.65rem 0.12rem;
+  margin: 0.3rem 0.65rem;
 }
 .message-captioned-media > .message-author + .message-forwarded-from {
   margin-top: 0;
@@ -915,6 +936,7 @@
   object-fit: contain;
 }
 .media-visual {
+  position: relative;
   display: grid;
   width: 20rem;
   max-width: 100%;
@@ -925,6 +947,49 @@
   border-radius: 0.7rem;
   background: rgb(0 0 0 / 0.2);
   color: var(--muted);
+}
+.media-video-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  transform: translate(-50%, -50%);
+  place-items: center;
+  border-radius: 50%;
+  background: rgb(7 9 12 / 0.68);
+  color: #fff;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.45));
+  pointer-events: none;
+  backdrop-filter: blur(0.25rem);
+}
+.media-video-play > span {
+  width: 0;
+  height: 0;
+  transform: translateX(2px);
+  border-top: 0.48rem solid transparent;
+  border-bottom: 0.48rem solid transparent;
+  border-left: 0.78rem solid currentcolor;
+}
+.media-video-metadata {
+  position: absolute;
+  left: 0.4rem;
+  bottom: 0.4rem;
+  z-index: 2;
+  display: flex;
+  gap: 0.4rem;
+  border-radius: 999px;
+  background: rgb(7 9 12 / 0.68);
+  padding: 0.15rem 0.42rem;
+  color: #fff;
+  font-size: calc(0.72rem * var(--chat-font-scale, 1));
+  font-weight: 650;
+  line-height: 1.25;
+  text-shadow: 0 1px 2px #000;
+  pointer-events: none;
+  backdrop-filter: blur(0.25rem);
 }
 .media-round-video-visual {
   min-height: 10rem;
@@ -957,12 +1022,24 @@
   overflow: hidden;
   border-radius: 0.7rem;
   background: rgb(0 0 0 / 0.24);
+  container-type: inline-size;
 }
 .media-album-row {
   display: flex;
   width: 100%;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 2px;
+}
+.media-album[data-album-size='3'] .media-album-row:first-child {
+  height: 56.25cqw;
+}
+.media-album[data-album-size='3'] .media-album-row:last-child {
+  height: 28.125cqw;
+}
+.media-album[data-album-size='3'] .media-album-item {
+  height: auto;
+  flex-grow: 1 !important;
+  aspect-ratio: auto !important;
 }
 .media-album-item {
   position: relative;
@@ -1005,7 +1082,7 @@
   height: 100%;
   max-height: none;
   border-radius: 0;
-  object-fit: contain;
+  object-fit: cover;
 }
 .media-visual.media-previewable {
   cursor: zoom-in;
@@ -1019,7 +1096,7 @@
   inset: 0;
   z-index: 100;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   background: rgb(5 7 10 / 0.94);
   backdrop-filter: blur(12px);
   width: 100vw;
@@ -1040,6 +1117,12 @@
   min-width: 0;
   align-items: baseline;
   gap: 0.65rem;
+}
+.media-viewer-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
 }
 .media-viewer-title span {
   overflow: hidden;
@@ -1111,6 +1194,57 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+.media-viewer-content img {
+  touch-action: none;
+  transition: transform 140ms ease;
+  user-select: none;
+}
+.media-viewer-origin {
+  animation: media-viewer-open 180ms ease-out;
+}
+@keyframes media-viewer-open {
+  from {
+    opacity: 0.45;
+    transform: translate(var(--media-origin-x), var(--media-origin-y))
+      scale(var(--media-origin-scale));
+  }
+}
+.media-viewer-caption {
+  max-height: 28vh;
+  overflow: auto;
+  padding: 0.65rem 1rem max(0.75rem, env(safe-area-inset-bottom));
+  background: rgb(5 7 10 / 0.72);
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.media-viewer-menu {
+  position: fixed;
+  z-index: 2;
+  display: grid;
+  min-width: 10rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: #171a20;
+  box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 0.45);
+}
+.media-viewer-menu button {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: 0;
+  background: transparent;
+  padding: 0.62rem 0.75rem;
+  color: var(--text);
+  text-align: left;
+}
+.media-viewer-menu button:hover,
+.media-viewer-menu button:focus-visible {
+  background: rgb(255 255 255 / 0.07);
+}
+.media-viewer-menu button.danger {
+  color: #fca5a5;
 }
 .media-loading {
   display: grid;
@@ -1206,6 +1340,42 @@
   color: inherit;
   text-align: left;
   text-decoration: none;
+}
+.media-file-previewable {
+  padding-right: 3rem !important;
+  cursor: zoom-in;
+}
+.media-file-download {
+  position: absolute;
+  right: 0.65rem;
+  bottom: 0.65rem;
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+}
+.media-file-download:hover,
+.media-file-download:focus-visible {
+  background: rgb(255 255 255 / 0.08);
+}
+.media-spoiler {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border: 0;
+  border-radius: inherit;
+  background: rgb(22 25 31 / 0.82);
+  color: #fff;
+  font-weight: 650;
+  backdrop-filter: blur(1.2rem);
 }
 :is(button, a).media-file span,
 :is(button, a).media-file strong,

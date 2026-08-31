@@ -124,4 +124,28 @@ describe('layoutMessages', () => {
     expect(layout?.className).toContain('message-media-cropped');
     expect(layout?.width).toBe('min(12rem, 100%)');
   });
+
+  it('widens an extreme portrait bubble to fit a long caption like Telegram Desktop', () => {
+    const [layout] = layoutMessages(
+      [
+        message('1', {
+          body: 'A long caption that should determine the bubble width instead of the portrait aspect ratio.',
+          forwardedFrom: { name: 'A channel with a long title' },
+          media: {
+            kind: 'photo',
+            name: 'portrait.jpg',
+            mimeType: 'image/jpeg',
+            width: 100,
+            height: 1_000,
+          },
+        }),
+      ],
+      { ...chat, kind: 'user' },
+      [],
+    );
+
+    expect(layout?.className).toContain('message-media-cropped');
+    expect(layout?.className).toContain('message-captioned-media');
+    expect(layout?.width).toBe('min(24rem, 100%)');
+  });
 });
