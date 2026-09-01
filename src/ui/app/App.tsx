@@ -283,6 +283,7 @@ export function App(props: AppProps) {
     activePeerMatches() && activeConversation()?.peerId === activeChatId();
   const hasCachedWorkspace = () => snapshot().dialogs.length > 0;
   const canSend = () => online() && activeConversationReady();
+  const canQueueMessage = () => activeConversationReady();
 
   const visibleChats = createMemo<ChatSummary[]>((previous) => {
     const next = snapshot()
@@ -369,7 +370,7 @@ export function App(props: AppProps) {
     snapshot,
     activePeerId: activeChatId,
     activeDialog,
-    canSend,
+    canSend: canQueueMessage,
     beforeUiChange: () => {
       const scroller = messageScroller;
       if (!scroller) return;
@@ -1299,13 +1300,15 @@ export function App(props: AppProps) {
     if (message.media?.name) await navigator.clipboard.writeText(message.media.name);
   };
 
-  const connectionNotice = createMemo(() => {
+  const connectionStatus = createMemo(() => {
     const current = snapshot() as EngineSnapshot & { online?: boolean };
     if (!hasCachedWorkspace()) return '';
-    if (current.phase === 'error')
-      return `Offline. Showing cached data.${current.error ? ` ${current.error}` : ''}`;
-    if (current.phase === 'ready' && current.online === false)
-      return `Offline. Showing cached data.${current.error ? ` ${current.error}` : ''}`;
+    if (current.phase === 'connecting' || current.phase === 'syncing' || syncRetrying()) {
+      return 'Reconnecting…';
+    }
+    if (current.phase === 'error' || (current.phase === 'ready' && current.online === false)) {
+      return 'Offline';
+    }
     return '';
   });
   const readReceiptFailed = createMemo(() =>
@@ -1393,6 +1396,18 @@ export function App(props: AppProps) {
               </span>
             </div>
             <nav class="flex items-center gap-1">
+              <Show when={connectionStatus()}>
+                {(status) => (
+                  <button
+                    class="connection-state-chip"
+                    disabled={syncRetrying()}
+                    onClick={() => void retrySync()}
+                    aria-label={`${status()} Retry Telegram connection`}
+                  >
+                    {status()}
+                  </button>
+                )}
+              </Show>
               <button
                 class="icon-button"
                 onClick={() => setSearchOpen(true)}
@@ -1412,15 +1427,6 @@ export function App(props: AppProps) {
               </Show>
             </nav>
           </header>
-
-          <Show when={connectionNotice()}>
-            <div class="sync-state-banner" role="alert">
-              <span>{connectionNotice()}</span>
-              <button disabled={syncRetrying()} onClick={() => void retrySync()}>
-                {syncRetrying() ? 'Retrying…' : 'Retry'}
-              </button>
-            </div>
-          </Show>
 
           <Show when={snapshot().operationError}>
             {(message) => (
@@ -2159,7 +2165,7 @@ export function App(props: AppProps) {
           <ChatComposer
             conversationId={activeChatId()}
             placeholder={visibleReplyKeyboard()?.keyboard.placeholder}
-            enabled={canSend()}
+            enabled={canQueueMessage()}
             composer={composer}
             expressions={expressions}
             onGeometryChange={viewport.reconcileLayout}

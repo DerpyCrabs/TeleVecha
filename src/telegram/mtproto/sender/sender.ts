@@ -1198,7 +1198,6 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
         return;
       }
       connected = false;
-      events.emit(connectionStateEvent('disconnected'));
       void reconnect(createMtprotoError('transport', 'Telegram WebSocket disconnected.'));
     });
     await nextConnection.connect();
@@ -1285,9 +1284,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     if (userDisconnected || terminalError !== undefined) return;
     if (reconnecting) return reconnecting;
     clearPing();
-    const wasConnected = connected;
     connected = false;
-    if (wasConnected) events.emit(connectionStateEvent('disconnected'));
     const previousConnection = connection;
     connection = undefined;
     const generation = ++connectionGeneration;
@@ -1301,6 +1298,9 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
           settle(request, { error: lastError });
         }
         waiting.length = 0;
+        if (!userDisconnected && generation === connectionGeneration) {
+          events.emit(connectionStateEvent('disconnected'));
+        }
       }
     });
     const tracked = operation.finally(() => {

@@ -1289,6 +1289,75 @@ describe('MTProto sender failure recovery', () => {
     sender.disconnect();
   });
 
+  it('keeps a transient socket reconnect internal', async () => {
+    const connections: ReturnType<typeof connectionDouble>[] = [];
+    let releaseReconnect!: () => void;
+    const reconnectGate = new Promise<void>((resolve) => {
+      releaseReconnect = resolve;
+    });
+    const sender = createMtprotoSender(
+      senderOptions(
+        () => {
+          const connection = connectionDouble();
+          if (connections.length > 0) {
+            const openConnection = connection.connect.bind(connection);
+            connection.connect = async () => {
+              await reconnectGate;
+              await openConnection();
+            };
+          }
+          connections.push(connection);
+          return connection;
+        },
+        codecDouble(() => Uint8Array.of(1, 0, 0, 0)),
+      ),
+    );
+    const states: string[] = [];
+    sender.subscribe((event) => {
+      if (event._ === 'connectionState') states.push(event.state);
+    });
+
+    await sender.connect();
+    connections[0]!.disconnect();
+    await vi.waitFor(() => expect(connections).toHaveLength(2));
+    expect(states).toEqual(['connected']);
+
+    releaseReconnect();
+    await vi.waitFor(() => expect(sender.isConnected()).toBe(true));
+    expect(states).toEqual(['connected', 'connected']);
+    sender.disconnect();
+  });
+
+  it('reports disconnected only after reconnect attempts fail', async () => {
+    const connections: ReturnType<typeof connectionDouble>[] = [];
+    const sender = createMtprotoSender({
+      ...senderOptions(
+        () => {
+          const connection = connectionDouble();
+          if (connections.length > 0) {
+            connection.connect = async () => {
+              throw new Error('reconnect failed');
+            };
+          }
+          connections.push(connection);
+          return connection;
+        },
+        codecDouble(() => Uint8Array.of(1, 0, 0, 0)),
+      ),
+      reconnect: { retries: 1, delayMs: 0 },
+    });
+    const states: string[] = [];
+    sender.subscribe((event) => {
+      if (event._ === 'connectionState') states.push(event.state);
+    });
+
+    await sender.connect();
+    connections[0]!.disconnect();
+    await vi.waitFor(() => expect(states).toEqual(['connected', 'disconnected']));
+    expect(connections).toHaveLength(3);
+    sender.disconnect();
+  });
+
   it('scopes invoke-after dependencies to one outgoing batch', async () => {
     const encodedNames: string[] = [];
     const sender = createMtprotoSender(
