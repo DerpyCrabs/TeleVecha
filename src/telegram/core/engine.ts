@@ -1973,16 +1973,26 @@ export class MessagingEngine {
     const generation = this.lifecycleGeneration;
     const accountId = pending.accountId;
     let delivery: Promise<void> | undefined;
+    this.patch({ pending: [...this.snapshotValue.pending, pending] });
     const reservation = this.pendingQueue.queueWrite(peer.id, async () => {
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
-      await this.reserveDraftSend(pending, text, draftVersion);
+      try {
+        await this.reserveDraftSend(pending, text, draftVersion);
+      } catch (error) {
+        if (this.isPendingOperationCurrent(generation, accountId)) {
+          this.patch({
+            pending: this.snapshotValue.pending.filter(({ id }) => id !== pending.id),
+          });
+        }
+        throw error;
+      }
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
       const drafts =
         this.snapshotValue.drafts[peer.id] === text &&
         (this.draftVersions.get(peer.id) ?? 0) === draftVersion
           ? { ...this.snapshotValue.drafts, [peer.id]: '' }
           : this.snapshotValue.drafts;
-      this.patch({ drafts, pending: [...this.snapshotValue.pending, pending] });
+      this.patch({ drafts });
       if (this.canDeliver(pending)) delivery = this.deliver(pending);
     });
 

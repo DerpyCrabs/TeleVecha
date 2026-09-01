@@ -3376,6 +3376,38 @@ describe('MessagingEngine', () => {
     await engine.stop();
   });
 
+  it('shows a pending message before its durable reservation finishes', async () => {
+    const reservationStarted = deferred<void>();
+    const releaseReservation = deferred<void>();
+    class HoldingStore extends MemoryStore {
+      override async commitOutbox(sends: PendingSend | PendingSend[], draft?: DraftReservation) {
+        if (draft) {
+          reservationStarted.resolve();
+          await releaseReservation.promise;
+        }
+        await super.commitOutbox(sends, draft);
+      }
+    }
+    const store = new HoldingStore();
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+    await engine.selectChat(peer.id);
+    await engine.setDraft(peer.id, 'Visible immediately');
+
+    const sending = engine.sendDraft(peer, 'Visible immediately');
+    await reservationStarted.promise;
+
+    expect(engine.snapshot().pending).toEqual([
+      expect.objectContaining({ peer, text: 'Visible immediately', attempts: 0 }),
+    ]);
+    expect(store.outbox).toEqual([]);
+
+    releaseReservation.resolve();
+    await sending;
+    await engine.stop();
+  });
+
   it('does not enqueue the same draft twice when send is triggered concurrently', async () => {
     const store = new MemoryStore();
     const transport = new FakeTransport();
