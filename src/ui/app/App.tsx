@@ -34,6 +34,7 @@ import { telegramPeerColor } from '../../domain/peerColor';
 import type { Conversation } from '../../telegram/core/conversation';
 import type {
   EngineSnapshot,
+  PendingSend,
   TelegramMessage,
   TelegramPeer,
   SharedMediaKind,
@@ -286,10 +287,18 @@ export function App(props: AppProps) {
   const canQueueMessage = () => activeConversationReady();
 
   const visibleChats = createMemo<ChatSummary[]>((previous) => {
-    const next = snapshot()
-      .dialogs.filter((dialog) => !dialog.transient)
+    const current = snapshot();
+    const latestPendingByPeer = new Map<string, PendingSend>();
+    for (const pending of current.pending) {
+      const latest = latestPendingByPeer.get(pending.peer.id);
+      if (!latest || pending.createdAt >= latest.createdAt) {
+        latestPendingByPeer.set(pending.peer.id, pending);
+      }
+    }
+    const next = current.dialogs
+      .filter((dialog) => !dialog.transient)
       .map((dialog) => {
-        const value = presentDialog(dialog);
+        const value = presentDialog(dialog, latestPendingByPeer.get(dialog.peer.id));
         return stableView(dialogViews, dialog.peer.id, value);
       });
     return reuseArray(previous, next) as ChatSummary[];

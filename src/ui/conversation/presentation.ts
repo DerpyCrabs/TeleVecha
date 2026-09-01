@@ -1,6 +1,11 @@
 import type { ChatMessage, ChatSummary } from '../../domain/models';
 import { richBlocksToPlainText } from '../../domain/messageText';
-import type { PendingAttachment, TelegramDialog, TelegramMessage } from '../../telegram/types';
+import type {
+  PendingAttachment,
+  PendingSend,
+  TelegramDialog,
+  TelegramMessage,
+} from '../../telegram/types';
 
 function formatMessageTime(timestamp: number) {
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(
@@ -8,9 +13,7 @@ function formatMessageTime(timestamp: number) {
   );
 }
 
-function mediaPreview(message: TelegramMessage) {
-  const media = message.media;
-  if (!media) return '';
+function mediaPreview(media: NonNullable<ChatMessage['media']>) {
   const labels: Record<NonNullable<TelegramMessage['media']>['kind'], string> = {
     photo: 'Photo',
     video: 'Video',
@@ -27,7 +30,7 @@ export function dialogMessagePreview(message: TelegramMessage) {
   const text = message.text.trim();
   if (text) return text;
   if (message.service?.text) return message.service.text;
-  const media = mediaPreview(message);
+  const media = message.media ? mediaPreview(message.media) : '';
   if (media) return media;
   if (message.richMessage) {
     return richBlocksToPlainText(message.richMessage.blocks).split('\n').find(Boolean) ?? 'Message';
@@ -57,20 +60,34 @@ export function presentPendingAttachment(
   };
 }
 
-export function presentDialog(dialog: TelegramDialog): ChatSummary {
+function pendingSendPreview(send: PendingSend) {
+  const text = send.text.trim();
+  if (text) return text;
+  if (send.sticker) return 'Sticker';
+  const attachment = send.attachment ?? send.album?.attachments[0];
+  return attachment ? mediaPreview(presentPendingAttachment(attachment)) : 'Message';
+}
+
+export function presentDialog(dialog: TelegramDialog, pending?: PendingSend): ChatSummary {
   const topMessage = dialog.topMessage;
   return {
     id: dialog.peer.id,
     title: dialog.title,
     initials: dialog.initials,
     color: dialog.color,
-    preview: topMessage
-      ? dialogMessagePreview(topMessage)
-      : dialog.topMessageId > 0
-        ? 'Message'
-        : 'No messages yet',
-    time: topMessage ? formatMessageTime(topMessage.date) : '',
-    ...(topMessage?.outgoing
+    preview: pending
+      ? pendingSendPreview(pending)
+      : topMessage
+        ? dialogMessagePreview(topMessage)
+        : dialog.topMessageId > 0
+          ? 'Message'
+          : 'No messages yet',
+    time: pending
+      ? formatMessageTime(Math.floor(pending.createdAt / 1000))
+      : topMessage
+        ? formatMessageTime(topMessage.date)
+        : '',
+    ...(!pending && topMessage?.outgoing
       ? {
           lastMessageStatus:
             topMessage.id <= dialog.readOutboxMaxId ? ('read' as const) : ('sent' as const),

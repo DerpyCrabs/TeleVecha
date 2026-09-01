@@ -933,6 +933,40 @@ describe('TabCoordinator', () => {
     }
   });
 
+  it('does not block dialog navigation behind an unrelated slow operation', async () => {
+    installBrowserFakes();
+    const slow = deferred<void>();
+    const openConversation = vi.fn(() => Promise.resolve());
+    const refreshUpdates = vi.fn(() => slow.promise);
+    const value = { ...snapshot(), activePeerId: 'peer-1' };
+    const target = coordinator();
+    const internals = target as unknown as CoordinatorInternals;
+    internals.owner = {
+      engine: ownerEngine(
+        {
+          openConversation,
+          refreshUpdates,
+          setActiveConversationVisibility: vi.fn(() => Promise.resolve()),
+        },
+        value,
+      ),
+    };
+    await target.client.openConversation('peer-1');
+
+    const refreshing = target.client.refreshUpdates();
+    const switching = target.client.openConversation('peer-2');
+
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(openConversation).toHaveBeenCalledWith('peer-2', false);
+    } finally {
+      slow.resolve();
+      await Promise.all([refreshing, switching]);
+      await target.stop();
+    }
+  });
+
   it('does not serialize independent media downloads behind commands or each other', async () => {
     installBrowserFakes();
     const command = deferred<void>();

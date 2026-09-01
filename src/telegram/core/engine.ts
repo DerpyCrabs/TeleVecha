@@ -544,6 +544,7 @@ export class MessagingEngine {
           phase: 'idle',
           sync: 'stale',
           online: false,
+          pending: [],
           activePeerId: undefined,
           loadingMessages: false,
           loadingOlderMessages: false,
@@ -4281,6 +4282,7 @@ export class MessagingEngine {
     const generation = this.lifecycleGeneration;
     const accountId = pending.accountId;
     let delivery: Promise<void> | undefined;
+    this.patch({ pending: [...this.snapshotValue.pending, pending] });
     const operation = this.pendingQueue.queueWrite(pending.peer.id, async () => {
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
       try {
@@ -4289,12 +4291,14 @@ export class MessagingEngine {
         );
       } catch (error) {
         if (this.isPendingOperationCurrent(generation, accountId)) {
+          this.patch({
+            pending: this.snapshotValue.pending.filter(({ id }) => id !== pending.id),
+          });
           this.fail('cache', 'The message could not be saved to the send queue.', error, false);
         }
         throw error;
       }
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
-      this.patch({ pending: [...this.snapshotValue.pending, pending] });
       if (this.canDeliver(pending)) delivery = this.deliver(pending);
     });
     return this.trackLifecycleTask(
@@ -4321,6 +4325,7 @@ export class MessagingEngine {
     const accountId = pending[0]!.accountId;
     const peerId = pending[0]!.peer.id;
     let deliveries: Promise<void>[] = [];
+    this.patch({ pending: [...this.snapshotValue.pending, ...pending] });
     const operation = this.pendingQueue.queueWrite(peerId, async () => {
       if (!this.isPendingOperationCurrent(generation, accountId)) return;
       try {
@@ -4332,6 +4337,10 @@ export class MessagingEngine {
         );
       } catch (error) {
         if (this.isPendingOperationCurrent(generation, accountId)) {
+          const failedIds = new Set(pending.map(({ id }) => id));
+          this.patch({
+            pending: this.snapshotValue.pending.filter(({ id }) => !failedIds.has(id)),
+          });
           this.fail('cache', 'The messages could not be saved to the send queue.', error, false);
         }
         throw error;
@@ -4346,7 +4355,7 @@ export class MessagingEngine {
       ) {
         drafts = { ...drafts, [draftReservation.peerId]: '' };
       }
-      this.patch({ drafts, pending: [...this.snapshotValue.pending, ...pending] });
+      this.patch({ drafts });
       deliveries = pending
         .filter((send) => this.canDeliver(send))
         .map((send) => this.deliver(send));

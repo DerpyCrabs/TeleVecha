@@ -127,8 +127,7 @@ const viewMutationMethods = new Set([
 
 // These operations must not wait behind a slow network mutation. In particular,
 // a draft typed while an edit is saving must become canonical promptly, and a
-// newer chat selection must be able to supersede a slow message jump. Ordinary
-// conversation opens stay serialized so failover restoration cannot race a send.
+// newer chat selection must be able to supersede any in-flight request.
 const concurrentMethods = new Set([
   'downloadAvatar',
   'downloadCustomEmoji',
@@ -245,6 +244,7 @@ export class TabCoordinator {
   private readonly resourceListeners = new Set<(event: TelegramResourceInvalidation) => void>();
   private readonly pending = new Map<string, PendingRequest>();
   private readonly coalescedOperations = new Map<string, Promise<unknown>>();
+  private readonly conversationOpens = new Map<string, Promise<void>>();
   private readonly activeRequests = new Set<string>();
   private readonly completedRequests = new Map<string, { result?: unknown; error?: string }>();
   private readonly queuedStateClients = new Set<string>();
@@ -827,13 +827,22 @@ export class TabCoordinator {
     }
     if (this.activeRequests.has(requestKey)) return;
     this.activeRequests.add(requestKey);
+    if (request.method === 'openConversation') {
+      const work = this.handleRequest(request, requestKey);
+      const tracked = work.finally(() => this.activeRequests.delete(requestKey));
+      this.trackConversationOpen(request.from, tracked);
+      return;
+    }
     if (concurrentMethods.has(request.method)) {
       void this.handleRequest(request, requestKey).finally(() =>
         this.activeRequests.delete(requestKey),
       );
       return;
     }
-    const work = this.operationTail.then(() => this.handleRequest(request, requestKey));
+    const conversationOpen = this.conversationOpens.get(request.from) ?? Promise.resolve();
+    const work = this.operationTail
+      .then(() => conversationOpen)
+      .then(() => this.handleRequest(request, requestKey));
     const tracked = work.finally(() => this.activeRequests.delete(requestKey));
     this.operationTail = tracked.then(
       () => undefined,
@@ -976,12 +985,18 @@ export class TabCoordinator {
     }
     const activePeerId = this.snapshotValue.activePeerId;
     if (this.owner) {
+      if (method === 'openConversation') {
+        const operation = this.invokeOwner(this.clientId, method, args, activePeerId);
+        this.trackConversationOpen(this.clientId, operation);
+        return operation;
+      }
       if (concurrentMethods.has(method)) {
         return this.invokeOwner(this.clientId, method, args, activePeerId);
       }
-      const operation = this.operationTail.then(() =>
-        this.invokeOwner(this.clientId, method, args, activePeerId),
-      );
+      const conversationOpen = this.conversationOpens.get(this.clientId) ?? Promise.resolve();
+      const operation = this.operationTail
+        .then(() => conversationOpen)
+        .then(() => this.invokeOwner(this.clientId, method, args, activePeerId));
       this.operationTail = operation.then(
         () => undefined,
         () => undefined,
@@ -1006,6 +1021,19 @@ export class TabCoordinator {
         args,
         activePeerId,
       });
+    });
+  }
+
+  private trackConversationOpen(clientId: string, operation: Promise<unknown>) {
+    const settled = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.conversationOpens.set(clientId, settled);
+    void settled.finally(() => {
+      if (this.conversationOpens.get(clientId) === settled) {
+        this.conversationOpens.delete(clientId);
+      }
     });
   }
 

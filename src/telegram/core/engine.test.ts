@@ -2122,6 +2122,43 @@ describe('MessagingEngine', () => {
     await engine.stop();
   });
 
+  it('shows a pending attachment before its durable reservation finishes', async () => {
+    const reservationStarted = deferred<void>();
+    const releaseReservation = deferred<void>();
+    class SlowReservationStore extends MemoryStore {
+      override async commitOutbox(sends: PendingSend | PendingSend[], draft?: DraftReservation) {
+        reservationStarted.resolve(undefined);
+        await releaseReservation.promise;
+        await super.commitOutbox(sends, draft);
+      }
+    }
+    const store = new SlowReservationStore();
+    const transport = new FakeTransport();
+    const engine = new MessagingEngine(transport, store);
+    await engine.start(credentials);
+
+    const sending = engine.sendAttachments(
+      peer,
+      [{ file: new File(['report'], 'report.txt', { type: 'text/plain' }), sendAs: 'file' }],
+      'Pending report',
+    );
+    await reservationStarted.promise;
+
+    try {
+      expect(engine.snapshot().pending).toEqual([
+        expect.objectContaining({
+          peer,
+          text: 'Pending report',
+          attachment: expect.objectContaining({ name: 'report.txt' }),
+        }),
+      ]);
+    } finally {
+      releaseReservation.resolve(undefined);
+      await sending;
+      await engine.stop();
+    }
+  });
+
   it('preserves newer typing queued behind an attachment reservation', async () => {
     const reservationStarted = deferred<void>();
     const releaseReservation = deferred<void>();
