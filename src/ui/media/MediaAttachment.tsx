@@ -36,7 +36,14 @@ export interface MediaPreview {
 }
 
 export function MediaAttachment(props: MediaAttachmentProps) {
-  const [url, setUrl] = createSignal(props.cachedPreviewUrl?.() ?? props.cachedUrl?.() ?? '');
+  const presentation = () => mediaPresentation(props.media);
+  const usesLightweightPreview = () =>
+    Boolean(props.loadPreview) && presentation().display !== 'image';
+  const cachedDisplayUrl = () =>
+    props.cachedUrl?.() ??
+    (usesLightweightPreview() ? props.cachedPreviewUrl?.() : undefined) ??
+    '';
+  const [url, setUrl] = createSignal(cachedDisplayUrl());
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
   const [previewOpen, setPreviewOpen] = createSignal(false);
@@ -65,7 +72,6 @@ export function MediaAttachment(props: MediaAttachmentProps) {
     onCleanup(() => observer.disconnect());
   });
 
-  const presentation = () => mediaPresentation(props.media);
   const isImage = () => presentation().display === 'image';
   const isVideo = () => presentation().display === 'video';
   const isRoundVideo = () => presentation().display === 'round-video';
@@ -98,7 +104,7 @@ export function MediaAttachment(props: MediaAttachmentProps) {
     if (existing) return existing;
     if (untrack(loading)) return undefined;
     const currentGeneration = generation;
-    const loader = props.loadPreview ?? props.load;
+    const loader = usesLightweightPreview() ? props.loadPreview! : props.load;
     const progress = Object.assign(
       (value: number) => {
         if (generation === currentGeneration) setDownloadProgress(value);
@@ -128,7 +134,7 @@ export function MediaAttachment(props: MediaAttachmentProps) {
   };
 
   const loadOriginal = async () => {
-    if (!props.loadPreview) return url() || (await load());
+    if (!usesLightweightPreview()) return url() || (await load());
     const progress = Object.assign((value: number) => setDownloadProgress(value), {
       isCanceled: false,
     });
@@ -152,7 +158,7 @@ export function MediaAttachment(props: MediaAttachmentProps) {
 
   createEffect(() => {
     const identity = `${props.revision ?? ''}:${props.media.cacheKey ?? ''}:${props.media.kind}:${props.media.name}:${props.media.mimeType}`;
-    const cached = untrack(() => props.cachedPreviewUrl?.() ?? props.cachedUrl?.() ?? '');
+    const cached = untrack(cachedDisplayUrl);
     const shouldLoad = presentation().preload;
     void identity;
     generation += 1;

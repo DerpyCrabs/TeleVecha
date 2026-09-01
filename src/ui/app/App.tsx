@@ -72,7 +72,7 @@ import { presentDialog, presentMessage } from '../conversation/presentation';
 import { MediaAttachment, type MediaPreview } from '../media/MediaAttachment';
 import { MediaAssets, type MediaAsset } from '../media/mediaAssets';
 import { MediaViewer } from '../media/MediaViewer';
-import { copyImageUrl, saveMediaUrl } from '../media/mediaActions';
+import { saveMediaUrl } from '../media/mediaActions';
 import { mediaPresentation } from '../media/mediaPresentation';
 import { Avatar } from '../shared/Avatar';
 import { modalVisible } from '../shared/focusScope';
@@ -132,38 +132,6 @@ function stableView<T extends object>(cache: Map<string, StoredView<T>>, key: st
 
 function runInBackground(task: Promise<unknown>) {
   void task.catch(() => undefined);
-}
-
-function messageLayoutRevision(messages: TelegramMessage[]) {
-  return JSON.stringify(
-    messages.map(
-      ({
-        id,
-        text,
-        editedAt,
-        groupedId,
-        replyToId,
-        replyQuote,
-        service,
-        media,
-        formats,
-        richMessage,
-        botKeyboard,
-      }) => ({
-        id,
-        text,
-        editedAt,
-        groupedId,
-        replyToId,
-        replyQuote,
-        service,
-        media,
-        formats,
-        richMessage,
-        botKeyboard,
-      }),
-    ),
-  );
 }
 
 interface AppProps {
@@ -483,13 +451,6 @@ export function App(props: AppProps) {
   const activeMessageEntries = createMemo<KeyedMessageView[]>(() => {
     return presentConversation(snapshot(), activeChatId());
   });
-  createEffect(
-    on(
-      () => messageLayoutRevision(snapshot().messages),
-      () => setMessageContextMenu(undefined),
-      { defer: true },
-    ),
-  );
   const activeMessages = createMemo(() => activeMessageEntries().map(({ message }) => message));
   const pendingSendForMessage = (messageId: string) =>
     snapshot().pending.find(
@@ -540,11 +501,20 @@ export function App(props: AppProps) {
     }
     return reuseArray(previous, next) as ChatMessage[];
   }, []);
-  const messageLayouts = createMemo(
-    (previous: ReturnType<typeof layoutMessages>) =>
-      layoutMessages(renderedMessages(), activeChat(), snapshot().dialogs, previous),
-    [],
-  );
+  const messageRows = createMemo<{
+    messages: ChatMessage[];
+    layouts: ReturnType<typeof layoutMessages>;
+    layoutByMessage: Map<ChatMessage, ReturnType<typeof layoutMessages>[number]>;
+  }>((previous) => {
+    const messages = renderedMessages();
+    const layouts = layoutMessages(messages, activeChat(), snapshot().dialogs, previous?.layouts);
+    if (previous?.messages === messages && previous.layouts === layouts) return previous;
+    return {
+      messages,
+      layouts,
+      layoutByMessage: new Map(messages.map((message, index) => [message, layouts[index]!])),
+    };
+  });
   const conversationHeader = createConversationHeaderSession({
     snapshot,
     chat: activeChat,
@@ -1258,6 +1228,7 @@ export function App(props: AppProps) {
 
   const openMessageActions = (message: ChatMessage, event: MouseEvent) => {
     if (message.service || !Number.isSafeInteger(Number(message.id))) return;
+    if (event.target instanceof HTMLImageElement) return;
     event.preventDefault();
     event.stopPropagation();
     expressions.close();
@@ -1279,6 +1250,21 @@ export function App(props: AppProps) {
     const menu = messageContextMenu();
     return menu ? renderedMessages().find(({ id }) => id === menu.messageId) : undefined;
   });
+  const editLastMessage = () => {
+    const message = renderedMessages()
+      .slice()
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.outgoing &&
+          !candidate.service &&
+          Boolean(candidate.body || candidate.media) &&
+          Number.isSafeInteger(Number(candidate.id)),
+      );
+    if (!message) return false;
+    composer.beginEdit(message);
+    return true;
+  };
   const copyMessageText = async (message: ChatMessage) => {
     const text = messageTextForClipboard(message);
     setMessageContextMenu(undefined);
@@ -1290,19 +1276,6 @@ export function App(props: AppProps) {
     const asset = mediaAssetFor(message.id);
     if (!asset) return;
     saveMediaUrl(asset.cached() ?? (await asset.load()), message.media.name);
-  };
-  const copyMessageImage = async (message: ChatMessage) => {
-    setMessageContextMenu(undefined);
-    if (
-      !message.media ||
-      message.protected ||
-      mediaPresentation(message.media).preview !== 'image'
-    ) {
-      return;
-    }
-    const asset = mediaAssetFor(message.id);
-    if (!asset) return;
-    await copyImageUrl(asset.cached() ?? (await asset.load()));
   };
   const copyMediaFilename = async (message: ChatMessage) => {
     setMessageContextMenu(undefined);
@@ -1563,7 +1536,7 @@ export function App(props: AppProps) {
                   </div>
                 </Show>
                 <For
-                  each={renderedMessages()}
+                  each={messageRows().messages}
                   fallback={
                     <Show
                       when={
@@ -1589,10 +1562,12 @@ export function App(props: AppProps) {
                 >
                   {(message, index) => {
                     const absoluteIndex = index;
-                    const layout = () => messageLayouts()[absoluteIndex()]!;
+                    const layout = () =>
+                      messageRows().layoutByMessage.get(message) ??
+                      layoutMessages([message], activeChat(), snapshot().dialogs)[0]!;
                     const compactAfter = () =>
-                      messageLayouts()
-                        .slice(absoluteIndex() + 1)
+                      messageRows()
+                        .layouts.slice(absoluteIndex() + 1)
                         .find((candidate) => !candidate.hide)
                         ?.className.includes('message-same-sender') ?? false;
                     return (
@@ -2036,17 +2011,6 @@ export function App(props: AppProps) {
                               <Copy size={15} /> Save media as
                             </button>
                           </Show>
-                          <Show
-                            when={
-                              target().media &&
-                              !target().protected &&
-                              mediaPresentation(target().media!).preview === 'image'
-                            }
-                          >
-                            <button role="menuitem" onClick={() => void copyMessageImage(target())}>
-                              <Copy size={15} /> Copy image
-                            </button>
-                          </Show>
                           <Show when={target().media?.kind === 'file'}>
                             <button
                               role="menuitem"
@@ -2177,6 +2141,7 @@ export function App(props: AppProps) {
             enabled={canQueueMessage()}
             composer={composer}
             expressions={expressions}
+            editLastMessage={editLastMessage}
             onGeometryChange={viewport.reconcileLayout}
             media={{
               loadSticker: (sticker) => mediaAssets.loadSticker(sticker),

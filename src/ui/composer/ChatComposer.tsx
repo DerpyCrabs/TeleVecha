@@ -27,6 +27,7 @@ interface ChatComposerProps {
   placeholder?: string | undefined;
   composer: ComposerSession;
   expressions: ExpressionSession;
+  editLastMessage?: (() => boolean) | undefined;
   onGeometryChange?: (() => void) | undefined;
   media: {
     loadSticker(sticker: TelegramSticker): Promise<string>;
@@ -406,6 +407,36 @@ export function ChatComposer(props: ChatComposerProps) {
               props.onGeometryChange?.();
             }}
             onKeyDown={(event) => {
+              if (event.key === 'Escape' && props.composer.editing()) {
+                event.preventDefault();
+                event.stopPropagation();
+                props.composer.cancelEdit();
+                return;
+              }
+              if (event.key === 'Escape' && props.composer.reply()) {
+                event.preventDefault();
+                event.stopPropagation();
+                props.composer.clearReply();
+                props.composer.focus();
+                return;
+              }
+              if (
+                event.key === 'ArrowUp' &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.shiftKey &&
+                !event.isComposing &&
+                event.keyCode !== 229 &&
+                props.composer.draft().length === 0 &&
+                props.composer.attachments().length === 0 &&
+                !props.composer.reply() &&
+                !props.composer.editing() &&
+                props.editLastMessage?.()
+              ) {
+                event.preventDefault();
+                return;
+              }
               if (
                 event.key === 'Enter' &&
                 !event.shiftKey &&

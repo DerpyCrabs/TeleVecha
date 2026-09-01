@@ -376,6 +376,7 @@ test('loads a video thumbnail without downloading the full video until preview o
 }) => {
   await openReady(page);
   await selectAlice(page);
+  await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
   const before = await page.evaluate(() => ({
     preview: window.__televechaFixture?.stats.downloadMediaPreview ?? 0,
     full: window.__televechaFixture?.stats.downloadMediaFull ?? 0,
@@ -420,4 +421,44 @@ test('loads a video thumbnail without downloading the full video until preview o
   await expect
     .poll(() => page.evaluate(() => window.__televechaFixture?.stats.downloadMediaFull ?? 0))
     .toBe(before.full + 1);
+});
+
+test('loads the original photo instead of a Telegram thumbnail', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
+  const before = await page.evaluate(() => ({
+    preview: window.__televechaFixture?.stats.downloadMediaPreview ?? 0,
+    full: window.__televechaFixture?.stats.downloadMediaFull ?? 0,
+  }));
+
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 92,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: '',
+        date: 1_700_005_001,
+        outgoing: false,
+        media: {
+          kind: 'photo',
+          name: 'full-resolution.jpg',
+          mimeType: 'image/jpeg',
+          width: 1920,
+          height: 1080,
+        },
+      },
+    }),
+  );
+
+  await expect(page.getByRole('img', { name: 'full-resolution.jpg' })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture?.stats.downloadMediaFull ?? 0))
+    .toBeGreaterThan(before.full);
+  expect(
+    await page.evaluate(() => window.__televechaFixture?.stats.downloadMediaPreview ?? 0),
+  ).toBe(before.preview);
 });

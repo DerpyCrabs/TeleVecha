@@ -146,6 +146,7 @@ test('previews image documents directly from shared files with message actions',
 test('loads shared-video thumbnails without downloading the original file', async ({ page }) => {
   await openReady(page, '/?scenario=shared-video');
   await selectAlice(page);
+  await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
   const before = await fixtureStats(page);
 
   await page.getByRole('button', { name: /^Videos/u }).click();

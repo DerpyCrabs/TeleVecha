@@ -7,18 +7,15 @@ test.beforeEach(async ({ page }) => {
   await selectAlice(page);
 });
 
-test('opens message actions from image content', async ({ page }) => {
+test('allows the native context menu on image content', async ({ page }) => {
   const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
   await expect(image).toBeVisible();
 
   const inlineAllowed = await image.evaluate((element) =>
     element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })),
   );
-  expect(inlineAllowed).toBe(false);
-  await expect(page.getByRole('menu', { name: 'Message actions' })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: 'Save media as' })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: 'Copy image' })).toBeVisible();
-  await page.keyboard.press('Escape');
+  expect(inlineAllowed).toBe(true);
+  await expect(page.getByRole('menu', { name: 'Message actions' })).toHaveCount(0);
 
   await image.click();
   const preview = page.getByRole('dialog', { name: /Media preview:/ }).getByRole('img');
@@ -26,8 +23,8 @@ test('opens message actions from image content', async ({ page }) => {
   const previewAllowed = await preview.evaluate((element) =>
     element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })),
   );
-  expect(previewAllowed).toBe(false);
-  await expect(page.getByRole('menu', { name: 'Media actions' })).toBeVisible();
+  expect(previewAllowed).toBe(true);
+  await expect(page.getByRole('menu', { name: 'Media actions' })).toHaveCount(0);
 });
 
 test('copies regular and rich message text from the context menu', async ({ page, context }) => {
@@ -54,6 +51,16 @@ test('copies regular and rich message text from the context menu', async ({ page
         'More\nNested content',
       ].join('\n\n'),
     );
+});
+
+test('focuses the composer when editing from a message menu', async ({ page }) => {
+  await page.locator('article[data-message-id="80"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+
+  const input = page.getByRole('textbox', { name: 'Message' });
+  await expect(page.getByTestId('composer-edit')).toBeVisible();
+  await expect(input).toHaveValue('Newest message from fixture');
+  await expect(input).toBeFocused();
 });
 
 test('pins and unpins a message and exposes the pinned-message bar', async ({ page }) => {

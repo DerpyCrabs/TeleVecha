@@ -1,6 +1,5 @@
 import ChevronLeft from 'lucide-solid/icons/chevron-left';
 import ChevronRight from 'lucide-solid/icons/chevron-right';
-import Copy from 'lucide-solid/icons/copy';
 import Download from 'lucide-solid/icons/download';
 import ExternalLink from 'lucide-solid/icons/external-link';
 import Forward from 'lucide-solid/icons/forward';
@@ -11,7 +10,7 @@ import { Show, createSignal } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
 import { useModalDialog } from '../shared/useModalDialog';
-import { copyImageUrl, saveMediaUrl } from './mediaActions';
+import { saveMediaUrl } from './mediaActions';
 
 function mediaDimensions(element: HTMLImageElement | HTMLVideoElement) {
   return element instanceof HTMLImageElement
@@ -228,7 +227,6 @@ export function MediaViewer(props: MediaViewerProps) {
                 });
               }}
               onPointerUp={() => (drag = undefined)}
-              onContextMenu={openContextMenu}
             />
           ) : (
             <video
@@ -273,11 +271,6 @@ export function MediaViewer(props: MediaViewerProps) {
               <Show when={canExport() && props.download}>
                 <button role="menuitem" onClick={download}>
                   <Download size={15} /> Save media as
-                </button>
-              </Show>
-              <Show when={canExport() && props.kind === 'image'}>
-                <button role="menuitem" onClick={() => void copyImageUrl(props.url)}>
-                  <Copy size={15} /> Copy image
                 </button>
               </Show>
               <Show when={canExport() && props.forward}>

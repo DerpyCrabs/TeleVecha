@@ -354,6 +354,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     focusComposer();
   };
   const beginEdit = (message: ChatMessage) => {
+    options.beforeUiChange();
     if (!editing()) {
       rememberAttachments(options.activePeerId(), attachments());
       editRestore = {
@@ -368,8 +369,10 @@ export function createComposerSession(options: ComposerSessionOptions) {
     setEditing(message);
     setDraft(message.body);
     setFormats(message.formats ? [...message.formats] : []);
+    focusComposer();
   };
   const cancelEdit = () => {
+    options.beforeUiChange();
     const restore = editRestore;
     editRestore = undefined;
     setEditing(undefined);
@@ -377,6 +380,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     setFormats(restore?.formats ?? []);
     setAttachments(cloneAttachments(restore?.attachments ?? []));
     if (restore) rememberAttachments(restore.peerId, restore.attachments);
+    focusComposer();
   };
   const reset = () => {
     stopTyping();

@@ -342,6 +342,55 @@ test('loads older messages automatically at the top and preserves the scroll anc
     .toBeLessThan(3);
 });
 
+test('renders a prepended channel history page without losing its message layouts', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/?scenario=long-channel-history');
+  await expect(page.getByTestId('chat-list')).toBeVisible();
+  await expect(page.getByText('Fetching current chats')).toHaveCount(0);
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Release Channel/ })
+    .click();
+  const scroller = page.getByTestId('message-scroller');
+  await expect(scroller.getByText('Channel history message 100', { exact: true })).toBeVisible();
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Alice Fixture/ })
+    .click();
+  await expect(scroller.getByText('Newest message from fixture', { exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const fixture = window.__televechaFixture;
+    if (!fixture) throw new Error('Fixture transport is unavailable');
+    for (let id = 101; id <= 103; id += 1) {
+      fixture.emit({
+        type: 'new-message',
+        pts: 10 + id,
+        ptsCount: 1,
+        channelScoped: true,
+        message: {
+          id,
+          peerId: 'c:202',
+          senderId: 'u:404',
+          senderName: 'Release Author',
+          text: `Channel history message ${id}`,
+          date: 1_700_000_000 + id,
+          outgoing: false,
+        },
+      });
+    }
+  });
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Release Channel/ })
+    .click();
+
+  await expect(scroller.getByText('Channel history message 100', { exact: true })).toBeAttached();
+  expect(pageErrors).toEqual([]);
+});
+
 test('shows a chat scrollbar and jumps back to the present', async ({ page }) => {
   const scroller = page.getByTestId('message-scroller');
   await expect(page.getByRole('button', { name: 'Jump to present' })).toHaveCount(0);

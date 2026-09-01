@@ -182,7 +182,7 @@ test('reports and cancels an attachment download', async ({ page }) => {
   ).toBeEnabled();
 });
 
-test('loads photo previews and stores the lightweight blob in IndexedDB', async ({ page }) => {
+test('loads original photos and stores the full blob in IndexedDB', async ({ page }) => {
   await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
   expect((await fixtureStats(page))?.downloadMedia).toBe(2);
 
@@ -199,11 +199,15 @@ test('loads photo previews and stores the lightweight blob in IndexedDB', async 
           lookup.onsuccess = () => resolve(lookup.result);
           lookup.onerror = () => reject(lookup.error);
         });
-        const value = records.find((record) => record.key.startsWith('preview:media:u:101:78:'));
-        return value?.blob.size ?? 0;
+        const original = records.find((record) => record.key.startsWith('media:u:101:78:'));
+        const preview = records.find((record) => record.key.startsWith('preview:media:u:101:78:'));
+        return {
+          hasOriginal: Boolean(original?.blob.size),
+          hasPreview: Boolean(preview?.blob.size),
+        };
       }),
     )
-    .toBeGreaterThan(0);
+    .toEqual({ hasOriginal: true, hasPreview: false });
 });
 
 test('renders a single photo with one media canvas instead of nested containers', async ({
@@ -248,6 +252,10 @@ test('renders a single photo with one media canvas instead of nested containers'
       background: messageStyle.backgroundColor,
       border: messageStyle.borderWidth,
       padding: messageStyle.padding,
+      messageTopRightRadius: messageStyle.borderTopRightRadius,
+      mediaTopRightRadius: getComputedStyle(
+        element.querySelector<HTMLElement>('.media-attachment')!,
+      ).borderTopRightRadius,
       message: {
         top: messageRect.top,
         right: messageRect.right,
@@ -276,6 +284,7 @@ test('renders a single photo with one media canvas instead of nested containers'
   expect(styles.background).not.toBe('rgba(0, 0, 0, 0)');
   expect(styles.border).toBe('0px');
   expect(styles.padding).toBe('0px');
+  expect(styles.mediaTopRightRadius).toBe(styles.messageTopRightRadius);
   expect(styles.visual.top).toBeCloseTo(styles.message.top, 0);
   expect(styles.visual.right).toBeCloseTo(styles.message.right, 0);
   expect(styles.visual.left).toBeCloseTo(styles.message.left, 0);
@@ -487,7 +496,7 @@ test('opens photo and video attachments in a fullscreen viewer', async ({ page }
   const fullscreenPhoto = photoViewer.getByRole('img', { name: 'fixture.jpg' });
   await expect(fullscreenPhoto).toBeVisible();
   await expect(photoViewer.getByRole('button', { name: 'Close media preview' })).toBeFocused();
-  expect((await fixtureStats(page))?.downloadMediaFull).toBe(fullDownloadsBefore + 1);
+  expect((await fixtureStats(page))?.downloadMediaFull).toBe(fullDownloadsBefore);
   await fullscreenPhoto.click({ position: { x: 160, y: 90 } });
   await expect(photoViewer).toBeVisible();
   const viewerContent = photoViewer.locator('.media-viewer-content');

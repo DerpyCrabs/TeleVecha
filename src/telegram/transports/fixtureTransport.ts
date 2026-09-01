@@ -566,7 +566,18 @@ export class FixtureTelegramTransport implements TelegramTransport {
       });
       this.releasePendingHistory = undefined;
     }
-    const history = messages.get(peer.id) ?? [];
+    const history =
+      this.scenario === 'long-channel-history' && peer.id === peers[1]!.id
+        ? Array.from({ length: 100 }, (_, index): TelegramMessage => ({
+            id: index + 1,
+            peerId: peer.id,
+            senderId: `u:${index % 3}`,
+            senderName: `Channel author ${index % 3}`,
+            text: `Channel history message ${index + 1}`,
+            date: 1_700_000_000 + index,
+            outgoing: false,
+          }))
+        : (messages.get(peer.id) ?? []);
     const eligible = beforeMessageId ? history.filter(({ id }) => id < beforeMessageId) : history;
     const pageLimit =
       this.scenario === 'single-message-first-page' &&
@@ -596,7 +607,9 @@ export class FixtureTelegramTransport implements TelegramTransport {
         : page;
     return {
       messages: renderedPage,
-      hasOlder: ['long-history', 'delayed-history-media'].includes(this.scenario)
+      hasOlder: ['long-history', 'long-channel-history', 'delayed-history-media'].includes(
+        this.scenario,
+      )
         ? page.length > 0
         : eligible.length > page.length,
       nextBeforeMessageId: page[0]?.id ?? beforeMessageId,

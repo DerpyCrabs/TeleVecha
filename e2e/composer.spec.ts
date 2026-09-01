@@ -46,6 +46,26 @@ test('centers the single-line composer label with its controls', async ({ page }
   expect(Math.abs(sendCenter - controlCenter)).toBeLessThan(1);
 });
 
+test('edits the latest outgoing message with Up from an empty composer', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message' });
+
+  await input.fill('Keep this draft');
+  await input.press('ArrowUp');
+  await expect(page.getByTestId('composer-edit')).toHaveCount(0);
+  await expect(input).toHaveValue('Keep this draft');
+
+  await input.clear();
+  await input.press('ArrowUp');
+  await expect(page.getByTestId('composer-edit')).toBeVisible();
+  await expect(input).toHaveValue('Newest message from fixture');
+  await expect(input).toBeFocused();
+
+  await input.press('Escape');
+  await expect(page.getByTestId('composer-edit')).toHaveCount(0);
+  await expect(input).toHaveValue('');
+  await expect(input).toBeFocused();
+});
+
 test('grows multiline drafts, caps their height, and collapses after clearing', async ({
   page,
 }) => {

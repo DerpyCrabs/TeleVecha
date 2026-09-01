@@ -194,7 +194,7 @@ test('removes deleted messages from the open conversation', async ({ page }) => 
   await expect(page.locator('article[data-message-id="79"]')).toHaveCount(0);
 });
 
-test('closes the message context menu when messages change', async ({ page }) => {
+test('keeps a message menu through updates until its target disappears', async ({ page }) => {
   const menu = page.getByRole('menu', { name: 'Message actions' });
   const target = page.locator('article[data-message-id="80"]');
 
@@ -215,10 +215,8 @@ test('closes the message context menu when messages change', async ({ page }) =>
       },
     }),
   );
-  await expect(menu).toHaveCount(0);
-
-  await target.click({ button: 'right' });
   await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Reply' })).toBeFocused();
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'edit-message',
@@ -235,17 +233,15 @@ test('closes the message context menu when messages change', async ({ page }) =>
       },
     }),
   );
-  await expect(menu).toHaveCount(0);
-
-  await target.click({ button: 'right' });
   await expect(menu).toBeVisible();
+  await expect(target).toContainText('Edited while the context menu was open');
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'delete-messages',
       pts: 13,
       ptsCount: 1,
       peerId: 'u:101',
-      messageIds: [79],
+      messageIds: [80],
     }),
   );
   await expect(menu).toHaveCount(0);

@@ -885,7 +885,9 @@
   width: 100%;
   max-width: none;
   margin: 0;
-  border-radius: 0.72rem 0.72rem 0 0;
+  border-radius: inherit;
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
 }
 .message-captioned-media > .media-attachment .media-visual {
   width: 100%;
