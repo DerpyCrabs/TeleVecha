@@ -79,6 +79,7 @@ export type WebTelegramTransportDependencies = Readonly<{
   readVideoMetadata?: (file: File) => Promise<{ duration: number; width: number; height: number }>;
   optionalEnrichmentDeadlineMs?: number;
   createClient?: typeof createMtprotoClient;
+  isPageActive?: () => boolean;
 }>;
 
 export type WebTelegramTransport = {
@@ -107,6 +108,9 @@ function createWebTelegramTransportImplementation(
 ): WebTelegramTransport {
   const optionalEnrichmentDeadlineMs =
     dependencies.optionalEnrichmentDeadlineMs ?? OPTIONAL_ENRICHMENT_DEADLINE_MS;
+  const isPageActive =
+    dependencies.isPageActive ??
+    (() => document.visibilityState === 'visible' && document.hasFocus());
   if (!Number.isFinite(optionalEnrichmentDeadlineMs) || optionalEnrichmentDeadlineMs < 0) {
     throw new RangeError('Optional Telegram enrichment deadline must be non-negative.');
   }
@@ -1710,6 +1714,10 @@ function createWebTelegramTransportImplementation(
     state.connectionLossTimer = setTimeout(() => {
       state.connectionLossTimer = undefined;
       if (generation !== state.connectionGeneration || state.client !== client) return;
+      if (!isPageActive()) {
+        scheduleConnectionLoss(client, generation);
+        return;
+      }
       const batch: TransportUpdateBatch = {
         updates: [{ type: 'connection-state', connected: false }],
       };

@@ -17,7 +17,7 @@ function transport(dependencies: WebTelegramTransportDependencies = {}) {
       loadTransportSession: async () => undefined,
       saveTransportSession: async () => undefined,
     },
-    dependencies,
+    { isPageActive: () => true, ...dependencies },
   );
 }
 
@@ -478,6 +478,68 @@ describe('web Telegram transport mapping', () => {
     vi.advanceTimersByTime(1_000);
     handler?.(connectionStateEvent('connected'));
     vi.advanceTimersByTime(5_000);
+
+    expect(received).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it('defers connection loss while the page is inactive', () => {
+    vi.useFakeTimers();
+    let pageActive = false;
+    const target = transport({ isPageActive: () => pageActive });
+    let handler: ((update: unknown) => void) | undefined;
+    const client = {
+      invoke: vi.fn(),
+      subscribe: (callback: unknown) => {
+        handler = callback as (update: unknown) => void;
+      },
+    };
+    const internals = target as unknown as {
+      client: unknown;
+      connectionGeneration: number;
+      installEventHandler(client: unknown, generation: number): void;
+    };
+    const received: TransportUpdate[] = [];
+    target.subscribe((batch) => received.push(...batch.updates));
+    internals.connectionGeneration = 1;
+    internals.client = client;
+    internals.installEventHandler(client, 1);
+
+    handler?.(connectionStateEvent('disconnected'));
+    vi.advanceTimersByTime(15_000);
+    expect(received).toEqual([]);
+
+    pageActive = true;
+    vi.advanceTimersByTime(5_000);
+    expect(received).toEqual([{ type: 'connection-state', connected: false }]);
+    vi.useRealTimers();
+  });
+
+  it('drops a deferred background connection loss after reconnecting', () => {
+    vi.useFakeTimers();
+    const target = transport({ isPageActive: () => false });
+    let handler: ((update: unknown) => void) | undefined;
+    const client = {
+      invoke: vi.fn(),
+      subscribe: (callback: unknown) => {
+        handler = callback as (update: unknown) => void;
+      },
+    };
+    const internals = target as unknown as {
+      client: unknown;
+      connectionGeneration: number;
+      installEventHandler(client: unknown, generation: number): void;
+    };
+    const received: TransportUpdate[] = [];
+    target.subscribe((batch) => received.push(...batch.updates));
+    internals.connectionGeneration = 1;
+    internals.client = client;
+    internals.installEventHandler(client, 1);
+
+    handler?.(connectionStateEvent('disconnected'));
+    vi.advanceTimersByTime(10_000);
+    handler?.(connectionStateEvent('connected'));
+    vi.advanceTimersByTime(10_000);
 
     expect(received).toEqual([]);
     vi.useRealTimers();
