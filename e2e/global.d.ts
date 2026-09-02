@@ -3,8 +3,8 @@ declare module 'node:fs/promises' {
 }
 
 interface Window {
-  __televechaReproBundle?: import('../src/debug/reproFormat').ReproBundleV1;
-  __televechaReproStatus?: import('../src/debug/reproRuntime').ReproStatus;
+  __televechaTvBugBundle?: import('../src/debug/tvbugFormat').TvBugBundleV2;
+  __televechaTvBugStatus?: import('../src/debug/tvbugRuntime').TvBugStatus;
   __televechaRuntimes?: Map<
     string,
     {

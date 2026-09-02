@@ -27,7 +27,6 @@ import {
 } from 'solid-js';
 import { createStore, reconcile, type SetStoreFunction } from 'solid-js/store';
 
-import { completeReproReplay, waitForReproSequence } from '../../debug/reproRuntime';
 import type { ChatMessage, ChatSummary } from '../../domain/models';
 import { messageTextForClipboard } from '../../domain/messageText';
 import { telegramPeerColor } from '../../domain/peerColor';
@@ -221,7 +220,6 @@ export function App(props: AppProps) {
   let selectionGeneration = 0;
   let conversationRetryGeneration = 0;
   let openMessageGeneration = 0;
-  let replaySelectionsStarted = false;
   let viewport!: ReturnType<typeof createConversationViewport>;
   let history!: ReturnType<typeof createConversationHistorySession>;
 
@@ -236,7 +234,6 @@ export function App(props: AppProps) {
     setSettingsOpen(true);
     if (!telegramWallpapers().length && !appearanceCatalogLoading()) {
       // Loading the export UI must not become part of the bug being exported.
-      environment.runtime.debugReports?.ignoreNextTransportCall?.('getWallpapers');
       void appearanceSession.loadCatalog();
     }
   };
@@ -569,7 +566,7 @@ export function App(props: AppProps) {
     linkedOpenGeneration?: number,
     urlMode: 'push' | 'replace' | 'none' = 'push',
   ) => {
-    if (!environment.replay) {
+    if (!environment.tvbug) {
       environment.runtime.debugReports?.recordPeerSelection?.(id);
     }
     if (linkedOpenGeneration === undefined) {
@@ -1066,42 +1063,7 @@ export function App(props: AppProps) {
         }
         initialUrlPeerId = undefined;
         if (target) {
-          const initialSelection = selectChat(target, undefined, 'replace');
-          if (environment.replay && !replaySelectionsStarted) {
-            replaySelectionsStarted = true;
-            runInBackground(
-              initialSelection.then(async () => {
-                for (const action of environment.replayUiActions ?? []) {
-                  await waitForReproSequence(action.afterSequence);
-                  if (!engine.snapshot().dialogs.some(({ peer }) => peer.id === action.peerId)) {
-                    continue;
-                  }
-                  if (activeChatId() !== action.peerId) await selectChat(action.peerId);
-                  if (action.type === 'select-chat') continue;
-                  if (action.type === 'composer-reply') {
-                    await nextFrame();
-                    const message = renderedMessages().find(
-                      ({ id }) => Number(id) === action.messageId,
-                    );
-                    const element = messageScroller?.querySelector<HTMLElement>(
-                      `article[data-message-id="${CSS.escape(String(action.messageId))}"]`,
-                    );
-                    if (message && element) composer.beginReply(message, element);
-                    await nextFrame();
-                    continue;
-                  }
-                  composer.replaceDraft(action.text);
-                  await nextFrame();
-                  await composer.send();
-                }
-                completeReproReplay();
-              }),
-            );
-          } else {
-            runInBackground(initialSelection);
-          }
-        } else if (environment.replay && next.phase === 'ready') {
-          completeReproReplay();
+          runInBackground(selectChat(target, undefined, 'replace'));
         }
       }
     });

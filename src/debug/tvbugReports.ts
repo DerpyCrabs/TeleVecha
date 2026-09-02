@@ -1,26 +1,28 @@
 import {
-  createReproManifest,
-  createReproSanitizer,
+  createTvBugManifest,
+  createTvBugSanitizer,
   createTvBugBundle,
-  type ReproStateSourceV1,
-  type ReproTimelineEventV1,
-} from './reproFormat';
-import type { ReproTransportEvent, ReproTransportEventSink } from './reproTransport';
+  type TvBugStateSourceV2,
+  type TvBugTraceEventV2,
+} from './tvbugFormat';
 import { subscribeDiagnostics } from '../telegram/core/diagnostics';
 import type { MessagingClient } from '../telegram/core/client';
 import type { CacheCheckpoint, IndexedDbCacheStore } from '../telegram/persistence/store';
-import type { TelegramTransport } from '../telegram/types';
-import { createRecordingTelegramTransport } from './reproTransport';
+import type { EngineSnapshot, PendingSend, TelegramDialog } from '../telegram/types';
 import { readThemePreferences } from '../ui/theme/themePreferences';
+import packageMetadata from '../../package.json';
 
-const MAX_TIMELINE_EVENTS = 100_000;
-const MAX_DIAGNOSTIC_EVENTS = 2_000;
+const MAX_TRACE_EVENTS = 300;
+const MAX_DIAGNOSTIC_EVENTS = 200;
+const MAX_DIALOGS = 250;
+const MAX_ACTIVE_MESSAGES = 500;
+const MAX_PENDING_SENDS = 100;
 const REPORT_MIME_TYPE = 'application/vnd.televecha.tvbug+zip';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'televecha:left-sidebar-width';
 const DETAILS_OPEN_STORAGE_KEY = 'televecha:details-open';
 
-interface StoredTimelineEvent {
-  event: ReproTimelineEventV1;
+interface StoredTraceEvent {
+  event: Omit<TvBugTraceEventV2, 'value'> & { value?: unknown };
   order: number;
 }
 
@@ -28,7 +30,7 @@ export interface DebugReportPreview {
   compressedBytes: number;
   diagnosticCount: number;
   messageCount: number;
-  timelineCount: number;
+  traceCount: number;
   truncated: boolean;
 }
 
@@ -45,52 +47,27 @@ export class BrowserDebugReportRecorder {
   private readonly startedAt = performance.now();
   private readonly sourceEpochMs = Math.floor(Date.now() / 1_000) * 1_000;
   private bootstrapActivePeerId = currentUrlPeerId();
-  private readonly sanitizer = createReproSanitizer({ sourceEpochMs: this.sourceEpochMs });
-  private readonly checkpoint: Promise<CacheCheckpoint>;
-  private readonly timeline: StoredTimelineEvent[] = [];
+  private readonly sanitizer = createTvBugSanitizer({ sourceEpochMs: this.sourceEpochMs });
+  private readonly trace: StoredTraceEvent[] = [];
   private diagnosticCount = 0;
-  private transportGeneration = 0;
   private order = 0;
   private truncated = false;
   private engine: MessagingClient | undefined;
-  private readonly ignoredTransportCalls = new Map<string, number>();
 
-  constructor(store: IndexedDbCacheStore) {
-    this.checkpoint = store.captureCheckpoint().catch(() => {
-      this.truncated = true;
-      return emptyCheckpoint();
-    });
+  constructor(private readonly store: IndexedDbCacheStore) {
     subscribeDiagnostics((diagnostic) => {
-      if (this.diagnosticCount >= MAX_DIAGNOSTIC_EVENTS) {
-        this.truncated = true;
-        return;
-      }
-      try {
-        this.append({
-          seq: 0,
-          tMs: this.elapsed(),
-          kind: 'diagnostic',
-          method: diagnostic.area,
-          value: this.sanitizer.sanitizeValue(
-            {
-              level: diagnostic.level,
-              message: diagnostic.message,
-              details: diagnostic.details,
-            },
-            'diagnostic',
-          ),
-        });
-        this.diagnosticCount += 1;
-      } catch {
-        this.append({
-          seq: 0,
-          tMs: this.elapsed(),
-          kind: 'diagnostic',
-          method: diagnostic.area,
-          value: { level: diagnostic.level, message: 'redacted' },
-        });
-        this.diagnosticCount += 1;
-      }
+      this.append({
+        seq: 0,
+        tMs: this.elapsed(),
+        kind: 'diagnostic',
+        method: diagnostic.area,
+        value: {
+          ...(diagnostic.code ? { code: diagnostic.code } : {}),
+          level: diagnostic.level,
+          message: diagnostic.message,
+          details: diagnostic.details,
+        },
+      });
     });
   }
 
@@ -105,7 +82,7 @@ export class BrowserDebugReportRecorder {
       tMs: this.elapsed(),
       kind: 'ui',
       method: 'select-chat',
-      value: { peerId: this.sanitizer.alias(peerAliasCategory(peerId), peerId) },
+      value: { peerId },
     });
   }
 
@@ -115,7 +92,7 @@ export class BrowserDebugReportRecorder {
       tMs: this.elapsed(),
       kind: 'ui',
       method: 'composer-reply',
-      value: this.sanitizer.sanitizeValue({ peerId, messageId }, 'ui.composer-reply'),
+      value: { peerId, messageId },
     });
   }
 
@@ -125,7 +102,7 @@ export class BrowserDebugReportRecorder {
       tMs: this.elapsed(),
       kind: 'ui',
       method: 'composer-send',
-      value: this.sanitizer.sanitizeValue({ peerId, text }, 'ui.composer-send'),
+      value: { peerId, text },
     });
   }
 
@@ -135,7 +112,7 @@ export class BrowserDebugReportRecorder {
       tMs: this.elapsed(),
       kind: 'ui',
       method: 'composer-focus',
-      value: this.sanitizer.sanitizeValue({ peerId, focused }, 'ui.composer-focus'),
+      value: { peerId, focused },
     });
   }
 
@@ -150,76 +127,80 @@ export class BrowserDebugReportRecorder {
       tMs: this.elapsed(),
       kind: 'ui',
       method: 'conversation-viewport',
-      value: this.sanitizer.sanitizeValue(
-        { peerId, phase, sample, ...geometry },
-        'ui.conversation-viewport',
-      ),
-    });
-  }
-
-  ignoreNextTransportCall(method: string) {
-    this.ignoredTransportCalls.set(method, (this.ignoredTransportCalls.get(method) ?? 0) + 1);
-  }
-
-  wrapTransport(transport: TelegramTransport): TelegramTransport {
-    const generation = `transport:${++this.transportGeneration}`;
-    const sink: ReproTransportEventSink = {
-      append: (event) => {
-        const callId = event.callId ? `${generation}:${event.callId}` : undefined;
-        this.append({
-          ...event,
-          seq: 0,
-          tMs: this.elapsed(),
-          ...(callId ? { callId } : {}),
-        });
-      },
-    };
-    return createRecordingTelegramTransport(transport, sink, {
-      sanitizer: this.sanitizer,
-      beforeInvoke: (method) =>
-        method === 'connect' ? this.checkpoint.then(() => undefined) : undefined,
-      onCaptureError: () => {
-        this.truncated = true;
-      },
-      shouldRecord: (method) => {
-        if (method === 'setTyping') return false;
-        const remaining = this.ignoredTransportCalls.get(method) ?? 0;
-        if (remaining === 0) return true;
-        if (remaining === 1) this.ignoredTransportCalls.delete(method);
-        else this.ignoredTransportCalls.set(method, remaining - 1);
-        return false;
-      },
+      value: { peerId, phase, sample, ...geometry },
     });
   }
 
   async prepare(): Promise<PreparedDebugReport> {
-    const checkpoint = await this.checkpoint;
+    const checkpoint = await this.store.captureCheckpoint().catch(() => {
+      this.truncated = true;
+      return emptyCheckpoint();
+    });
     const snapshot = this.engine?.snapshot();
-    const stateSource: ReproStateSourceV1 = {
+    const activePeerId = snapshot?.activePeerId ?? checkpoint.lastPeerId;
+    const sourceDialogs = snapshot?.dialogs ?? checkpoint.dialogs;
+    const sourcePending = snapshot?.pending ?? checkpoint.pending;
+    if (sourceDialogs.length > MAX_DIALOGS || sourcePending.length > MAX_PENDING_SENDS) {
+      this.truncated = true;
+    }
+    const dialogs = limitDialogs(sourceDialogs, activePeerId);
+    const messages = (
+      snapshot?.messages ??
+      checkpoint.messages.filter((message) => !activePeerId || message.peerId === activePeerId)
+    ).slice(-MAX_ACTIVE_MESSAGES);
+    if ((snapshot?.messages.length ?? checkpoint.messages.length) > messages.length) {
+      this.truncated = true;
+    }
+    const drafts = activePeerId
+      ? pickRecord(snapshot?.drafts ?? checkpoint.drafts, activePeerId)
+      : {};
+    const draftRevisions = activePeerId ? pickRecord(checkpoint.draftRevisions, activePeerId) : {};
+    const pending = limitPending(sourcePending);
+    const pinnedMessages =
+      activePeerId && snapshot
+        ? { [activePeerId]: { value: snapshot.pinnedMessages, savedAt: Date.now() } }
+        : activePeerId
+          ? pickRecord(checkpoint.pinnedMessages, activePeerId)
+          : {};
+    const groupMembers = activePeerId ? pickRecord(checkpoint.groupMembers, activePeerId) : {};
+    const stateSource: TvBugStateSourceV2 = {
       cursor: checkpoint.cursor,
       epoch: checkpoint.epoch,
       lastPeerId: checkpoint.lastPeerId,
-      dialogs: checkpoint.dialogs,
-      messages: checkpoint.messages,
-      drafts: checkpoint.drafts,
-      draftRevisions: checkpoint.draftRevisions,
-      pending: checkpoint.pending.map((pending) => ({ ...pending, accountId: undefined })),
-      pinnedMessages: checkpoint.pinnedMessages,
-      groupMembers: checkpoint.groupMembers,
+      dialogs,
+      messages,
+      drafts,
+      draftRevisions,
+      pending: pending.map((item) => ({ ...item, accountId: undefined })),
+      pinnedMessages,
+      groupMembers,
       workspace: {
+        activePeerId,
         phase: snapshot?.phase,
         sync: snapshot?.sync,
         online: snapshot?.online,
       },
+      runtime: snapshot ? compactRuntime(snapshot) : {},
       ui: captureUiState(snapshot?.activePeerId, this.bootstrapActivePeerId),
     };
     const state = this.sanitizer.sanitizeState(stateSource);
-    const timeline = this.timeline
+    const trace = this.trace
       .slice()
       .sort((left, right) => left.event.tMs - right.event.tMs || left.order - right.order)
-      .map(({ event }, index) => ({ ...event, seq: index + 1 }));
-    const manifest = createReproManifest({
-      producer: { appVersion: '0.1.0' },
+      .map(({ event: { value, ...event } }, index): TvBugTraceEventV2 => ({
+        ...event,
+        seq: index + 1,
+        ...(value !== undefined
+          ? { value: this.sanitizeTraceValue(value, event.kind, event.method) }
+          : {}),
+      }));
+    const manifest = createTvBugManifest({
+      producer: {
+        appVersion: packageMetadata.version,
+        ...(import.meta.env.VITE_TELEVECHA_COMMIT
+          ? { commit: import.meta.env.VITE_TELEVECHA_COMMIT }
+          : {}),
+      },
       capture: {
         durationMs: this.elapsed(),
         complete: !this.truncated,
@@ -228,7 +209,7 @@ export class BrowserDebugReportRecorder {
       },
       environment: captureEnvironment(),
     });
-    const bytes = createTvBugBundle({ manifest, state, timeline });
+    const bytes = createTvBugBundle({ manifest, snapshot: state, trace });
     const fingerprint = await shortDigest(bytes);
     const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
     const file = new File([ownedBuffer(bytes)], `televecha-${date}-${fingerprint}.tvbug`, {
@@ -240,23 +221,75 @@ export class BrowserDebugReportRecorder {
         compressedBytes: bytes.byteLength,
         diagnosticCount: this.diagnosticCount,
         messageCount: state.messages.length,
-        timelineCount: timeline.length,
+        traceCount: trace.length,
         truncated: this.truncated,
       },
     };
   }
 
-  private append(event: ReproTimelineEventV1 | ReproTransportEvent) {
-    if (this.timeline.length >= MAX_TIMELINE_EVENTS) {
-      this.truncated = true;
-      return;
+  private append(event: StoredTraceEvent['event']) {
+    if (event.kind === 'diagnostic' && this.diagnosticCount >= MAX_DIAGNOSTIC_EVENTS) {
+      const oldestDiagnostic = this.trace.findIndex((stored) => stored.event.kind === 'diagnostic');
+      if (oldestDiagnostic >= 0) {
+        this.trace.splice(oldestDiagnostic, 1);
+        this.diagnosticCount -= 1;
+        this.truncated = true;
+      }
     }
-    this.timeline.push({ event, order: ++this.order });
+    if (this.trace.length >= MAX_TRACE_EVENTS) {
+      const removed = this.trace.shift();
+      if (removed?.event.kind === 'diagnostic') this.diagnosticCount -= 1;
+      this.truncated = true;
+    }
+    this.trace.push({ event, order: ++this.order });
+    if (event.kind === 'diagnostic') this.diagnosticCount += 1;
+  }
+
+  private sanitizeTraceValue(value: unknown, kind: string, method?: string) {
+    try {
+      return this.sanitizer.sanitizeValue(value, `trace.${kind}.${method ?? 'event'}`) ?? null;
+    } catch {
+      return { level: 'error', message: 'redacted' };
+    }
   }
 
   private elapsed() {
     return Math.max(0, Math.round(performance.now() - this.startedAt));
   }
+}
+
+function compactRuntime(snapshot: EngineSnapshot) {
+  const { dialogs, messages, drafts, pending, pinnedMessages, authStep, ...runtime } = snapshot;
+  return {
+    ...runtime,
+    ...(authStep ? { loginStep: authStep } : {}),
+    dialogCount: dialogs.length,
+    activeMessageCount: messages.length,
+    draftCount: Object.values(drafts).filter(Boolean).length,
+    pendingCount: pending.length,
+    pinnedMessageCount: pinnedMessages.length,
+  };
+}
+
+function limitDialogs(dialogs: readonly TelegramDialog[], activePeerId?: string) {
+  if (dialogs.length <= MAX_DIALOGS) return dialogs;
+  const limited = dialogs.slice(0, MAX_DIALOGS);
+  const active = activePeerId && dialogs.find((dialog) => dialog.peer.id === activePeerId);
+  if (active && !limited.some((dialog) => dialog.peer.id === activePeerId)) {
+    limited[limited.length - 1] = active;
+  }
+  return limited;
+}
+
+function limitPending(pending: readonly PendingSend[]) {
+  if (pending.length <= MAX_PENDING_SENDS) return pending;
+  const failed = pending.filter((item) => item.lastError);
+  const healthy = pending.filter((item) => !item.lastError);
+  return [...failed, ...healthy].slice(0, MAX_PENDING_SENDS);
+}
+
+function pickRecord<T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> {
+  return key in record ? { [key]: record[key]! } : {};
 }
 
 function emptyCheckpoint(): CacheCheckpoint {
@@ -342,10 +375,6 @@ function wallpaperKind(value: string): 'none' | 'solid' | 'gradient' | 'pattern'
   if (value === 'graphite') return 'solid';
   if (value === 'custom' || value === 'telegram') return 'image';
   return 'gradient';
-}
-
-function peerAliasCategory(peerId: string) {
-  return peerId.startsWith('u:') ? 'u' : peerId.startsWith('g:') ? 'g' : 'c';
 }
 
 function readNumber(key: string) {

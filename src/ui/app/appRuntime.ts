@@ -1,8 +1,7 @@
 import { MessagingEngine } from '../../telegram/core/engine';
 import type { MessagingClient } from '../../telegram/core/client';
-import { BrowserDebugReportRecorder } from '../../debug/reproReports';
-import type { ReproBundleV1 } from '../../debug/reproFormat';
-import { createReproEngine, injectedReproBundle } from '../../debug/reproRuntime';
+import { BrowserDebugReportRecorder } from '../../debug/tvbugReports';
+import { createTvBugSnapshotClient, injectedTvBugBundle } from '../../debug/tvbugRuntime';
 import { IndexedDbCacheStore } from '../../telegram/persistence/store';
 import { TabCoordinator, type TabCoordinatorOwner } from '../../telegram/session/tabCoordinator';
 import { FixtureTelegramTransport } from '../../telegram/transports/fixtureTransport';
@@ -20,7 +19,7 @@ export interface PreparedDebugReport {
     compressedBytes: number;
     diagnosticCount: number;
     messageCount: number;
-    timelineCount: number;
+    traceCount: number;
     truncated: boolean;
   };
 }
@@ -37,13 +36,7 @@ export interface DebugReportModule {
     sample: number,
     geometry: { scrollTop: number; scrollHeight: number; clientHeight: number },
   ): void;
-  ignoreNextTransportCall?(method: string): void;
 }
-
-export type ReplayUiAction =
-  | { type: 'select-chat'; peerId: string; afterSequence: number }
-  | { type: 'composer-reply'; peerId: string; messageId: number; afterSequence: number }
-  | { type: 'composer-send'; peerId: string; text: string; afterSequence: number };
 
 interface ControlledRuntime extends AppRuntime {
   transport?: TelegramTransport | undefined;
@@ -53,8 +46,7 @@ export interface AppEnvironment {
   runtime: AppRuntime;
   credentials?: TelegramCredentials | undefined;
   configurationError?: string | undefined;
-  replay?: boolean | undefined;
-  replayUiActions?: readonly ReplayUiAction[] | undefined;
+  tvbug?: boolean | undefined;
 }
 
 function environmentCredentials(): TelegramCredentials | undefined {
@@ -109,8 +101,7 @@ function runtime(fixtureMode: boolean, fixtureScenario: string | null): Controll
       const sourceTransport: TelegramTransport = fixtureMode
         ? new FixtureTelegramTransport()
         : createWebTelegramTransport(store);
-      const recordedTransport = debugReports.wrapTransport(sourceTransport);
-      const engine = new MessagingEngine(recordedTransport, store, { manageTabLease: false });
+      const engine = new MessagingEngine(sourceTransport, store, { manageTabLease: false });
       debugReports.attachEngine(engine);
       return {
         engine,
@@ -129,40 +120,15 @@ function runtime(fixtureMode: boolean, fixtureScenario: string | null): Controll
 }
 
 export function defaultAppEnvironment(search = window.location.search): AppEnvironment {
-  const reproBundle = injectedReproBundle();
-  if (reproBundle) {
-    const root = globalThis as typeof globalThis & { __televechaReproRuntime?: AppRuntime };
-    const replayRuntime = (root.__televechaReproRuntime ??= {
-      engine: createReproEngine(reproBundle),
+  const tvbugBundle = injectedTvBugBundle();
+  if (tvbugBundle) {
+    const root = globalThis as typeof globalThis & { __televechaTvBugRuntime?: AppRuntime };
+    const tvbugRuntime = (root.__televechaTvBugRuntime ??= {
+      engine: createTvBugSnapshotClient(tvbugBundle),
     });
     return {
-      runtime: replayRuntime,
-      credentials: { apiId: 1, apiHash: 'offline-replay' },
-      replay: true,
-      replayUiActions: reproBundle.timeline.flatMap((event, index): ReplayUiAction[] => {
-        if (event.kind !== 'ui') return [];
-        if (!event.value || Array.isArray(event.value) || typeof event.value !== 'object')
-          return [];
-        const peerId = event.value.peerId;
-        if (typeof peerId !== 'string') return [];
-        const afterSequence = replayActionAfterSequence(reproBundle.timeline, index, peerId);
-        if (event.method === 'select-chat') {
-          return [{ type: 'select-chat', peerId, afterSequence }];
-        }
-        if (event.method === 'composer-reply') {
-          const messageId = event.value.messageId;
-          return typeof messageId === 'number' && Number.isSafeInteger(messageId)
-            ? [{ type: 'composer-reply', peerId, messageId, afterSequence }]
-            : [];
-        }
-        if (event.method === 'composer-send') {
-          const text = event.value.text;
-          return typeof text === 'string'
-            ? [{ type: 'composer-send', peerId, text, afterSequence }]
-            : [];
-        }
-        return [];
-      }),
+      runtime: tvbugRuntime,
+      tvbug: true,
     };
   }
   const fixtureMode = import.meta.env.VITE_TELEVECHA_E2E === '1';
@@ -175,34 +141,4 @@ export function defaultAppEnvironment(search = window.location.search): AppEnvir
       ? undefined
       : 'TeleVecha could not find VITE_TELEGRAM_API_ID and VITE_TELEGRAM_API_HASH.',
   };
-}
-
-export function replayActionAfterSequence(
-  timeline: ReproBundleV1['timeline'],
-  actionIndex: number,
-  peerId: string,
-) {
-  const transportKinds = new Set(['call', 'resolve', 'reject', 'push']);
-  for (let index = actionIndex + 1; index < timeline.length; index += 1) {
-    const event = timeline[index]!;
-    if (event.kind !== 'call' || !reproValueReferencesPeer(event.args, peerId)) continue;
-    for (let priorIndex = index - 1; priorIndex >= 0; priorIndex -= 1) {
-      const prior = timeline[priorIndex]!;
-      if (transportKinds.has(prior.kind)) return prior.seq;
-    }
-    return 0;
-  }
-  for (let index = actionIndex - 1; index >= 0; index -= 1) {
-    const event = timeline[index]!;
-    if (transportKinds.has(event.kind)) return event.seq;
-  }
-  return 0;
-}
-
-function reproValueReferencesPeer(value: unknown, peerId: string): boolean {
-  if (!value || typeof value !== 'object') return false;
-  if (Array.isArray(value)) return value.some((item) => reproValueReferencesPeer(item, peerId));
-  const record = value as Record<string, unknown>;
-  if (record.id === peerId || record.peerId === peerId) return true;
-  return Object.values(record).some((item) => reproValueReferencesPeer(item, peerId));
 }

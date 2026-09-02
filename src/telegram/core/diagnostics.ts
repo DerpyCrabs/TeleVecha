@@ -1,6 +1,7 @@
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface DiagnosticEvent {
+  code?: string;
   level: DiagnosticLevel;
   area: 'auth' | 'sync' | 'transport' | 'cache' | 'outbox';
   message: string;

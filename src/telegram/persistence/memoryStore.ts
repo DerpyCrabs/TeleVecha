@@ -36,15 +36,11 @@ export interface MemoryCacheStoreInitialState {
   blobs?: SeededMap<Blob> | undefined;
 }
 
-export interface MemoryCacheStoreOptions {
-  replay?: boolean | undefined;
-}
-
 /**
- * An isolated CacheStore for deterministic replay and tests.
+ * An isolated CacheStore for tests.
  *
  * The store clones values at its boundary, just as IndexedDB does. Callers can
- * mutate fixtures and loaded values without changing the replay's cached state.
+ * mutate fixtures and loaded values without changing the store's cached state.
  */
 export class MemoryCacheStore implements CacheStore {
   private transportSession: unknown;
@@ -60,14 +56,8 @@ export class MemoryCacheStore implements CacheStore {
   private readonly pinnedMessages: Map<string, TimedCacheValue<TelegramMessage[]>>;
   private readonly groupMembers: Map<string, TimedCacheValue<TelegramGroupMember[]>>;
   private readonly blobs: Map<string, Blob>;
-  private readonly replay: boolean;
-
-  constructor(
-    initialState: MemoryCacheStoreInitialState = {},
-    options: MemoryCacheStoreOptions = {},
-  ) {
-    this.replay = options.replay ?? false;
-    this.transportSession = this.replay ? undefined : clone(initialState.transportSession);
+  constructor(initialState: MemoryCacheStoreInitialState = {}) {
+    this.transportSession = clone(initialState.transportSession);
     this.accountId = initialState.accountId;
     this.cursor = clone(initialState.cursor);
     this.epoch = initialState.epoch ?? 0;
@@ -83,12 +73,10 @@ export class MemoryCacheStore implements CacheStore {
   }
 
   async loadTransportSession() {
-    if (this.replay) return undefined;
     return clone(this.transportSession);
   }
 
   async saveTransportSession(session: unknown) {
-    if (this.replay) return;
     this.transportSession = clone(session);
   }
 

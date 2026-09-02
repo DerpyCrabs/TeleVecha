@@ -8,16 +8,16 @@ import { Unzip, UnzipInflate } from 'fflate';
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const FORMAT = 'televecha-debug';
-const VERSION = 1;
-const REQUIRED_FILES = new Set(['manifest.json', 'state.v1.json', 'timeline.v1.ndjson']);
+const VERSION = 2;
+const REQUIRED_FILES = new Set(['manifest.json', 'snapshot.v2.json', 'trace.v2.ndjson']);
 const FILE_LIMITS = new Map([
   ['manifest.json', 256 * 1024],
-  ['state.v1.json', 24 * 1024 * 1024],
-  ['timeline.v1.ndjson', 24 * 1024 * 1024],
+  ['snapshot.v2.json', 8 * 1024 * 1024],
+  ['trace.v2.ndjson', 1024 * 1024],
 ]);
-const MAX_COMPRESSED_BYTES = 16 * 1024 * 1024;
-const MAX_UNCOMPRESSED_BYTES = 48 * 1024 * 1024;
-const MAX_TIMELINE_EVENTS = 100_000;
+const MAX_COMPRESSED_BYTES = 8 * 1024 * 1024;
+const MAX_UNCOMPRESSED_BYTES = 10 * 1024 * 1024;
+const MAX_TRACE_EVENTS = 300;
 const MAX_JSON_COLLECTION_ITEMS = 100_000;
 const MAX_JSON_DEPTH = 64;
 const MAX_CALLBACK_DATA_LENGTH = 1024 * 1024;
@@ -33,7 +33,7 @@ const ZIP_ENCRYPTED_FLAGS = 0x2041;
 const ZIP_DATA_DESCRIPTOR_FLAG = 0x0008;
 const DEFAULT_PORT = 4175;
 const READY_TIMEOUT_MS = 120_000;
-const REPLAY_QUIESCENCE_MS = 500;
+const INSPECTION_QUIESCENCE_MS = 500;
 const FORBIDDEN_KEYS = new Set(
   [
     'accesshash',
@@ -54,35 +54,27 @@ const FORBIDDEN_KEYS = new Set(
     'token',
   ].map(normalizeKey),
 );
-const TIMELINE_KINDS = new Set([
-  'call',
-  'resolve',
-  'reject',
-  'push',
-  'ui',
-  'checkpoint',
-  'diagnostic',
-]);
+const TRACE_KINDS = new Set(['ui', 'diagnostic']);
 const CRC32_TABLE = createCrc32Table();
 
-class ReplayInputError extends Error {
+class TvBugInputError extends Error {
   constructor(message) {
     super(message);
-    this.name = 'ReplayInputError';
+    this.name = 'TvBugInputError';
   }
 }
 
 function usage() {
   return [
-    'Usage: npm run replay -- [--headless | --serve-only] [--screenshot <path>] <report.tvbug>',
+    'Usage: npm run tvbug -- [--headless | --serve] [--screenshot <path>] <report.tvbug>',
     '',
-    `The replay server uses port ${DEFAULT_PORT} by default. Set TELEVECHA_REPLAY_PORT to change it.`,
+    `The snapshot server uses port ${DEFAULT_PORT} by default. Set TELEVECHA_TVBUG_PORT to change it.`,
   ].join('\n');
 }
 
 function parseArguments(argv) {
   let headless = false;
-  let serveOnly = false;
+  let serve = false;
   let screenshot;
   let bundlePath;
 
@@ -92,14 +84,14 @@ function parseArguments(argv) {
       headless = true;
       continue;
     }
-    if (argument === '--serve-only') {
-      serveOnly = true;
+    if (argument === '--serve') {
+      serve = true;
       continue;
     }
     if (argument === '--screenshot') {
       const value = argv[index + 1];
       if (!value || value.startsWith('--')) {
-        throw new ReplayInputError('--screenshot requires a file path.');
+        throw new TvBugInputError('--screenshot requires a file path.');
       }
       screenshot = resolve(process.cwd(), value);
       index += 1;
@@ -107,24 +99,24 @@ function parseArguments(argv) {
     }
     if (argument === '--help' || argument === '-h') return { help: true };
     if (argument.startsWith('-')) {
-      throw new ReplayInputError(`Unknown option: ${argument}`);
+      throw new TvBugInputError(`Unknown option: ${argument}`);
     }
-    if (bundlePath) throw new ReplayInputError('Pass exactly one .tvbug bundle.');
+    if (bundlePath) throw new TvBugInputError('Pass exactly one .tvbug bundle.');
     bundlePath = resolve(process.cwd(), argument);
   }
 
-  if (!bundlePath) throw new ReplayInputError('Missing .tvbug bundle path.');
-  if (serveOnly && screenshot) {
-    throw new ReplayInputError('--screenshot cannot be used with --serve-only.');
+  if (!bundlePath) throw new TvBugInputError('Missing .tvbug bundle path.');
+  if (serve && screenshot) {
+    throw new TvBugInputError('--screenshot cannot be used with --serve.');
   }
-  return { bundlePath, headless, serveOnly, screenshot, help: false };
+  return { bundlePath, headless, serve, screenshot, help: false };
 }
 
 function parsePort(rawValue) {
   const value = rawValue ?? String(DEFAULT_PORT);
   const port = Number(value);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
-    throw new ReplayInputError(`Invalid TELEVECHA_REPLAY_PORT: ${value}`);
+    throw new TvBugInputError(`Invalid TELEVECHA_TVBUG_PORT: ${value}`);
   }
   return port;
 }
@@ -134,19 +126,19 @@ function isRecord(value) {
 }
 
 function requireRecord(value, label) {
-  if (!isRecord(value)) throw new ReplayInputError(`${label} must contain a JSON object.`);
+  if (!isRecord(value)) throw new TvBugInputError(`${label} must contain a JSON object.`);
   return value;
 }
 
 function requireFiniteNumber(value, label, { integer = false, minimum } = {}) {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new ReplayInputError(`${label} must be a finite number.`);
+    throw new TvBugInputError(`${label} must be a finite number.`);
   }
   if (integer && !Number.isSafeInteger(value)) {
-    throw new ReplayInputError(`${label} must be a safe integer.`);
+    throw new TvBugInputError(`${label} must be a safe integer.`);
   }
   if (minimum !== undefined && value < minimum) {
-    throw new ReplayInputError(`${label} must be at least ${minimum}.`);
+    throw new TvBugInputError(`${label} must be at least ${minimum}.`);
   }
   return value;
 }
@@ -158,17 +150,17 @@ function validateJsonNumbers(value, label) {
     const current = stack.pop();
     nodes += 1;
     if (nodes > 1_000_000) {
-      throw new ReplayInputError(`${label} has too many JSON values.`);
+      throw new TvBugInputError(`${label} has too many JSON values.`);
     }
     if (current.depth > MAX_JSON_DEPTH) {
-      throw new ReplayInputError(`${current.path} is nested too deeply.`);
+      throw new TvBugInputError(`${current.path} is nested too deeply.`);
     }
     if (typeof current.value === 'number' && !Number.isFinite(current.value)) {
-      throw new ReplayInputError(`${current.path} contains a non-finite number.`);
+      throw new TvBugInputError(`${current.path} contains a non-finite number.`);
     }
     if (Array.isArray(current.value)) {
       if (current.value.length > MAX_JSON_COLLECTION_ITEMS) {
-        throw new ReplayInputError(`${current.path} contains too many items.`);
+        throw new TvBugInputError(`${current.path} contains too many items.`);
       }
       for (let index = 0; index < current.value.length; index += 1) {
         stack.push({
@@ -180,11 +172,11 @@ function validateJsonNumbers(value, label) {
     } else if (isRecord(current.value)) {
       const entries = Object.entries(current.value);
       if (entries.length > MAX_JSON_COLLECTION_ITEMS) {
-        throw new ReplayInputError(`${current.path} contains too many fields.`);
+        throw new TvBugInputError(`${current.path} contains too many fields.`);
       }
       for (const [key, child] of entries) {
         if (isForbiddenField(key, child)) {
-          throw new ReplayInputError(`${current.path}.${key} is forbidden in a .tvbug bundle.`);
+          throw new TvBugInputError(`${current.path}.${key} is forbidden in a .tvbug bundle.`);
         }
         const normalized = normalizeKey(key);
         if (
@@ -192,14 +184,14 @@ function validateJsonNumbers(value, label) {
           (typeof child !== 'string' ||
             !/^https:\/\/example\.invalid\/[a-z0-9-]+:\d+$/u.test(child))
         ) {
-          throw new ReplayInputError(`${current.path}.${key} contains an unsafe URL.`);
+          throw new TvBugInputError(`${current.path}.${key} contains an unsafe URL.`);
         }
         if (
           normalized === 'datalength' &&
           requireFiniteNumber(child, `${current.path}.${key}`, { integer: true, minimum: 0 }) >
             MAX_CALLBACK_DATA_LENGTH
         ) {
-          throw new ReplayInputError(`${current.path}.${key} exceeds the callback data limit.`);
+          throw new TvBugInputError(`${current.path}.${key} exceeds the callback data limit.`);
         }
         stack.push({ value: child, path: `${current.path}.${key}`, depth: current.depth + 1 });
       }
@@ -218,7 +210,7 @@ function inspectZipArchive(archive) {
       break;
     }
   }
-  if (endOffset < 0) throw new ReplayInputError('Cannot find a valid ZIP end record.');
+  if (endOffset < 0) throw new TvBugInputError('Cannot find a valid ZIP end record.');
 
   const diskNumber = readUint16(archive, endOffset + 4);
   const centralDisk = readUint16(archive, endOffset + 6);
@@ -234,15 +226,15 @@ function inspectZipArchive(archive) {
     centralSize === 0xffffffff ||
     centralOffset === 0xffffffff
   ) {
-    throw new ReplayInputError('Multi-disk and ZIP64 .tvbug archives are not supported.');
+    throw new TvBugInputError('Multi-disk and ZIP64 .tvbug archives are not supported.');
   }
   if (entryCount !== REQUIRED_FILES.size) {
-    throw new ReplayInputError(
+    throw new TvBugInputError(
       `The .tvbug bundle must contain exactly ${REQUIRED_FILES.size} files.`,
     );
   }
   if (centralOffset + centralSize !== endOffset) {
-    throw new ReplayInputError('The ZIP central directory is malformed.');
+    throw new TvBugInputError('The ZIP central directory is malformed.');
   }
 
   const seen = new Set();
@@ -251,7 +243,7 @@ function inspectZipArchive(archive) {
   let offset = centralOffset;
   for (let index = 0; index < entryCount; index += 1) {
     if (offset + 46 > endOffset || readUint32(archive, offset) !== ZIP_CENTRAL_SIGNATURE) {
-      throw new ReplayInputError('The ZIP central directory is malformed.');
+      throw new TvBugInputError('The ZIP central directory is malformed.');
     }
     const flags = readUint16(archive, offset + 8);
     const compression = readUint16(archive, offset + 10);
@@ -265,30 +257,30 @@ function inspectZipArchive(archive) {
     const localOffset = readUint32(archive, offset + 42);
     const nextOffset = offset + 46 + nameLength + extraLength + commentLength;
     if (nextOffset > endOffset) {
-      throw new ReplayInputError('The ZIP central directory is truncated.');
+      throw new TvBugInputError('The ZIP central directory is truncated.');
     }
     const name = readArchiveName(archive, offset + 46, nameLength);
     if (!REQUIRED_FILES.has(name) || name.includes('/') || name.includes('\\')) {
-      throw new ReplayInputError(`Unexpected path in .tvbug bundle: ${name}`);
+      throw new TvBugInputError(`Unexpected path in .tvbug bundle: ${name}`);
     }
-    if (seen.has(name)) throw new ReplayInputError(`Duplicate path in .tvbug bundle: ${name}`);
+    if (seen.has(name)) throw new TvBugInputError(`Duplicate path in .tvbug bundle: ${name}`);
     if (startDisk !== 0) {
-      throw new ReplayInputError(`${name} is stored on an unsupported ZIP disk.`);
+      throw new TvBugInputError(`${name} is stored on an unsupported ZIP disk.`);
     }
     if ((flags & ZIP_ENCRYPTED_FLAGS) !== 0) {
-      throw new ReplayInputError(`${name} uses unsupported ZIP encryption.`);
+      throw new TvBugInputError(`${name} uses unsupported ZIP encryption.`);
     }
     if ((flags & ZIP_DATA_DESCRIPTOR_FLAG) !== 0) {
-      throw new ReplayInputError(`${name} uses an unsupported ZIP data descriptor.`);
+      throw new TvBugInputError(`${name} uses an unsupported ZIP data descriptor.`);
     }
     if (compression !== 0 && compression !== 8) {
-      throw new ReplayInputError(`${name} uses an unsupported ZIP compression method.`);
+      throw new TvBugInputError(`${name} uses an unsupported ZIP compression method.`);
     }
     const limit = FILE_LIMITS.get(name);
-    if (originalSize > limit) throw new ReplayInputError(`${name} exceeds its size limit.`);
+    if (originalSize > limit) throw new TvBugInputError(`${name} exceeds its size limit.`);
     totalSize += originalSize;
     if (totalSize > MAX_UNCOMPRESSED_BYTES) {
-      throw new ReplayInputError('The uncompressed .tvbug bundle exceeds 48 MiB.');
+      throw new TvBugInputError('The uncompressed .tvbug bundle exceeds 10 MiB.');
     }
 
     const local = inspectLocalZipEntry(archive, {
@@ -314,19 +306,19 @@ function inspectZipArchive(archive) {
     offset = nextOffset;
   }
   if (offset !== endOffset || seen.size !== REQUIRED_FILES.size) {
-    throw new ReplayInputError('The ZIP central directory is malformed.');
+    throw new TvBugInputError('The ZIP central directory is malformed.');
   }
 
   entries.sort((left, right) => left.localOffset - right.localOffset);
   let expectedOffset = 0;
   for (const entry of entries) {
     if (entry.localOffset !== expectedOffset) {
-      throw new ReplayInputError('The ZIP contains overlapping, hidden, or padded file data.');
+      throw new TvBugInputError('The ZIP contains overlapping, hidden, or padded file data.');
     }
     expectedOffset = entry.dataEnd;
   }
   if (expectedOffset !== centralOffset) {
-    throw new ReplayInputError('The ZIP contains unlisted file data.');
+    throw new TvBugInputError('The ZIP contains unlisted file data.');
   }
   return entries;
 }
@@ -334,7 +326,7 @@ function inspectZipArchive(archive) {
 function inspectLocalZipEntry(archive, expected) {
   const offset = expected.localOffset;
   if (offset + 30 > expected.centralOffset || readUint32(archive, offset) !== ZIP_LOCAL_SIGNATURE) {
-    throw new ReplayInputError(`${expected.name} has a malformed local ZIP header.`);
+    throw new TvBugInputError(`${expected.name} has a malformed local ZIP header.`);
   }
   const flags = readUint16(archive, offset + 6);
   const compression = readUint16(archive, offset + 8);
@@ -345,7 +337,7 @@ function inspectLocalZipEntry(archive, expected) {
   const extraLength = readUint16(archive, offset + 28);
   const dataOffset = offset + 30 + nameLength + extraLength;
   if (dataOffset > expected.centralOffset) {
-    throw new ReplayInputError(`${expected.name} has a truncated local ZIP header.`);
+    throw new TvBugInputError(`${expected.name} has a truncated local ZIP header.`);
   }
   const name = readArchiveName(archive, offset + 30, nameLength);
   if (
@@ -356,11 +348,11 @@ function inspectLocalZipEntry(archive, expected) {
     compressedSize !== expected.compressedSize ||
     originalSize !== expected.originalSize
   ) {
-    throw new ReplayInputError(`${expected.name} has inconsistent ZIP metadata.`);
+    throw new TvBugInputError(`${expected.name} has inconsistent ZIP metadata.`);
   }
   const dataEnd = dataOffset + compressedSize;
   if (dataEnd > expected.centralOffset) {
-    throw new ReplayInputError(`${expected.name} has truncated ZIP data.`);
+    throw new TvBugInputError(`${expected.name} has truncated ZIP data.`);
   }
   return { dataEnd };
 }
@@ -373,16 +365,16 @@ function unpackArchive(archive, entries) {
   const unzip = new Unzip((file) => {
     try {
       const entry = expected.get(file.name);
-      if (!entry) throw new ReplayInputError(`Unexpected path in .tvbug bundle: ${file.name}`);
+      if (!entry) throw new TvBugInputError(`Unexpected path in .tvbug bundle: ${file.name}`);
       if (started.has(file.name)) {
-        throw new ReplayInputError(`Duplicate path in .tvbug bundle: ${file.name}`);
+        throw new TvBugInputError(`Duplicate path in .tvbug bundle: ${file.name}`);
       }
       if (
         file.compression !== entry.compression ||
         file.size !== entry.compressedSize ||
         file.originalSize !== entry.originalSize
       ) {
-        throw new ReplayInputError(`${file.name} has inconsistent ZIP metadata.`);
+        throw new TvBugInputError(`${file.name} has inconsistent ZIP metadata.`);
       }
       started.add(file.name);
       const output = new Uint8Array(entry.originalSize);
@@ -391,11 +383,11 @@ function unpackArchive(archive, entries) {
       file.ondata = (error, chunk, final) => {
         if (failure) return;
         if (error) {
-          failure = new ReplayInputError(`Cannot decompress ${file.name}: ${errorMessage(error)}`);
+          failure = new TvBugInputError(`Cannot decompress ${file.name}: ${errorMessage(error)}`);
           return;
         }
         if (!(chunk instanceof Uint8Array) || outputOffset + chunk.byteLength > output.byteLength) {
-          failure = new ReplayInputError(`${file.name} expands beyond its declared size.`);
+          failure = new TvBugInputError(`${file.name} expands beyond its declared size.`);
           return;
         }
         output.set(chunk, outputOffset);
@@ -403,11 +395,11 @@ function unpackArchive(archive, entries) {
         crc32 = updateCrc32(crc32, chunk);
         if (!final) return;
         if (outputOffset !== output.byteLength) {
-          failure = new ReplayInputError(`${file.name} did not expand to its declared size.`);
+          failure = new TvBugInputError(`${file.name} did not expand to its declared size.`);
           return;
         }
         if ((crc32 ^ 0xffffffff) >>> 0 !== entry.crc32) {
-          failure = new ReplayInputError(`${file.name} failed its ZIP checksum.`);
+          failure = new TvBugInputError(`${file.name} failed its ZIP checksum.`);
           return;
         }
         files[file.name] = output;
@@ -415,9 +407,9 @@ function unpackArchive(archive, entries) {
       file.start();
     } catch (error) {
       failure =
-        error instanceof ReplayInputError
+        error instanceof TvBugInputError
           ? error
-          : new ReplayInputError(`Cannot unpack the .tvbug ZIP: ${errorMessage(error)}`);
+          : new TvBugInputError(`Cannot unpack the .tvbug ZIP: ${errorMessage(error)}`);
     }
   });
   unzip.register(UnzipInflate);
@@ -429,12 +421,12 @@ function unpackArchive(archive, entries) {
     }
   } catch (error) {
     if (failure) throw failure;
-    throw new ReplayInputError(`Cannot unpack the .tvbug ZIP: ${errorMessage(error)}`);
+    throw new TvBugInputError(`Cannot unpack the .tvbug ZIP: ${errorMessage(error)}`);
   }
   if (failure) throw failure;
   for (const fileName of REQUIRED_FILES) {
     if (!(files[fileName] instanceof Uint8Array)) {
-      throw new ReplayInputError(`Missing ${fileName} in .tvbug bundle.`);
+      throw new TvBugInputError(`Missing ${fileName} in .tvbug bundle.`);
     }
   }
   return files;
@@ -458,12 +450,12 @@ function readUint32(bytes, offset) {
 
 function readArchiveName(bytes, offset, length) {
   if (length > 256 || offset < 0 || offset + length > bytes.byteLength) {
-    throw new ReplayInputError('The ZIP contains an invalid file name.');
+    throw new TvBugInputError('The ZIP contains an invalid file name.');
   }
   let result = '';
   for (let index = 0; index < length; index += 1) {
     const value = bytes[offset + index];
-    if (value > 0x7f) throw new ReplayInputError('The ZIP contains a non-ASCII file name.');
+    if (value > 0x7f) throw new TvBugInputError('The ZIP contains a non-ASCII file name.');
     result += String.fromCharCode(value);
   }
   return result;
@@ -491,7 +483,7 @@ function decodeUtf8(bytes, fileName) {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch (error) {
-    throw new ReplayInputError(`${fileName} is not valid UTF-8: ${errorMessage(error)}`);
+    throw new TvBugInputError(`${fileName} is not valid UTF-8: ${errorMessage(error)}`);
   }
 }
 
@@ -500,14 +492,14 @@ function parseJson(bytes, fileName) {
   try {
     return JSON.parse(source);
   } catch (error) {
-    throw new ReplayInputError(`${fileName} contains malformed JSON: ${errorMessage(error)}`);
+    throw new TvBugInputError(`${fileName} contains malformed JSON: ${errorMessage(error)}`);
   }
 }
 
 function validateManifest(value) {
   const manifest = requireRecord(value, 'manifest.json');
   if (manifest.format !== FORMAT || manifest.version !== VERSION) {
-    throw new ReplayInputError(`Unsupported .tvbug format: expected ${FORMAT} version ${VERSION}.`);
+    throw new TvBugInputError(`Unsupported .tvbug format: expected ${FORMAT} version ${VERSION}.`);
   }
 
   requireRecord(manifest.producer, 'manifest.json producer');
@@ -518,18 +510,18 @@ function validateManifest(value) {
     minimum: 1,
   });
   if (typeof capture.complete !== 'boolean' || typeof capture.truncated !== 'boolean') {
-    throw new ReplayInputError('manifest.json capture flags must be booleans.');
+    throw new TvBugInputError('manifest.json capture flags must be booleans.');
   }
 
   const privacy = requireRecord(manifest.privacy, 'manifest.json privacy');
   if (
-    privacy.profile !== 'account-free-v1' ||
+    privacy.profile !== 'account-free-v2' ||
     privacy.rawText !== false ||
     privacy.rawMedia !== false ||
     privacy.stableIdentifiers !== false ||
     privacy.authMaterial !== false
   ) {
-    throw new ReplayInputError('The bundle does not declare the account-free-v1 privacy profile.');
+    throw new TvBugInputError('The bundle does not declare the account-free-v2 privacy profile.');
   }
 
   if (manifest.environment !== undefined) {
@@ -542,7 +534,7 @@ function validateManifest(value) {
           (part) => !Number.isSafeInteger(part) || part < 1 || part > MAX_VIEWPORT_EDGE,
         )
       ) {
-        throw new ReplayInputError('manifest.json environment.viewport is invalid.');
+        throw new TvBugInputError('manifest.json environment.viewport is invalid.');
       }
     }
     if (environment.deviceScaleFactor !== undefined) {
@@ -552,7 +544,7 @@ function validateManifest(value) {
         { minimum: 0.1 },
       );
       if (scale > 10) {
-        throw new ReplayInputError(
+        throw new TvBugInputError(
           'manifest.json environment.deviceScaleFactor must not exceed 10.',
         );
       }
@@ -567,8 +559,8 @@ function validateManifest(value) {
         height * scale > MAX_DEVICE_EDGE ||
         width * height * scale * scale > MAX_DEVICE_PIXELS
       ) {
-        throw new ReplayInputError(
-          'manifest.json viewport and device scale exceed the safe replay surface limit.',
+        throw new TvBugInputError(
+          'manifest.json viewport and device scale exceed the safe inspection limit.',
         );
       }
     }
@@ -577,10 +569,10 @@ function validateManifest(value) {
       environment.colorScheme !== 'light' &&
       environment.colorScheme !== 'dark'
     ) {
-      throw new ReplayInputError('manifest.json environment.colorScheme is invalid.');
+      throw new TvBugInputError('manifest.json environment.colorScheme is invalid.');
     }
     if (environment.reducedMotion !== undefined && typeof environment.reducedMotion !== 'boolean') {
-      throw new ReplayInputError('manifest.json environment.reducedMotion must be a boolean.');
+      throw new TvBugInputError('manifest.json environment.reducedMotion must be a boolean.');
     }
     if (environment.timezoneOffsetMinutes !== undefined) {
       const offset = requireFiniteNumber(
@@ -589,7 +581,7 @@ function validateManifest(value) {
         { integer: true },
       );
       if (offset < -840 || offset > 720) {
-        throw new ReplayInputError(
+        throw new TvBugInputError(
           'manifest.json environment.timezoneOffsetMinutes is outside the supported range.',
         );
       }
@@ -600,17 +592,17 @@ function validateManifest(value) {
         environment.timezone.length > 100 ||
         !isValidTimezone(environment.timezone)
       ) {
-        throw new ReplayInputError('manifest.json environment.timezone is invalid.');
+        throw new TvBugInputError('manifest.json environment.timezone is invalid.');
       }
     }
     if (environment.locale !== undefined) {
       if (typeof environment.locale !== 'string' || environment.locale.length > 100) {
-        throw new ReplayInputError('manifest.json environment.locale is invalid.');
+        throw new TvBugInputError('manifest.json environment.locale is invalid.');
       }
       try {
         new Intl.Locale(environment.locale);
       } catch {
-        throw new ReplayInputError('manifest.json environment.locale is invalid.');
+        throw new TvBugInputError('manifest.json environment.locale is invalid.');
       }
     }
   }
@@ -619,13 +611,13 @@ function validateManifest(value) {
 }
 
 function validateState(value) {
-  const state = requireRecord(value, 'state.v1.json');
+  const state = requireRecord(value, 'snapshot.v2.json');
   if (state.version !== VERSION) {
-    throw new ReplayInputError(`state.v1.json must use version ${VERSION}.`);
+    throw new TvBugInputError(`snapshot.v2.json must use version ${VERSION}.`);
   }
-  requireFiniteNumber(state.epoch, 'state.v1.json epoch', { integer: true, minimum: 0 });
+  requireFiniteNumber(state.epoch, 'snapshot.v2.json epoch', { integer: true, minimum: 0 });
   if (!Array.isArray(state.dialogs) || !Array.isArray(state.messages)) {
-    throw new ReplayInputError('state.v1.json must contain dialogs and messages arrays.');
+    throw new TvBugInputError('snapshot.v2.json must contain dialogs and messages arrays.');
   }
   if (
     !isRecord(state.histories) ||
@@ -635,9 +627,10 @@ function validateState(value) {
     !Array.isArray(state.pending) ||
     !isRecord(state.pinnedMessages) ||
     !isRecord(state.groupMembers) ||
-    !isRecord(state.workspace)
+    !isRecord(state.workspace) ||
+    !isRecord(state.runtime)
   ) {
-    throw new ReplayInputError('state.v1.json is missing replay state collections.');
+    throw new TvBugInputError('snapshot.v2.json is missing snapshot state collections.');
   }
   for (const [label, collection] of [
     ['dialogs', state.dialogs],
@@ -645,23 +638,23 @@ function validateState(value) {
     ['pending', state.pending],
   ]) {
     if (collection.length > 100_000) {
-      throw new ReplayInputError(`state.v1.json ${label} exceeds 100,000 items.`);
+      throw new TvBugInputError(`snapshot.v2.json ${label} exceeds 100,000 items.`);
     }
   }
   let attachmentBytes = 0;
   state.pending.forEach((pending, index) => {
-    const record = requireRecord(pending, `state.v1.json pending[${index}]`);
+    const record = requireRecord(pending, `snapshot.v2.json pending[${index}]`);
     if (record.attachment !== undefined) {
       attachmentBytes += validateAttachmentBytes(
         record.attachment,
-        `state.v1.json pending[${index}].attachment`,
+        `snapshot.v2.json pending[${index}].attachment`,
       );
     }
     if (record.album !== undefined) {
-      const album = requireRecord(record.album, `state.v1.json pending[${index}].album`);
+      const album = requireRecord(record.album, `snapshot.v2.json pending[${index}].album`);
       if (!Array.isArray(album.attachments)) {
-        throw new ReplayInputError(
-          `state.v1.json pending[${index}].album.attachments must be an array.`,
+        throw new TvBugInputError(
+          `snapshot.v2.json pending[${index}].album.attachments must be an array.`,
         );
       }
       for (
@@ -671,17 +664,17 @@ function validateState(value) {
       ) {
         attachmentBytes += validateAttachmentBytes(
           album.attachments[attachmentIndex],
-          `state.v1.json pending[${index}].album.attachments[${attachmentIndex}]`,
+          `snapshot.v2.json pending[${index}].album.attachments[${attachmentIndex}]`,
         );
       }
     }
     if (attachmentBytes > MAX_SYNTHETIC_ATTACHMENT_BYTES) {
-      throw new ReplayInputError(
-        'state.v1.json pending attachments exceed the 256 MiB aggregate replay limit.',
+      throw new TvBugInputError(
+        'snapshot.v2.json pending attachments exceed the 256 MiB aggregate placeholder limit.',
       );
     }
   });
-  validateJsonNumbers(state, 'state.v1.json');
+  validateJsonNumbers(state, 'snapshot.v2.json');
   return state;
 }
 
@@ -692,33 +685,33 @@ function validateAttachmentBytes(value, label) {
     minimum: 0,
   });
   if (byteSize > MAX_SYNTHETIC_ATTACHMENT_BYTES) {
-    throw new ReplayInputError(`${label}.byteSize exceeds the 256 MiB replay limit.`);
+    throw new TvBugInputError(`${label}.byteSize exceeds the 256 MiB materialization limit.`);
   }
   return byteSize;
 }
 
-function parseTimeline(bytes) {
-  const source = decodeUtf8(bytes, 'timeline.v1.ndjson');
+function parseTrace(bytes) {
+  const source = decodeUtf8(bytes, 'trace.v2.ndjson');
   const lines = source.split(/\n/u);
   while (lines.length && lines.at(-1)?.trim() === '') lines.pop();
-  if (lines.length > MAX_TIMELINE_EVENTS) {
-    throw new ReplayInputError(
-      `timeline.v1.ndjson exceeds ${MAX_TIMELINE_EVENTS.toLocaleString('en-US')} events.`,
+  if (lines.length > MAX_TRACE_EVENTS) {
+    throw new TvBugInputError(
+      `trace.v2.ndjson exceeds ${MAX_TRACE_EVENTS.toLocaleString('en-US')} events.`,
     );
   }
 
-  const timeline = [];
+  const trace = [];
   let previousSequence = -1;
   let previousTime = -1;
   for (let index = 0; index < lines.length; index += 1) {
-    const label = `timeline.v1.ndjson:${index + 1}`;
+    const label = `trace.v2.ndjson:${index + 1}`;
     const line = lines[index];
-    if (!line.trim()) throw new ReplayInputError(`${label} is blank.`);
+    if (!line.trim()) throw new TvBugInputError(`${label} is blank.`);
     let value;
     try {
       value = JSON.parse(line);
     } catch (error) {
-      throw new ReplayInputError(`${label} contains malformed JSON: ${errorMessage(error)}`);
+      throw new TvBugInputError(`${label} contains malformed JSON: ${errorMessage(error)}`);
     }
     const event = requireRecord(value, label);
     const sequence = requireFiniteNumber(event.seq, `${label} seq`, {
@@ -727,20 +720,20 @@ function parseTimeline(bytes) {
     });
     const time = requireFiniteNumber(event.tMs, `${label} tMs`, { minimum: 0 });
     if (sequence <= previousSequence) {
-      throw new ReplayInputError(`${label} seq must increase.`);
+      throw new TvBugInputError(`${label} seq must increase.`);
     }
     if (time < previousTime) {
-      throw new ReplayInputError(`${label} tMs must not move backwards.`);
+      throw new TvBugInputError(`${label} tMs must not move backwards.`);
     }
-    if (!TIMELINE_KINDS.has(event.kind)) {
-      throw new ReplayInputError(`${label} has an unknown event kind.`);
+    if (!TRACE_KINDS.has(event.kind)) {
+      throw new TvBugInputError(`${label} has an unknown event kind.`);
     }
     validateJsonNumbers(event, label);
-    timeline.push(event);
+    trace.push(event);
     previousSequence = sequence;
     previousTime = time;
   }
-  return timeline;
+  return trace;
 }
 
 async function readBundle(bundlePath) {
@@ -748,39 +741,39 @@ async function readBundle(bundlePath) {
   try {
     metadata = await stat(bundlePath);
   } catch (error) {
-    throw new ReplayInputError(`Cannot read ${bundlePath}: ${errorMessage(error)}`);
+    throw new TvBugInputError(`Cannot read ${bundlePath}: ${errorMessage(error)}`);
   }
-  if (!metadata.isFile()) throw new ReplayInputError(`${bundlePath} is not a file.`);
-  if (metadata.size === 0) throw new ReplayInputError('The .tvbug bundle is empty.');
+  if (!metadata.isFile()) throw new TvBugInputError(`${bundlePath} is not a file.`);
+  if (metadata.size === 0) throw new TvBugInputError('The .tvbug bundle is empty.');
   if (metadata.size > MAX_COMPRESSED_BYTES) {
-    throw new ReplayInputError('The compressed .tvbug bundle exceeds 16 MiB.');
+    throw new TvBugInputError('The compressed .tvbug bundle exceeds 8 MiB.');
   }
 
   let archive;
   try {
     archive = await readFile(bundlePath);
   } catch (error) {
-    throw new ReplayInputError(`Cannot read ${bundlePath}: ${errorMessage(error)}`);
+    throw new TvBugInputError(`Cannot read ${bundlePath}: ${errorMessage(error)}`);
   }
   if (archive.byteLength > MAX_COMPRESSED_BYTES) {
-    throw new ReplayInputError('The compressed .tvbug bundle exceeds 16 MiB.');
+    throw new TvBugInputError('The compressed .tvbug bundle exceeds 8 MiB.');
   }
   const entries = inspectZipArchive(archive);
   const files = unpackArchive(archive, entries);
 
   for (const fileName of REQUIRED_FILES) {
     if (!(files[fileName] instanceof Uint8Array)) {
-      throw new ReplayInputError(`Missing ${fileName} in .tvbug bundle.`);
+      throw new TvBugInputError(`Missing ${fileName} in .tvbug bundle.`);
     }
     if (files[fileName].byteLength > FILE_LIMITS.get(fileName)) {
-      throw new ReplayInputError(`${fileName} exceeds its size limit.`);
+      throw new TvBugInputError(`${fileName} exceeds its size limit.`);
     }
   }
 
   const manifest = validateManifest(parseJson(files['manifest.json'], 'manifest.json'));
-  const state = validateState(parseJson(files['state.v1.json'], 'state.v1.json'));
-  const timeline = parseTimeline(files['timeline.v1.ndjson']);
-  return { manifest, state, timeline };
+  const snapshot = validateState(parseJson(files['snapshot.v2.json'], 'snapshot.v2.json'));
+  const trace = parseTrace(files['trace.v2.ndjson']);
+  return { manifest, snapshot, trace };
 }
 
 function contextOptions(manifest) {
@@ -819,7 +812,7 @@ function isValidTimezone(timezone) {
   }
 }
 
-function isReplayOrigin(rawUrl, protocol, port) {
+function isInspectionOrigin(rawUrl, protocol, port) {
   let url;
   try {
     url = new URL(rawUrl);
@@ -838,23 +831,27 @@ function isReplayOrigin(rawUrl, protocol, port) {
 async function restrictNetwork(context, port) {
   await context.route('**/*', async (route) => {
     const requestUrl = route.request().url();
-    if (isReplayOrigin(requestUrl, 'http:', port)) await route.continue();
+    if (isInspectionOrigin(requestUrl, 'http:', port)) await route.continue();
     else await route.abort('blockedbyclient');
   });
   await context.routeWebSocket('**/*', async (socket) => {
-    if (isReplayOrigin(socket.url(), 'ws:', port)) socket.connectToServer();
-    else await socket.close({ code: 1008, reason: 'External network is disabled during replay.' });
+    if (isInspectionOrigin(socket.url(), 'ws:', port)) socket.connectToServer();
+    else
+      await socket.close({
+        code: 1008,
+        reason: 'External network is disabled during snapshot inspection.',
+      });
   });
 }
 
-async function waitForReplayOutcome(page) {
+async function waitForInspectionOutcome(page) {
   const statusHandle = await page.waitForFunction(
     () => {
-      const status = window.__televechaReproStatus;
+      const status = window.__televechaTvBugStatus;
       if (
         status &&
         typeof status === 'object' &&
-        (status.state === 'ready' || status.state === 'diverged' || status.state === 'error')
+        (status.state === 'ready' || status.state === 'error')
       ) {
         return {
           state: status.state,
@@ -865,7 +862,7 @@ async function waitForReplayOutcome(page) {
         };
       }
 
-      const alert = [...document.querySelectorAll('[role="alert"], [data-repro-error]')].find(
+      const alert = [...document.querySelectorAll('[role="alert"], [data-tvbug-error]')].find(
         (candidate) => {
           const style = getComputedStyle(candidate);
           const bounds = candidate.getBoundingClientRect();
@@ -922,10 +919,10 @@ async function writeScreenshot(page, screenshotPath) {
 function reportOutcome(outcome) {
   const detail = outcome.message ? ` ${terminalText(outcome.message)}` : '';
   if (outcome.state === 'ready') {
-    console.info(`Replay status: ready.${detail}`);
+    console.info(`Snapshot status: ready.${detail}`);
     return;
   }
-  console.error(`Replay status: ${outcome.state}.${detail}`);
+  console.error(`Snapshot status: ${outcome.state}.${detail}`);
 }
 
 function watchPageErrors(page) {
@@ -951,11 +948,11 @@ function watchPageErrors(page) {
 
 async function settledOutcome(page, pageErrors = watchPageErrors(page)) {
   try {
-    return await Promise.race([waitForReplayOutcome(page), pageErrors.promise]);
+    return await Promise.race([waitForInspectionOutcome(page), pageErrors.promise]);
   } catch (error) {
     return {
       state: 'error',
-      message: `Timed out waiting for replay readiness. ${errorMessage(error)}`,
+      message: `Timed out waiting for snapshot readiness. ${errorMessage(error)}`,
       source: 'launcher',
     };
   }
@@ -968,27 +965,27 @@ async function finalizeOutcome(page, initialOutcome, pageErrors, screenshotPath)
     if (outcome.state === 'ready' && !pageErrors.outcome) {
       let timeout;
       const quiescence = new Promise((resolveQuiescence) => {
-        timeout = setTimeout(resolveQuiescence, REPLAY_QUIESCENCE_MS);
+        timeout = setTimeout(resolveQuiescence, INSPECTION_QUIESCENCE_MS);
       });
       const latePageError = await Promise.race([quiescence, pageErrors.promise]);
       clearTimeout(timeout);
       if (latePageError) outcome = latePageError;
     }
     if (pageErrors.outcome) outcome = pageErrors.outcome;
-    outcome = (await currentReplayFailure(page)) ?? outcome;
+    outcome = (await currentInspectionFailure(page)) ?? outcome;
     try {
       await writeScreenshot(page, screenshotPath);
     } catch (error) {
       screenshotFailed = true;
       outcome = {
         state: 'error',
-        message: `Could not capture the replay screenshot. ${errorMessage(error)}`,
+        message: `Could not capture the snapshot screenshot. ${errorMessage(error)}`,
         source: 'launcher',
       };
     }
     if (!screenshotFailed) {
       if (pageErrors.outcome) outcome = pageErrors.outcome;
-      outcome = (await currentReplayFailure(page)) ?? outcome;
+      outcome = (await currentInspectionFailure(page)) ?? outcome;
     }
     return outcome;
   } finally {
@@ -996,15 +993,11 @@ async function finalizeOutcome(page, initialOutcome, pageErrors, screenshotPath)
   }
 }
 
-async function currentReplayFailure(page) {
+async function currentInspectionFailure(page) {
   try {
     return await page.evaluate(() => {
-      const status = window.__televechaReproStatus;
-      if (
-        status &&
-        typeof status === 'object' &&
-        (status.state === 'diverged' || status.state === 'error')
-      ) {
+      const status = window.__televechaTvBugStatus;
+      if (status && typeof status === 'object' && status.state === 'error') {
         return {
           state: status.state,
           ...(typeof status.message === 'string'
@@ -1013,7 +1006,7 @@ async function currentReplayFailure(page) {
           source: 'runtime',
         };
       }
-      const alert = [...document.querySelectorAll('[role="alert"], [data-repro-error]')].find(
+      const alert = [...document.querySelectorAll('[role="alert"], [data-tvbug-error]')].find(
         (candidate) => {
           const style = getComputedStyle(candidate);
           const bounds = candidate.getBoundingClientRect();
@@ -1036,7 +1029,7 @@ async function currentReplayFailure(page) {
   } catch (error) {
     return {
       state: 'error',
-      message: `Could not inspect the replay page. ${errorMessage(error)}`,
+      message: `Could not inspect the snapshot page. ${errorMessage(error)}`,
       source: 'launcher',
     };
   }
@@ -1090,20 +1083,20 @@ function terminalText(value) {
   return result;
 }
 
-function replayBundlePlugin(bundle) {
+function tvbugBundlePlugin(bundle) {
   const source = JSON.stringify(bundle)
     .replaceAll('<', '\\u003c')
     .replaceAll('\u2028', '\\u2028')
     .replaceAll('\u2029', '\\u2029');
   return {
-    name: 'televecha-replay-bundle',
+    name: 'televecha-tvbug-bundle',
     transformIndexHtml: {
       order: 'pre',
       handler() {
         return [
           {
             tag: 'script',
-            children: `window.__televechaReproBundle=${source};`,
+            children: `window.__televechaTvBugBundle=${source};`,
             injectTo: 'head',
           },
         ];
@@ -1155,15 +1148,15 @@ function isForbiddenField(key, value) {
   ].some((fragment) => normalized.includes(fragment));
 }
 
-async function runReplay(options) {
+async function runInspection(options) {
   const bundle = await readBundle(options.bundlePath);
-  const port = parsePort(process.env.TELEVECHA_REPLAY_PORT);
+  const port = parsePort(process.env.TELEVECHA_TVBUG_PORT);
   const headless = options.headless || !displayAvailable();
   let server;
   let browser;
 
   console.info(
-    `Loaded ${terminalText(options.bundlePath)} with ${bundle.timeline.length.toLocaleString('en-US')} timeline events.`,
+    `Loaded ${terminalText(options.bundlePath)} with ${bundle.trace.length.toLocaleString('en-US')} trace events.`,
   );
   const capturedTimezoneOffset = bundle.manifest.environment?.timezoneOffsetMinutes;
   if (
@@ -1172,22 +1165,22 @@ async function runReplay(options) {
     capturedTimezoneOffset % 60 !== 0
   ) {
     console.warn(
-      `Captured timezone offset ${capturedTimezoneOffset} minutes cannot be applied exactly; replay will use the host timezone.`,
+      `Captured timezone offset ${capturedTimezoneOffset} minutes cannot be applied exactly; inspection will use the host timezone.`,
     );
   }
 
   try {
     server = await createServer({
       root: PROJECT_ROOT,
-      ...(options.serveOnly ? { plugins: [replayBundlePlugin(bundle)] } : {}),
+      ...(options.serve ? { plugins: [tvbugBundlePlugin(bundle)] } : {}),
       server: { host: '127.0.0.1', port, strictPort: true },
     });
     await server.listen();
 
-    const url = `http://127.0.0.1:${port}/?repro=1`;
-    if (options.serveOnly) {
-      console.info(`Replay URL: ${url}`);
-      console.info('Serving the replay without opening a browser. Press Ctrl+C to stop.');
+    const url = `http://127.0.0.1:${port}/?tvbug=1`;
+    if (options.serve) {
+      console.info(`Snapshot URL: ${url}`);
+      console.info('Serving the snapshot without opening a browser. Press Ctrl+C to stop.');
       await waitForStopSignal();
       return 0;
     }
@@ -1195,13 +1188,13 @@ async function runReplay(options) {
     browser = await chromium.launch({ headless });
     const context = await browser.newContext(contextOptions(bundle.manifest));
     await restrictNetwork(context, port);
-    await context.addInitScript((reproBundle) => {
-      window.__televechaReproBundle = reproBundle;
+    await context.addInitScript((tvbugBundle) => {
+      window.__televechaTvBugBundle = tvbugBundle;
     }, bundle);
 
     const page = await context.newPage();
     const pageErrors = watchPageErrors(page);
-    console.info(`Replay URL: ${url}`);
+    console.info(`Snapshot URL: ${url}`);
     console.info(`Browser mode: ${headless ? 'headless' : 'headed'}`);
     let navigationOutcome;
     try {
@@ -1209,7 +1202,7 @@ async function runReplay(options) {
     } catch (error) {
       navigationOutcome = {
         state: 'error',
-        message: `Could not load the replay app. ${errorMessage(error)}`,
+        message: `Could not load the snapshot app. ${errorMessage(error)}`,
         source: 'launcher',
       };
     }
@@ -1221,7 +1214,7 @@ async function runReplay(options) {
       return outcome.state === 'ready' ? 0 : 1;
     }
 
-    console.info('The replay window will stay open until you close it or press Ctrl+C.');
+    console.info('The snapshot window will stay open until you close it or press Ctrl+C.');
     let monitoredOutcome;
     const monitor = (
       navigationOutcome ? Promise.resolve(navigationOutcome) : settledOutcome(page, pageErrors)
@@ -1239,13 +1232,13 @@ async function runReplay(options) {
         pageErrors.dispose();
         monitoredOutcome = {
           state: 'error',
-          message: `Could not monitor replay status. ${errorMessage(error)}`,
+          message: `Could not monitor snapshot status. ${errorMessage(error)}`,
           source: 'launcher',
         };
         reportOutcome(monitoredOutcome);
       });
     const reason = await waitForBrowserOrSignal(browser);
-    console.info(`Closing replay: ${reason}.`);
+    console.info(`Closing snapshot: ${reason}.`);
     await browser.close().catch(() => undefined);
     await monitor;
     return monitoredOutcome?.state === 'ready' ? 0 : 1;
@@ -1261,11 +1254,11 @@ try {
   if (options.help) {
     console.info(usage());
   } else {
-    exitCode = await runReplay(options);
+    exitCode = await runInspection(options);
   }
 } catch (error) {
-  console.error(`Replay failed: ${errorMessage(error)}`);
-  if (error instanceof ReplayInputError) console.error(usage());
+  console.error(`Snapshot inspection failed: ${errorMessage(error)}`);
+  if (error instanceof TvBugInputError) console.error(usage());
   exitCode = 1;
 }
 process.exitCode = exitCode;

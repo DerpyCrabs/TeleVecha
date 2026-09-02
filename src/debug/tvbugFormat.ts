@@ -21,19 +21,20 @@ import type {
 } from '../telegram/types';
 
 export const TVBUG_FORMAT = 'televecha-debug' as const;
-export const TVBUG_VERSION = 1 as const;
+export const TVBUG_VERSION = 2 as const;
 export const TVBUG_FIXED_EPOCH_SECONDS = 1_577_836_800;
 
 const MANIFEST_FILE = 'manifest.json';
-const STATE_FILE = 'state.v1.json';
-const TIMELINE_FILE = 'timeline.v1.ndjson';
-const REQUIRED_FILES = new Set([MANIFEST_FILE, STATE_FILE, TIMELINE_FILE]);
-const MAX_COMPRESSED_BYTES = 16 * 1024 * 1024;
+const SNAPSHOT_FILE = 'snapshot.v2.json';
+const TRACE_FILE = 'trace.v2.ndjson';
+const REQUIRED_FILES = new Set([MANIFEST_FILE, SNAPSHOT_FILE, TRACE_FILE]);
+const MAX_COMPRESSED_BYTES = 8 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
-const MAX_STATE_BYTES = 24 * 1024 * 1024;
-const MAX_TIMELINE_BYTES = 24 * 1024 * 1024;
-const MAX_TOTAL_UNCOMPRESSED_BYTES = 48 * 1024 * 1024;
+const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+const MAX_TRACE_BYTES = 1024 * 1024;
+const MAX_TOTAL_UNCOMPRESSED_BYTES = 10 * 1024 * 1024;
 const MAX_COLLECTION_ITEMS = 100_000;
+const MAX_TRACE_EVENTS = 300;
 const MAX_TEXT_UTF16_LENGTH = 2_000_000;
 const MAX_SYNTHETIC_ATTACHMENT_BYTES = 256 * 1024 * 1024;
 const MAX_CALLBACK_DATA_LENGTH = 1024 * 1024;
@@ -195,14 +196,14 @@ const SAFE_SEMANTIC_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     'default',
     'accepted',
     'request',
-    'repro-undefined',
-    'repro-binary',
-    'repro-file',
-    'repro-bigint',
-    'repro-number',
-    'repro-redacted',
-    'repro-function',
-    'repro-cycle',
+    'tvbug-undefined',
+    'tvbug-binary',
+    'tvbug-file',
+    'tvbug-bigint',
+    'tvbug-number',
+    'tvbug-redacted',
+    'tvbug-function',
+    'tvbug-cycle',
     'secret-connect',
     'secret-requestcode',
     'secret-submitcode',
@@ -232,19 +233,19 @@ const FORBIDDEN_KEYS = new Set(
   ].map(normalizeKey),
 );
 
-export interface ReproTextMetricsV1 {
+export interface TvBugTextMetricsV2 {
   utf16Length: number;
   graphemeCount: number;
   lineCount: number;
   lineUtf16Lengths: number[];
 }
 
-export interface ReproTextV1 {
+export interface TvBugTextV2 {
   value: string;
-  metrics: ReproTextMetricsV1;
+  metrics: TvBugTextMetricsV2;
 }
 
-export interface ReproManifestV1 {
+export interface TvBugManifestV2 {
   format: typeof TVBUG_FORMAT;
   version: typeof TVBUG_VERSION;
   producer: {
@@ -270,7 +271,7 @@ export interface ReproManifestV1 {
     reducedMotion?: boolean | undefined;
   };
   privacy: {
-    profile: 'account-free-v1';
+    profile: 'account-free-v2';
     rawText: false;
     rawMedia: false;
     stableIdentifiers: false;
@@ -278,14 +279,14 @@ export interface ReproManifestV1 {
   };
 }
 
-export interface ReproPeerV1 {
+export interface TvBugPeerV2 {
   id: string;
   kind: TelegramPeer['kind'];
 }
 
-export interface ReproMediaV1 {
+export interface TvBugMediaV2 {
   kind: TelegramMedia['kind'];
-  name: ReproTextV1;
+  name: TvBugTextV2;
   mimeType: string;
   byteSize?: number | undefined;
   width?: number | undefined;
@@ -294,60 +295,60 @@ export interface ReproMediaV1 {
   cacheKey?: string | undefined;
 }
 
-export interface ReproTextFormatV1 {
+export interface TvBugTextFormatV2 {
   offset: number;
   length: number;
   kind: TelegramTextFormat['kind'];
   url?: string | undefined;
   customEmojiId?: string | undefined;
   timestamp?: number | undefined;
-  oldText?: ReproTextV1 | undefined;
+  oldText?: TvBugTextV2 | undefined;
 }
 
-export interface ReproMessageV1 {
+export interface TvBugMessageV2 {
   id: number;
   peerId: string;
   senderId: string;
-  senderName?: ReproTextV1 | undefined;
+  senderName?: TvBugTextV2 | undefined;
   senderHasAvatar?: boolean | undefined;
   senderAvatarId?: string | undefined;
   senderColor?: string | undefined;
   senderColorVersion?: number | undefined;
-  senderRole?: ReproTextV1 | undefined;
+  senderRole?: TvBugTextV2 | undefined;
   senderRoleKind?: 'owner' | 'admin' | undefined;
   text: string;
-  textMetrics: ReproTextMetricsV1;
+  textMetrics: TvBugTextMetricsV2;
   date: number;
   outgoing: boolean;
   editedAt?: number | undefined;
   replyToId?: number | undefined;
-  replyQuote?: ReproTextV1 | undefined;
+  replyQuote?: TvBugTextV2 | undefined;
   randomId?: string | undefined;
   groupedId?: string | undefined;
   forwardedFrom?: {
-    name: ReproTextV1;
+    name: TvBugTextV2;
     peerId?: string | undefined;
     messageId?: number | undefined;
     hasAvatar?: boolean | undefined;
     avatarId?: string | undefined;
     color?: string | undefined;
   };
-  service?: ReproServiceMessageV1 | undefined;
-  botKeyboard?: ReproBotKeyboardV1 | undefined;
-  media?: ReproMediaV1 | undefined;
-  reactions?: ReproReactionV1[] | undefined;
-  mentions?: ReproMentionV1[] | undefined;
-  links?: ReproLinkV1[] | undefined;
-  linkPreview?: ReproLinkPreviewV1 | undefined;
-  formats?: ReproTextFormatV1[] | undefined;
-  richMessage?: ReproRichMessageV1 | undefined;
+  service?: TvBugServiceMessageV2 | undefined;
+  botKeyboard?: TvBugBotKeyboardV2 | undefined;
+  media?: TvBugMediaV2 | undefined;
+  reactions?: TvBugReactionV2[] | undefined;
+  mentions?: TvBugMentionV2[] | undefined;
+  links?: TvBugLinkV2[] | undefined;
+  linkPreview?: TvBugLinkPreviewV2 | undefined;
+  formats?: TvBugTextFormatV2[] | undefined;
+  richMessage?: TvBugRichMessageV2 | undefined;
   pinned?: boolean | undefined;
   cacheEpoch?: number | undefined;
 }
 
-export type ReproRichTextV1 =
-  | { kind: 'text'; text: ReproTextV1 }
-  | { kind: 'concat'; children: ReproRichTextV1[] }
+export type TvBugRichTextV2 =
+  | { kind: 'text'; text: TvBugTextV2 }
+  | { kind: 'concat'; children: TvBugRichTextV2[] }
   | {
       kind:
         | 'bold'
@@ -360,58 +361,58 @@ export type ReproRichTextV1 =
         | 'marked'
         | 'spoiler'
         | 'diff';
-      child: ReproRichTextV1;
-      oldText?: ReproRichTextV1 | undefined;
+      child: TvBugRichTextV2;
+      oldText?: TvBugRichTextV2 | undefined;
     }
-  | { kind: 'link'; child: ReproRichTextV1; url: string }
-  | { kind: 'anchor'; child: ReproRichTextV1; name: ReproTextV1 }
-  | { kind: 'customEmoji'; alt: ReproTextV1; documentId: string }
-  | { kind: 'math'; source: ReproTextV1 }
-  | { kind: 'date'; child: ReproRichTextV1; timestamp: number };
+  | { kind: 'link'; child: TvBugRichTextV2; url: string }
+  | { kind: 'anchor'; child: TvBugRichTextV2; name: TvBugTextV2 }
+  | { kind: 'customEmoji'; alt: TvBugTextV2; documentId: string }
+  | { kind: 'math'; source: TvBugTextV2 }
+  | { kind: 'date'; child: TvBugRichTextV2; timestamp: number };
 
-export type ReproRichBlockV1 =
+export type TvBugRichBlockV2 =
   | {
       kind: 'text';
       role: Extract<RichBlock, { kind: 'text' }>['role'];
-      text: ReproRichTextV1;
+      text: TvBugRichTextV2;
     }
-  | { kind: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6; text: ReproRichTextV1 }
-  | { kind: 'pre'; text: ReproRichTextV1; language?: ReproTextV1 | undefined }
+  | { kind: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6; text: TvBugRichTextV2 }
+  | { kind: 'pre'; text: TvBugRichTextV2; language?: TvBugTextV2 | undefined }
   | { kind: 'divider' }
-  | { kind: 'anchor'; name: ReproTextV1 }
+  | { kind: 'anchor'; name: TvBugTextV2 }
   | {
       kind: 'list';
       ordered: boolean;
       reversed?: boolean | undefined;
       start?: number | undefined;
       items: Array<{
-        text?: ReproRichTextV1 | undefined;
-        blocks?: ReproRichBlockV1[] | undefined;
+        text?: TvBugRichTextV2 | undefined;
+        blocks?: TvBugRichBlockV2[] | undefined;
         checked?: boolean | undefined;
         checkbox?: boolean | undefined;
-        marker?: ReproTextV1 | undefined;
+        marker?: TvBugTextV2 | undefined;
         value?: number | undefined;
       }>;
     }
   | {
       kind: 'quote';
-      blocks: ReproRichBlockV1[];
-      caption?: ReproRichTextV1 | undefined;
+      blocks: TvBugRichBlockV2[];
+      caption?: TvBugRichTextV2 | undefined;
       pull?: boolean | undefined;
       expandable?: boolean | undefined;
     }
   | {
       kind: 'details';
-      title: ReproRichTextV1;
-      blocks: ReproRichBlockV1[];
+      title: TvBugRichTextV2;
+      blocks: TvBugRichBlockV2[];
       open?: boolean | undefined;
     }
   | {
       kind: 'table';
-      title?: ReproRichTextV1 | undefined;
+      title?: TvBugRichTextV2 | undefined;
       rows: Array<
         Array<{
-          text?: ReproRichTextV1 | undefined;
+          text?: TvBugRichTextV2 | undefined;
           header?: boolean | undefined;
           align?: 'left' | 'center' | 'right' | undefined;
           verticalAlign?: 'top' | 'middle' | 'bottom' | undefined;
@@ -422,104 +423,104 @@ export type ReproRichBlockV1 =
       bordered?: boolean | undefined;
       striped?: boolean | undefined;
     }
-  | { kind: 'math'; source: ReproTextV1 }
+  | { kind: 'math'; source: TvBugTextV2 }
   | {
       kind: 'media';
       mediaKind: 'photo' | 'video' | 'audio' | 'embed' | 'map';
       id?: string | undefined;
       url?: string | undefined;
       caption?: {
-        text: ReproRichTextV1;
-        credit?: ReproRichTextV1 | undefined;
+        text: TvBugRichTextV2;
+        credit?: TvBugRichTextV2 | undefined;
       };
       spoiler?: boolean | undefined;
     }
   | {
       kind: 'group';
       mode: 'cover' | 'collage' | 'slideshow';
-      blocks: ReproRichBlockV1[];
+      blocks: TvBugRichBlockV2[];
       caption?: {
-        text: ReproRichTextV1;
-        credit?: ReproRichTextV1 | undefined;
+        text: TvBugRichTextV2;
+        credit?: TvBugRichTextV2 | undefined;
       };
     }
-  | { kind: 'author'; author: ReproRichTextV1; publishedAt: number };
+  | { kind: 'author'; author: TvBugRichTextV2; publishedAt: number };
 
-export interface ReproRichMessageV1 {
-  blocks: ReproRichBlockV1[];
+export interface TvBugRichMessageV2 {
+  blocks: TvBugRichBlockV2[];
   rtl?: boolean | undefined;
   partial?: boolean | undefined;
 }
 
-export interface ReproReactionV1 {
-  emoji: ReproTextV1;
+export interface TvBugReactionV2 {
+  emoji: TvBugTextV2;
   customEmojiId?: string | undefined;
   count: number;
   chosen: boolean;
 }
 
-export interface ReproMentionV1 {
+export interface TvBugMentionV2 {
   offset: number;
   length: number;
   userId?: string | undefined;
 }
 
-export interface ReproLinkV1 {
+export interface TvBugLinkV2 {
   offset: number;
   length: number;
   url?: string | undefined;
 }
 
-export interface ReproLinkPreviewV1 {
+export interface TvBugLinkPreviewV2 {
   url: string;
-  siteName?: ReproTextV1 | undefined;
-  title?: ReproTextV1 | undefined;
-  description?: ReproTextV1 | undefined;
+  siteName?: TvBugTextV2 | undefined;
+  title?: TvBugTextV2 | undefined;
+  description?: TvBugTextV2 | undefined;
   hasPhoto?: boolean | undefined;
   photoSize?: 'small' | 'large' | undefined;
 }
 
-export interface ReproServiceMessageV1 {
+export interface TvBugServiceMessageV2 {
   kind: TelegramServiceMessage['kind'];
-  text: ReproTextV1;
+  text: TvBugTextV2;
   actorId?: string | undefined;
   targetUserIds?: string[] | undefined;
-  title?: ReproTextV1 | undefined;
+  title?: TvBugTextV2 | undefined;
 }
 
-export interface ReproBotKeyboardV1 {
+export interface TvBugBotKeyboardV2 {
   kind: TelegramBotKeyboard['kind'];
   rows: Array<
     Array<{
       kind: TelegramBotKeyboard['rows'][number][number]['kind'];
-      text: ReproTextV1;
+      text: TvBugTextV2;
       url?: string | undefined;
       buttonId?: number | undefined;
       dataLength?: number | undefined;
-      copyText?: ReproTextV1 | undefined;
-      query?: ReproTextV1 | undefined;
+      copyText?: TvBugTextV2 | undefined;
+      query?: TvBugTextV2 | undefined;
       samePeer?: boolean | undefined;
-      botUsername?: ReproTextV1 | undefined;
+      botUsername?: TvBugTextV2 | undefined;
     }>
   >;
   hidden?: boolean | undefined;
   forceReply?: boolean | undefined;
   singleUse?: boolean | undefined;
   persistent?: boolean | undefined;
-  placeholder?: ReproTextV1 | undefined;
+  placeholder?: TvBugTextV2 | undefined;
 }
 
-export interface ReproDialogV1 {
-  peer: ReproPeerV1;
+export interface TvBugDialogV2 {
+  peer: TvBugPeerV2;
   transient?: boolean | undefined;
   channelPts?: number | undefined;
-  title: ReproTextV1;
-  initials: ReproTextV1;
+  title: TvBugTextV2;
+  initials: TvBugTextV2;
   color: string;
-  username?: ReproTextV1 | undefined;
+  username?: TvBugTextV2 | undefined;
   archived?: boolean | undefined;
   topMessageId: number;
-  topMessage?: ReproMessageV1 | undefined;
+  topMessage?: TvBugMessageV2 | undefined;
   unreadCount: number;
   readInboxMaxId: number;
   readOutboxMaxId: number;
@@ -531,18 +532,18 @@ export interface ReproDialogV1 {
   presence?: 'online' | 'recently' | 'offline' | undefined;
   lastSeenAt?: number | undefined;
   userDetails?: {
-    firstName?: ReproTextV1 | undefined;
-    lastName?: ReproTextV1 | undefined;
-    username?: ReproTextV1 | undefined;
-    bio?: ReproTextV1 | undefined;
+    firstName?: TvBugTextV2 | undefined;
+    lastName?: TvBugTextV2 | undefined;
+    username?: TvBugTextV2 | undefined;
+    bio?: TvBugTextV2 | undefined;
     isContact?: boolean | undefined;
     blocked: boolean;
   };
   cacheEpoch?: number | undefined;
 }
 
-export interface ReproPendingAttachmentV1 {
-  name: ReproTextV1;
+export interface TvBugPendingAttachmentV2 {
+  name: TvBugTextV2;
   mimeType: string;
   byteSize: number;
   asSticker: boolean;
@@ -550,57 +551,57 @@ export interface ReproPendingAttachmentV1 {
   randomId?: string | undefined;
 }
 
-export interface ReproPendingSendV1 {
+export interface TvBugPendingSendV2 {
   id: string;
   accountId?: string | undefined;
-  peer: ReproPeerV1;
+  peer: TvBugPeerV2;
   text: string;
-  textMetrics: ReproTextMetricsV1;
+  textMetrics: TvBugTextMetricsV2;
   randomId: string;
   createdAt: number;
   queueOrder?: number | undefined;
   attempts: number;
   lastError?: 'recorded-send-failure' | undefined;
   uploadProgress?: number | undefined;
-  reply?: { messageId: number; quoteText?: ReproTextV1 | undefined } | undefined;
-  formats?: ReproTextFormatV1[] | undefined;
+  reply?: { messageId: number; quoteText?: TvBugTextV2 | undefined } | undefined;
+  formats?: TvBugTextFormatV2[] | undefined;
   sticker?: {
     id: string;
-    emoji: ReproTextV1;
+    emoji: TvBugTextV2;
     mimeType: string;
     byteSize?: number | undefined;
-    title?: ReproTextV1 | undefined;
+    title?: TvBugTextV2 | undefined;
   };
-  forward?: { fromPeer: ReproPeerV1; messageId: number } | undefined;
-  botStart?: { startParam: ReproTextV1 } | undefined;
-  attachment?: ReproPendingAttachmentV1 | undefined;
-  album?: { id: string; attachments: ReproPendingAttachmentV1[] } | undefined;
+  forward?: { fromPeer: TvBugPeerV2; messageId: number } | undefined;
+  botStart?: { startParam: TvBugTextV2 } | undefined;
+  attachment?: TvBugPendingAttachmentV2 | undefined;
+  album?: { id: string; attachments: TvBugPendingAttachmentV2[] } | undefined;
 }
 
-export interface ReproGroupMemberV1 {
-  peer: ReproPeerV1;
-  title: ReproTextV1;
-  initials: ReproTextV1;
+export interface TvBugGroupMemberV2 {
+  peer: TvBugPeerV2;
+  title: TvBugTextV2;
+  initials: TvBugTextV2;
   color: string;
-  username?: ReproTextV1 | undefined;
-  role?: ReproTextV1 | undefined;
+  username?: TvBugTextV2 | undefined;
+  role?: TvBugTextV2 | undefined;
   roleKind?: 'owner' | 'admin' | undefined;
   hasAvatar: boolean;
   avatarId?: string | undefined;
   presence?: 'online' | 'recently' | 'offline' | undefined;
 }
 
-export interface ReproTimedValueV1<T> {
+export interface TvBugTimedValueV2<T> {
   value: T;
   savedAt: number;
 }
 
-export interface ReproTimedSourceV1<T> {
+export interface TvBugTimedSourceV2<T> {
   value: readonly T[];
   savedAt: number;
 }
 
-export interface ReproWorkspaceSourceV1 {
+export interface TvBugWorkspaceSourceV2 {
   accountId?: string | undefined;
   dialogs?: readonly CachedDialog[] | undefined;
   draftRevisions?: Readonly<Record<string, number>> | undefined;
@@ -614,7 +615,7 @@ export interface ReproWorkspaceSourceV1 {
   online?: boolean | undefined;
 }
 
-export interface ReproUiSourceV1 {
+export interface TvBugUiSourceV2 {
   route?: string | undefined;
   bootstrapActivePeerId?: string | undefined;
   activePeerId?: string | undefined;
@@ -632,7 +633,7 @@ export interface ReproUiSourceV1 {
     | undefined;
 }
 
-export interface ReproStateSourceV1 {
+export interface TvBugStateSourceV2 {
   cursor?: SyncCursor | undefined;
   epoch?: number | undefined;
   lastPeerId?: string | undefined;
@@ -642,33 +643,36 @@ export interface ReproStateSourceV1 {
   drafts?: Readonly<Record<string, string>> | undefined;
   draftRevisions?: Readonly<Record<string, number>> | undefined;
   pending?: readonly PendingSend[] | undefined;
-  pinnedMessages?: Readonly<Record<string, ReproTimedSourceV1<TelegramMessage>>> | undefined;
-  groupMembers?: Readonly<Record<string, ReproTimedSourceV1<TelegramGroupMember>>> | undefined;
-  workspace?: ReproWorkspaceSourceV1 | undefined;
-  ui?: ReproUiSourceV1 | undefined;
+  pinnedMessages?: Readonly<Record<string, TvBugTimedSourceV2<TelegramMessage>>> | undefined;
+  groupMembers?: Readonly<Record<string, TvBugTimedSourceV2<TelegramGroupMember>>> | undefined;
+  workspace?: TvBugWorkspaceSourceV2 | undefined;
+  /** Runtime flags and errors, excluding collections already represented above. */
+  runtime?: unknown;
+  ui?: TvBugUiSourceV2 | undefined;
 }
 
-export interface ReproStateV1 {
+export interface TvBugStateV2 {
   version: typeof TVBUG_VERSION;
   cursor?: SyncCursor | undefined;
   epoch: number;
   lastPeerId?: string | undefined;
-  dialogs: ReproDialogV1[];
-  messages: ReproMessageV1[];
+  dialogs: TvBugDialogV2[];
+  messages: TvBugMessageV2[];
   histories: Record<string, number[]>;
   drafts: Record<string, string>;
-  draftMetrics: Record<string, ReproTextMetricsV1>;
+  draftMetrics: Record<string, TvBugTextMetricsV2>;
   draftRevisions: Record<string, number>;
-  pending: ReproPendingSendV1[];
-  pinnedMessages: Record<string, ReproTimedValueV1<ReproMessageV1[]>>;
-  groupMembers: Record<string, ReproTimedValueV1<ReproGroupMemberV1[]>>;
+  pending: TvBugPendingSendV2[];
+  pinnedMessages: Record<string, TvBugTimedValueV2<TvBugMessageV2[]>>;
+  groupMembers: Record<string, TvBugTimedValueV2<TvBugGroupMemberV2[]>>;
   workspace: {
     accountId?: string | undefined;
     activePeerId?: string | undefined;
-    phase?: ReproWorkspaceSourceV1['phase'];
-    sync?: ReproWorkspaceSourceV1['sync'];
+    phase?: TvBugWorkspaceSourceV2['phase'];
+    sync?: TvBugWorkspaceSourceV2['sync'];
     online?: boolean | undefined;
   };
+  runtime: TvBugJsonValue;
   ui?: {
     route?: string | undefined;
     bootstrapActivePeerId?: string | undefined;
@@ -686,55 +690,43 @@ export interface ReproStateV1 {
   };
 }
 
-export type ReproJsonPrimitive = string | number | boolean | null;
-export type ReproJsonValue =
-  | ReproJsonPrimitive
-  | ReproJsonValue[]
-  | { [key: string]: ReproJsonValue };
+export type TvBugJsonPrimitive = string | number | boolean | null;
+export type TvBugJsonValue =
+  | TvBugJsonPrimitive
+  | TvBugJsonValue[]
+  | { [key: string]: TvBugJsonValue };
 
-export type ReproTimelineKindV1 =
-  | 'call'
-  | 'resolve'
-  | 'reject'
-  | 'push'
-  | 'ui'
-  | 'checkpoint'
-  | 'diagnostic';
+export type TvBugTraceKindV2 = 'ui' | 'diagnostic';
 
-export interface ReproTimelineEventV1 {
+export interface TvBugTraceEventV2 {
   seq: number;
   tMs: number;
-  kind: ReproTimelineKindV1;
-  tab?: string | undefined;
-  callId?: string | undefined;
+  kind: TvBugTraceKindV2;
   method?: string | undefined;
-  args?: ReproJsonValue | undefined;
-  value?: ReproJsonValue | undefined;
-  error?: { code: string; message?: string | undefined } | undefined;
-  checkpointHash?: string | undefined;
+  value?: TvBugJsonValue | undefined;
 }
 
-export interface ReproBundleV1 {
-  manifest: ReproManifestV1;
-  state: ReproStateV1;
-  timeline: ReproTimelineEventV1[];
+export interface TvBugBundleV2 {
+  manifest: TvBugManifestV2;
+  snapshot: TvBugStateV2;
+  trace: TvBugTraceEventV2[];
 }
 
-export interface CreateReproBundleInputV1 extends ReproBundleV1 {}
+export interface CreateTvBugBundleInputV2 extends TvBugBundleV2 {}
 
-export interface ReproSanitizerV1 {
-  sanitizeState(source: ReproStateSourceV1): ReproStateV1;
-  sanitizeValue(value: unknown, context?: string): ReproJsonValue | undefined;
+export interface TvBugSanitizerV2 {
+  sanitizeState(source: TvBugStateSourceV2): TvBugStateV2;
+  sanitizeValue(value: unknown, context?: string): TvBugJsonValue | undefined;
   alias(category: string, value: string | number): string;
   shiftSeconds(value: number): number;
   shiftMilliseconds(value: number): number;
 }
 
-export interface ReproSanitizerOptionsV1 {
+export interface TvBugSanitizerOptionsV2 {
   sourceEpochMs?: number | undefined;
 }
 
-export interface HydratedReproStateV1 {
+export interface HydratedTvBugStateV2 {
   cursor?: SyncCursor | undefined;
   epoch: number;
   lastPeerId?: string | undefined;
@@ -744,8 +736,8 @@ export interface HydratedReproStateV1 {
   drafts: Record<string, string>;
   draftRevisions: Record<string, number>;
   pending: PendingSend[];
-  pinnedMessages: Record<string, ReproTimedValueV1<TelegramMessage[]>>;
-  groupMembers: Record<string, ReproTimedValueV1<TelegramGroupMember[]>>;
+  pinnedMessages: Record<string, TvBugTimedValueV2<TelegramMessage[]>>;
+  groupMembers: Record<string, TvBugTimedValueV2<TelegramGroupMember[]>>;
   workspace: {
     accountId?: string | undefined;
     dialogs: CachedDialog[];
@@ -754,22 +746,22 @@ export interface HydratedReproStateV1 {
     epoch: number;
     lastPeerId?: string | undefined;
     pending: PendingSend[];
-    pinnedMessages: Record<string, ReproTimedValueV1<TelegramMessage[]>>;
-    groupMembers: Record<string, ReproTimedValueV1<TelegramGroupMember[]>>;
+    pinnedMessages: Record<string, TvBugTimedValueV2<TelegramMessage[]>>;
+    groupMembers: Record<string, TvBugTimedValueV2<TelegramGroupMember[]>>;
   };
-  ui?: ReproStateV1['ui'];
+  ui?: TvBugStateV2['ui'];
 }
 
-export class ReproFormatError extends Error {
+export class TvBugFormatError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'ReproFormatError';
+    this.name = 'TvBugFormatError';
   }
 }
 
-export function createReproManifest(
-  input: Omit<ReproManifestV1, 'format' | 'version' | 'privacy'>,
-): ReproManifestV1 {
+export function createTvBugManifest(
+  input: Omit<TvBugManifestV2, 'format' | 'version' | 'privacy'>,
+): TvBugManifestV2 {
   return {
     format: TVBUG_FORMAT,
     version: TVBUG_VERSION,
@@ -777,7 +769,7 @@ export function createReproManifest(
     capture: { ...input.capture },
     ...(input.environment ? { environment: { ...input.environment } } : {}),
     privacy: {
-      profile: 'account-free-v1',
+      profile: 'account-free-v2',
       rawText: false,
       rawMedia: false,
       stableIdentifiers: false,
@@ -786,13 +778,13 @@ export function createReproManifest(
   };
 }
 
-export function sanitizeReproText(value: string): ReproTextV1 {
+export function sanitizeTvBugText(value: string): TvBugTextV2 {
   assertTextSize(value, 'text');
   const synthetic = Array.from(value, synthesizeCodePoint).join('');
   return { value: synthetic, metrics: measureText(synthetic) };
 }
 
-export function measureText(value: string): ReproTextMetricsV1 {
+export function measureText(value: string): TvBugTextMetricsV2 {
   assertTextSize(value, 'text');
   const lines = value.split(/\r\n|[\n\r\u2028\u2029]/u);
   return {
@@ -803,37 +795,37 @@ export function measureText(value: string): ReproTextMetricsV1 {
   };
 }
 
-export function createReproSanitizer(options: ReproSanitizerOptionsV1 = {}): ReproSanitizerV1 {
-  return new ReproSanitizer(options);
+export function createTvBugSanitizer(options: TvBugSanitizerOptionsV2 = {}): TvBugSanitizerV2 {
+  return new TvBugSanitizer(options);
 }
 
-export function sanitizeReproState(source: ReproStateSourceV1): ReproStateV1 {
-  return createReproSanitizer().sanitizeState(source);
+export function sanitizeTvBugState(source: TvBugStateSourceV2): TvBugStateV2 {
+  return createTvBugSanitizer().sanitizeState(source);
 }
 
-class ReproSanitizer implements ReproSanitizerV1 {
+class TvBugSanitizer implements TvBugSanitizerV2 {
   private readonly aliases = new AliasBook();
   private time: TimeShifter | undefined;
 
-  constructor(private readonly options: ReproSanitizerOptionsV1) {
+  constructor(private readonly options: TvBugSanitizerOptionsV2) {
     if (options.sourceEpochMs !== undefined) {
       this.time = new TimeShifter([], options.sourceEpochMs);
     }
   }
 
-  sanitizeState(source: ReproStateSourceV1): ReproStateV1 {
+  sanitizeState(source: TvBugStateSourceV2): TvBugStateV2 {
     const sanitizer = new StateSanitizer(source, this.aliases, this.time);
     this.time = sanitizer.timeShifter;
     return sanitizer.sanitize();
   }
 
-  sanitizeValue(value: unknown, context = 'value'): ReproJsonValue | undefined {
+  sanitizeValue(value: unknown, context = 'value'): TvBugJsonValue | undefined {
     return sanitizeJsonValue(value, context, this.aliases, this.time, 0);
   }
 
   alias(category: string, value: string | number): string {
     if (!/^[a-z][a-z0-9-]{0,31}$/u.test(category)) {
-      throw new ReproFormatError('Alias categories must be short lowercase names.');
+      throw new TvBugFormatError('Alias categories must be short lowercase names.');
     }
     return this.aliases.get(category, String(value));
   }
@@ -848,7 +840,7 @@ class ReproSanitizer implements ReproSanitizerV1 {
 
   private requireTime(): TimeShifter {
     if (!this.time) {
-      throw new ReproFormatError(
+      throw new TvBugFormatError(
         'Timestamp shifting needs sourceEpochMs or a sanitized initial state first.',
       );
     }
@@ -856,30 +848,30 @@ class ReproSanitizer implements ReproSanitizerV1 {
   }
 }
 
-export function createTvBugBundle(bundle: CreateReproBundleInputV1): Uint8Array {
+export function createTvBugBundle(bundle: CreateTvBugBundleInputV2): Uint8Array {
   validateBundle(bundle);
   const manifest = strToU8(JSON.stringify(bundle.manifest, null, 2));
-  const state = strToU8(JSON.stringify(bundle.state, null, 2));
-  const timeline = strToU8(
-    bundle.timeline.map((event) => JSON.stringify(event)).join('\n') +
-      (bundle.timeline.length ? '\n' : ''),
+  const snapshot = strToU8(JSON.stringify(bundle.snapshot, null, 2));
+  const trace = strToU8(
+    bundle.trace.map((event) => JSON.stringify(event)).join('\n') +
+      (bundle.trace.length ? '\n' : ''),
   );
-  assertFileSizes(manifest.byteLength, state.byteLength, timeline.byteLength);
+  assertFileSizes(manifest.byteLength, snapshot.byteLength, trace.byteLength);
   const result = zipSync(
     {
       [MANIFEST_FILE]: [manifest, { mtime: ZIP_MTIME }],
-      [STATE_FILE]: [state, { mtime: ZIP_MTIME }],
-      [TIMELINE_FILE]: [timeline, { mtime: ZIP_MTIME }],
+      [SNAPSHOT_FILE]: [snapshot, { mtime: ZIP_MTIME }],
+      [TRACE_FILE]: [trace, { mtime: ZIP_MTIME }],
     },
     { level: 9 },
   );
   if (result.byteLength > MAX_COMPRESSED_BYTES) {
-    throw new ReproFormatError('The compressed .tvbug bundle exceeds 16 MiB.');
+    throw new TvBugFormatError('The compressed .tvbug bundle exceeds 8 MiB.');
   }
   return result;
 }
 
-interface ReproZipEntry {
+interface TvBugZipEntry {
   name: string;
   flags: number;
   compression: number;
@@ -898,7 +890,7 @@ function extractTvBugZip(data: Uint8Array): Record<string, Uint8Array> {
   return files;
 }
 
-function inspectTvBugZip(data: Uint8Array): ReproZipEntry[] {
+function inspectTvBugZip(data: Uint8Array): TvBugZipEntry[] {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const endOffset = findZipEnd(view);
   const disk = view.getUint16(endOffset + 4, true);
@@ -908,24 +900,24 @@ function inspectTvBugZip(data: Uint8Array): ReproZipEntry[] {
   const centralSize = view.getUint32(endOffset + 12, true);
   const centralOffset = view.getUint32(endOffset + 16, true);
   if (disk !== 0 || centralDisk !== 0 || entriesOnDisk !== entryCount) {
-    throw new ReproFormatError('Multi-disk .tvbug ZIPs are not supported.');
+    throw new TvBugFormatError('Multi-disk .tvbug ZIPs are not supported.');
   }
   if (entryCount === 0xffff || centralSize === 0xffff_ffff || centralOffset === 0xffff_ffff) {
-    throw new ReproFormatError('ZIP64 .tvbug bundles are not supported.');
+    throw new TvBugFormatError('ZIP64 .tvbug bundles are not supported.');
   }
   const centralEnd = checkedZipEnd(centralOffset, centralSize, endOffset, 'central directory');
   if (centralEnd !== endOffset) {
-    throw new ReproFormatError('The .tvbug ZIP central directory is inconsistent.');
+    throw new TvBugFormatError('The .tvbug ZIP central directory is inconsistent.');
   }
 
-  const entries: ReproZipEntry[] = [];
+  const entries: TvBugZipEntry[] = [];
   const seen = new Set<string>();
   let totalSize = 0;
   let offset = centralOffset;
   for (let index = 0; index < entryCount; index += 1) {
     checkedZipEnd(offset, 46, centralEnd, 'central directory entry');
     if (view.getUint32(offset, true) !== ZIP_CENTRAL_SIGNATURE) {
-      throw new ReproFormatError('The .tvbug ZIP central directory is malformed.');
+      throw new TvBugFormatError('The .tvbug ZIP central directory is malformed.');
     }
     const flags = view.getUint16(offset + 8, true);
     const compression = view.getUint16(offset + 10, true);
@@ -948,11 +940,11 @@ function inspectTvBugZip(data: Uint8Array): ReproZipEntry[] {
     validateZipEntryMetadata(name, flags, compression, entryDisk, seen);
     const fileLimit = zipFileLimit(name);
     if (uncompressedSize > fileLimit) {
-      throw new ReproFormatError(`${name} exceeds its size limit.`);
+      throw new TvBugFormatError(`${name} exceeds its size limit.`);
     }
     totalSize += uncompressedSize;
     if (totalSize > MAX_TOTAL_UNCOMPRESSED_BYTES) {
-      throw new ReproFormatError('The uncompressed .tvbug bundle exceeds 48 MiB.');
+      throw new TvBugFormatError('The uncompressed .tvbug bundle exceeds 10 MiB.');
     }
     const entry = inspectLocalZipEntry(data, view, centralOffset, {
       name,
@@ -967,21 +959,21 @@ function inspectTvBugZip(data: Uint8Array): ReproZipEntry[] {
     offset = nextOffset;
   }
   if (offset !== centralEnd) {
-    throw new ReproFormatError('The .tvbug ZIP central directory has trailing data.');
+    throw new TvBugFormatError('The .tvbug ZIP central directory has trailing data.');
   }
   for (const file of REQUIRED_FILES) {
-    if (!seen.has(file)) throw new ReproFormatError(`Missing ${file} in .tvbug bundle.`);
+    if (!seen.has(file)) throw new TvBugFormatError(`Missing ${file} in .tvbug bundle.`);
   }
   const localOrder = [...entries].sort((left, right) => left.localOffset - right.localOffset);
   let expectedOffset = 0;
   for (const entry of localOrder) {
     if (entry.localOffset !== expectedOffset) {
-      throw new ReproFormatError('The .tvbug ZIP contains overlapping, hidden, or padded data.');
+      throw new TvBugFormatError('The .tvbug ZIP contains overlapping, hidden, or padded data.');
     }
     expectedOffset = entry.dataEnd;
   }
   if (expectedOffset !== centralOffset) {
-    throw new ReproFormatError('The .tvbug ZIP contains unlisted file data.');
+    throw new TvBugFormatError('The .tvbug ZIP contains unlisted file data.');
   }
   return entries;
 }
@@ -993,18 +985,18 @@ function findZipEnd(view: DataView): number {
     const commentLength = view.getUint16(offset + 20, true);
     if (offset + 22 + commentLength === view.byteLength) return offset;
   }
-  throw new ReproFormatError('The .tvbug ZIP end record is missing or malformed.');
+  throw new TvBugFormatError('The .tvbug ZIP end record is missing or malformed.');
 }
 
 function inspectLocalZipEntry(
   data: Uint8Array,
   view: DataView,
   centralOffset: number,
-  central: Omit<ReproZipEntry, 'dataOffset' | 'dataEnd'>,
-): ReproZipEntry {
+  central: Omit<TvBugZipEntry, 'dataOffset' | 'dataEnd'>,
+): TvBugZipEntry {
   checkedZipEnd(central.localOffset, 30, centralOffset, `${central.name} local header`);
   if (view.getUint32(central.localOffset, true) !== ZIP_LOCAL_SIGNATURE) {
-    throw new ReproFormatError(`${central.name} has a malformed local ZIP header.`);
+    throw new TvBugFormatError(`${central.name} has a malformed local ZIP header.`);
   }
   const flags = view.getUint16(central.localOffset + 6, true);
   const compression = view.getUint16(central.localOffset + 8, true);
@@ -1029,7 +1021,7 @@ function inspectLocalZipEntry(
     compressedSize !== central.compressedSize ||
     uncompressedSize !== central.uncompressedSize
   ) {
-    throw new ReproFormatError(`${central.name} local and central ZIP metadata disagree.`);
+    throw new TvBugFormatError(`${central.name} local and central ZIP metadata disagree.`);
   }
   const dataEnd = checkedZipEnd(
     dataOffset,
@@ -1038,7 +1030,7 @@ function inspectLocalZipEntry(
     `${central.name} compressed data`,
   );
   if (compression === 0 && compressedSize !== uncompressedSize) {
-    throw new ReproFormatError(`${central.name} has inconsistent stored ZIP sizes.`);
+    throw new TvBugFormatError(`${central.name} has inconsistent stored ZIP sizes.`);
   }
   return { ...central, dataOffset, dataEnd };
 }
@@ -1051,20 +1043,20 @@ function validateZipEntryMetadata(
   seen: Set<string>,
 ) {
   if (!REQUIRED_FILES.has(name) || name.includes('/') || name.includes('\\')) {
-    throw new ReproFormatError(`Unexpected file in .tvbug bundle: ${name}`);
+    throw new TvBugFormatError(`Unexpected file in .tvbug bundle: ${name}`);
   }
-  if (seen.has(name)) throw new ReproFormatError(`Duplicate file in .tvbug bundle: ${name}`);
+  if (seen.has(name)) throw new TvBugFormatError(`Duplicate file in .tvbug bundle: ${name}`);
   seen.add(name);
-  if (entryDisk !== 0) throw new ReproFormatError(`${name} refers to another ZIP disk.`);
+  if (entryDisk !== 0) throw new TvBugFormatError(`${name} refers to another ZIP disk.`);
   if ((flags & ~ZIP_UTF8_FLAG) !== 0) {
-    throw new ReproFormatError(`${name} uses unsupported ZIP flags.`);
+    throw new TvBugFormatError(`${name} uses unsupported ZIP flags.`);
   }
   if (compression !== 0 && compression !== 8) {
-    throw new ReproFormatError(`${name} uses an unsupported ZIP compression method.`);
+    throw new TvBugFormatError(`${name} uses an unsupported ZIP compression method.`);
   }
 }
 
-function extractZipEntry(data: Uint8Array, entry: ReproZipEntry): Uint8Array {
+function extractZipEntry(data: Uint8Array, entry: TvBugZipEntry): Uint8Array {
   const fileLimit = zipFileLimit(entry.name);
   const output = new Uint8Array(entry.uncompressedSize);
   let written = 0;
@@ -1073,7 +1065,9 @@ function extractZipEntry(data: Uint8Array, entry: ReproZipEntry): Uint8Array {
   const append = (chunk: Uint8Array, final: boolean) => {
     const next = written + chunk.byteLength;
     if (next > entry.uncompressedSize || next > fileLimit) {
-      throw new ReproFormatError(`${entry.name} expands beyond its declared size or replay limit.`);
+      throw new TvBugFormatError(
+        `${entry.name} expands beyond its declared size or materialization limit.`,
+      );
     }
     output.set(chunk, written);
     written = next;
@@ -1095,10 +1089,10 @@ function extractZipEntry(data: Uint8Array, entry: ReproZipEntry): Uint8Array {
     }
   }
   if (!finished || written !== entry.uncompressedSize) {
-    throw new ReproFormatError(`${entry.name} does not match its declared uncompressed size.`);
+    throw new TvBugFormatError(`${entry.name} does not match its declared uncompressed size.`);
   }
   if ((checksum ^ 0xffff_ffff) >>> 0 !== entry.crc32) {
-    throw new ReproFormatError(`${entry.name} failed its ZIP CRC-32 check.`);
+    throw new TvBugFormatError(`${entry.name} failed its ZIP CRC-32 check.`);
   }
   return output;
 }
@@ -1106,15 +1100,15 @@ function extractZipEntry(data: Uint8Array, entry: ReproZipEntry): Uint8Array {
 function checkedZipEnd(start: number, length: number, limit: number, context: string): number {
   const end = start + length;
   if (!Number.isSafeInteger(end) || start < 0 || length < 0 || end > limit) {
-    throw new ReproFormatError(`The .tvbug ZIP ${context} is out of bounds.`);
+    throw new TvBugFormatError(`The .tvbug ZIP ${context} is out of bounds.`);
   }
   return end;
 }
 
 function zipFileLimit(name: string): number {
   if (name === MANIFEST_FILE) return MAX_MANIFEST_BYTES;
-  if (name === STATE_FILE) return MAX_STATE_BYTES;
-  return MAX_TIMELINE_BYTES;
+  if (name === SNAPSHOT_FILE) return MAX_SNAPSHOT_BYTES;
+  return MAX_TRACE_BYTES;
 }
 
 function createCrc32Table(): Uint32Array {
@@ -1135,43 +1129,43 @@ function updateCrc32(checksum: number, data: Uint8Array): number {
   return value >>> 0;
 }
 
-export function parseTvBugBundle(data: Uint8Array): ReproBundleV1 {
+export function parseTvBugBundle(data: Uint8Array): TvBugBundleV2 {
   if (!(data instanceof Uint8Array) || data.byteLength === 0) {
-    throw new ReproFormatError('The .tvbug bundle is empty.');
+    throw new TvBugFormatError('The .tvbug bundle is empty.');
   }
   if (data.byteLength > MAX_COMPRESSED_BYTES) {
-    throw new ReproFormatError('The compressed .tvbug bundle exceeds 16 MiB.');
+    throw new TvBugFormatError('The compressed .tvbug bundle exceeds 8 MiB.');
   }
   let files: Record<string, Uint8Array>;
   try {
     files = extractTvBugZip(data);
   } catch (error) {
-    if (error instanceof ReproFormatError) throw error;
-    throw new ReproFormatError(`Cannot read .tvbug ZIP: ${errorMessage(error)}`);
+    if (error instanceof TvBugFormatError) throw error;
+    throw new TvBugFormatError(`Cannot read .tvbug ZIP: ${errorMessage(error)}`);
   }
   for (const file of REQUIRED_FILES) {
-    if (!files[file]) throw new ReproFormatError(`Missing ${file} in .tvbug bundle.`);
+    if (!files[file]) throw new TvBugFormatError(`Missing ${file} in .tvbug bundle.`);
   }
   assertFileSizes(
     files[MANIFEST_FILE]!.byteLength,
-    files[STATE_FILE]!.byteLength,
-    files[TIMELINE_FILE]!.byteLength,
+    files[SNAPSHOT_FILE]!.byteLength,
+    files[TRACE_FILE]!.byteLength,
   );
   const manifest = parseJsonFile(files[MANIFEST_FILE]!, MANIFEST_FILE);
-  const state = parseJsonFile(files[STATE_FILE]!, STATE_FILE);
-  const timelineText = decodeUtf8(files[TIMELINE_FILE]!, TIMELINE_FILE);
-  const timeline = timelineText
+  const snapshot = parseJsonFile(files[SNAPSHOT_FILE]!, SNAPSHOT_FILE);
+  const traceText = decodeUtf8(files[TRACE_FILE]!, TRACE_FILE);
+  const trace = traceText
     .split('\n')
     .filter((line) => line.length > 0)
-    .map((line, index) => parseJsonText(line, `${TIMELINE_FILE}:${index + 1}`));
-  const bundle = { manifest, state, timeline } as ReproBundleV1;
+    .map((line, index) => parseJsonText(line, `${TRACE_FILE}:${index + 1}`));
+  const bundle = { manifest, snapshot, trace } as TvBugBundleV2;
   validateBundle(bundle);
   return bundle;
 }
 
-export function hydrateReproState(state: ReproStateV1): HydratedReproStateV1 {
+export function hydrateTvBugState(state: TvBugStateV2): HydratedTvBugStateV2 {
   validateStateForHydration(state);
-  const replayNow = Date.now();
+  const hydrationNow = Date.now();
   const messages = state.messages.map((message) => hydrateMessage(message, state.epoch));
   const messageIndex = new Map(
     messages.map((message) => [`${message.peerId}\0${message.id}`, message]),
@@ -1181,24 +1175,24 @@ export function hydrateReproState(state: ReproStateV1): HydratedReproStateV1 {
     histories[peerId] = ids.map((id) => {
       const message = messageIndex.get(`${peerId}\0${id}`);
       if (!message)
-        throw new ReproFormatError(`History references missing message ${peerId}/${id}.`);
+        throw new TvBugFormatError(`History references missing message ${peerId}/${id}.`);
       return message;
     });
   }
   const dialogs = state.dialogs.map((dialog) => hydrateDialog(dialog, state.epoch));
   const pending = state.pending.map(hydratePending);
-  const pinnedMessages: Record<string, ReproTimedValueV1<TelegramMessage[]>> = {};
+  const pinnedMessages: Record<string, TvBugTimedValueV2<TelegramMessage[]>> = {};
   for (const [peerId, cached] of Object.entries(state.pinnedMessages)) {
     pinnedMessages[peerId] = {
       value: cached.value.map((message) => hydrateMessage(message, state.epoch)),
-      savedAt: rebaseCacheTimestamp(cached.savedAt, replayNow),
+      savedAt: rebaseCacheTimestamp(cached.savedAt, hydrationNow),
     };
   }
-  const groupMembers: Record<string, ReproTimedValueV1<TelegramGroupMember[]>> = {};
+  const groupMembers: Record<string, TvBugTimedValueV2<TelegramGroupMember[]>> = {};
   for (const [peerId, cached] of Object.entries(state.groupMembers)) {
     groupMembers[peerId] = {
       value: cached.value.map(hydrateGroupMember),
-      savedAt: rebaseCacheTimestamp(cached.savedAt, replayNow),
+      savedAt: rebaseCacheTimestamp(cached.savedAt, hydrationNow),
     };
   }
   return {
@@ -1228,7 +1222,7 @@ export function hydrateReproState(state: ReproStateV1): HydratedReproStateV1 {
   };
 }
 
-function hydrateGroupMember(member: ReproGroupMemberV1): TelegramGroupMember {
+function hydrateGroupMember(member: TvBugGroupMemberV2): TelegramGroupMember {
   return {
     peer: { ...member.peer },
     title: member.title.value,
@@ -1243,11 +1237,11 @@ function hydrateGroupMember(member: ReproGroupMemberV1): TelegramGroupMember {
   };
 }
 
-function rebaseCacheTimestamp(savedAt: number, replayNow: number) {
-  return replayNow + (savedAt - TVBUG_FIXED_EPOCH_SECONDS * 1_000);
+function rebaseCacheTimestamp(savedAt: number, hydrationNow: number) {
+  return hydrationNow + (savedAt - TVBUG_FIXED_EPOCH_SECONDS * 1_000);
 }
 
-function hydrateDialog(dialog: ReproDialogV1, epoch: number): CachedDialog {
+function hydrateDialog(dialog: TvBugDialogV2, epoch: number): CachedDialog {
   return {
     peer: { ...dialog.peer },
     ...(dialog.transient !== undefined ? { transient: dialog.transient } : {}),
@@ -1289,7 +1283,7 @@ function hydrateDialog(dialog: ReproDialogV1, epoch: number): CachedDialog {
   };
 }
 
-function hydrateMessage(message: ReproMessageV1, epoch: number): CachedMessage {
+function hydrateMessage(message: TvBugMessageV2, epoch: number): CachedMessage {
   return {
     id: message.id,
     peerId: message.peerId,
@@ -1380,7 +1374,7 @@ function hydrateMessage(message: ReproMessageV1, epoch: number): CachedMessage {
   };
 }
 
-function hydrateService(service: ReproServiceMessageV1): TelegramServiceMessage {
+function hydrateService(service: TvBugServiceMessageV2): TelegramServiceMessage {
   return {
     kind: service.kind,
     text: service.text.value,
@@ -1390,7 +1384,7 @@ function hydrateService(service: ReproServiceMessageV1): TelegramServiceMessage 
   };
 }
 
-function hydrateKeyboard(keyboard: ReproBotKeyboardV1): TelegramBotKeyboard {
+function hydrateKeyboard(keyboard: TvBugBotKeyboardV2): TelegramBotKeyboard {
   return {
     kind: keyboard.kind,
     rows: keyboard.rows.map((row) =>
@@ -1416,7 +1410,7 @@ function hydrateKeyboard(keyboard: ReproBotKeyboardV1): TelegramBotKeyboard {
   };
 }
 
-function hydrateFormat(format: ReproTextFormatV1): TelegramTextFormat {
+function hydrateFormat(format: TvBugTextFormatV2): TelegramTextFormat {
   return {
     offset: format.offset,
     length: format.length,
@@ -1428,7 +1422,7 @@ function hydrateFormat(format: ReproTextFormatV1): TelegramTextFormat {
   };
 }
 
-function hydratePending(send: ReproPendingSendV1): PendingSend {
+function hydratePending(send: TvBugPendingSendV2): PendingSend {
   return {
     id: send.id,
     ...(send.accountId ? { accountId: send.accountId } : {}),
@@ -1481,7 +1475,7 @@ function hydratePending(send: ReproPendingSendV1): PendingSend {
   };
 }
 
-function hydrateAttachment(attachment: ReproPendingAttachmentV1) {
+function hydrateAttachment(attachment: TvBugPendingAttachmentV2) {
   return {
     blob: createSizedBlob(attachment.byteSize, attachment.mimeType),
     name: attachment.name.value,
@@ -1503,7 +1497,7 @@ function createSizedBlob(byteSize: number, mimeType: string) {
   return new Blob(parts, { type: mimeType });
 }
 
-function hydrateRichMessage(message: ReproRichMessageV1): RichMessage {
+function hydrateRichMessage(message: TvBugRichMessageV2): RichMessage {
   return {
     blocks: message.blocks.map(hydrateRichBlock),
     ...(message.rtl !== undefined ? { rtl: message.rtl } : {}),
@@ -1511,7 +1505,7 @@ function hydrateRichMessage(message: ReproRichMessageV1): RichMessage {
   };
 }
 
-function hydrateRichText(text: ReproRichTextV1): RichText {
+function hydrateRichText(text: TvBugRichTextV2): RichText {
   switch (text.kind) {
     case 'text':
       return { kind: 'text', text: text.text.value };
@@ -1536,7 +1530,7 @@ function hydrateRichText(text: ReproRichTextV1): RichText {
   }
 }
 
-function hydrateRichBlock(block: ReproRichBlockV1): RichBlock {
+function hydrateRichBlock(block: TvBugRichBlockV2): RichBlock {
   switch (block.kind) {
     case 'text':
       return { kind: 'text', role: block.role, text: hydrateRichText(block.text) };
@@ -1640,14 +1634,14 @@ function hydrateRichBlock(block: ReproRichBlockV1): RichBlock {
   }
 }
 
-function validateStateForHydration(state: ReproStateV1) {
+function validateStateForHydration(state: TvBugStateV2) {
   validateBundle({
-    manifest: createReproManifest({
+    manifest: createTvBugManifest({
       producer: { appVersion: 'hydrate' },
       capture: { durationMs: 0, complete: true, truncated: false, tabCount: 1 },
     }),
-    state,
-    timeline: [],
+    snapshot: state,
+    trace: [],
   });
 }
 
@@ -1658,11 +1652,11 @@ class StateSanitizer {
   private readonly pending: readonly PendingSend[];
   private readonly drafts: Readonly<Record<string, string>>;
   private readonly draftRevisions: Readonly<Record<string, number>>;
-  private readonly pinnedMessages: Readonly<Record<string, ReproTimedSourceV1<TelegramMessage>>>;
-  private readonly groupMembers: Readonly<Record<string, ReproTimedSourceV1<TelegramGroupMember>>>;
+  private readonly pinnedMessages: Readonly<Record<string, TvBugTimedSourceV2<TelegramMessage>>>;
+  private readonly groupMembers: Readonly<Record<string, TvBugTimedSourceV2<TelegramGroupMember>>>;
 
   constructor(
-    private readonly source: ReproStateSourceV1,
+    private readonly source: TvBugStateSourceV2,
     private readonly aliases = new AliasBook(),
     time?: TimeShifter,
   ) {
@@ -1684,7 +1678,7 @@ class StateSanitizer {
       time ?? new TimeShifter(collectTimestamps(source, this.dialogs, this.messages, this.pending));
   }
 
-  sanitize(): ReproStateV1 {
+  sanitize(): TvBugStateV2 {
     const workspace = this.source.workspace;
     const epoch = finiteInteger(this.source.epoch ?? workspace?.epoch ?? 0, 'epoch');
     const safeDialogs = this.dialogs.map((dialog) => this.sanitizeDialog(dialog));
@@ -1696,10 +1690,10 @@ class StateSanitizer {
     for (const ids of Object.values(histories)) ids.sort((left, right) => left - right);
 
     const drafts: Record<string, string> = {};
-    const draftMetrics: Record<string, ReproTextMetricsV1> = {};
+    const draftMetrics: Record<string, TvBugTextMetricsV2> = {};
     for (const [peerId, text] of Object.entries(this.drafts)) {
       const safePeerId = this.peerId(peerId);
-      const safeText = sanitizeReproText(text);
+      const safeText = sanitizeTvBugText(text);
       drafts[safePeerId] = safeText.value;
       draftMetrics[safePeerId] = safeText.metrics;
     }
@@ -1734,6 +1728,14 @@ class StateSanitizer {
         ...(workspace?.sync ? { sync: workspace.sync } : {}),
         ...(workspace?.online !== undefined ? { online: workspace.online } : {}),
       },
+      runtime:
+        sanitizeJsonValue(
+          this.source.runtime ?? {},
+          'runtime',
+          this.aliases,
+          this.timeShifter,
+          0,
+        ) ?? {},
       ...(this.source.ui ? { ui: this.sanitizeUi(this.source.ui) } : {}),
     };
   }
@@ -1793,11 +1795,11 @@ class StateSanitizer {
     };
   }
 
-  private sanitizePeer(peer: TelegramPeer): ReproPeerV1 {
+  private sanitizePeer(peer: TelegramPeer): TvBugPeerV2 {
     return { id: this.peerId(peer.id, peer.kind), kind: peer.kind };
   }
 
-  private sanitizeDialog(dialog: TelegramDialog | CachedDialog): ReproDialogV1 {
+  private sanitizeDialog(dialog: TelegramDialog | CachedDialog): TvBugDialogV2 {
     const peerId = dialog.peer.id;
     return {
       peer: this.sanitizePeer(dialog.peer),
@@ -1805,10 +1807,10 @@ class StateSanitizer {
       ...(dialog.channelPts !== undefined
         ? { channelPts: finiteInteger(dialog.channelPts, 'dialog.channelPts') }
         : {}),
-      title: sanitizeReproText(dialog.title),
-      initials: sanitizeReproText(dialog.initials),
+      title: sanitizeTvBugText(dialog.title),
+      initials: sanitizeTvBugText(dialog.initials),
       color: sanitizeColor(dialog.color),
-      ...(dialog.username ? { username: sanitizeReproText(dialog.username) } : {}),
+      ...(dialog.username ? { username: sanitizeTvBugText(dialog.username) } : {}),
       ...(dialog.archived !== undefined ? { archived: dialog.archived } : {}),
       topMessageId: this.messageId(peerId, dialog.topMessageId),
       ...(dialog.topMessage ? { topMessage: this.sanitizeMessage(dialog.topMessage) } : {}),
@@ -1828,15 +1830,15 @@ class StateSanitizer {
         ? {
             userDetails: {
               ...(dialog.userDetails.firstName
-                ? { firstName: sanitizeReproText(dialog.userDetails.firstName) }
+                ? { firstName: sanitizeTvBugText(dialog.userDetails.firstName) }
                 : {}),
               ...(dialog.userDetails.lastName
-                ? { lastName: sanitizeReproText(dialog.userDetails.lastName) }
+                ? { lastName: sanitizeTvBugText(dialog.userDetails.lastName) }
                 : {}),
               ...(dialog.userDetails.username
-                ? { username: sanitizeReproText(dialog.userDetails.username) }
+                ? { username: sanitizeTvBugText(dialog.userDetails.username) }
                 : {}),
-              ...(dialog.userDetails.bio ? { bio: sanitizeReproText(dialog.userDetails.bio) } : {}),
+              ...(dialog.userDetails.bio ? { bio: sanitizeTvBugText(dialog.userDetails.bio) } : {}),
               ...(dialog.userDetails.isContact !== undefined
                 ? { isContact: dialog.userDetails.isContact }
                 : {}),
@@ -1850,13 +1852,13 @@ class StateSanitizer {
     };
   }
 
-  private sanitizeMessage(message: TelegramMessage | CachedMessage): ReproMessageV1 {
-    const text = sanitizeReproText(message.text);
+  private sanitizeMessage(message: TelegramMessage | CachedMessage): TvBugMessageV2 {
+    const text = sanitizeTvBugText(message.text);
     return {
       id: this.messageId(message.peerId, message.id),
       peerId: this.peerId(message.peerId),
       senderId: this.peerId(message.senderId),
-      ...(message.senderName ? { senderName: sanitizeReproText(message.senderName) } : {}),
+      ...(message.senderName ? { senderName: sanitizeTvBugText(message.senderName) } : {}),
       ...(message.senderHasAvatar !== undefined
         ? { senderHasAvatar: message.senderHasAvatar }
         : {}),
@@ -1872,7 +1874,7 @@ class StateSanitizer {
             ),
           }
         : {}),
-      ...(message.senderRole ? { senderRole: sanitizeReproText(message.senderRole) } : {}),
+      ...(message.senderRole ? { senderRole: sanitizeTvBugText(message.senderRole) } : {}),
       ...(message.senderRoleKind ? { senderRoleKind: message.senderRoleKind } : {}),
       text: text.value,
       textMetrics: text.metrics,
@@ -1884,13 +1886,13 @@ class StateSanitizer {
       ...(message.replyToId !== undefined
         ? { replyToId: this.messageId(message.peerId, message.replyToId) }
         : {}),
-      ...(message.replyQuote ? { replyQuote: sanitizeReproText(message.replyQuote) } : {}),
+      ...(message.replyQuote ? { replyQuote: sanitizeTvBugText(message.replyQuote) } : {}),
       ...(message.randomId ? { randomId: this.aliases.get('random', message.randomId) } : {}),
       ...(message.groupedId ? { groupedId: this.aliases.get('album', message.groupedId) } : {}),
       ...(message.forwardedFrom
         ? {
             forwardedFrom: {
-              name: sanitizeReproText(message.forwardedFrom.name),
+              name: sanitizeTvBugText(message.forwardedFrom.name),
               ...(message.forwardedFrom.peerId
                 ? { peerId: this.peerId(message.forwardedFrom.peerId) }
                 : {}),
@@ -1936,10 +1938,10 @@ class StateSanitizer {
     };
   }
 
-  private sanitizeMedia(media: TelegramMedia): ReproMediaV1 {
+  private sanitizeMedia(media: TelegramMedia): TvBugMediaV2 {
     return {
       kind: media.kind,
-      name: sanitizeReproText(media.name),
+      name: sanitizeTvBugText(media.name),
       mimeType: sanitizeMimeType(media.mimeType),
       ...(media.size !== undefined
         ? { byteSize: finiteNonNegativeInteger(media.size, 'media.size') }
@@ -1957,7 +1959,7 @@ class StateSanitizer {
     };
   }
 
-  private sanitizeFormats(formats: readonly TelegramTextFormat[]): ReproTextFormatV1[] {
+  private sanitizeFormats(formats: readonly TelegramTextFormat[]): TvBugTextFormatV2[] {
     assertCollectionSize(formats.length, 'text formats');
     return formats.map((format) => ({
       offset: finiteNonNegativeInteger(format.offset, 'format.offset'),
@@ -1970,13 +1972,13 @@ class StateSanitizer {
       ...(format.timestamp !== undefined
         ? { timestamp: this.timeShifter.shiftSeconds(format.timestamp) }
         : {}),
-      ...(format.oldText ? { oldText: sanitizeReproText(format.oldText) } : {}),
+      ...(format.oldText ? { oldText: sanitizeTvBugText(format.oldText) } : {}),
     }));
   }
 
-  private sanitizeReaction(reaction: TelegramReaction): ReproReactionV1 {
+  private sanitizeReaction(reaction: TelegramReaction): TvBugReactionV2 {
     return {
-      emoji: sanitizeReproText(reaction.emoji),
+      emoji: sanitizeTvBugText(reaction.emoji),
       ...(reaction.customEmojiId
         ? { customEmojiId: this.aliases.get('custom-emoji', reaction.customEmojiId) }
         : {}),
@@ -1985,7 +1987,7 @@ class StateSanitizer {
     };
   }
 
-  private sanitizeMention(mention: TelegramMention): ReproMentionV1 {
+  private sanitizeMention(mention: TelegramMention): TvBugMentionV2 {
     return {
       offset: finiteNonNegativeInteger(mention.offset, 'mention.offset'),
       length: finiteNonNegativeInteger(mention.length, 'mention.length'),
@@ -1993,7 +1995,7 @@ class StateSanitizer {
     };
   }
 
-  private sanitizeLink(link: TelegramLink): ReproLinkV1 {
+  private sanitizeLink(link: TelegramLink): TvBugLinkV2 {
     return {
       offset: finiteNonNegativeInteger(link.offset, 'link.offset'),
       length: finiteNonNegativeInteger(link.length, 'link.length'),
@@ -2001,30 +2003,30 @@ class StateSanitizer {
     };
   }
 
-  private sanitizeLinkPreview(preview: TelegramLinkPreview): ReproLinkPreviewV1 {
+  private sanitizeLinkPreview(preview: TelegramLinkPreview): TvBugLinkPreviewV2 {
     return {
       url: this.safeUrl(preview.url),
-      ...(preview.siteName ? { siteName: sanitizeReproText(preview.siteName) } : {}),
-      ...(preview.title ? { title: sanitizeReproText(preview.title) } : {}),
-      ...(preview.description ? { description: sanitizeReproText(preview.description) } : {}),
+      ...(preview.siteName ? { siteName: sanitizeTvBugText(preview.siteName) } : {}),
+      ...(preview.title ? { title: sanitizeTvBugText(preview.title) } : {}),
+      ...(preview.description ? { description: sanitizeTvBugText(preview.description) } : {}),
       ...(preview.hasPhoto !== undefined ? { hasPhoto: preview.hasPhoto } : {}),
       ...(preview.photoSize ? { photoSize: preview.photoSize } : {}),
     };
   }
 
-  private sanitizeService(service: TelegramServiceMessage): ReproServiceMessageV1 {
+  private sanitizeService(service: TelegramServiceMessage): TvBugServiceMessageV2 {
     return {
       kind: service.kind,
-      text: sanitizeReproText(service.text),
+      text: sanitizeTvBugText(service.text),
       ...(service.actorId ? { actorId: this.peerId(service.actorId) } : {}),
       ...(service.targetUserIds
         ? { targetUserIds: service.targetUserIds.map((id) => this.peerId(id)) }
         : {}),
-      ...(service.title ? { title: sanitizeReproText(service.title) } : {}),
+      ...(service.title ? { title: sanitizeTvBugText(service.title) } : {}),
     };
   }
 
-  private sanitizeKeyboard(keyboard: TelegramBotKeyboard): ReproBotKeyboardV1 {
+  private sanitizeKeyboard(keyboard: TelegramBotKeyboard): TvBugBotKeyboardV2 {
     assertCollectionSize(keyboard.rows.length, 'keyboard rows');
     return {
       kind: keyboard.kind,
@@ -2032,28 +2034,28 @@ class StateSanitizer {
         assertCollectionSize(row.length, 'keyboard buttons');
         return row.map((button) => ({
           kind: button.kind,
-          text: sanitizeReproText(button.text),
+          text: sanitizeTvBugText(button.text),
           ...(button.url ? { url: this.safeUrl(button.url) } : {}),
           ...(button.buttonId !== undefined
             ? { buttonId: finiteInteger(button.buttonId, 'button.buttonId') }
             : {}),
           ...(button.data ? { dataLength: button.data.length } : {}),
-          ...(button.copyText ? { copyText: sanitizeReproText(button.copyText) } : {}),
-          ...(button.query ? { query: sanitizeReproText(button.query) } : {}),
+          ...(button.copyText ? { copyText: sanitizeTvBugText(button.copyText) } : {}),
+          ...(button.query ? { query: sanitizeTvBugText(button.query) } : {}),
           ...(button.samePeer !== undefined ? { samePeer: button.samePeer } : {}),
-          ...(button.botUsername ? { botUsername: sanitizeReproText(button.botUsername) } : {}),
+          ...(button.botUsername ? { botUsername: sanitizeTvBugText(button.botUsername) } : {}),
         }));
       }),
       ...(keyboard.hidden !== undefined ? { hidden: keyboard.hidden } : {}),
       ...(keyboard.forceReply !== undefined ? { forceReply: keyboard.forceReply } : {}),
       ...(keyboard.singleUse !== undefined ? { singleUse: keyboard.singleUse } : {}),
       ...(keyboard.persistent !== undefined ? { persistent: keyboard.persistent } : {}),
-      ...(keyboard.placeholder ? { placeholder: sanitizeReproText(keyboard.placeholder) } : {}),
+      ...(keyboard.placeholder ? { placeholder: sanitizeTvBugText(keyboard.placeholder) } : {}),
     };
   }
 
-  private sanitizePending(send: PendingSend, index: number): ReproPendingSendV1 {
-    const text = sanitizeReproText(send.text);
+  private sanitizePending(send: PendingSend, index: number): TvBugPendingSendV2 {
+    const text = sanitizeTvBugText(send.text);
     return {
       id: this.aliases.get('pending', send.id),
       ...(send.accountId ? { accountId: this.aliases.get('account', send.accountId) } : {}),
@@ -2075,7 +2077,7 @@ class StateSanitizer {
             reply: {
               messageId: this.messageId(send.peer.id, send.reply.messageId),
               ...(send.reply.quoteText
-                ? { quoteText: sanitizeReproText(send.reply.quoteText) }
+                ? { quoteText: sanitizeTvBugText(send.reply.quoteText) }
                 : {}),
             },
           }
@@ -2085,12 +2087,12 @@ class StateSanitizer {
         ? {
             sticker: {
               id: this.aliases.get('sticker', send.sticker.id),
-              emoji: sanitizeReproText(send.sticker.emoji),
+              emoji: sanitizeTvBugText(send.sticker.emoji),
               mimeType: sanitizeMimeType(send.sticker.mimeType),
               ...(send.sticker.size !== undefined
                 ? { byteSize: finiteNonNegativeInteger(send.sticker.size, 'sticker.size') }
                 : {}),
-              ...(send.sticker.title ? { title: sanitizeReproText(send.sticker.title) } : {}),
+              ...(send.sticker.title ? { title: sanitizeTvBugText(send.sticker.title) } : {}),
             },
           }
         : {}),
@@ -2103,7 +2105,7 @@ class StateSanitizer {
           }
         : {}),
       ...(send.botStart
-        ? { botStart: { startParam: sanitizeReproText(send.botStart.startParam) } }
+        ? { botStart: { startParam: sanitizeTvBugText(send.botStart.startParam) } }
         : {}),
       ...(send.attachment ? { attachment: this.sanitizeAttachment(send.attachment) } : {}),
       ...(send.album
@@ -2119,8 +2121,8 @@ class StateSanitizer {
     };
   }
 
-  private sanitizePinnedMessages(): Record<string, ReproTimedValueV1<ReproMessageV1[]>> {
-    const result: Record<string, ReproTimedValueV1<ReproMessageV1[]>> = {};
+  private sanitizePinnedMessages(): Record<string, TvBugTimedValueV2<TvBugMessageV2[]>> {
+    const result: Record<string, TvBugTimedValueV2<TvBugMessageV2[]>> = {};
     for (const [peerId, cached] of Object.entries(this.pinnedMessages)) {
       assertCollectionSize(cached.value.length, 'cached pinned messages');
       result[this.peerId(peerId)] = {
@@ -2131,8 +2133,8 @@ class StateSanitizer {
     return result;
   }
 
-  private sanitizeGroupMembers(): Record<string, ReproTimedValueV1<ReproGroupMemberV1[]>> {
-    const result: Record<string, ReproTimedValueV1<ReproGroupMemberV1[]>> = {};
+  private sanitizeGroupMembers(): Record<string, TvBugTimedValueV2<TvBugGroupMemberV2[]>> {
+    const result: Record<string, TvBugTimedValueV2<TvBugGroupMemberV2[]>> = {};
     for (const [peerId, cached] of Object.entries(this.groupMembers)) {
       assertCollectionSize(cached.value.length, 'cached group members');
       result[this.peerId(peerId)] = {
@@ -2143,14 +2145,14 @@ class StateSanitizer {
     return result;
   }
 
-  private sanitizeGroupMember(member: TelegramGroupMember): ReproGroupMemberV1 {
+  private sanitizeGroupMember(member: TelegramGroupMember): TvBugGroupMemberV2 {
     return {
       peer: this.sanitizePeer(member.peer),
-      title: sanitizeReproText(member.title),
-      initials: sanitizeReproText(member.initials),
+      title: sanitizeTvBugText(member.title),
+      initials: sanitizeTvBugText(member.initials),
       color: sanitizeColor(member.color),
-      ...(member.username ? { username: sanitizeReproText(member.username) } : {}),
-      ...(member.role ? { role: sanitizeReproText(member.role) } : {}),
+      ...(member.username ? { username: sanitizeTvBugText(member.username) } : {}),
+      ...(member.role ? { role: sanitizeTvBugText(member.role) } : {}),
       ...(member.roleKind ? { roleKind: member.roleKind } : {}),
       hasAvatar: member.hasAvatar,
       ...(member.avatarId ? { avatarId: this.aliases.get('avatar', member.avatarId) } : {}),
@@ -2162,10 +2164,10 @@ class StateSanitizer {
     attachment:
       | PendingSend['attachment']
       | NonNullable<PendingSend['album']>['attachments'][number],
-  ): ReproPendingAttachmentV1 {
-    if (!attachment) throw new ReproFormatError('Missing pending attachment.');
+  ): TvBugPendingAttachmentV2 {
+    if (!attachment) throw new TvBugFormatError('Missing pending attachment.');
     return {
-      name: sanitizeReproText(attachment.name),
+      name: sanitizeTvBugText(attachment.name),
       mimeType: sanitizeMimeType(attachment.mimeType),
       byteSize: finiteNonNegativeInteger(attachment.blob.size, 'attachment size'),
       asSticker: attachment.asSticker,
@@ -2176,7 +2178,7 @@ class StateSanitizer {
     };
   }
 
-  private sanitizeUi(ui: ReproUiSourceV1): NonNullable<ReproStateV1['ui']> {
+  private sanitizeUi(ui: TvBugUiSourceV2): NonNullable<TvBugStateV2['ui']> {
     return {
       ...(ui.route ? { route: sanitizeRoute(ui.route) } : {}),
       ...(ui.bootstrapActivePeerId
@@ -2221,7 +2223,7 @@ class StateSanitizer {
     };
   }
 
-  private sanitizeRichMessage(message: RichMessage): ReproRichMessageV1 {
+  private sanitizeRichMessage(message: RichMessage): TvBugRichMessageV2 {
     assertCollectionSize(message.blocks.length, 'rich message blocks');
     return {
       blocks: message.blocks.map((block) => this.sanitizeRichBlock(block, 0)),
@@ -2230,11 +2232,11 @@ class StateSanitizer {
     };
   }
 
-  private sanitizeRichText(text: RichText, depth: number): ReproRichTextV1 {
+  private sanitizeRichText(text: RichText, depth: number): TvBugRichTextV2 {
     assertNestingDepth(depth);
     switch (text.kind) {
       case 'text':
-        return { kind: 'text', text: sanitizeReproText(text.text) };
+        return { kind: 'text', text: sanitizeTvBugText(text.text) };
       case 'concat':
         assertCollectionSize(text.children.length, 'rich text children');
         return {
@@ -2251,16 +2253,16 @@ class StateSanitizer {
         return {
           kind: 'anchor',
           child: this.sanitizeRichText(text.child, depth + 1),
-          name: sanitizeReproText(text.name),
+          name: sanitizeTvBugText(text.name),
         };
       case 'customEmoji':
         return {
           kind: 'customEmoji',
-          alt: sanitizeReproText(text.alt),
+          alt: sanitizeTvBugText(text.alt),
           documentId: this.aliases.get('custom-emoji', text.documentId),
         };
       case 'math':
-        return { kind: 'math', source: sanitizeReproText(text.source) };
+        return { kind: 'math', source: sanitizeTvBugText(text.source) };
       case 'date':
         return {
           kind: 'date',
@@ -2276,7 +2278,7 @@ class StateSanitizer {
     }
   }
 
-  private sanitizeRichBlock(block: RichBlock, depth: number): ReproRichBlockV1 {
+  private sanitizeRichBlock(block: RichBlock, depth: number): TvBugRichBlockV2 {
     assertNestingDepth(depth);
     switch (block.kind) {
       case 'text':
@@ -2295,12 +2297,12 @@ class StateSanitizer {
         return {
           kind: 'pre',
           text: this.sanitizeRichText(block.text, depth + 1),
-          ...(block.language ? { language: sanitizeReproText(block.language) } : {}),
+          ...(block.language ? { language: sanitizeTvBugText(block.language) } : {}),
         };
       case 'divider':
         return { kind: 'divider' };
       case 'anchor':
-        return { kind: 'anchor', name: sanitizeReproText(block.name) };
+        return { kind: 'anchor', name: sanitizeTvBugText(block.name) };
       case 'list':
         assertCollectionSize(block.items.length, 'rich list items');
         return {
@@ -2317,7 +2319,7 @@ class StateSanitizer {
               : {}),
             ...(item.checked !== undefined ? { checked: item.checked } : {}),
             ...(item.checkbox !== undefined ? { checkbox: item.checkbox } : {}),
-            ...(item.marker ? { marker: sanitizeReproText(item.marker) } : {}),
+            ...(item.marker ? { marker: sanitizeTvBugText(item.marker) } : {}),
             ...(item.value !== undefined ? { value: item.value } : {}),
           })),
         };
@@ -2354,7 +2356,7 @@ class StateSanitizer {
           ...(block.striped !== undefined ? { striped: block.striped } : {}),
         };
       case 'math':
-        return { kind: 'math', source: sanitizeReproText(block.source) };
+        return { kind: 'math', source: sanitizeTvBugText(block.source) };
       case 'media':
         return {
           kind: 'media',
@@ -2480,7 +2482,7 @@ function mergeMessages(
 }
 
 function collectTimestamps(
-  source: ReproStateSourceV1,
+  source: TvBugStateSourceV2,
   dialogs: readonly (TelegramDialog | CachedDialog)[],
   messages: readonly (TelegramMessage | CachedMessage)[],
   pending: readonly PendingSend[],
@@ -2543,7 +2545,7 @@ function sanitizeJsonValue(
   aliases: AliasBook,
   time: TimeShifter | undefined,
   depth: number,
-): ReproJsonValue | undefined {
+): TvBugJsonValue | undefined {
   assertNestingDepth(depth);
   if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
     return undefined;
@@ -2580,14 +2582,14 @@ function sanitizeJsonValue(
       return sanitizeSemanticString(value, key);
     }
     if (isSemanticStringKey(key)) return sanitizeSemanticString(value, key);
-    return sanitizeReproText(value).value;
+    return sanitizeTvBugText(value).value;
   }
   if (value instanceof Uint8Array || value instanceof ArrayBuffer || value instanceof Blob) {
-    throw new ReproFormatError(`${context} contains raw binary data.`);
+    throw new TvBugFormatError(`${context} contains raw binary data.`);
   }
   if (Array.isArray(value)) {
     assertCollectionSize(value.length, context);
-    const result: ReproJsonValue[] = [];
+    const result: TvBugJsonValue[] = [];
     for (let index = 0; index < value.length; index += 1) {
       const safe = sanitizeJsonValue(
         value[index],
@@ -2600,7 +2602,7 @@ function sanitizeJsonValue(
     }
     return result;
   }
-  if (!isPlainObject(value)) throw new ReproFormatError(`${context} is not safe JSON data.`);
+  if (!isPlainObject(value)) throw new TvBugFormatError(`${context} is not safe JSON data.`);
   const peer =
     typeof value.id === 'string' &&
     (value.kind === 'user' || value.kind === 'group' || value.kind === 'channel')
@@ -2609,10 +2611,10 @@ function sanitizeJsonValue(
   if (peer) aliases.registerPeer(peer.id, peer.kind);
   const entries = Object.entries(value);
   assertCollectionSize(entries.length, `${context} fields`);
-  const result: Record<string, ReproJsonValue> = {};
+  const result: Record<string, TvBugJsonValue> = {};
   for (const [key, child] of entries) {
     if (isForbiddenField(key, child)) {
-      throw new ReproFormatError(`${context}.${key} is forbidden in a .tvbug bundle.`);
+      throw new TvBugFormatError(`${context}.${key} is forbidden in a .tvbug bundle.`);
     }
     const safe =
       peer && key === 'id'
@@ -2682,22 +2684,22 @@ function countGraphemes(value: string): number {
   return Array.from(value).length;
 }
 
-function validateBundle(value: unknown): asserts value is ReproBundleV1 {
+function validateBundle(value: unknown): asserts value is TvBugBundleV2 {
   const bundle = requireRecord(value, 'bundle');
-  requireExactKeys(bundle, ['manifest', 'state', 'timeline'], 'bundle');
+  requireExactKeys(bundle, ['manifest', 'snapshot', 'trace'], 'bundle');
   const manifest = requireRecord(bundle.manifest, 'manifest');
   if (manifest.format !== TVBUG_FORMAT || manifest.version !== TVBUG_VERSION) {
-    throw new ReproFormatError('Unsupported .tvbug format or version.');
+    throw new TvBugFormatError('Unsupported .tvbug format or version.');
   }
   const privacy = requireRecord(manifest.privacy, 'manifest.privacy');
   if (
-    privacy.profile !== 'account-free-v1' ||
+    privacy.profile !== 'account-free-v2' ||
     privacy.rawText !== false ||
     privacy.rawMedia !== false ||
     privacy.stableIdentifiers !== false ||
     privacy.authMaterial !== false
   ) {
-    throw new ReproFormatError('The .tvbug privacy declaration is missing or unsafe.');
+    throw new TvBugFormatError('The .tvbug privacy declaration is missing or unsafe.');
   }
   if (manifest.environment !== undefined) {
     const environment = requireRecord(manifest.environment, 'manifest.environment');
@@ -2705,17 +2707,18 @@ function validateBundle(value: unknown): asserts value is ReproBundleV1 {
       environment.timezone !== undefined &&
       (typeof environment.timezone !== 'string' || !isValidTimeZone(environment.timezone))
     ) {
-      throw new ReproFormatError('manifest.environment.timezone is invalid.');
+      throw new TvBugFormatError('manifest.environment.timezone is invalid.');
     }
   }
-  const state = requireRecord(bundle.state, 'state');
-  if (state.version !== TVBUG_VERSION) throw new ReproFormatError('Unsupported state version.');
+  const state = requireRecord(bundle.snapshot, 'snapshot');
+  if (state.version !== TVBUG_VERSION) throw new TvBugFormatError('Unsupported state version.');
+  requireRecord(state.runtime, 'state.runtime');
   if (
     !Array.isArray(state.dialogs) ||
     !Array.isArray(state.messages) ||
     !Array.isArray(state.pending)
   ) {
-    throw new ReproFormatError('State collections are malformed.');
+    throw new TvBugFormatError('State collections are malformed.');
   }
   assertCollectionSize(state.dialogs.length, 'state.dialogs');
   assertCollectionSize(state.messages.length, 'state.messages');
@@ -2727,25 +2730,25 @@ function validateBundle(value: unknown): asserts value is ReproBundleV1 {
   for (const [index, raw] of state.pending.entries()) {
     pendingAttachmentBytes += validatePending(raw, index);
     if (pendingAttachmentBytes > MAX_SYNTHETIC_ATTACHMENT_BYTES) {
-      throw new ReproFormatError('Pending attachments exceed the 256 MiB aggregate replay limit.');
+      throw new TvBugFormatError(
+        'Pending attachments exceed the 256 MiB aggregate materialization limit.',
+      );
     }
   }
-  if (!Array.isArray(bundle.timeline)) throw new ReproFormatError('Timeline must be an array.');
-  assertCollectionSize(bundle.timeline.length, 'timeline');
+  if (!Array.isArray(bundle.trace)) throw new TvBugFormatError('Trace must be an array.');
+  if (bundle.trace.length > MAX_TRACE_EVENTS) {
+    throw new TvBugFormatError('Trace exceeds 300 events.');
+  }
   let priorSeq = -1;
   let priorTime = -1;
-  for (const [index, raw] of bundle.timeline.entries()) {
-    const event = requireRecord(raw, `timeline[${index}]`);
-    const seq = finiteNonNegativeInteger(event.seq, `timeline[${index}].seq`);
-    const tMs = finiteNonNegativeNumber(event.tMs, `timeline[${index}].tMs`);
-    if (seq <= priorSeq) throw new ReproFormatError('Timeline sequence numbers must increase.');
-    if (tMs < priorTime) throw new ReproFormatError('Timeline times must not move backward.');
-    if (
-      !['call', 'resolve', 'reject', 'push', 'ui', 'checkpoint', 'diagnostic'].includes(
-        String(event.kind),
-      )
-    ) {
-      throw new ReproFormatError(`Unknown timeline kind at event ${index}.`);
+  for (const [index, raw] of bundle.trace.entries()) {
+    const event = requireRecord(raw, `trace[${index}]`);
+    const seq = finiteNonNegativeInteger(event.seq, `trace[${index}].seq`);
+    const tMs = finiteNonNegativeNumber(event.tMs, `trace[${index}].tMs`);
+    if (seq <= priorSeq) throw new TvBugFormatError('Trace sequence numbers must increase.');
+    if (tMs < priorTime) throw new TvBugFormatError('Trace times must not move backward.');
+    if (!['ui', 'diagnostic'].includes(String(event.kind))) {
+      throw new TvBugFormatError(`Unknown trace kind at event ${index}.`);
     }
     priorSeq = seq;
     priorTime = tMs;
@@ -2762,7 +2765,7 @@ function validatePending(value: unknown, index: number): number {
   if (pending.album !== undefined) {
     const album = requireRecord(pending.album, `state.pending[${index}].album`);
     if (!Array.isArray(album.attachments)) {
-      throw new ReproFormatError(`state.pending[${index}].album.attachments must be an array.`);
+      throw new TvBugFormatError(`state.pending[${index}].album.attachments must be an array.`);
     }
     assertCollectionSize(album.attachments.length, `state.pending[${index}].album.attachments`);
     album.attachments.forEach((attachment, attachmentIndex) => {
@@ -2779,7 +2782,7 @@ function validatePendingAttachment(value: unknown, context: string): number {
   const attachment = requireRecord(value, context);
   const byteSize = finiteNonNegativeInteger(attachment.byteSize, `${context}.byteSize`);
   if (byteSize > MAX_SYNTHETIC_ATTACHMENT_BYTES) {
-    throw new ReproFormatError(`${context}.byteSize exceeds the 256 MiB replay limit.`);
+    throw new TvBugFormatError(`${context}.byteSize exceeds the 256 MiB materialization limit.`);
   }
   return byteSize;
 }
@@ -2807,7 +2810,7 @@ function validateMetrics(value: string, raw: unknown, context: string) {
     metrics.lineUtf16Lengths.length !== measured.lineUtf16Lengths.length ||
     metrics.lineUtf16Lengths.some((length, index) => length !== measured.lineUtf16Lengths[index])
   ) {
-    throw new ReproFormatError(`${context} does not match its generated text.`);
+    throw new TvBugFormatError(`${context} does not match its generated text.`);
   }
 }
 
@@ -2833,33 +2836,33 @@ function auditSafeJson(value: unknown, context: string, depth: number) {
   }
   for (const [key, child] of Object.entries(record)) {
     if (isForbiddenField(key, child)) {
-      throw new ReproFormatError(`${context}.${key} is forbidden in a .tvbug bundle.`);
+      throw new TvBugFormatError(`${context}.${key} is forbidden in a .tvbug bundle.`);
     }
     const normalized = normalizeKey(key);
     if (
       normalized === 'url' &&
       (typeof child !== 'string' || !/^https:\/\/example\.invalid\/[a-z0-9-]+:\d+$/u.test(child))
     ) {
-      throw new ReproFormatError(`${context}.${key} contains an unsafe URL.`);
+      throw new TvBugFormatError(`${context}.${key} contains an unsafe URL.`);
     }
     if (
       normalized === 'datalength' &&
       finiteNonNegativeInteger(child, `${context}.${key}`) > MAX_CALLBACK_DATA_LENGTH
     ) {
-      throw new ReproFormatError(`${context}.${key} exceeds the callback data limit.`);
+      throw new TvBugFormatError(`${context}.${key} exceeds the callback data limit.`);
     }
     auditSafeJson(child, `${context}.${key}`, depth + 1);
   }
 }
 
-function assertFileSizes(manifest: number, state: number, timeline: number) {
-  if (manifest > MAX_MANIFEST_BYTES) throw new ReproFormatError('manifest.json exceeds 256 KiB.');
-  if (state > MAX_STATE_BYTES) throw new ReproFormatError('state.v1.json exceeds 24 MiB.');
-  if (timeline > MAX_TIMELINE_BYTES) {
-    throw new ReproFormatError('timeline.v1.ndjson exceeds 24 MiB.');
+function assertFileSizes(manifest: number, state: number, trace: number) {
+  if (manifest > MAX_MANIFEST_BYTES) throw new TvBugFormatError('manifest.json exceeds 256 KiB.');
+  if (state > MAX_SNAPSHOT_BYTES) throw new TvBugFormatError('snapshot.v2.json exceeds 8 MiB.');
+  if (trace > MAX_TRACE_BYTES) {
+    throw new TvBugFormatError('trace.v2.ndjson exceeds 1 MiB.');
   }
-  if (manifest + state + timeline > MAX_TOTAL_UNCOMPRESSED_BYTES) {
-    throw new ReproFormatError('The uncompressed .tvbug bundle exceeds 48 MiB.');
+  if (manifest + state + trace > MAX_TOTAL_UNCOMPRESSED_BYTES) {
+    throw new TvBugFormatError('The uncompressed .tvbug bundle exceeds 10 MiB.');
   }
 }
 
@@ -2871,7 +2874,7 @@ function parseJsonText(value: string, name: string): unknown {
   try {
     return JSON.parse(value) as unknown;
   } catch (error) {
-    throw new ReproFormatError(`Malformed JSON in ${name}: ${errorMessage(error)}`);
+    throw new TvBugFormatError(`Malformed JSON in ${name}: ${errorMessage(error)}`);
   }
 }
 
@@ -2879,7 +2882,7 @@ function decodeUtf8(value: Uint8Array, name: string): string {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(value);
   } catch (error) {
-    throw new ReproFormatError(`Invalid UTF-8 in ${name}: ${errorMessage(error)}`);
+    throw new TvBugFormatError(`Invalid UTF-8 in ${name}: ${errorMessage(error)}`);
   }
 }
 
@@ -3000,7 +3003,7 @@ function timestampToMilliseconds(value: number): number {
 }
 
 function requireRecord(value: unknown, context: string): Record<string, unknown> {
-  if (!isPlainObject(value)) throw new ReproFormatError(`${context} must be an object.`);
+  if (!isPlainObject(value)) throw new TvBugFormatError(`${context} must be an object.`);
   return value;
 }
 
@@ -3011,15 +3014,15 @@ function requireExactKeys(
 ) {
   const expected = new Set(keys);
   for (const key of Object.keys(record)) {
-    if (!expected.has(key)) throw new ReproFormatError(`Unexpected ${context} field: ${key}`);
+    if (!expected.has(key)) throw new TvBugFormatError(`Unexpected ${context} field: ${key}`);
   }
   for (const key of expected) {
-    if (!(key in record)) throw new ReproFormatError(`Missing ${context}.${key}.`);
+    if (!(key in record)) throw new TvBugFormatError(`Missing ${context}.${key}.`);
   }
 }
 
 function requireString(value: unknown, context: string): string {
-  if (typeof value !== 'string') throw new ReproFormatError(`${context} must be a string.`);
+  if (typeof value !== 'string') throw new TvBugFormatError(`${context} must be a string.`);
   return value;
 }
 
@@ -3041,7 +3044,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function finiteNumber(value: unknown, context: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new ReproFormatError(`${context} must be a finite number.`);
+    throw new TvBugFormatError(`${context} must be a finite number.`);
   }
   return value;
 }
@@ -3049,37 +3052,37 @@ function finiteNumber(value: unknown, context: string): number {
 function finiteInteger(value: unknown, context: string): number {
   const number = finiteNumber(value, context);
   if (!Number.isSafeInteger(number))
-    throw new ReproFormatError(`${context} must be a safe integer.`);
+    throw new TvBugFormatError(`${context} must be a safe integer.`);
   return number;
 }
 
 function finiteNonNegativeInteger(value: unknown, context: string): number {
   const number = finiteInteger(value, context);
-  if (number < 0) throw new ReproFormatError(`${context} must not be negative.`);
+  if (number < 0) throw new TvBugFormatError(`${context} must not be negative.`);
   return number;
 }
 
 function finiteNonNegativeNumber(value: unknown, context: string): number {
   const number = finiteNumber(value, context);
-  if (number < 0) throw new ReproFormatError(`${context} must not be negative.`);
+  if (number < 0) throw new TvBugFormatError(`${context} must not be negative.`);
   return number;
 }
 
 function assertTextSize(value: string, context: string) {
-  if (typeof value !== 'string') throw new ReproFormatError(`${context} must be a string.`);
+  if (typeof value !== 'string') throw new TvBugFormatError(`${context} must be a string.`);
   if (value.length > MAX_TEXT_UTF16_LENGTH) {
-    throw new ReproFormatError(`${context} exceeds the text length limit.`);
+    throw new TvBugFormatError(`${context} exceeds the text length limit.`);
   }
 }
 
 function assertCollectionSize(length: number, context: string) {
   if (length > MAX_COLLECTION_ITEMS) {
-    throw new ReproFormatError(`${context} contains too many items.`);
+    throw new TvBugFormatError(`${context} contains too many items.`);
   }
 }
 
 function assertNestingDepth(depth: number) {
-  if (depth > 64) throw new ReproFormatError('The .tvbug data is nested too deeply.');
+  if (depth > 64) throw new TvBugFormatError('The .tvbug data is nested too deeply.');
 }
 
 function errorMessage(error: unknown): string {

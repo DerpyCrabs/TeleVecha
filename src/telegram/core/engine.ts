@@ -2907,6 +2907,7 @@ export class MessagingEngine {
     if (difference.type === 'too-long' || embeddedTooLong || clientBudgetExceeded) {
       const nextCursor = difference.cursor;
       reportDiagnostic({
+        code: 'large-update-backlog-skipped',
         level: 'info',
         area: 'sync',
         message: "Skipped a large update backlog and loaded Telegram's latest state.",
@@ -4721,7 +4722,13 @@ export class MessagingEngine {
     fatal = true,
   ) {
     const detail = this.errorMessage(error);
-    reportDiagnostic({ level: 'error', area, message, details: { error: detail } });
+    reportDiagnostic({
+      code: `${area}-failed`,
+      level: 'error',
+      area,
+      message,
+      details: { error: detail },
+    });
     if (fatal && (this.snapshotValue.online || this.unsubscribeTransport)) {
       this.unsubscribeTransport?.();
       this.unsubscribeTransport = undefined;
@@ -4769,6 +4776,7 @@ export class MessagingEngine {
     error: unknown,
   ) {
     reportDiagnostic({
+      code: `${area}-operation-failed`,
       level: 'error',
       area,
       message,
@@ -4780,6 +4788,7 @@ export class MessagingEngine {
     this.unsubscribeTransport?.();
     this.unsubscribeTransport = undefined;
     reportDiagnostic({
+      code: 'connection-lost',
       level: 'info',
       area: 'transport',
       message: 'Telegram connection was lost; cached data remains available.',

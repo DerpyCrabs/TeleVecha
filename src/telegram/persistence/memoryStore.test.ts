@@ -61,7 +61,7 @@ const member: TelegramGroupMember = {
 };
 
 describe('MemoryCacheStore', () => {
-  it('loads a cloned seeded workspace, ordered history, and replay metadata', async () => {
+  it('loads a cloned seeded workspace, ordered history, and cache metadata', async () => {
     const firstDialog = dialog(peer, 'First', 4);
     const latestMessage = {
       ...message(peer, 9, 4),
@@ -239,15 +239,7 @@ describe('MemoryCacheStore', () => {
     expect((await store.loadOutbox()).map(({ id }) => id)).toEqual(['first', 'later']);
   });
 
-  it('never accepts or exposes a transport session in replay mode', async () => {
-    const replay = new MemoryCacheStore(
-      { transportSession: { authKey: 'secret' } },
-      { replay: true },
-    );
-    expect(await replay.loadTransportSession()).toBeUndefined();
-    await replay.saveTransportSession({ authKey: 'another secret' });
-    expect(await replay.loadTransportSession()).toBeUndefined();
-
+  it('clones a transport session at its boundary', async () => {
     const ordinary = new MemoryCacheStore();
     const session = { dcId: 2 };
     await ordinary.saveTransportSession(session);

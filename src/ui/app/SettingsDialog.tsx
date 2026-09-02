@@ -95,9 +95,9 @@ export function SettingsDialog(props: {
                       <Bug size={17} /> Debug report
                     </strong>
                     <p>
-                      Download an offline reproduction of this browser session. Message text is
-                      replaced with generated text of the same length. Login data and media files
-                      are excluded.
+                      Download a compact snapshot of the current problem. Message text is replaced
+                      with generated text of the same length. Login data and media files are
+                      excluded.
                     </p>
                     <Show when={props.debugReportError}>
                       <p class="text-red-300" role="alert">

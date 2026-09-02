@@ -175,6 +175,7 @@ function createWebTelegramTransportImplementation(
       onSessionError(error) {
         state.sessionSaveError = error;
         reportDiagnostic({
+          code: 'session-persist-failed',
           level: 'error',
           area: 'cache',
           message: 'Could not persist the Telegram authorization session.',
@@ -1358,6 +1359,7 @@ function createWebTelegramTransportImplementation(
         }
         const set = sets[offset + index];
         reportDiagnostic({
+          code: 'sticker-pack-load-failed',
           level: 'warn',
           area: 'transport',
           message: `Could not load the installed sticker pack ${set?.title ?? set?.id ?? 'unknown'}.`,

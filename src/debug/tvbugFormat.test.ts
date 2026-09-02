@@ -9,13 +9,13 @@ import type {
 } from '../telegram/types';
 import {
   TVBUG_FIXED_EPOCH_SECONDS,
-  createReproManifest,
-  createReproSanitizer,
+  createTvBugManifest,
+  createTvBugSanitizer,
   createTvBugBundle,
-  hydrateReproState,
+  hydrateTvBugState,
   parseTvBugBundle,
-  sanitizeReproState,
-} from './reproFormat';
+  sanitizeTvBugState,
+} from './tvbugFormat';
 
 const sourceEpochSeconds = 1_700_000_000;
 const secretPeerId = '9876543210987654321';
@@ -158,7 +158,7 @@ function sourceGroupMember(): TelegramGroupMember {
 }
 
 function manifest() {
-  return createReproManifest({
+  return createTvBugManifest({
     producer: { appVersion: '0.1.0', commit: 'abc123', telegramLayer: 228 },
     capture: { durationMs: 500, complete: true, truncated: false, tabCount: 1 },
     environment: {
@@ -171,10 +171,10 @@ function manifest() {
   });
 }
 
-describe('.tvbug repro format', () => {
+describe('.tvbug snapshot format', () => {
   it('uses allowlisted fields and bundle-local aliases without leaking account data', () => {
     const message = sourceMessage();
-    const sanitizer = createReproSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
+    const sanitizer = createTvBugSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
     const state = sanitizer.sanitizeState({
       cursor: { pts: 100, qts: 2, date: sourceEpochSeconds, seq: 8 },
       epoch: 4,
@@ -193,6 +193,14 @@ describe('.tvbug repro format', () => {
         },
       },
       workspace: { accountId: 'private-account-id', activePeerId: secretPeerId },
+      runtime: {
+        phase: 'error',
+        sync: 'stale',
+        online: false,
+        operationError: 'Could not load Family Secrets',
+        historyGaps: [{ olderMaxMessageId: 41, newerMinMessageId: 43 }],
+        activities: [{ peerId: secretPeerId, senderId: secretSenderId, kind: 'typing' }],
+      },
       ui: {
         route: '/chat/9876543210987654321',
         bootstrapActivePeerId: secretPeerId,
@@ -238,6 +246,12 @@ describe('.tvbug repro format', () => {
     expect(state.messages[0]!.mentions![0]!.userId).toBe(state.messages[0]!.senderId);
     expect(state.lastPeerId).toBe(state.dialogs[0]!.peer.id);
     expect(state.workspace.accountId).toBe('account:1');
+    expect(state.runtime).toMatchObject({
+      phase: 'error',
+      sync: 'stale',
+      online: false,
+      activities: [{ peerId: 'c:1', senderId: 'u:1', kind: 'typing' }],
+    });
     expect(state.pending[0]!.accountId).toBe(state.workspace.accountId);
     expect(state.ui?.appearance?.themeId).toBe('tinted');
     expect(state.ui?.bootstrapActivePeerId).toBe(state.dialogs[0]!.peer.id);
@@ -250,7 +264,7 @@ describe('.tvbug repro format', () => {
 
   it('preserves UTF-16 length, line geometry, entity offsets, and media dimensions', () => {
     const message = sourceMessage();
-    const state = sanitizeReproState({ dialogs: [sourceDialog(message)], messages: [message] });
+    const state = sanitizeTvBugState({ dialogs: [sourceDialog(message)], messages: [message] });
     const safe = state.messages[0]!;
 
     expect(safe.text).not.toBe(secretText);
@@ -286,7 +300,7 @@ describe('.tvbug repro format', () => {
 
   it('shifts timestamps by one constant while preserving their deltas', () => {
     const message = sourceMessage();
-    const sanitizer = createReproSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
+    const sanitizer = createTvBugSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
     const state = sanitizer.sanitizeState({
       cursor: { pts: 1, qts: 2, date: sourceEpochSeconds, seq: 3 },
       dialogs: [sourceDialog(message)],
@@ -300,49 +314,51 @@ describe('.tvbug repro format', () => {
     expect(sanitizer.shiftSeconds(sourceEpochSeconds + 20)).toBe(TVBUG_FIXED_EPOCH_SECONDS + 20);
   });
 
-  it('round-trips the three-file ZIP and retains timeline ordering', () => {
+  it('round-trips the three-file ZIP and retains trace ordering', () => {
     const message = sourceMessage();
-    const sanitizer = createReproSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
+    const sanitizer = createTvBugSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
     const state = sanitizer.sanitizeState({
       dialogs: [sourceDialog(message)],
       messages: [message],
     });
-    const timelineValue = sanitizer.sanitizeValue(
+    const traceValue = sanitizer.sanitizeValue(
       { peerId: secretPeerId, text: 'New private text', kind: 'new-message' },
       'push.value',
     );
     const bytes = createTvBugBundle({
       manifest: manifest(),
-      state,
-      timeline: [
+      snapshot: state,
+      trace: [
         {
           seq: 1,
           tMs: 0,
-          kind: 'call',
-          callId: 'call:1',
-          method: 'getHistory',
-          args: { peerId: state.dialogs[0]!.peer.id, limit: 50 },
+          kind: 'ui',
+          method: 'select-chat',
+          value: { peerId: state.dialogs[0]!.peer.id },
         },
-        { seq: 2, tMs: 12, kind: 'push', method: 'updates', value: timelineValue },
-        { seq: 3, tMs: 20, kind: 'resolve', callId: 'call:1', value: { hasOlder: false } },
+        { seq: 2, tMs: 12, kind: 'diagnostic', method: 'sync', value: traceValue },
       ],
     });
 
     const files = unzipSync(bytes);
     expect(Object.keys(files).sort()).toEqual([
       'manifest.json',
-      'state.v1.json',
-      'timeline.v1.ndjson',
+      'snapshot.v2.json',
+      'trace.v2.ndjson',
     ]);
-    expect(strFromU8(files['timeline.v1.ndjson']!).trim().split('\n')).toHaveLength(3);
+    expect(strFromU8(files['trace.v2.ndjson']!).trim().split('\n')).toHaveLength(2);
     const parsed = parseTvBugBundle(bytes);
-    expect(parsed.timeline.map(({ seq }) => seq)).toEqual([1, 2, 3]);
-    expect(parsed.state).toEqual(state);
+    expect(parsed.manifest).toMatchObject({
+      version: 2,
+      privacy: { profile: 'account-free-v2' },
+    });
+    expect(parsed.trace.map(({ seq }) => seq)).toEqual([1, 2]);
+    expect(parsed.snapshot).toEqual(state);
   });
 
   it('hydrates cache-shaped messages, rich content, media, and generated attachments', () => {
     const message = sourceMessage();
-    const sanitizer = createReproSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
+    const sanitizer = createTvBugSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
     const state = sanitizer.sanitizeState({
       epoch: 9,
       dialogs: [sourceDialog(message)],
@@ -359,7 +375,7 @@ describe('.tvbug repro format', () => {
       },
     });
     const beforeHydration = Date.now();
-    const hydrated = hydrateReproState(state);
+    const hydrated = hydrateTvBugState(state);
 
     expect(hydrated.messages[0]).toMatchObject({
       id: 42,
@@ -383,7 +399,7 @@ describe('.tvbug repro format', () => {
   });
 
   it('handles hostile nested values without leaking secrets or changing structural enums', () => {
-    const sanitizer = createReproSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
+    const sanitizer = createTvBugSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
     const safe = sanitizer.sanitizeValue(
       {
         presence: 'online',
@@ -452,18 +468,18 @@ describe('.tvbug repro format', () => {
 
   it('rejects unsafe URLs and allocation-sized attachment descriptors in hand-authored bundles', () => {
     const message = sourceMessage();
-    const state = sanitizeReproState({
+    const state = sanitizeTvBugState({
       messages: [{ ...message, linkPreview: { url: 'https://private.example/story' } }],
       pending: [sourcePending()],
     });
     state.messages[0]!.linkPreview!.url = 'javascript:alert(1)';
-    expect(() => createTvBugBundle({ manifest: manifest(), state, timeline: [] })).toThrow(
+    expect(() => createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] })).toThrow(
       /unsafe URL/u,
     );
 
     state.messages[0]!.linkPreview!.url = 'https://example.invalid/url:1';
     state.pending[0]!.attachment!.byteSize = 256 * 1024 * 1024 + 1;
-    expect(() => createTvBugBundle({ manifest: manifest(), state, timeline: [] })).toThrow(
+    expect(() => createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] })).toThrow(
       /256 MiB/u,
     );
 
@@ -471,15 +487,15 @@ describe('.tvbug repro format', () => {
     const secondPending = structuredClone(state.pending[0]!);
     secondPending.id = 'pending:2';
     state.pending.push(secondPending);
-    expect(() => createTvBugBundle({ manifest: manifest(), state, timeline: [] })).toThrow(
-      /aggregate replay limit/u,
+    expect(() => createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] })).toThrow(
+      /aggregate materialization limit/u,
     );
   });
 
   it('rejects forged ZIP sizes and checksums before trusting decompressed output', () => {
-    const state = sanitizeReproState({});
-    const valid = createTvBugBundle({ manifest: manifest(), state, timeline: [] });
-    const { local, central } = zipHeaderOffsets(valid, 'state.v1.json');
+    const state = sanitizeTvBugState({});
+    const valid = createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] });
+    const { local, central } = zipHeaderOffsets(valid, 'snapshot.v2.json');
 
     const centralMismatch = valid.slice();
     const centralMismatchView = new DataView(centralMismatch.buffer);
@@ -502,24 +518,27 @@ describe('.tvbug repro format', () => {
   });
 
   it('rejects unordered, malformed, extra-file, and privacy-unsafe bundles', () => {
-    const state = sanitizeReproState({});
+    const state = sanitizeTvBugState({});
     expect(() =>
       createTvBugBundle({
         manifest: manifest(),
-        state,
-        timeline: [
-          { seq: 2, tMs: 10, kind: 'checkpoint' },
-          { seq: 1, tMs: 11, kind: 'checkpoint' },
+        snapshot: state,
+        trace: [
+          { seq: 2, tMs: 10, kind: 'diagnostic' },
+          { seq: 1, tMs: 11, kind: 'diagnostic' },
         ],
       }),
     ).toThrow(/sequence numbers/u);
     expect(() => parseTvBugBundle(new Uint8Array())).toThrow(/empty/u);
 
-    const valid = createTvBugBundle({ manifest: manifest(), state, timeline: [] });
+    const valid = createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] });
     const files = unzipSync(valid);
-    const unsafeState = JSON.parse(strFromU8(files['state.v1.json']!)) as Record<string, unknown>;
+    const unsafeState = JSON.parse(strFromU8(files['snapshot.v2.json']!)) as Record<
+      string,
+      unknown
+    >;
     unsafeState.session = { authKey: 'secret' };
-    files['state.v1.json'] = strToU8(JSON.stringify(unsafeState));
+    files['snapshot.v2.json'] = strToU8(JSON.stringify(unsafeState));
     expect(() => parseTvBugBundle(zipSync(files))).toThrow(/forbidden/u);
 
     const extraFiles = unzipSync(valid);

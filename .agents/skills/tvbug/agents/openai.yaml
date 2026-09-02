@@ -1,0 +1,4 @@
+interface:
+  display_name: 'TVBug inspector'
+  short_description: 'Inspect compact TeleVecha bug reports'
+  default_prompt: 'Use $tvbug to inspect this report and identify the most likely cause.'

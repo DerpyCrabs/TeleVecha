@@ -63,19 +63,21 @@ npm run build
 
 Playwright uses port 4174 by default. Set `TELEVECHA_E2E_PORT` when that port is already in use.
 
-## Replay a debug report
+## Inspect a debug report
 
-Open a `.tvbug` report without signing in or contacting Telegram:
+Open a `.tvbug` snapshot without signing in or contacting Telegram:
 
 ```sh
-npm run replay -- report.tvbug
-npm run replay -- --headless --screenshot result.png report.tvbug
-npm run replay -- --serve-only report.tvbug
+npm run tvbug -- report.tvbug
+npm run tvbug -- --headless --screenshot result.png report.tvbug
+npm run tvbug -- --serve report.tvbug
 ```
 
-The launcher opens Chromium when a display is available. Use `--headless` for an unattended run, `--screenshot result.png` to capture the final viewport, or `--serve-only` to print a local URL without opening a browser. It serves the app on port 4175 by default; set `TELEVECHA_REPLAY_PORT` if that port is busy. The replay browser can contact only that exact local Vite origin. Captured IANA timezones are reproduced; older offset-only reports fall back to the host timezone with a warning when the offset is not a whole hour.
+The inspector opens Chromium when a display is available. Use `--headless` for an unattended run, `--screenshot result.png` to capture the snapshot, or `--serve` to print a local URL without opening a browser. It serves the app on port 4175 by default; set `TELEVECHA_TVBUG_PORT` if that port is busy. The browser can contact only that exact local Vite origin. Captured IANA timezones are applied; offset-only reports fall back to the host timezone with a warning when the offset is not a whole hour.
 
-A `.tvbug` file contains a sanitized starting state and an ordered transport timeline. Message text is replaced with generated text that keeps the original UTF-16 length, line breaks, and formatting offsets. Media payloads are omitted, but their kind, byte size, dimensions, duration, and MIME family remain so the app can reconstruct layout. Account identifiers are replaced with bundle-local aliases, timestamps move to a fixed epoch, and the file contains no Telegram session, authorization key, phone number, access hash, file reference, or cached media bytes.
+A `.tvbug` file is a ZIP containing `manifest.json`, `snapshot.v2.json`, and `trace.v2.ndjson`. The snapshot captures the current runtime flags and errors, up to 250 dialogs, the latest 500 messages from the active conversation, up to 100 pending sends, the active draft, UI settings, and a fresh cache cursor. The trace keeps only the latest 300 UI and diagnostic events. Telegram transport calls are not included.
+
+Message text is replaced with generated text that keeps the original UTF-16 length, line breaks, and formatting offsets. Media payloads are omitted, but their kind, byte size, dimensions, duration, and MIME family remain so the app can reconstruct layout. Account identifiers are replaced with bundle-local aliases, timestamps move to a fixed epoch, and the file contains no Telegram session, authorization key, phone number, access hash, file reference, or cached media bytes. If the viewer cannot open a report, use any ZIP reader to inspect its files directly.
 
 The unit suite covers the messaging engine, IndexedDB migrations and bounds, tab election, and Telegram adapter mappings. The Playwright suite runs against a deterministic transport and a separate `televecha-e2e` database. It tests login and offline states, desktop and phone navigation, drafts, sends and failed-outbox recovery, focus-aware read receipts, uploads, lazy media caching, live edits and deletions, history/search/shared-media pagination, scroll anchoring and render bounds, modal focus, reload persistence, layout containment, independent two-tab conversations, synchronized drafts, and automatic owner failover. It never opens a production Telegram session.
 
