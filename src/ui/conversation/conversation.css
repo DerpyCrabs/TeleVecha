@@ -698,6 +698,27 @@
 .message-flow-row-compact {
   padding-bottom: 0.15rem;
 }
+.unread-messages-divider {
+  align-self: stretch;
+  margin: 0.35rem 0 0.65rem;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+.unread-messages-divider::before,
+.unread-messages-divider::after {
+  display: inline-block;
+  width: calc(50% - 5rem);
+  height: 1px;
+  margin: 0 0.6rem 0.2rem;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  content: '';
+}
+.unread-messages-divider::after {
+  margin-right: 0;
+  margin-left: 0.6rem;
+}
 .upload-progress {
   width: min(20rem, 100%);
   margin-top: 0.4rem;
@@ -1464,8 +1485,8 @@
 .reply-message {
   right: -4rem;
 }
-.message:hover .add-reaction,
-.message:hover .reply-message,
+.message-flow-row:hover > .message .add-reaction,
+.message-flow-row:hover > .message .reply-message,
 .add-reaction:focus-visible,
 .reply-message:focus-visible,
 .add-reaction[aria-expanded='true'] {

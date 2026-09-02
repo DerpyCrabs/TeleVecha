@@ -336,7 +336,7 @@ function fixtureDialog(peer: TelegramPeer, title: string, color: string): Telegr
     topMessageId: topMessage?.id ?? 0,
     topMessage,
     unreadCount: 2,
-    readInboxMaxId: 0,
+    readInboxMaxId: Math.max(0, (topMessage?.id ?? 0) - 2),
     readOutboxMaxId: 0,
     muted: false,
     pinned: false,
@@ -542,8 +542,15 @@ export class FixtureTelegramTransport implements TelegramTransport {
         fixtureDialog(peers[0]!, 'Alice Fixture', '#7c5cff'),
         fixtureDialog(peers[1]!, 'Release Channel', '#4ca184'),
         fixtureDialog(peers[2]!, 'Fixture Group', '#b26b3f'),
-        ...(['long-history', 'delayed-history-media'].includes(this.scenario)
-          ? [fixtureDialog(peers[3]!, 'Long History', '#4b7bec')]
+        ...(['long-history', 'unread-history', 'delayed-history-media'].includes(this.scenario)
+          ? [
+              {
+                ...fixtureDialog(peers[3]!, 'Long History', '#4b7bec'),
+                ...(this.scenario === 'unread-history'
+                  ? { unreadCount: 15, readInboxMaxId: 970 }
+                  : {}),
+              },
+            ]
           : []),
       ]
         .filter((dialog) => !this.deletedPeers.has(dialog.peer.id))
@@ -607,9 +614,12 @@ export class FixtureTelegramTransport implements TelegramTransport {
         : page;
     return {
       messages: renderedPage,
-      hasOlder: ['long-history', 'long-channel-history', 'delayed-history-media'].includes(
-        this.scenario,
-      )
+      hasOlder: [
+        'long-history',
+        'unread-history',
+        'long-channel-history',
+        'delayed-history-media',
+      ].includes(this.scenario)
         ? page.length > 0
         : eligible.length > page.length,
       nextBeforeMessageId: page[0]?.id ?? beforeMessageId,

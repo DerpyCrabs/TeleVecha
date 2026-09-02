@@ -11,6 +11,7 @@ interface ConversationHistoryOptions {
   conversation: Accessor<Conversation | undefined>;
   loaded: Accessor<boolean>;
   openingMessage: Accessor<boolean>;
+  unreadAfterId: Accessor<number | undefined>;
   scroller: Accessor<HTMLDivElement | undefined>;
   viewport: Accessor<ConversationViewport>;
 }
@@ -86,7 +87,7 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
       viewport.setReady(true);
       return;
     }
-    untrack(() => viewport.positionAtPresent(peerId, options.loaded));
+    untrack(() => viewport.positionForPeer(peerId, options.unreadAfterId(), options.loaded));
   });
 
   createEffect(() => {

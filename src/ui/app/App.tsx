@@ -147,6 +147,7 @@ export function App(props: AppProps) {
   const [authOpen, setAuthOpen] = createSignal(engine.snapshot().phase !== 'ready');
   const [activeChatId, setActiveChatId] = createSignal('empty');
   const [activeConversation, setActiveConversation] = createSignal<Conversation>();
+  const [initialUnreadAfterId, setInitialUnreadAfterId] = createSignal<number>();
   const sidebarLayout = createSidebarLayout({
     captureConversationAnchor: () => viewport.captureAnchor(),
   });
@@ -452,6 +453,13 @@ export function App(props: AppProps) {
     return presentConversation(snapshot(), activeChatId());
   });
   const activeMessages = createMemo(() => activeMessageEntries().map(({ message }) => message));
+  const initialUnreadMessageId = createMemo(() => {
+    const unreadAfterId = initialUnreadAfterId();
+    if (unreadAfterId === undefined) return undefined;
+    return activeMessages().find(
+      (message) => !message.outgoing && Number(message.id) > unreadAfterId,
+    )?.id;
+  });
   const pendingSendForMessage = (messageId: string) =>
     snapshot().pending.find(
       (send) =>
@@ -470,6 +478,7 @@ export function App(props: AppProps) {
     return index >= 0 ? send.album.attachments[index] : undefined;
   };
   let reportConversationVisibility = () => {};
+  let initiallyMarkedReadPeer = '';
   viewport = createConversationViewport({
     scroller: () => messageScroller,
     activePeerId: activeChatId,
@@ -544,6 +553,7 @@ export function App(props: AppProps) {
     conversation: activeConversation,
     loaded: activeConversationLoaded,
     openingMessage: () => openingMessage,
+    unreadAfterId: initialUnreadAfterId,
     scroller: () => messageScroller,
     viewport: () => viewport,
   });
@@ -582,6 +592,9 @@ export function App(props: AppProps) {
     const previousPeerId = activeChatId();
     const changingPeer = id !== previousPeerId;
     if (changingPeer) {
+      const dialog = snapshot().dialogs.find(({ peer }) => peer.id === id);
+      setInitialUnreadAfterId(dialog && dialog.unreadCount > 0 ? dialog.readInboxMaxId : undefined);
+      initiallyMarkedReadPeer = '';
       conversationRetryGeneration += 1;
       setActiveConversation(undefined);
       setConversationRetrying(false);
@@ -783,10 +796,20 @@ export function App(props: AppProps) {
         bot.menuOpen() ||
         authOpen() ||
         modalVisible();
+      const visible = document.visibilityState === 'visible' && document.hasFocus() && !obscured;
+      if (
+        visible &&
+        viewport.ready() &&
+        initialUnreadAfterId() !== undefined &&
+        initiallyMarkedReadPeer !== peerId
+      ) {
+        initiallyMarkedReadPeer = peerId;
+        runInBackground(engine.retryMarkRead(peerId));
+      }
       runInBackground(
         Promise.resolve(
           engine.setActiveConversationVisibility(peerId, {
-            visible: document.visibilityState === 'visible' && document.hasFocus() && !obscured,
+            visible,
             atBottom,
           }),
         ),
@@ -1599,6 +1622,11 @@ export function App(props: AppProps) {
                               month: 'short',
                               day: 'numeric',
                             }).format(new Date((message.date ?? 0) * 1000))}
+                          </div>
+                        </Show>
+                        <Show when={message.id === initialUnreadMessageId()}>
+                          <div class="unread-messages-divider" data-unread-message-id={message.id}>
+                            Unread messages
                           </div>
                         </Show>
                         <article

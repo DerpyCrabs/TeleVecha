@@ -143,9 +143,12 @@ const concurrentMethods = new Set([
   'getUserDetails',
   'openMessage',
   'searchPeers',
+  'sendDraft',
   'setDraft',
   'setTyping',
 ]);
+
+const concurrentAfterConversationOpenMethods = new Set(['sendDraft']);
 
 const coalescedMethods = new Set([
   'ensureSharedMediaCounts',
@@ -834,9 +837,12 @@ export class TabCoordinator {
       return;
     }
     if (concurrentMethods.has(request.method)) {
-      void this.handleRequest(request, requestKey).finally(() =>
-        this.activeRequests.delete(requestKey),
-      );
+      const conversationOpen = concurrentAfterConversationOpenMethods.has(request.method)
+        ? (this.conversationOpens.get(request.from) ?? Promise.resolve())
+        : Promise.resolve();
+      void conversationOpen
+        .then(() => this.handleRequest(request, requestKey))
+        .finally(() => this.activeRequests.delete(requestKey));
       return;
     }
     const conversationOpen = this.conversationOpens.get(request.from) ?? Promise.resolve();
@@ -991,7 +997,12 @@ export class TabCoordinator {
         return operation;
       }
       if (concurrentMethods.has(method)) {
-        return this.invokeOwner(this.clientId, method, args, activePeerId);
+        const conversationOpen = concurrentAfterConversationOpenMethods.has(method)
+          ? (this.conversationOpens.get(this.clientId) ?? Promise.resolve())
+          : Promise.resolve();
+        return conversationOpen.then(() =>
+          this.invokeOwner(this.clientId, method, args, activePeerId),
+        );
       }
       const conversationOpen = this.conversationOpens.get(this.clientId) ?? Promise.resolve();
       const operation = this.operationTail

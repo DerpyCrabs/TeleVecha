@@ -9,6 +9,7 @@ import {
 
 interface ConversationMessage {
   id: string;
+  outgoing: boolean;
 }
 
 interface ConversationViewportOptions {
@@ -146,7 +147,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
         dispatch({ type: 'present-visible' }, scroller);
       }
       dispatch({ type: 'viewport-scrolled' }, scroller);
-      if (!followingPresent() && scroller.scrollTop === 0) {
+      if (!followingPresent() && ready() && scroller.scrollTop === 0) {
         dispatch({ type: 'top-reached', canLoad: options.canLoadOlder() }, scroller);
       }
     };
@@ -226,17 +227,51 @@ export function createConversationViewport(options: ConversationViewportOptions)
     dispatch({ type: 'peer-reset' });
   };
 
-  const positionAtPresent = (peerId: string, stillCurrent: () => boolean) => {
+  const positionForPeer = (
+    peerId: string,
+    unreadAfterId: number | undefined,
+    stillCurrent: () => boolean,
+  ) => {
     if (!stillCurrent() || positionedPeer === peerId) return;
     positionedPeer = peerId;
-    const scroller = options.scroller();
-    dispatch({ type: 'peer-positioned' }, scroller);
     queueMicrotask(() => {
       if (options.activePeerId() !== peerId || !stillCurrent()) return;
-      const current = options.scroller();
-      dispatch({ type: 'peer-positioned' }, current);
+      const scroller = options.scroller();
+      const unread =
+        unreadAfterId === undefined
+          ? undefined
+          : options
+              .messages()
+              .find((message) => !message.outgoing && Number(message.id) > unreadAfterId);
+      const selector = unread ? `[data-unread-message-id="${CSS.escape(unread.id)}"]` : undefined;
+      const target = selector ? scroller?.querySelector<HTMLElement>(selector) : undefined;
+      if (!scroller || !target) {
+        dispatch({ type: 'peer-positioned' }, scroller);
+        return;
+      }
+      const alignUnread = () => {
+        const currentTarget = scroller.querySelector<HTMLElement>(selector!);
+        if (!currentTarget) return;
+        scroller.scrollTop +=
+          currentTarget.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      };
+      alignUnread();
+      dispatch({ type: 'history-target-opened' }, scroller);
+      requestAnimationFrame(() => {
+        if (options.activePeerId() !== peerId || !stillCurrent()) return;
+        dispatch({ type: 'viewport-ready' }, scroller);
+        requestAnimationFrame(() => {
+          if (options.activePeerId() !== peerId || !stillCurrent()) return;
+          readingAnchors = [];
+          alignUnread();
+          dispatch({ type: 'reading-anchor-requested' }, scroller);
+        });
+      });
     });
   };
+
+  const positionAtPresent = (peerId: string, stillCurrent: () => boolean) =>
+    positionForPeer(peerId, undefined, stillCurrent);
 
   const jumpToPresent = () => {
     options.cancelMessageOpen();
@@ -279,6 +314,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
     setReady: (next: boolean) => dispatch({ type: next ? 'viewport-ready' : 'viewport-hidden' }),
     followingPresent,
     jumpToPresent,
+    positionForPeer,
     positionAtPresent,
     resetForPeer,
     reveal,
