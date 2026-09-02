@@ -30,6 +30,31 @@ test('opens a chat at the first unread message instead of the latest message', a
     )
     .toBeLessThan(100);
   await expect(scroller).toContainText('Long history message 972');
+  await expect(scroller.getByText('Unread messages')).toBeVisible();
+});
+
+test('removes the unread divider after replying from the unread section', async ({ page }) => {
+  await openReady(page, '/?scenario=unread-history');
+  await chatButton(page, /Long History/).click();
+
+  const firstUnread = page.locator('article[data-message-id="972"]');
+  await firstUnread.hover();
+  await firstUnread.getByRole('button', { name: 'Reply to message 972' }).click();
+  const composer = page.getByRole('textbox', { name: 'Message' });
+  await composer.fill('Read and replied');
+  await composer.press('Enter');
+
+  await expect(page.getByText('Unread messages')).toHaveCount(0);
+});
+
+test('removes the unread divider after jumping to the present', async ({ page }) => {
+  await openReady(page, '/?scenario=unread-history');
+  await chatButton(page, /Long History/).click();
+  await expect(page.getByText('Unread messages')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Jump to present' }).click();
+
+  await expect(page.getByText('Unread messages')).toHaveCount(0);
 });
 
 test('keeps message actions visible while the pointer crosses the message-owned side area', async ({

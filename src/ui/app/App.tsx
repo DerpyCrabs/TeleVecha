@@ -490,6 +490,7 @@ export function App(props: AppProps) {
       );
     },
     reportVisibility: () => reportConversationVisibility(),
+    dismissUnreadMarker: () => setInitialUnreadAfterId(undefined),
     loadOlder: (scroller) => history.loadOlder(scroller),
     cancelMessageOpen: () => {
       openMessageGeneration += 1;

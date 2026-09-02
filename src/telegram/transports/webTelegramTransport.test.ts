@@ -453,7 +453,7 @@ describe('web Telegram transport mapping', () => {
     vi.useRealTimers();
   });
 
-  it('does not report background wake-up warnings as connection loss', () => {
+  it('catches up updates after a quick reconnect without reporting a connection loss', () => {
     vi.useFakeTimers();
     const target = transport();
     let handler: ((update: unknown) => void) | undefined;
@@ -479,7 +479,7 @@ describe('web Telegram transport mapping', () => {
     handler?.(connectionStateEvent('connected'));
     vi.advanceTimersByTime(5_000);
 
-    expect(received).toEqual([]);
+    expect(received).toEqual([{ type: 'too-long' }]);
     vi.useRealTimers();
   });
 

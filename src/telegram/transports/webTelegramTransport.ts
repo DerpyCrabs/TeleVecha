@@ -1686,7 +1686,12 @@ function createWebTelegramTransportImplementation(
       if (generation !== state.connectionGeneration || state.client !== client) return;
       if (connectionStateEvent.is(raw)) {
         if (raw.state === 'connected') {
+          const reconnected = state.connectionLossTimer !== undefined;
           clearConnectionLossTimer();
+          if (reconnected) {
+            const batch: TransportUpdateBatch = { updates: [{ type: 'too-long' }] };
+            for (const listener of state.listeners) listener(batch);
+          }
           return;
         }
         if (raw.state === 'disconnected') {

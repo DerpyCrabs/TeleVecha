@@ -18,6 +18,7 @@ interface ConversationViewportOptions {
   messages: Accessor<readonly ConversationMessage[]>;
   canLoadOlder: Accessor<boolean>;
   reportVisibility: () => void;
+  dismissUnreadMarker: () => void;
   loadOlder: (scroller: HTMLDivElement) => Promise<void>;
   cancelMessageOpen: () => void;
 }
@@ -144,6 +145,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
         readHistory(scroller);
       }
       if (!followingPresent() && atPresent(scroller)) {
+        options.dismissUnreadMarker();
         dispatch({ type: 'present-visible' }, scroller);
       }
       dispatch({ type: 'viewport-scrolled' }, scroller);
@@ -275,6 +277,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
 
   const jumpToPresent = () => {
     options.cancelMessageOpen();
+    options.dismissUnreadMarker();
     const scroller = options.scroller();
     dispatch({ type: 'jump-to-present' }, scroller);
   };
