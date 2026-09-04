@@ -1728,21 +1728,20 @@ function AppContent(props: AppProps) {
                   }
                 >
                   {(message, index) => {
-                    const absoluteIndex = index;
-                    const layout = () =>
-                      messageRows().layoutByMessage.get(message) ??
-                      layoutMessages([message], activeChat(), snapshot().dialogs)[0]!;
-                    const compactAfter = () =>
-                      messageRows()
-                        .layouts.slice(absoluteIndex() + 1)
-                        .find((candidate) => !candidate.hide)
-                        ?.className.includes('message-same-sender') ?? false;
+                    const layout = createMemo(
+                      () =>
+                        messageRows().layoutByMessage.get(message) ??
+                        layoutMessages([message], activeChat(), snapshot().dialogs)[0]!,
+                    );
+                    // Layout can change while the caption stays the same (for example,
+                    // prepending history or changing the trailing avatar of a sender group).
+                    const caption = createMemo(() => layout().caption);
                     return (
                       <div
                         class="message-flow-row"
                         classList={{
                           'message-flow-row-first': index() === 0,
-                          'message-flow-row-compact': compactAfter(),
+                          'message-flow-row-compact': layout().compactAfter,
                         }}
                         hidden={layout().hide}
                       >
@@ -2022,7 +2021,7 @@ function AppContent(props: AppProps) {
                           </Show>
                           <div class="message-copy">
                             <MessageBody
-                              message={layout().caption}
+                              message={caption()}
                               loadPreviewPhoto={
                                 message.linkPreview?.hasPhoto
                                   ? () => {

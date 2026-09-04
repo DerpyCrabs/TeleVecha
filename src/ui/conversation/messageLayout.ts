@@ -6,6 +6,7 @@ export interface MessageLayout {
   author: string;
   caption: ChatMessage;
   className: string;
+  compactAfter: boolean;
   forwardedFrom: ChatMessage['forwardedFrom'] | undefined;
   hide: boolean;
   media: ChatMessage['media'] | undefined;
@@ -20,6 +21,7 @@ function sameLayout(previous: MessageLayout | undefined, next: MessageLayout) {
     previous.author === next.author &&
     previous.caption === next.caption &&
     previous.className === next.className &&
+    previous.compactAfter === next.compactAfter &&
     previous.forwardedFrom === next.forwardedFrom &&
     previous.hide === next.hide &&
     previous.media === next.media &&
@@ -196,6 +198,7 @@ export function layoutMessages(
       author: messageAuthor,
       caption,
       className,
+      compactAfter: sameSender(previousVisible(nextIndex), messages[nextIndex]),
       forwardedFrom,
       hide: continuations[index] ?? false,
       media: album.length === 0 ? message.media : undefined,

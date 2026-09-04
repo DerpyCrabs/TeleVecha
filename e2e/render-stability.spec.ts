@@ -62,6 +62,67 @@ test('typing a draft does not replace messages, media, or unchanged chat rows', 
   expect(callsAfter?.downloadMedia).toBe(callsBefore?.downloadMedia);
 });
 
+test('appending and prepending preserve text nodes and revealed spoilers', async ({ page }) => {
+  const body = page.locator('article[data-message-id="76"] .message-body');
+  const spoiler = body.locator('.spoiler');
+  const unchangedText = page.locator('article[data-message-id="79"] .message-body span').first();
+  await spoiler.click();
+  await expect(spoiler).toHaveAttribute('aria-expanded', 'true');
+  await mark(spoiler, 'revealed-spoiler');
+  await mark(unchangedText, 'unchanged-text');
+
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 81,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: 'Append without rebuilding text',
+        date: 1_700_000_081,
+        outgoing: false,
+      },
+    }),
+  );
+  await expect(page.locator('article[data-message-id="81"]')).toBeAttached();
+  await expectMarked(spoiler, 'revealed-spoiler');
+  await expectMarked(unchangedText, 'unchanged-text');
+  await expect(spoiler).toHaveAttribute('aria-expanded', 'true');
+
+  await page.getByTestId('message-scroller').evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+    element.scrollTop = 0;
+  });
+  await expect(page.locator('article[data-message-id="1"]')).toBeAttached();
+  await expectMarked(spoiler, 'revealed-spoiler');
+  await expectMarked(unchangedText, 'unchanged-text');
+  await expect(spoiler).toHaveAttribute('aria-expanded', 'true');
+
+  // An actual edit must still update the body even though its message proxy is stable.
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'edit-message',
+      pts: 12,
+      ptsCount: 1,
+      message: {
+        id: 76,
+        peerId: 'u:101',
+        senderId: 'self',
+        text: 'Updated secret',
+        date: 1_700_000_076,
+        editedAt: 1_700_000_082,
+        outgoing: true,
+        formats: [{ offset: 8, length: 6, kind: 'spoiler' }],
+      },
+    }),
+  );
+  await expect(body).toHaveText('Updated secret');
+  await expect(spoiler).toHaveAttribute('aria-expanded', 'false');
+  await expectMarked(unchangedText, 'unchanged-text');
+});
+
 test('typing does not nudge the conversation on each input', async ({ page }) => {
   const scroller = page.getByTestId('message-scroller');
   const composer = page.getByRole('textbox', { name: 'Message' });

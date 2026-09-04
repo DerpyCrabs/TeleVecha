@@ -59,3 +59,5 @@ Verified on 2026-09-05: the complete command passed, with 294 unit tests and 293
 | Telegram chunk              |          181.22 KB |  182.07 KB |
 
 The combined increase is 5.94 KB gzip. No dependencies were added. This is a bundle-cost comparison, not a runtime benchmark.
+
+The subsequent [production-build comparison](effect-solid-benchmark.md) measured substantial reductions in message-update CPU time, with about 23% more heap in a loaded large conversation. It also exposed text-span rebuilding during appends, which the rendering follow-up fixes with per-row layout and caption memos. A browser regression now verifies text-node identity and revealed spoilers across appends and history prepends, while allowing actual text edits to update. The bounded memory increase is accepted; no cache redesign is included.

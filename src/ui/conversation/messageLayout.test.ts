@@ -80,6 +80,32 @@ describe('layoutMessages', () => {
     expect(layouts[0]?.showSenderAvatar).toBe(false);
     expect(layouts[1]?.showSenderAvatar).toBe(true);
     expect(layouts[1]?.className).toContain('message-same-sender');
+    expect(layouts[0]?.compactAfter).toBe(true);
+    expect(layouts[1]?.compactAfter).toBe(false);
+  });
+
+  it('computes spacing across hidden album rows and sender/date boundaries', () => {
+    const media = { kind: 'photo' as const, name: 'photo.jpg', mimeType: 'image/jpeg' };
+    const messages = [
+      message('1'),
+      message('2', { groupedId: 'album', media }),
+      message('3', { groupedId: 'album', media, body: '' }),
+      message('4', { senderId: 'user:3' }),
+      message('5', { senderId: 'user:3', date: 1_700_086_400 }),
+    ];
+    const layouts = layoutMessages(messages, chat, []);
+    expect(layouts.map(({ compactAfter }) => compactAfter)).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(layouts[2]?.hide).toBe(true);
+
+    const next = layoutMessages([...messages, message('6')], chat, [], layouts);
+    expect(next[0]).toBe(layouts[0]);
+    expect(next[1]).toBe(layouts[1]);
   });
 
   it('groups consecutive outgoing messages even when Telegram omits their sender id', () => {
