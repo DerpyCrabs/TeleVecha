@@ -59,7 +59,27 @@ function pendingMessage(
   return { key: `${send.peer.id}:random:${randomId}`, message: value };
 }
 
-export function presentConversation(snapshot: EngineSnapshot, peerId: string): KeyedMessageView[] {
+export function createConversationPresenter() {
+  const cache = new WeakMap<
+    EngineSnapshot['messages'][number],
+    { reply: EngineSnapshot['messages'][number] | undefined; read: boolean; view: ChatMessage }
+  >();
+  return (snapshot: EngineSnapshot, peerId: string) =>
+    presentConversation(snapshot, peerId, (message, readOutboxMaxId, reply) => {
+      const read = message.outgoing && message.id <= readOutboxMaxId;
+      const previous = cache.get(message);
+      if (previous && previous.reply === reply && previous.read === read) return previous.view;
+      const view = presentMessage(message, readOutboxMaxId, reply);
+      cache.set(message, { reply, read, view });
+      return view;
+    });
+}
+
+export function presentConversation(
+  snapshot: EngineSnapshot,
+  peerId: string,
+  project = presentMessage,
+): KeyedMessageView[] {
   if (snapshot.activePeerId !== peerId) return [];
   const readOutboxMaxId =
     snapshot.dialogs.find(({ peer }) => peer.id === peerId)?.readOutboxMaxId ?? 0;
@@ -73,7 +93,7 @@ export function presentConversation(snapshot: EngineSnapshot, peerId: string): K
     key: message.randomId
       ? `${message.peerId}:random:${message.randomId}`
       : `${message.peerId}:${message.id}`,
-    message: presentMessage(
+    message: project(
       message,
       readOutboxMaxId,
       message.replyToId ? messagesById.get(message.replyToId) : undefined,

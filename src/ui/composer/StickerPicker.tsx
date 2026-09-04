@@ -1,3 +1,4 @@
+import { createUiResource } from '../reactivity/solid';
 import Clock3 from 'lucide-solid/icons/clock-3';
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 
@@ -14,10 +15,15 @@ interface StickerImageProps {
 }
 
 function StickerImage(props: StickerImageProps) {
-  const [source, setSource] = createSignal(props.cachedUrl() ?? '');
+  const [visible, setVisible] = createSignal(Boolean(props.eager));
+  const [loaded] = createUiResource(
+    () => visible() && props.sticker.id,
+    () => props.cachedUrl() ?? props.load(),
+  );
+  const source = () => props.cachedUrl() ?? loaded();
   let root: HTMLSpanElement | undefined;
   const load = () => {
-    if (!source()) void props.load().then(setSource, () => undefined);
+    setVisible(true);
   };
   onMount(() => {
     if (props.eager || !('IntersectionObserver' in window)) return load();

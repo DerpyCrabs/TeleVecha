@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { fixtureStats, openReady, selectAlice } from './helpers';
+import { chatButton, fixtureStats, openReady, selectAlice } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await openReady(page);
@@ -316,4 +316,28 @@ test('searches Telegram for GIFs instead of filtering saved GIF identifiers', as
   await picker.getByPlaceholder('Search gifs').fill('cat');
   await expect(picker.getByRole('button', { name: 'Send GIF cat result' })).toBeVisible();
   expect((await fixtureStats(page))?.searchGifs).toBe(1);
+});
+
+test('restores persisted drafts on entry without mirroring later snapshot changes into the composer', async ({
+  page,
+}) => {
+  const composer = page.getByRole('textbox', { name: 'Message' });
+  await page.evaluate(async () => {
+    const runtime = window.__televechaRuntimes!.get('fixture:default')!;
+    await runtime.runEffect(runtime.engine.setDraft('u:101', 'Persisted draft'));
+  });
+  await expect(composer).toHaveValue('');
+  await chatButton(page, /Release Channel/).click();
+  await chatButton(page, /Alice Fixture/).click();
+  await expect(composer).toHaveValue('Persisted draft');
+  await composer.fill('Local draft survives');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__televechaRuntimes!.get('fixture:default')!.engine.snapshot().drafts['u:101'],
+      ),
+    )
+    .toBe('Local draft survives');
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Local draft survives');
 });

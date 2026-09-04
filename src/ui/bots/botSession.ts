@@ -1,3 +1,4 @@
+import { createUiResource, useUiModel } from '../reactivity/solid';
 import { createEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js';
 import type { Effect } from 'effect';
 
@@ -51,9 +52,8 @@ interface BotSessionOptions {
 }
 
 export function createBotSession(options: BotSessionOptions) {
-  const [commands, setCommands] = createSignal<TelegramBotCommand[]>([]);
-  const [commandsPeerId, setCommandsPeerId] = createSignal('');
-  const [commandsLoading, setCommandsLoading] = createSignal(false);
+  const [commandsRequested, setCommandsRequested] = createSignal('');
+  const model = useUiModel();
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [starting, setStarting] = createSignal(false);
   const [buttonBusy, setButtonBusy] = createSignal<{ owner: string; key: string }>();
@@ -62,7 +62,6 @@ export function createBotSession(options: BotSessionOptions) {
   const [urlAuthBusy, setUrlAuthBusy] = createSignal(false);
   const [inlineSwitch, setInlineSwitch] = createSignal<PendingInlineSwitch>();
   let actionGeneration = 0;
-  let commandsGeneration = 0;
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
   const isCurrent = (peerId: string, generation: number) =>
@@ -90,34 +89,22 @@ export function createBotSession(options: BotSessionOptions) {
     if (!opened) showNotice('The browser blocked the new tab.');
   };
 
+  const [loadedCommands] = createUiResource(
+    () => {
+      const dialog = options.activeDialog();
+      const conversation = dialog && currentConversation(dialog.peer.id);
+      return conversation &&
+        (dialog?.peer.kind === 'group' || (dialog?.bot && commandsRequested() === dialog.peer.id))
+        ? conversation
+        : false;
+    },
+    (conversation) => conversation.getBotCommands(),
+    { namespace: 'bot-commands', key: (conversation) => conversation.peerId },
+  );
+  const commands = () => loadedCommands() ?? [];
+  const commandsLoading = () => loadedCommands.loading;
   const loadCommands = async () => {
-    const dialog = options.activeDialog();
-    const supportsCommands = dialog?.bot || dialog?.peer.kind === 'group';
-    if (
-      !dialog ||
-      !currentConversation(dialog.peer.id) ||
-      !supportsCommands ||
-      commandsLoading() ||
-      commandsPeerId() === dialog.peer.id
-    ) {
-      return;
-    }
-    const peerId = dialog.peer.id;
-    const generation = ++commandsGeneration;
-    setCommandsLoading(true);
-    try {
-      const conversation = currentConversation(peerId);
-      const next = conversation
-        ? await options.runEffect(conversation.getBotCommands())
-        : undefined;
-      if (options.activePeerId() !== peerId || generation !== commandsGeneration) return;
-      setCommands(next ?? []);
-      setCommandsPeerId(peerId);
-    } finally {
-      if (options.activePeerId() === peerId && generation === commandsGeneration) {
-        setCommandsLoading(false);
-      }
-    }
+    setCommandsRequested(options.activePeerId());
   };
 
   createEffect(
@@ -127,10 +114,7 @@ export function createBotSession(options: BotSessionOptions) {
         const peerId = options.activePeerId();
         const conversationPeerId = options.conversation()?.peerId ?? '';
         actionGeneration += 1;
-        commandsGeneration += 1;
-        setCommands([]);
-        setCommandsPeerId('');
-        setCommandsLoading(false);
+        setCommandsRequested('');
         setMenuOpen(false);
         setStarting(false);
         setButtonBusy(undefined);
@@ -156,15 +140,9 @@ export function createBotSession(options: BotSessionOptions) {
           (event.peerId !== undefined && event.peerId !== options.activePeerId())
         )
           return;
-        const hadLoadedCommands = commandsPeerId() === options.activePeerId();
-        commandsGeneration += 1;
-        setCommands([]);
-        setCommandsPeerId('');
-        setCommandsLoading(false);
-        const dialog = options.activeDialog();
-        if ((dialog?.bot || dialog?.peer.kind === 'group') && (hadLoadedCommands || menuOpen())) {
-          void loadCommands().catch(() => undefined);
-        }
+        model.invalidate(
+          event.peerId === undefined ? 'bot-commands:' : `bot-commands:${event.peerId}`,
+        );
       }),
     ),
   );

@@ -1,3 +1,4 @@
+import type { UiLoad } from '../reactivity/model';
 import Search from 'lucide-solid/icons/search';
 import { For, Show, createMemo, createSignal } from 'solid-js';
 
@@ -24,7 +25,7 @@ interface ExpressionPickerProps {
   stickerUrl: (sticker: TelegramSticker) => string | undefined;
   sendSticker: (sticker: TelegramSticker) => void;
   sendGif: (gif: TelegramSticker) => void;
-  searchGifs: (query: string) => Promise<TelegramSticker[]>;
+  searchGifs: (query: string) => UiLoad<TelegramSticker[]>;
   retryGifs: () => Promise<void>;
 }
 

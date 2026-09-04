@@ -1,3 +1,4 @@
+import { createUiResource, createDebouncedValue } from '../reactivity/solid';
 import BellOff from 'lucide-solid/icons/bell-off';
 import Ban from 'lucide-solid/icons/ban';
 import Archive from 'lucide-solid/icons/archive';
@@ -22,7 +23,6 @@ import {
 } from 'solid-js';
 
 import type { ChatSummary } from '../../domain/models';
-import type { TelegramPeerSearchResult, TelegramUserDetails } from '../../telegram/types';
 import type { SidebarLayout } from '../app/sidebarLayout';
 import type { MediaAssets } from '../media/mediaAssets';
 import { Avatar } from '../shared/Avatar';
@@ -86,10 +86,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
   const compact = () => props.layout.compact() && !props.layout.mobileOpen();
   const [query, setQuery] = createSignal('');
   const [filter, setFilter] = createSignal<ChatFilter>('all');
-  const [peerResults, setPeerResults] = createSignal<TelegramPeerSearchResult[]>([]);
-  const [searchingPeers, setSearchingPeers] = createSignal(false);
-  const [peerSearchFailed, setPeerSearchFailed] = createSignal(false);
-  const [peerSearchRetry, setPeerSearchRetry] = createSignal(0);
   const [listScrollTop, setListScrollTop] = createSignal(0);
   const [listViewportHeight, setListViewportHeight] = createSignal(640);
   const [contextMenu, setContextMenu] = createSignal<{
@@ -97,8 +93,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
     x: number;
     y: number;
   }>();
-  const [contextUser, setContextUser] = createSignal<TelegramUserDetails>();
-  let peerSearchGeneration = 0;
   let chatListElement: HTMLDivElement | undefined;
   const chatHref = (peerId: string) => {
     const url = new URL(window.location.href);
@@ -106,6 +100,36 @@ export function ChatSidebar(props: ChatSidebarProps) {
     return `${url.pathname}${url.search}${url.hash}`;
   };
   const archiveOpen = () => filter() === 'archived';
+  const searchTerm = () => query().trim();
+  const debouncedTerm = createDebouncedValue(searchTerm);
+  const [loadedPeers, peerResource] = createUiResource(
+    () =>
+      searchTerm() && searchTerm() === debouncedTerm() && !archiveOpen() && filter() !== 'unread'
+        ? { term: searchTerm(), online: props.online }
+        : false,
+    ({ term }) => props.directory.search(term),
+    { namespace: 'peer-search', key: ({ term, online }) => `${online}:${term}` },
+  );
+  const peerResults = () => loadedPeers() ?? [];
+  const searchingPeers = () =>
+    Boolean(searchTerm()) &&
+    !archiveOpen() &&
+    filter() !== 'unread' &&
+    (searchTerm() !== debouncedTerm() || loadedPeers.loading);
+  const peerSearchFailed = () => Boolean(loadedPeers.error);
+  const [loadedContextUser] = createUiResource(
+    () => {
+      const id = contextMenu()?.chatId;
+      return id && props.chats.some((chat) => chat.id === id && chat.kind === 'user') ? id : false;
+    },
+    (id) => props.directory.details(id),
+    { namespace: 'user-details' },
+  );
+
+  const contextUser = () => {
+    const id = contextMenu()?.chatId;
+    return id ? (props.directory.cachedDetails(id) ?? loadedContextUser()) : undefined;
+  };
   const archivedChats = createMemo(() => props.chats.filter((chat) => chat.archived));
   const archivedUnreadCount = createMemo(() =>
     archivedChats().reduce((total, chat) => total + normalizeUnreadCount(chat.unread), 0),
@@ -171,7 +195,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
       () => props.activeChatId,
       (activeChatId) => {
         setContextMenu(undefined);
-        setContextUser(undefined);
         if (!activeChatId) return;
         const index = filteredChats().findIndex(({ id }) => id === activeChatId);
         if (index < 0) return;
@@ -189,40 +212,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
             Math.max(0, (chatListElement.clientHeight - CHAT_ROW_HEIGHT) / 2);
           chatListElement.scrollTop = Math.max(0, centeredTop);
           setListScrollTop(chatListElement.scrollTop);
-        });
-      },
-    ),
-  );
-
-  createEffect(
-    on(
-      () => [query().trim(), props.online, archiveOpen(), filter(), peerSearchRetry()] as const,
-      ([term, _online, archived, selectedFilter]) => {
-        const generation = ++peerSearchGeneration;
-        setPeerResults([]);
-        setPeerSearchFailed(false);
-        if (!term || archived || selectedFilter === 'unread') {
-          setSearchingPeers(false);
-          return;
-        }
-        setSearchingPeers(true);
-        const timer = window.setTimeout(() => {
-          void props.directory.search(term).then(
-            (results) => {
-              if (generation !== peerSearchGeneration) return;
-              setPeerResults(results);
-              setSearchingPeers(false);
-            },
-            () => {
-              if (generation !== peerSearchGeneration) return;
-              setPeerSearchFailed(true);
-              setSearchingPeers(false);
-            },
-          );
-        }, 250);
-        onCleanup(() => {
-          window.clearTimeout(timer);
-          if (generation === peerSearchGeneration) peerSearchGeneration += 1;
         });
       },
     ),
@@ -415,16 +404,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
                     window.innerHeight - (chat.kind === 'user' ? 245 : 205),
                   ),
                 };
-                setContextUser(undefined);
                 setContextMenu(menu);
-                if (chat.kind === 'user') {
-                  void props.directory
-                    .details(chat.id)
-                    .then((details) => {
-                      if (contextMenu() === menu) setContextUser(details);
-                    })
-                    .catch(() => undefined);
-                }
               }}
               aria-label={`${chat.title}, ${chat.preview}${
                 chat.lastMessageStatus ? `, last message ${chat.lastMessageStatus}` : ''
@@ -550,7 +530,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
         <Show when={peerSearchFailed()}>
           <div class="px-4 py-5 text-center text-sm text-[var(--muted)]" role="alert">
             <p>Telegram search is unavailable. Try again.</p>
-            <button onClick={() => setPeerSearchRetry((retry) => retry + 1)}>Retry search</button>
+            <button onClick={() => peerResource.refetch()}>Retry search</button>
           </div>
         </Show>
         <Show

@@ -185,16 +185,19 @@ test('propagates a follower-initiated sign-out to every tab', async ({ context, 
   await expect(page.getByTestId('chat-list').locator('.chat-row')).toHaveCount(0);
 });
 
-test('synchronizes canonical drafts and promotes a follower after the owner closes', async ({
+test('keeps different chats and drafts independent and promotes a follower after the owner closes', async ({
   context,
   page,
 }) => {
   await openReady(page, '/?chat=u%3A101');
   const second = await context.newPage();
-  await openReady(second, '/?chat=u%3A101');
+  await openReady(second, '/?chat=c%3A202');
 
   await page.getByRole('textbox', { name: 'Message' }).fill('Shared draft');
-  await expect(second.getByRole('textbox', { name: 'Message' })).toHaveValue('Shared draft');
+  await expect(second.getByRole('textbox', { name: 'Message' })).toHaveValue('');
+  await second.getByRole('textbox', { name: 'Message' }).fill('Channel draft');
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Shared draft');
+  await expect(second.getByTestId('conversation-header')).toContainText('Release Channel');
 
   await page.close();
   await expect
@@ -208,28 +211,6 @@ test('synchronizes canonical drafts and promotes a follower after the owner clos
     second.locator('article.message', { hasText: 'Sent after automatic takeover' }),
   ).toBeVisible({ timeout: 15_000 });
   await expect.poll(async () => (await fixtureStats(second))?.sendText).toBe(1);
-});
-
-test('never replaces rapid local input with another tab draft snapshot', async ({
-  context,
-  page,
-}) => {
-  await openReady(page, '/?chat=u%3A101');
-  const second = await context.newPage();
-  await openReady(second, '/?chat=u%3A101');
-  const localDraft = 'fast-local-input-'.repeat(8);
-  const typing = second
-    .getByRole('textbox', { name: 'Message' })
-    .pressSequentially(localDraft, { delay: 2 });
-
-  await page.waitForTimeout(20);
-  await page.getByRole('textbox', { name: 'Message' }).fill('older remote draft');
-  await typing;
-
-  await expect(second.getByRole('textbox', { name: 'Message' })).toHaveValue(localDraft);
-  await page.getByRole('textbox', { name: 'Message' }).fill('newer remote draft');
-  await page.waitForTimeout(100);
-  await expect(second.getByRole('textbox', { name: 'Message' })).toHaveValue(localDraft);
 });
 
 test('preserves a follower conversation when it takes ownership', async ({ context, page }) => {

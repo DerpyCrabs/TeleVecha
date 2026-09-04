@@ -1,3 +1,6 @@
+import { Effect } from 'effect';
+import { createUiPages } from '../reactivity/solid';
+import { loadEffect, type UiLoad } from '../reactivity/model';
 import Search from 'lucide-solid/icons/search';
 import X from 'lucide-solid/icons/x';
 import { For, Show, createSignal } from 'solid-js';
@@ -20,7 +23,7 @@ interface SearchPanelProps {
     query: string,
     global: boolean,
     offset?: TelegramSearchPage['nextOffset'],
-  ) => Promise<TelegramSearchPage>;
+  ) => UiLoad<TelegramSearchPage>;
   openResult: (message: TelegramMessage) => void;
   close: () => void;
 }
@@ -28,74 +31,41 @@ interface SearchPanelProps {
 export function SearchPanel(props: SearchPanelProps) {
   const [query, setQuery] = createSignal('');
   const [global, setGlobal] = createSignal(false);
-  const [results, setResults] = createSignal<TelegramMessage[]>([]);
-  const [loading, setLoading] = createSignal(false);
-  const [loadingMore, setLoadingMore] = createSignal(false);
-  const [hasMore, setHasMore] = createSignal(false);
-  const [nextOffset, setNextOffset] = createSignal<TelegramSearchPage['nextOffset']>();
-  const [error, setError] = createSignal('');
-  const [submitted, setSubmitted] = createSignal(false);
+  const [submittedQuery, setSubmittedQuery] = createSignal('');
+  const submitted = () => Boolean(submittedQuery());
   let overlay: HTMLDivElement | undefined;
-  let searchVersion = 0;
   useModalDialog(() => overlay, props.close);
-
-  const runSearch = async (append = false, scope = global()) => {
+  const pages = createUiPages(
+    () =>
+      submittedQuery()
+        ? { term: submittedQuery(), global: global(), peerId: props.activePeerId }
+        : false,
+    (request, offset: TelegramSearchPage['nextOffset']) =>
+      loadEffect(() => props.search(request.term, request.global, offset)).pipe(
+        Effect.map((page) => ({
+          items: page.messages,
+          next: page.hasMore ? page.nextOffset : undefined,
+        })),
+      ),
+    {
+      key: (request) => JSON.stringify(request),
+      itemKey: (message) => `${message.peerId}:${message.id}`,
+    },
+  );
+  const { items: results, loading, loadingMore, hasMore, error } = pages;
+  const runSearch = (append = false) => {
+    if (append) return pages.more();
     const term = query().trim();
-    if (!term) {
-      setResults([]);
-      setHasMore(false);
-      setNextOffset(undefined);
-      setError('');
-      return;
-    }
-    setSubmitted(true);
-    const version = ++searchVersion;
-    if (append) setLoadingMore(true);
-    else setLoading(true);
-    setError('');
-    try {
-      const page = await props.search(term, scope, append ? nextOffset() : undefined);
-      if (version === searchVersion) {
-        setResults((current) => {
-          if (!append) return page.messages;
-          const known = new Set(current.map(({ peerId, id }) => `${peerId}:${id}`));
-          return [
-            ...current,
-            ...page.messages.filter(({ peerId, id }) => !known.has(`${peerId}:${id}`)),
-          ];
-        });
-        setNextOffset(page.nextOffset);
-        setHasMore(page.hasMore && Boolean(page.nextOffset));
-      }
-    } catch (cause) {
-      if (version === searchVersion) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-        if (!append) setResults([]);
-      }
-    } finally {
-      if (version === searchVersion) {
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    }
+    if (submittedQuery() === term) pages.refresh();
+    else setSubmittedQuery(term);
   };
-
   const changeScope = (nextGlobal: boolean) => {
-    if (nextGlobal === global()) return;
     setGlobal(nextGlobal);
-    if (query().trim()) void runSearch(false, nextGlobal);
+    setSubmittedQuery(query().trim());
   };
-
   const changeQuery = (value: string) => {
-    searchVersion += 1;
+    setSubmittedQuery('');
     setQuery(value);
-    setResults([]);
-    setHasMore(false);
-    setNextOffset(undefined);
-    setError('');
-    setLoading(false);
-    setLoadingMore(false);
-    setSubmitted(false);
   };
 
   const title = (message: TelegramMessage) =>
@@ -150,7 +120,7 @@ export function SearchPanel(props: SearchPanelProps) {
             class="mx-[0.8rem] my-[0.7rem] flex items-center gap-[0.55rem] rounded-[0.65rem] border border-[#30343d] bg-[#101216] px-[0.7rem] focus-within:border-[color-mix(in_srgb,var(--accent)_70%,transparent)] focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent)_20%,transparent)]"
             onSubmit={(event) => {
               event.preventDefault();
-              void runSearch(false);
+              runSearch(false);
             }}
           >
             <Search size={17} />
@@ -185,7 +155,7 @@ export function SearchPanel(props: SearchPanelProps) {
                   >
                     <div class={`panel-error ${panelErrorClass}`} role="alert">
                       <p>{error()}</p>
-                      <button onClick={() => void runSearch(false)}>Retry search</button>
+                      <button onClick={() => runSearch(false)}>Retry search</button>
                     </div>
                   </Show>
                 }
@@ -203,14 +173,14 @@ export function SearchPanel(props: SearchPanelProps) {
               <Show when={results().length > 0 && error()}>
                 <div class={`panel-error ${panelErrorClass}`} role="alert">
                   <p>{error()}</p>
-                  <button onClick={() => void runSearch(true)}>Retry loading more</button>
+                  <button onClick={() => runSearch(true)}>Retry loading more</button>
                 </div>
               </Show>
               <Show when={hasMore() && !error()}>
                 <button
                   class={`panel-load-more ${panelLoadMoreClass}`}
                   disabled={loadingMore()}
-                  onClick={() => void runSearch(true)}
+                  onClick={() => runSearch(true)}
                 >
                   {loadingMore() ? 'Loading more…' : 'Load more'}
                 </button>

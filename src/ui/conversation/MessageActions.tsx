@@ -1,6 +1,7 @@
+import { createUiResource } from '../reactivity/solid';
 import Reply from 'lucide-solid/icons/reply';
 import SmilePlus from 'lucide-solid/icons/smile-plus';
-import { For, Show, createResource } from 'solid-js';
+import { For, Show } from 'solid-js';
 
 import type { ChatMessage } from '../../domain/models';
 import { TgsPlayer } from '../media/TgsPlayer';
@@ -24,7 +25,7 @@ function CustomReaction(props: {
   documentId: string;
   load?: ((documentId: string) => Promise<CustomEmojiAsset>) | undefined;
 }) {
-  const [asset] = createResource(
+  const [asset] = createUiResource(
     () => (props.load ? props.documentId : false),
     (documentId) => props.load?.(documentId).catch(() => undefined),
   );

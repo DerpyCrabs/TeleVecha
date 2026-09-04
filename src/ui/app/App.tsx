@@ -18,6 +18,7 @@ import Trash2 from 'lucide-solid/icons/trash-2';
 import {
   For,
   Show,
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -25,7 +26,12 @@ import {
   onCleanup,
   onMount,
 } from 'solid-js';
-import { createStore, reconcile, type SetStoreFunction } from 'solid-js/store';
+import {
+  createEntityViews,
+  createRecordView,
+  UiModelProvider,
+  useUiModel,
+} from '../reactivity/solid';
 import { Effect } from 'effect';
 
 import type { ChatMessage, ChatSummary } from '../../domain/models';
@@ -74,12 +80,12 @@ import { MessageBody } from '../conversation/MessageBody';
 import { createConversationHeaderSession } from '../conversation/conversationHeaderSession';
 import { createConversationHistorySession } from '../conversation/conversationHistorySession';
 import {
-  presentConversation,
+  createConversationPresenter,
   type KeyedMessageView,
 } from '../conversation/conversationPresentation';
 import { createConversationViewport } from '../conversation/conversationViewport';
 import { layoutMessages } from '../conversation/messageLayout';
-import { presentDialog, presentMessage } from '../conversation/presentation';
+import { createDialogPresenter, presentMessage } from '../conversation/presentation';
 import { MediaAttachment, type MediaPreview } from '../media/MediaAttachment';
 import { createMediaAssets, type MediaAsset } from '../media/mediaAssets';
 import { MediaViewer } from '../media/MediaViewer';
@@ -124,24 +130,6 @@ function reuseArray<T>(previous: readonly T[], next: T[]) {
     : next;
 }
 
-interface StoredView<T extends object> {
-  value: T;
-  set: SetStoreFunction<T>;
-}
-
-function stableView<T extends object>(cache: Map<string, StoredView<T>>, key: string, next: T) {
-  const current = cache.get(key);
-  if (current) {
-    current.set(reconcile(next));
-    cache.delete(key);
-    cache.set(key, current);
-    return current.value;
-  }
-  const [value, set] = createStore(next);
-  cache.set(key, { value, set });
-  return value;
-}
-
 function runInBackground(task: Promise<unknown>) {
   void task.catch(() => undefined);
 }
@@ -151,11 +139,25 @@ interface AppProps {
 }
 
 export function App(props: AppProps) {
+  return (
+    <UiModelProvider>
+      <AppContent {...props} />
+    </UiModelProvider>
+  );
+}
+
+function AppContent(props: AppProps) {
   const environment = props.environment;
   const { credentials, configurationError } = environment;
   const { engine, runEffect, runLatestEffect, runSharedEffect } = environment.runtime;
   let initialUrlPeerId = new URL(window.location.href).searchParams.get('chat') ?? undefined;
-  const [snapshot, setSnapshot] = createSignal<EngineSnapshot>(engine.snapshot());
+  const model = useUiModel();
+  const presentConversation = createConversationPresenter();
+  const presentDialog = createDialogPresenter();
+  const snapshotView = createRecordView(engine.snapshot(), model);
+  const snapshot = () => snapshotView.value;
+  const setSnapshot = snapshotView.set;
+  onCleanup(snapshotView.dispose);
   const [authOpen, setAuthOpen] = createSignal(engine.snapshot().phase !== 'ready');
   const [activeChatId, setActiveChatId] = createSignal('empty');
   const [activeConversation, setActiveConversation] = createSignal<EffectConversation>();
@@ -232,8 +234,8 @@ export function App(props: AppProps) {
     runSharedEffect,
     () => snapshot().dialogs,
   );
-  const dialogViews = new Map<string, StoredView<ChatSummary>>();
-  const messageViews = new Map<string, StoredView<ChatMessage>>();
+  const dialogViews = createEntityViews<ChatSummary>();
+  const messageViews = createEntityViews<ChatMessage>(MAX_CACHED_MESSAGE_VIEWS);
   let appGridElement: HTMLDivElement | undefined;
   let conversationPaneElement: HTMLElement | undefined;
   let mobileSidebarTriggerElement: HTMLButtonElement | undefined;
@@ -297,7 +299,7 @@ export function App(props: AppProps) {
       .filter((dialog) => !dialog.transient)
       .map((dialog) => {
         const value = presentDialog(dialog, latestPendingByPeer.get(dialog.peer.id));
-        return stableView(dialogViews, dialog.peer.id, value);
+        return dialogViews.get(dialog.peer.id, value);
       });
     return reuseArray(previous, next) as ChatSummary[];
   }, []);
@@ -321,7 +323,7 @@ export function App(props: AppProps) {
     if (listed) return listed;
     const transient = snapshot().dialogs.find(({ peer }) => peer.id === activeChatId());
     if (transient) {
-      return stableView(dialogViews, transient.peer.id, presentDialog(transient));
+      return dialogViews.get(transient.peer.id, presentDialog(transient));
     }
     return {
       id: 'empty',
@@ -452,21 +454,6 @@ export function App(props: AppProps) {
       requestAnimationFrame(sampleFrames);
     },
   });
-  const canonicalDraft = createMemo(() => {
-    const peerId = activeChatId();
-    return peerId === 'empty'
-      ? { text: '', details: undefined }
-      : {
-          text: snapshot().drafts[peerId] ?? '',
-          details: snapshot().draftDetails[peerId],
-        };
-  });
-  createEffect(
-    on(canonicalDraft, ({ text, details }) => {
-      if (activeChatId() === 'empty' || composer.editing()) return;
-      composer.syncDraft(text, details);
-    }),
-  );
   const expressions = createExpressionSession({
     source: engine,
     runEffect,
@@ -575,11 +562,8 @@ export function App(props: AppProps) {
     const entries = activeMessageEntries();
     const visibleEntries = entries;
     const visibleKeys = new Set(visibleEntries.map(({ key }) => key));
-    const next = visibleEntries.map(({ key, message }) => stableView(messageViews, key, message));
-    for (const key of messageViews.keys()) {
-      if (messageViews.size <= MAX_CACHED_MESSAGE_VIEWS) break;
-      if (!visibleKeys.has(key)) messageViews.delete(key);
-    }
+    const next = visibleEntries.map(({ key, message }) => messageViews.get(key, message));
+    messageViews.retain(visibleKeys);
     return reuseArray(previous, next) as ChatMessage[];
   }, []);
   const messageRows = createMemo<{
@@ -801,6 +785,7 @@ export function App(props: AppProps) {
     try {
       mediaAssets.dispose();
       await runEffect(engine.clearCache());
+      batch(() => model.resetResources());
       conversationRetryGeneration += 1;
       setActiveChatId('empty');
       setActiveConversation(undefined);
@@ -1106,10 +1091,31 @@ export function App(props: AppProps) {
     window.addEventListener('popstate', handlePopState);
     document.addEventListener('visibilitychange', refreshVisibleTelegramState);
 
+    let mounted = true;
+    let wasUnauthorized = false;
+    const unsubscribeResources = subscribeAtUi(
+      runEffect,
+      engine.subscribeResources((event) => {
+        if (!mounted) return;
+        if (event.kind === 'peer-metadata') {
+          model.invalidate(event.peerId ? `user-details:${event.peerId}` : 'user-details:');
+          model.invalidate('chat-appearance:');
+        }
+      }),
+    );
     const unsubscribe = subscribeAtUi(
       runEffect,
       engine.subscribe((next) => {
-        setSnapshot(next);
+        if (!mounted) return;
+        const clearedAccount = next.phase === 'unauthorized' && snapshot().phase !== 'unauthorized';
+        const authenticated = wasUnauthorized && next.phase === 'ready';
+        if (next.phase === 'unauthorized') wasUnauthorized = true;
+        if (authenticated) wasUnauthorized = false;
+        batch(() => {
+          setSnapshot(next);
+          if (clearedAccount) mediaAssets.dispose();
+          if (clearedAccount || authenticated) model.resetResources();
+        });
         if (next.requiresReload) {
           setAuthOpen(true);
         } else if (next.phase === 'unauthorized') {
@@ -1169,7 +1175,9 @@ export function App(props: AppProps) {
     }
 
     onCleanup(() => {
+      mounted = false;
       unsubscribe();
+      unsubscribeResources();
       detachViewport?.();
       document.removeEventListener('pointerdown', dismissMenus);
       document.removeEventListener('keydown', dismissMenusWithKeyboard);
@@ -2443,9 +2451,7 @@ export function App(props: AppProps) {
           <SearchPanel
             dialogs={snapshot().dialogs}
             activePeerId={activeChatId()}
-            search={(term, global, offset) =>
-              runEffect(activeConversation()!.search(term, global, offset))
-            }
+            search={(term, global, offset) => activeConversation()!.search(term, global, offset)}
             openResult={(message) => {
               setSearchOpen(false);
               runInBackground(openMessage(message));
@@ -2457,10 +2463,9 @@ export function App(props: AppProps) {
         <Show when={sharedMediaKind()} keyed>
           {(kind) => (
             <SharedMediaPanel
+              peerId={activeChatId()}
               initialKind={kind}
-              loadItems={(selected, offset) =>
-                runEffect(activeConversation()!.sharedMedia(selected, offset))
-              }
+              loadItems={(selected, offset) => activeConversation()!.sharedMedia(selected, offset)}
               loadMedia={(message, progress) => mediaAssets.loadMedia(message, progress)}
               loadMediaPreview={(message) => mediaAssets.messagePreview(message).load()}
               cachedMedia={(message) => mediaAssets.message(message).cached()}

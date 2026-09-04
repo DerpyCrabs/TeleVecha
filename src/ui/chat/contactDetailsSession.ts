@@ -1,13 +1,6 @@
-import {
-  createEffect,
-  createMemo,
-  createResource,
-  createSignal,
-  on,
-  onCleanup,
-  type Accessor,
-} from 'solid-js';
-import type { Effect } from 'effect';
+import { createUiPages } from '../reactivity/solid';
+import { createMemo, createSignal, onCleanup, type Accessor } from 'solid-js';
+import { Effect } from 'effect';
 
 import type {
   TelegramDialog,
@@ -66,73 +59,30 @@ export function createContactDetailsSession(options: {
       !permissionsForDialog(dialog).canViewMembers
     )
       return false;
-    return { key: `${dialog.peer.id}:${revision}`, peer: dialog.peer };
+    return {
+      key: `${dialog.peer.id}:${dialog.peer.accessHash ?? ''}:${revision}`,
+      peer: dialog.peer,
+    };
   });
-  const [additionalMembers, setAdditionalMembers] = createSignal<
-    import('../../telegram/types').TelegramGroupMember[]
-  >([]);
-  const [memberContinuation, setMemberContinuation] = createSignal<
-    Omit<TelegramGroupMemberPage, 'members'> | undefined
-  >();
-  const [loadingMoreMembers, setLoadingMoreMembers] = createSignal(false);
-  createEffect(
-    on(memberRequest, () => {
-      setAdditionalMembers([]);
-      setMemberContinuation(undefined);
-      setLoadingMoreMembers(false);
-    }),
+  const pages = createUiPages(
+    memberRequest,
+    (request, offset: number | undefined) =>
+      options.source.getGroupMembers(request.peer, 50, offset).pipe(
+        Effect.map((page) => ({
+          items: page.members,
+          totalCount: page.totalCount,
+          next: page.hasMore ? (page.nextOffset ?? (offset ?? 0) + page.members.length) : undefined,
+        })),
+      ),
+    { key: (request) => request.key, itemKey: (member) => member.peer.id },
   );
-  const [loadedMembers] = createResource(memberRequest, async ({ key, peer }) => ({
-    key,
-    page: await options
-      .runEffect(options.source.getGroupMembers(peer))
-      .catch((): TelegramGroupMemberPage => ({ members: [], totalCount: 0, hasMore: false })),
-  }));
-  const currentMemberPage = () => {
-    const request = memberRequest();
-    const loaded = loadedMembers();
-    return request && loaded?.key === request.key
-      ? { ...loaded.page, ...memberContinuation() }
-      : undefined;
-  };
-  const members = () => {
-    const page = currentMemberPage();
-    if (!page) return [];
-    const seen = new Set(page.members.map(({ peer }) => peer.id));
-    return [...page.members, ...additionalMembers().filter(({ peer }) => !seen.has(peer.id))];
-  };
-  const membersLoading = () => Boolean(memberRequest()) && loadedMembers.loading;
+  const members = pages.items;
+  const membersLoading = pages.loading;
   const membersTotal = () =>
-    currentMemberPage()?.totalCount ?? options.dialog()?.permissions?.memberCount ?? 0;
-  const membersHasMore = () => Boolean(currentMemberPage()?.hasMore);
-  const loadMoreMembers = async () => {
-    const request = memberRequest();
-    const page = currentMemberPage();
-    if (!request || !page?.hasMore || loadingMoreMembers()) return;
-    setLoadingMoreMembers(true);
-    try {
-      const next = await options.runEffect(
-        options.source.getGroupMembers(request.peer, 50, page.nextOffset ?? members().length),
-      );
-      setAdditionalMembers((current) => [
-        ...current,
-        ...next.members.filter(
-          ({ peer }) =>
-            !current.some((member) => member.peer.id === peer.id) &&
-            !page.members.some((member) => member.peer.id === peer.id),
-        ),
-      ]);
-      setMemberContinuation({
-        totalCount: next.totalCount,
-        hasMore: next.hasMore,
-        ...(next.nextOffset === undefined ? {} : { nextOffset: next.nextOffset }),
-      });
-    } catch {
-      // The next attempt can retry the same page without changing the loaded catalog.
-    } finally {
-      setLoadingMoreMembers(false);
-    }
-  };
+    pages.totalCount() ?? options.dialog()?.permissions?.memberCount ?? members().length;
+  const membersHasMore = pages.hasMore;
+  const loadingMoreMembers = pages.loadingMore;
+  const loadMoreMembers = async () => pages.more();
 
   const share = async () => {
     const dialog = options.dialog();

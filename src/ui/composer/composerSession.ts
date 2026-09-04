@@ -66,8 +66,6 @@ export function createComposerSession(options: ComposerSessionOptions) {
   const attachmentDrafts = new Map<string, StagedAttachment[]>();
   let editRestore: EditRestore | undefined;
   let editVersion = 0;
-  let draftAuthorityVersion = 0;
-  let draftAuthorityPeerId = '';
   let pendingDraftWrite: PendingDraftWrite | undefined;
   let draftBurst = false;
   const draftWrites = new Set<Deferred.Deferred<void>>();
@@ -132,7 +130,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     if (!pending) return options.runEffect(awaitDraftWrites);
     return options.runLatestEffect(
       DRAFT_WRITE_TASK,
-      trackDraftWrite(pending.conversation.setDraft(pending.value)),
+      trackDraftWrite(pending.conversation.setDraft(pending.value, pending.details)),
     );
   };
   const scheduleDraftWrite = (write: PendingDraftWrite) => {
@@ -167,38 +165,14 @@ export function createComposerSession(options: ComposerSessionOptions) {
     draftBurst = false;
     void options.runLatestEffect(DRAFT_WRITE_TASK, Effect.void).catch(() => undefined);
   };
-  const takeDraftAuthority = (peerId = options.activePeerId()) => {
-    draftAuthorityVersion += 1;
-    draftAuthorityPeerId = peerId === 'empty' ? '' : peerId;
-    return draftAuthorityVersion;
-  };
-  const releaseDraftAuthority = (peerId: string, version: number, value: string) => {
-    if (
-      draftAuthorityPeerId === peerId &&
-      draftAuthorityVersion === version &&
-      options.activePeerId() === peerId &&
-      draft() === value
-    ) {
-      draftAuthorityPeerId = '';
-    }
-  };
   const replaceDraft = (value: string) => {
     editVersion += 1;
-    takeDraftAuthority();
     setDraft(value);
-  };
-  const syncDraft = (value: string, details?: TelegramDraftDetails) => {
-    if (draftAuthorityPeerId === options.activePeerId()) return;
-    editVersion += 1;
-    setDraft(value);
-    setFormats(details?.formats ? [...details.formats] : []);
-    setReply(details?.reply ? { ...details.reply } : undefined);
   };
   const changeDraft = (value: string) => {
     options.beforeUiChange();
     editVersion += 1;
     const peerId = options.activePeerId();
-    takeDraftAuthority(peerId);
     setDraft(value);
     if (editing()) return;
     if (peerId === 'empty') return;
@@ -277,8 +251,6 @@ export function createComposerSession(options: ComposerSessionOptions) {
       const details = options.snapshot().draftDetails[peerId];
       setFormats(details?.formats ? [...details.formats] : []);
       setReply(details?.reply ? { ...details.reply } : undefined);
-      draftAuthorityVersion += 1;
-      draftAuthorityPeerId = '';
       setDraft(options.snapshot().drafts[peerId] ?? '');
     }
     stopTyping();
@@ -311,13 +283,11 @@ export function createComposerSession(options: ComposerSessionOptions) {
       : undefined;
     const capturedFormats = formats().map((format) => ({ ...format }));
     const capturedVersion = editVersion;
-    const preserveDraftAuthority = draftAuthorityPeerId === peerId;
     const pendingDraft = flushDraftWrite(peerId);
 
     options.beforeSend();
     options.onSend?.(body);
     stopTyping();
-    const clearedAuthorityVersion = takeDraftAuthority(peerId);
     setDraft('');
     setReply(undefined);
     setAttachments([]);
@@ -346,9 +316,6 @@ export function createComposerSession(options: ComposerSessionOptions) {
           setFormats(restore.formats);
           setAttachments(cloneAttachments(restore.attachments));
           rememberAttachments(peerId, restore.attachments);
-          if (!preserveDraftAuthority) {
-            releaseDraftAuthority(peerId, clearedAuthorityVersion, restore.text);
-          }
         }
         return;
       }
@@ -366,7 +333,6 @@ export function createComposerSession(options: ComposerSessionOptions) {
       } else {
         await options.runEffect(conversation.sendDraft(body, telegramReply, capturedFormats));
       }
-      releaseDraftAuthority(peerId, clearedAuthorityVersion, '');
     } catch {
       const hasNewerState =
         options.activePeerId() !== peerId ||
@@ -377,7 +343,6 @@ export function createComposerSession(options: ComposerSessionOptions) {
         reply() !== undefined ||
         editing() !== undefined;
       if (!hasNewerState) {
-        takeDraftAuthority(peerId);
         setDraft(body);
         setReply(capturedReply);
         setAttachments(cloneAttachments(capturedAttachments));
@@ -479,8 +444,6 @@ export function createComposerSession(options: ComposerSessionOptions) {
   const reset = () => {
     stopTyping();
     cancelDraftWrite();
-    draftAuthorityVersion += 1;
-    draftAuthorityPeerId = '';
     setDraft('');
     setFormats([]);
     setAttachments([]);
@@ -503,7 +466,6 @@ export function createComposerSession(options: ComposerSessionOptions) {
     setFormats: changeFormats,
     changeDraft,
     replaceDraft,
-    syncDraft,
     switchPeer,
     send,
     attach,

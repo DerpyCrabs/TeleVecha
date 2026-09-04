@@ -1,4 +1,6 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { createUiResource, createDebouncedValue } from '../reactivity/solid';
+import type { UiLoad } from '../reactivity/model';
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 
 import type { TelegramSticker } from '../../telegram/types';
 import { VisibilityVideo } from '../media/VisibilityVideo';
@@ -10,11 +12,16 @@ function GifOption(props: {
   send: () => void;
   enabled: boolean;
 }) {
-  const [source, setSource] = createSignal(props.cachedUrl() ?? '');
+  const [visible, setVisible] = createSignal(false);
+  const [loaded] = createUiResource(
+    () => visible() && props.gif.id,
+    () => props.cachedUrl() ?? props.load(),
+  );
+  const source = () => props.cachedUrl() ?? loaded();
   let button: HTMLButtonElement | undefined;
   onMount(() => {
     if (source()) return;
-    const load = () => void props.load().then(setSource, () => undefined);
+    const load = () => setVisible(true);
     if (!('IntersectionObserver' in window)) return load();
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -54,40 +61,20 @@ export function GifPicker(props: {
   query: string;
   load: (gif: TelegramSticker) => Promise<string>;
   cachedUrl: (gif: TelegramSticker) => string | undefined;
-  search: (query: string) => Promise<TelegramSticker[]>;
+  search: (query: string) => UiLoad<TelegramSticker[]>;
   send: (gif: TelegramSticker) => void;
   enabled: boolean;
   retry: () => Promise<void>;
 }) {
-  const [searchResults, setSearchResults] = createSignal<TelegramSticker[]>([]);
-  const [searching, setSearching] = createSignal(false);
-  let searchVersion = 0;
-  createEffect(() => {
-    const query = props.query.trim();
-    const version = ++searchVersion;
-    if (!query) {
-      setSearchResults([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    const timer = window.setTimeout(() => {
-      void props
-        .search(query)
-        .then(
-          (results) => {
-            if (version === searchVersion) setSearchResults(results);
-          },
-          () => {
-            if (version === searchVersion) setSearchResults([]);
-          },
-        )
-        .finally(() => {
-          if (version === searchVersion) setSearching(false);
-        });
-    }, 250);
-    onCleanup(() => window.clearTimeout(timer));
-  });
+  const term = () => props.query.trim();
+  const debouncedTerm = createDebouncedValue(term);
+  const [loadedSearch] = createUiResource(
+    () => (term() && term() === debouncedTerm() ? term() : false),
+    (query) => props.search(query),
+    { namespace: 'gif-search' },
+  );
+  const searchResults = () => loadedSearch() ?? [];
+  const searching = () => Boolean(term()) && (term() !== debouncedTerm() || loadedSearch.loading);
   const results = createMemo(() => {
     const term = props.query.trim().toLocaleLowerCase();
     return term ? searchResults() : props.gifs;

@@ -6,7 +6,7 @@ import type {
   TelegramDialog,
   TelegramMessage,
 } from '../../telegram/types';
-import { presentConversation } from './conversationPresentation';
+import { createConversationPresenter, presentConversation } from './conversationPresentation';
 
 const peer = { id: 'user:1', kind: 'user' as const };
 const dialog: TelegramDialog = {
@@ -99,5 +99,47 @@ describe('presentConversation', () => {
 
   it('returns no messages for an inactive peer', () => {
     expect(presentConversation(snapshot(), 'user:2')).toEqual([]);
+  });
+});
+
+describe('cached conversation presentation', () => {
+  it('reuses 999 of 1,000 message projections after editing one entity', () => {
+    const present = createConversationPresenter();
+    const messages: TelegramMessage[] = Array.from({ length: 1_000 }, (_, index) => ({
+      id: index + 1,
+      peerId: peer.id,
+      senderId: peer.id,
+      text: `Message ${index}`,
+      date: 1_700_000_000,
+      outgoing: false,
+    }));
+    const initial = present(snapshot(messages), peer.id);
+    const changed = [...messages];
+    changed[500] = { ...changed[500]!, text: 'Edited' };
+    const next = present(snapshot(changed), peer.id);
+    expect(next.filter((entry, index) => entry.message !== initial[index]!.message)).toHaveLength(
+      1,
+    );
+    expect(next[500]!.message.body).toBe('Edited');
+  });
+
+  it('refreshes affected replies and read receipts while preserving unrelated projections', () => {
+    const present = createConversationPresenter();
+    const first: TelegramMessage = {
+      id: 2,
+      peerId: peer.id,
+      senderId: peer.id,
+      text: 'Original',
+      date: 1_700_000_000,
+      outgoing: true,
+    };
+    const reply = { ...first, id: 3, replyToId: 2, text: 'Reply', outgoing: false };
+    const initial = present(snapshot([first, reply]), peer.id);
+    const next = present(snapshot([{ ...first, text: 'Changed' }, reply]), peer.id);
+    expect(next[1]!.message).not.toBe(initial[1]!.message);
+    expect(next[1]!.message.replyTo).toBe('Changed');
+    const state = snapshot([first, reply]);
+    state.dialogs = [{ ...dialog, readOutboxMaxId: 2 }];
+    expect(present(state, peer.id)[0]!.message.status).toBe('read');
   });
 });

@@ -35,7 +35,7 @@ export function createChatDirectory(
   };
 
   return {
-    search: (query: string) => runEffect(source.searchPeers(query)),
+    search: (query: string) => source.searchPeers(query),
     select(peerId: string) {
       openGeneration += 1;
       return selectPeer(peerId);
@@ -46,7 +46,9 @@ export function createChatDirectory(
       if (generation !== openGeneration) return false;
       return selectPeer(result.peer.id);
     },
-    details: (peerId: string) => runEffect(source.getUserDetails(dialog(peerId).peer)),
+    cachedDetails: (peerId: string) =>
+      dialogs().find(({ peer }) => peer.id === peerId)?.userDetails,
+    details: (peerId: string) => source.getUserDetails(dialog(peerId).peer),
     setMuted: (peerId: string, muted: boolean) =>
       runEffect(source.setMuted(dialog(peerId).peer, muted)),
     setBlocked: (peerId: string, blocked: boolean) =>

@@ -1,3 +1,4 @@
+import { createUiResource } from '../reactivity/solid';
 import { createSignal, onCleanup, onMount } from 'solid-js';
 import type { Effect } from 'effect';
 
@@ -22,8 +23,14 @@ interface AppearanceSource {
 /** Owns application-wide appearance persistence and wallpaper object URLs. */
 export function createAppearanceSession(source: AppearanceSource, runEffect: UiEffectRunner) {
   const [appearance, setAppearance] = createSignal(readThemePreferences());
-  const [telegramWallpapers, setTelegramWallpapers] = createSignal<TelegramWallpaper[]>([]);
-  const [catalogLoading, setCatalogLoading] = createSignal(false);
+  const [catalogRequested, setCatalogRequested] = createSignal(false);
+  const [catalog, catalogResource] = createUiResource(
+    () => catalogRequested() && 'catalog',
+    () => source.getWallpapers(),
+    { namespace: 'wallpapers' },
+  );
+  const telegramWallpapers = () => catalog() ?? [];
+  const catalogLoading = () => catalog.loading;
   const [wallpaperBusy, setWallpaperBusy] = createSignal(false);
   const [wallpaperError, setWallpaperError] = createSignal('');
   let loadGeneration = 0;
@@ -74,15 +81,8 @@ export function createAppearanceSession(source: AppearanceSource, runEffect: UiE
   };
 
   const loadCatalog = async () => {
-    if (catalogLoading()) return;
-    setCatalogLoading(true);
-    try {
-      setTelegramWallpapers(await runEffect(source.getWallpapers()));
-    } catch {
-      setTelegramWallpapers([]);
-    } finally {
-      setCatalogLoading(false);
-    }
+    if (catalog.error) catalogResource.refetch();
+    setCatalogRequested(true);
   };
 
   const selectWallpaper = (wallpaper: ThemePreferences['wallpaper']) => {

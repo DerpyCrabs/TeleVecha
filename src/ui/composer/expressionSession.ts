@@ -1,3 +1,4 @@
+import { createUiResource, useUiModel } from '../reactivity/solid';
 import { createSignal, onCleanup, type Accessor } from 'solid-js';
 import { Effect } from 'effect';
 
@@ -31,68 +32,47 @@ export function createExpressionSession(options: {
   clearReply: () => void;
 }) {
   const [stickerOpen, setStickerOpen] = createSignal(false);
-  const [stickerLoading, setStickerLoading] = createSignal(false);
   const [gifOpen, setGifOpen] = createSignal(false);
-  const [gifLoading, setGifLoading] = createSignal(false);
-  const [gifError, setGifError] = createSignal('');
   const [visible, setVisible] = createSignal(false);
-  const [gifs, setGifs] = createSignal<TelegramSticker[]>([]);
-  const [stickerPacks, setStickerPacks] = createSignal<TelegramStickerPack[]>([]);
-
-  const loadStickers = async () => {
-    if (stickerLoading()) return;
-    setStickerLoading(true);
-    try {
-      const [recent, installed] = await options.runEffect(
-        Effect.all([options.source.getRecentStickers(), options.source.getStickerPacks()], {
-          concurrency: 'unbounded',
-        }),
-      );
-      setStickerPacks([
-        ...(recent.length > 0 ? [{ id: 'recent', title: 'Recent', stickers: recent }] : []),
-        ...installed,
-      ]);
-    } finally {
-      setStickerLoading(false);
-    }
-  };
-
-  const loadGifs = async () => {
-    if (gifLoading()) return;
-    setGifLoading(true);
-    setGifError('');
-    try {
-      setGifs(await options.runEffect(options.source.getSavedGifs()));
-    } catch {
-      setGifError('GIFs could not be loaded.');
-    } finally {
-      setGifLoading(false);
-    }
-  };
-
+  const model = useUiModel();
+  const [loadedStickers] = createUiResource(
+    () => stickerOpen() && 'catalog',
+    () =>
+      Effect.all([options.source.getRecentStickers(), options.source.getStickerPacks()], {
+        concurrency: 'unbounded',
+      }).pipe(
+        Effect.map(([recent, installed]) => [
+          ...(recent.length ? [{ id: 'recent', title: 'Recent', stickers: recent }] : []),
+          ...installed,
+        ]),
+      ),
+    { namespace: 'expressions:stickers' },
+  );
+  const [loadedGifs, gifResource] = createUiResource(
+    () => gifOpen() && 'catalog',
+    () => options.source.getSavedGifs(),
+    { namespace: 'expressions:gifs' },
+  );
+  const stickerPacks = () => loadedStickers() ?? [];
+  const gifs = () => loadedGifs() ?? [];
+  const stickerLoading = () => loadedStickers.loading;
+  const gifLoading = () => loadedGifs.loading;
+  const gifError = () => (loadedGifs.error ? 'GIFs could not be loaded.' : '');
   const toggleStickers = async () => {
-    const open = !stickerOpen();
-    setStickerOpen(open);
-    if (open) setGifOpen(false);
-    if (open && stickerPacks().length === 0) await loadStickers();
+    setStickerOpen(!stickerOpen());
+    if (stickerOpen()) setGifOpen(false);
   };
-
   const toggleGifs = async () => {
-    const open = !gifOpen();
-    setGifOpen(open);
-    if (open) setStickerOpen(false);
-    if (open && gifs().length === 0) await loadGifs();
+    setGifOpen(!gifOpen());
+    if (gifOpen()) setStickerOpen(false);
   };
+  const loadGifs = async () => gifResource.refetch();
 
   onCleanup(
     subscribeAtUi(
       options.runEffect,
       options.source.subscribeResources(({ kind }) => {
-        if (kind !== 'expressions') return;
-        setStickerPacks([]);
-        setGifs([]);
-        if (stickerOpen()) void loadStickers().catch(() => undefined);
-        if (gifOpen()) void loadGifs().catch(() => undefined);
+        if (kind === 'expressions') model.invalidate('expressions:');
       }),
     ),
   );
@@ -131,9 +111,9 @@ export function createExpressionSession(options: {
       await sendExpression(gif, options.canSendGifs(), 'gif');
     },
     searchGifs: (query: string) => {
-      if (!options.canSendGifs()) return Promise.resolve([]);
+      if (!options.canSendGifs()) return Effect.succeed([]);
       const conversation = options.conversation();
-      return options.runEffect(conversation ? conversation.searchGifs(query) : Effect.succeed([]));
+      return conversation ? conversation.searchGifs(query) : Effect.succeed([]);
     },
     close: () => {
       setStickerOpen(false);

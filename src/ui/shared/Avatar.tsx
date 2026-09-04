@@ -1,4 +1,5 @@
-import { Show, createMemo, createResource, createSignal, onCleanup, onMount } from 'solid-js';
+import { createUiResource } from '../reactivity/solid';
+import { Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 
 const visibleAvatars = new Map<Element, () => void>();
 let avatarObserver: IntersectionObserver | undefined;
@@ -50,19 +51,33 @@ export function Avatar(props: AvatarProps) {
       md: 'size-12 text-sm',
       lg: 'size-20 text-xl',
     })[props.size ?? 'md'];
-  const request = createMemo(() =>
-    visible() && (props.loadCached || props.load)
-      ? {
-          identity: props.identity,
-          loadCached: props.loadCached,
-          load: props.load,
-        }
-      : false,
+  const request = createMemo(
+    () =>
+      visible() && (props.loadCached || props.load)
+        ? {
+            identity: props.identity,
+            loadCached: props.loadCached,
+            load: props.load,
+          }
+        : false,
+    undefined,
+    {
+      equals: (a, b) =>
+        a === b ||
+        Boolean(
+          a &&
+          b &&
+          a.identity === b.identity &&
+          Boolean(a.load) === Boolean(b.load) &&
+          Boolean(a.loadCached) === Boolean(b.loadCached),
+        ),
+    },
   );
-  const [loadedSource] = createResource(request, async ({ identity, loadCached, load }) => {
+  const [loadedSource] = createUiResource(request, async ({ identity, loadCached, load }) => {
     const cached = await loadCached?.().catch(() => undefined);
     if (cached || !load) return { identity, url: cached };
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (identity !== props.identity) return { identity, url: undefined };
       const loaded = await load().catch(() => undefined);
       if (loaded) return { identity, url: loaded };
     }

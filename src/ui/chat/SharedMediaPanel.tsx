@@ -1,8 +1,11 @@
+import { Effect } from 'effect';
+import { createUiPages } from '../reactivity/solid';
+import { loadEffect, type UiLoad } from '../reactivity/model';
 import ExternalLink from 'lucide-solid/icons/external-link';
 import FileText from 'lucide-solid/icons/file-text';
 import Link from 'lucide-solid/icons/link';
 import X from 'lucide-solid/icons/x';
-import { For, Show, createSignal, onMount } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
 import type {
@@ -27,10 +30,11 @@ import { useModalDialog } from '../shared/useModalDialog';
 
 interface SharedMediaPanelProps {
   initialKind: SharedMediaKind;
+  peerId: string;
   loadItems: (
     kind: SharedMediaKind,
     offset?: TelegramSearchPage['nextOffset'],
-  ) => Promise<TelegramSearchPage>;
+  ) => UiLoad<TelegramSearchPage>;
   loadMedia: (message: TelegramMessage, progress?: TelegramTransferProgress) => Promise<string>;
   loadMediaPreview: (message: TelegramMessage) => Promise<string>;
   cachedMedia: (message: TelegramMessage) => string | undefined;
@@ -68,48 +72,28 @@ function fileSize(size?: number) {
 }
 
 export function SharedMediaPanel(props: SharedMediaPanelProps) {
-  const [items, setItems] = createSignal<TelegramMessage[]>([]);
-  const [loading, setLoading] = createSignal(true);
-  const [loadingMore, setLoadingMore] = createSignal(false);
-  const [hasMore, setHasMore] = createSignal(false);
-  const [nextOffset, setNextOffset] = createSignal<TelegramSearchPage['nextOffset']>();
-  const [error, setError] = createSignal('');
+  const pages = createUiPages(
+    () => ({ kind: props.initialKind, peerId: props.peerId }),
+    (request, offset: TelegramSearchPage['nextOffset']) =>
+      loadEffect(() => props.loadItems(request.kind, offset)).pipe(
+        Effect.map((page) => ({
+          items: page.messages,
+          next: page.hasMore ? page.nextOffset : undefined,
+        })),
+      ),
+    {
+      key: (request) => `${request.peerId}:${request.kind}`,
+      itemKey: (message) => `${message.peerId}:${message.id}`,
+    },
+  );
+  const { items, loading, loadingMore, hasMore, error } = pages;
   const [viewer, setViewer] = createSignal<
     { index: number; preview: MediaPreview; loading: boolean } | undefined
   >();
   let overlay: HTMLDivElement | undefined;
-  let loadVersion = 0;
   useModalDialog(() => overlay, props.close);
+  const loadItems = (append: boolean) => (append ? pages.more() : pages.refresh());
 
-  const loadItems = async (append: boolean) => {
-    const version = ++loadVersion;
-    if (append) setLoadingMore(true);
-    else setLoading(true);
-    setError('');
-    try {
-      const page = await props.loadItems(props.initialKind, append ? nextOffset() : undefined);
-      if (version !== loadVersion) return;
-      setItems((current) => {
-        if (!append) return page.messages;
-        const known = new Set(current.map(({ peerId, id }) => `${peerId}:${id}`));
-        return [
-          ...current,
-          ...page.messages.filter(({ peerId, id }) => !known.has(`${peerId}:${id}`)),
-        ];
-      });
-      setNextOffset(page.nextOffset);
-      setHasMore(page.hasMore && Boolean(page.nextOffset));
-    } catch (cause) {
-      if (version === loadVersion) setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      if (version === loadVersion) {
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    }
-  };
-
-  onMount(() => void loadItems(false));
   const links = (text: string) => [...text.matchAll(/https?:\/\/[^\s]+/gu)].map(([url]) => url);
   const previewableItems = () =>
     items().filter(
@@ -200,7 +184,7 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
                   >
                     <div class={`panel-error ${panelErrorClass}`} role="alert">
                       <p>{error()}</p>
-                      <button onClick={() => void loadItems(false)}>Retry</button>
+                      <button onClick={() => loadItems(false)}>Retry</button>
                     </div>
                   </Show>
                 }
@@ -321,14 +305,14 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
               <Show when={items().length > 0 && error()}>
                 <div class={`panel-error ${panelErrorClass}`} role="alert">
                   <p>{error()}</p>
-                  <button onClick={() => void loadItems(true)}>Retry loading more</button>
+                  <button onClick={() => loadItems(true)}>Retry loading more</button>
                 </div>
               </Show>
               <Show when={hasMore() && !error()}>
                 <button
                   class={`panel-load-more ${panelLoadMoreClass}`}
                   disabled={loadingMore()}
-                  onClick={() => void loadItems(true)}
+                  onClick={() => loadItems(true)}
                 >
                   {loadingMore() ? 'Loading more…' : 'Load more'}
                 </button>

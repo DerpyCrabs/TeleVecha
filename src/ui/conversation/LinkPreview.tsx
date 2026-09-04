@@ -1,4 +1,5 @@
-import { Show, createResource } from 'solid-js';
+import { createUiResource } from '../reactivity/solid';
+import { Show } from 'solid-js';
 
 import type { ChatMessage } from '../../domain/models';
 import { safeExternalUrl } from '../shared/safeUrl';
@@ -21,11 +22,11 @@ export function LinkPreview(props: LinkPreviewProps) {
       provider === 'facebook';
     return props.preview.photoSize === 'large' || providerDefaultsToLarge;
   };
-  const [photo] = createResource(
+  const [photo] = createUiResource(
     () => (props.preview.hasPhoto && props.loadPhoto ? props.preview.url : false),
     () => props.loadPhoto?.().catch(() => undefined),
   );
-  const [media] = createResource(
+  const [media] = createUiResource(
     () =>
       props.preview.media && props.loadMedia
         ? `${props.preview.url}:${props.preview.media.cacheKey ?? props.preview.media.name}`

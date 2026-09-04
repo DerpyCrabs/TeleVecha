@@ -1,13 +1,5 @@
-import {
-  batch,
-  createEffect,
-  createMemo,
-  createSignal,
-  on,
-  onCleanup,
-  untrack,
-  type Accessor,
-} from 'solid-js';
+import { createEffect, createMemo, onCleanup, type Accessor } from 'solid-js';
+import { createUiResource } from '../reactivity/solid';
 import type { Effect } from 'effect';
 
 import type { TelegramChatAppearance, TelegramDialog, TelegramPeer } from '../../telegram/types';
@@ -77,11 +69,17 @@ export function createChatAppearanceSession(options: {
   activeDialog: Accessor<TelegramDialog | undefined>;
   preferences: Accessor<ThemePreferences>;
 }) {
-  const [chatAppearance, setChatAppearance] = createSignal<TelegramChatAppearance>();
-  const [wallpaperAsset, setWallpaperAsset] = createSignal('');
-  const appearances = new Map<string, TelegramChatAppearance>();
-  const wallpaperObjectUrls = new Map<string, string>();
-  let loadGeneration = 0;
+  const [chatAppearance] = createUiResource(
+    () => {
+      const dialog = options.activeDialog();
+      return dialog && !dialog.transient ? dialog.peer : false;
+    },
+    (peer) => options.source.getChatAppearance(peer),
+    {
+      namespace: 'chat-appearance',
+      key: (peer) => `${peer.kind}:${peer.id}:${peer.accessHash ?? ''}`,
+    },
+  );
 
   const settings = createMemo(() => themeSettings(chatAppearance(), options.preferences()));
   const wallpaper = createMemo(() => chatAppearance()?.wallpaper ?? settings()?.wallpaper);
@@ -95,6 +93,21 @@ export function createChatAppearanceSession(options: {
       baseTheme === 'tinted'
       ? 'inverted'
       : 'normal';
+  });
+  const [wallpaperBlob] = createUiResource(
+    () => {
+      const current = wallpaper();
+      return current?.hasFile ? current.id : false;
+    },
+    (id) => options.source.downloadWallpaper(id),
+    { namespace: 'wallpaper-blob' },
+  );
+  const wallpaperAsset = createMemo(() => {
+    const blob = wallpaperBlob();
+    if (!blob) return '';
+    const url = URL.createObjectURL(blob);
+    onCleanup(() => URL.revokeObjectURL(url));
+    return url;
   });
   const style = createMemo(() => {
     const currentSettings = settings();
@@ -142,77 +155,10 @@ export function createChatAppearanceSession(options: {
     };
   });
 
-  createEffect(
-    on(
-      () => {
-        const dialog = options.activeDialog();
-        return dialog && !dialog.transient
-          ? `${dialog.peer.kind}:${dialog.peer.id}:${dialog.peer.accessHash ?? ''}`
-          : '';
-      },
-      () => {
-        const dialog = untrack(options.activeDialog);
-        const generation = ++loadGeneration;
-        if (!dialog || dialog.transient) {
-          batch(() => {
-            setChatAppearance(undefined);
-            setWallpaperAsset('');
-          });
-          return;
-        }
-        const cachedAppearance = appearances.get(dialog.peer.id);
-        const cachedSettings = themeSettings(cachedAppearance, options.preferences());
-        const cachedWallpaper = cachedAppearance?.wallpaper ?? cachedSettings?.wallpaper;
-        batch(() => {
-          setChatAppearance(cachedAppearance);
-          setWallpaperAsset(
-            cachedWallpaper ? (wallpaperObjectUrls.get(cachedWallpaper.id) ?? '') : '',
-          );
-        });
-        void options
-          .runEffect(options.source.getChatAppearance(dialog.peer))
-          .then(async (nextAppearance) => {
-            if (!nextAppearance) return;
-            appearances.set(dialog.peer.id, nextAppearance);
-            if (generation === loadGeneration) {
-              reportAppearance(dialog.peer, nextAppearance, options.preferences());
-            }
-            const nextSettings = themeSettings(nextAppearance, options.preferences());
-            const nextWallpaper = nextAppearance.wallpaper ?? nextSettings?.wallpaper;
-            if (!nextWallpaper?.hasFile) {
-              if (generation === loadGeneration) setChatAppearance(nextAppearance);
-              return;
-            }
-            const cachedObjectUrl = wallpaperObjectUrls.get(nextWallpaper.id);
-            if (cachedObjectUrl) {
-              if (generation === loadGeneration) {
-                batch(() => {
-                  setWallpaperAsset(cachedObjectUrl);
-                  setChatAppearance(nextAppearance);
-                });
-              }
-              return;
-            }
-            if (generation === loadGeneration) setChatAppearance(nextAppearance);
-            const blob = await options.runEffect(
-              options.source.downloadWallpaper(nextWallpaper.id),
-            );
-            let objectUrl = wallpaperObjectUrls.get(nextWallpaper.id);
-            if (!objectUrl) {
-              objectUrl = URL.createObjectURL(blob);
-              wallpaperObjectUrls.set(nextWallpaper.id, objectUrl);
-            }
-            if (generation === loadGeneration) setWallpaperAsset(objectUrl);
-          })
-          .catch(() => undefined);
-      },
-    ),
-  );
-
-  onCleanup(() => {
-    loadGeneration += 1;
-    for (const objectUrl of wallpaperObjectUrls.values()) URL.revokeObjectURL(objectUrl);
-    wallpaperObjectUrls.clear();
+  createEffect(() => {
+    const peer = options.activeDialog()?.peer;
+    const appearance = chatAppearance();
+    if (peer && appearance) reportAppearance(peer, appearance, options.preferences());
   });
 
   return { settings, wallpaper, pattern, style };

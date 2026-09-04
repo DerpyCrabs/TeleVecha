@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-Open the URL printed by Vite+. Multiple tabs share one elected Telegram sync owner. Each tab keeps independent navigation while commands, drafts, updates, and owner failover travel through a versioned browser channel. The Web Locks and Broadcast Channel APIs are required so TeleVecha can prevent competing update consumers from corrupting the shared cursor.
+Open the URL printed by Vite+. Multiple tabs share one elected Telegram sync owner. Each tab keeps independent navigation while commands, updates, and owner failover travel through a versioned browser channel. Drafts are restored when entering a chat and saved for offline recovery; typing is not mirrored into another open composer. The Web Locks and Broadcast Channel APIs are required so TeleVecha can prevent competing update consumers from corrupting the shared cursor.
 
 The owner has no selected conversation. It owns only account-scoped transport, persistence, synchronization, and durable delivery. A tab binds commands to a peer immediately and owns its own conversation projection. Lost cross-tab responses are retried with the same request ID, so the owner can return its recorded result without executing the command again; an unconfirmed command fails explicitly instead of waiting forever.
 
@@ -82,7 +82,7 @@ A `.tvbug` file is a ZIP containing `manifest.json`, `snapshot.v2.json`, and `tr
 
 Message text is replaced with generated text that keeps the original UTF-16 length, line breaks, and formatting offsets. Media payloads are omitted, but their kind, byte size, dimensions, duration, and MIME family remain so the app can reconstruct layout. Account identifiers are replaced with bundle-local aliases, timestamps move to a fixed epoch, and the file contains no Telegram session, authorization key, phone number, access hash, file reference, or cached media bytes. If the viewer cannot open a report, use any ZIP reader to inspect its files directly.
 
-The unit suite covers the messaging engine, IndexedDB migrations and bounds, tab election, and Telegram adapter mappings. The Playwright suite runs against a deterministic transport and a separate `televecha-e2e` database. It tests login and offline states, desktop and phone navigation, drafts, sends and failed-outbox recovery, focus-aware read receipts, uploads, lazy media caching, live edits and deletions, history/search/shared-media pagination, scroll anchoring and render bounds, modal focus, reload persistence, layout containment, independent two-tab conversations, synchronized drafts, and automatic owner failover. It never opens a production Telegram session.
+The unit suite covers the messaging engine, IndexedDB migrations and bounds, tab election, and Telegram adapter mappings. The Playwright suite runs against a deterministic transport and a separate `televecha-e2e` database. It tests login and offline states, desktop and phone navigation, drafts, sends and failed-outbox recovery, focus-aware read receipts, uploads, lazy media caching, live edits and deletions, history/search/shared-media pagination, scroll anchoring and render bounds, modal focus, reload persistence, layout containment, independent two-tab conversations and drafts, and automatic owner failover. It never opens a production Telegram session.
 
 ## Current limits
 
@@ -91,6 +91,8 @@ Static WebP, video, and TGS/Lottie stickers render in chat; animated media plays
 TeleVecha generates tagged TypeScript objects and binary codec descriptors from a pinned Telegram TL schema. The generator exposes only the RPC methods the app calls, while the decoder retains the constructor coverage required for valid update envelopes. The protocol implementation uses functions, plain objects, and closure state.
 
 ## Module design
+
+This branch experiments with Effect atoms and a shared Solid adapter across the app. See [the experiment notes](docs/effect-solid-experiment.md) for ownership rules, resource reads, validation, and the work that still requires array scans.
 
 `src/telegram/core/engine.ts` composes the account runtime. It does not persist a selected conversation; `TabCoordinator` combines the account snapshot with a separate conversation projection for each tab, and the tab URL owns navigation persistence. UI code enters a selected chat through `openConversation`, which returns a handle that binds peer identity once. Drafts, sends, and explicit-peer mutations remain addressed to that peer even when history is loading or another tab changes its view. Only pagination and message-jump operations require that tab's projection to remain selected.
 

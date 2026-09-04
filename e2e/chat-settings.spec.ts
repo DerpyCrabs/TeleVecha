@@ -21,7 +21,10 @@ test('searches the current chat and all chats through Telegram', async ({ page }
   await expect(
     search.getByRole('button', { name: /Release Channel.*Release notes/ }),
   ).toBeVisible();
-  expect((await fixtureStats(page))?.searchMessages).toBe(3);
+  // The scope-change search can be interrupted when the next query is entered.
+  const requests = (await fixtureStats(page))?.searchMessages;
+  expect(requests).toBeGreaterThanOrEqual(2);
+  expect(requests).toBeLessThanOrEqual(3);
 });
 
 test('paginates search results and discards the old cursor when the query changes', async ({

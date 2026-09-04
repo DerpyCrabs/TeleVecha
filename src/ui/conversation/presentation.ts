@@ -68,6 +68,20 @@ function pendingSendPreview(send: PendingSend) {
   return attachment ? mediaPreview(presentPendingAttachment(attachment)) : 'Message';
 }
 
+export function createDialogPresenter() {
+  const cache = new WeakMap<
+    TelegramDialog,
+    { pending: PendingSend | undefined; view: ChatSummary }
+  >();
+  return (dialog: TelegramDialog, pending?: PendingSend) => {
+    const previous = cache.get(dialog);
+    if (previous && previous.pending === pending) return previous.view;
+    const view = presentDialog(dialog, pending);
+    cache.set(dialog, { pending, view });
+    return view;
+  };
+}
+
 export function presentDialog(dialog: TelegramDialog, pending?: PendingSend): ChatSummary {
   const topMessage = dialog.topMessage;
   return {
