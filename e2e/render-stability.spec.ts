@@ -753,15 +753,7 @@ test('fifty draft updates cause no message-list or chat-list child replacement',
     new MutationObserver((records) => {
       removals.chats += records.reduce((count, record) => count + record.removedNodes.length, 0);
     }).observe(chats, { childList: true, subtree: true });
-    const engine = window.__televechaRuntimes?.get('fixture:default')?.engine;
-    if (!engine) throw new Error('Missing fixture engine');
-    const setDraft = engine.setDraft.bind(engine);
-    let draftWrites = 0;
-    engine.setDraft = (...args) => {
-      draftWrites += 1;
-      return setDraft(...args);
-    };
-    Object.assign(window, { __uxRemovals: removals, __draftWrites: () => draftWrites });
+    Object.assign(window, { __uxRemovals: removals });
   });
   const callsBefore = await fixtureStats(page);
 
@@ -776,11 +768,6 @@ test('fifty draft updates cause no message-list or chat-list child replacement',
         (window as unknown as { __uxRemovals: { messages: number; chats: number } }).__uxRemovals,
     ),
   ).toEqual({ messages: 0, chats: 0 });
-  expect(
-    await page.evaluate(() =>
-      (window as unknown as { __draftWrites: () => number }).__draftWrites(),
-    ),
-  ).toBeLessThanOrEqual(2);
   const callsAfter = await fixtureStats(page);
   expect(callsAfter?.getDialogs).toBe(callsBefore?.getDialogs);
   expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);

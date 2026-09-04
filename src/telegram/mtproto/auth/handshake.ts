@@ -5,8 +5,8 @@ import {
   equalBytesConstantTime,
   minimalBigEndianBytes,
 } from '../bytes';
-import { aesIgeDecrypt, aesIgeEncrypt, browserCrypto, type CryptoAdapter } from '../crypto';
-import { createMtprotoError } from '../errors';
+import { aesIgeDecrypt, aesIgeEncrypt, randomBytes, sha1 } from '../crypto';
+import { createMtprotoError, type MtprotoError } from '../errors';
 import { createAuthKey, type AuthKey } from './authKey';
 import {
   calculateDhValues,
@@ -61,7 +61,7 @@ export type DhGenerationResult = Readonly<{
 }>;
 
 export interface AuthorizationHandshakeWire {
-  requestPq(nonce: bigint): Promise<ResPq>;
+  requestPq(nonce: bigint): Effect.Effect<ResPq, MtprotoError>;
   encodePqInnerData(input: {
     pq: Uint8Array;
     p: Uint8Array;
@@ -78,7 +78,7 @@ export interface AuthorizationHandshakeWire {
     q: Uint8Array;
     publicKeyFingerprint: bigint;
     encryptedData: Uint8Array;
-  }): Promise<ServerDhParams>;
+  }): Effect.Effect<ServerDhParams, MtprotoError>;
   decodeServerDhInner(input: Uint8Array): {
     value: ServerDhInner;
     encoded: Uint8Array;
@@ -94,14 +94,13 @@ export interface AuthorizationHandshakeWire {
     nonce: bigint;
     serverNonce: bigint;
     encryptedData: Uint8Array;
-  }): Promise<DhGenerationResult>;
+  }): Effect.Effect<DhGenerationResult, MtprotoError>;
 }
 
 export interface AuthorizationHandshakeOptions {
   readonly dcId: number;
   readonly isTestServer?: boolean | undefined;
   readonly wire: AuthorizationHandshakeWire;
-  readonly crypto?: CryptoAdapter | undefined;
   readonly now?: (() => number) | undefined;
   readonly trace?: ((message: string) => void) | undefined;
 }
@@ -112,43 +111,46 @@ export interface AuthorizationResult {
   readonly serverSalt: bigint;
 }
 
-export async function createAuthorizationKey(
+export const createAuthorizationKey = Effect.fn('mtproto.auth.authorize')(function* (
   options: AuthorizationHandshakeOptions,
-): Promise<AuthorizationResult> {
+) {
   if (!Number.isSafeInteger(options.dcId) || options.dcId <= 0) {
-    throw createMtprotoError('configuration', 'Data-center ID must be a positive integer.');
+    return yield* Effect.fail(
+      createMtprotoError('configuration', 'Data-center ID must be a positive integer.'),
+    );
   }
-  const crypto = options.crypto ?? browserCrypto();
   const trace = options.trace ?? (() => undefined);
 
-  const nonceBytes = crypto.randomBytes(16);
-  requireLength(nonceBytes, 16, 'authorization nonce');
+  const nonceBytes = yield* randomBytes(16);
   const nonce = bytesToBigInt(nonceBytes, { signed: true });
-  const response = await options.wire.requestPq(nonce);
-  trace('Received resPQ.');
-  if (response.nonce !== nonce) fail('resPQ contained the wrong nonce.');
-  validatePqEncoding(response.pq);
+  const response = yield* options.wire.requestPq(nonce);
+  yield* Effect.sync(() => trace('Received resPQ.'));
+  if (response.nonce !== nonce) return yield* Effect.fail(fail('resPQ contained the wrong nonce.'));
+  yield* validatePqEncoding(response.pq);
   const pq = bytesToBigInt(response.pq);
   const { p, q } = factorizePq(pq);
   const pBytes = minimalBigEndianBytes(p);
   const qBytes = minimalBigEndianBytes(q);
   const rsaKey = findTelegramRsaKey(response.serverPublicKeyFingerprints);
-  if (!rsaKey) fail('Telegram did not offer a recognized RSA key.');
+  if (!rsaKey) return yield* Effect.fail(fail('Telegram did not offer a recognized RSA key.'));
 
-  const newNonceBytes = crypto.randomBytes(32);
-  requireLength(newNonceBytes, 32, 'new nonce');
+  const newNonceBytes = yield* randomBytes(32);
   const newNonce = bytesToBigInt(newNonceBytes, { littleEndian: true, signed: true });
-  const innerData = options.wire.encodePqInnerData({
-    pq: minimalBigEndianBytes(pq),
-    p: pBytes,
-    q: qBytes,
-    nonce,
-    serverNonce: response.serverNonce,
-    newNonce,
-    dcId: options.isTestServer ? options.dcId + 10_000 : options.dcId,
+  const innerData = yield* Effect.try({
+    try: () =>
+      options.wire.encodePqInnerData({
+        pq: minimalBigEndianBytes(pq),
+        p: pBytes,
+        q: qBytes,
+        nonce,
+        serverNonce: response.serverNonce,
+        newNonce,
+        dcId: options.isTestServer ? options.dcId + 10_000 : options.dcId,
+      }),
+    catch: (cause) => createMtprotoError('protocol', 'Could not encode PQ inner data.', { cause }),
   });
-  const encryptedData = await encryptRsaPaddedInnerData(innerData, rsaKey, crypto);
-  const dhParams = await options.wire.requestDh({
+  const encryptedData = yield* encryptRsaPaddedInnerData(innerData, rsaKey);
+  const dhParams = yield* options.wire.requestDh({
     nonce,
     serverNonce: response.serverNonce,
     p: pBytes,
@@ -156,99 +158,129 @@ export async function createAuthorizationKey(
     publicKeyFingerprint: rsaKey.fingerprint,
     encryptedData,
   });
-  validateNonces(dhParams, nonce, response.serverNonce, 'server DH parameters');
+  yield* validateNonces(dhParams, nonce, response.serverNonce, 'server DH parameters');
   if (dhParams.kind === 'fail') {
-    const digest = await crypto.sha1(
-      bigIntToBytes(newNonce, 32, { littleEndian: true, signed: true }),
-    );
+    const digest = yield* sha1(bigIntToBytes(newNonce, 32, { littleEndian: true, signed: true }));
     const expected = bytesToBigInt(digest.subarray(4, 20), {
       littleEndian: true,
       signed: true,
     });
-    if (dhParams.newNonceHash !== expected) fail('DH rejection contained the wrong nonce hash.');
-    fail('Telegram rejected the DH parameters.');
+    if (dhParams.newNonceHash !== expected)
+      return yield* Effect.fail(fail('DH rejection contained the wrong nonce hash.'));
+    return yield* Effect.fail(fail('Telegram rejected the DH parameters.'));
   }
 
-  const temporary = await deriveTemporaryAes(response.serverNonce, newNonce, crypto);
+  const temporary = yield* deriveTemporaryAes(response.serverNonce, newNonce);
   if (dhParams.encryptedAnswer.byteLength % 16 !== 0) {
-    fail('Encrypted server DH data is not block-aligned.');
+    return yield* Effect.fail(fail('Encrypted server DH data is not block-aligned.'));
   }
-  const plaintext = aesIgeDecrypt(temporary.key, temporary.iv, dhParams.encryptedAnswer);
-  if (plaintext.byteLength < 20) fail('Encrypted server DH data is truncated.');
+  const plaintext = yield* Effect.try({
+    try: () => aesIgeDecrypt(temporary.key, temporary.iv, dhParams.encryptedAnswer),
+    catch: (cause) => createMtprotoError('crypto', 'Could not decrypt server DH data.', { cause }),
+  });
+  if (plaintext.byteLength < 20)
+    return yield* Effect.fail(fail('Encrypted server DH data is truncated.'));
   const expectedHash = plaintext.subarray(0, 20);
-  const decoded = options.wire.decodeServerDhInner(plaintext.subarray(20));
+  const decoded = yield* Effect.try({
+    try: () => options.wire.decodeServerDhInner(plaintext.subarray(20)),
+    catch: (cause) => createMtprotoError('protocol', 'Could not decode server DH data.', { cause }),
+  });
   if (
     !Number.isSafeInteger(decoded.bytesRead) ||
     decoded.bytesRead <= 0 ||
     decoded.bytesRead !== decoded.encoded.byteLength
   ) {
-    fail('Server DH decoder returned an invalid body length.');
+    return yield* Effect.fail(fail('Server DH decoder returned an invalid body length.'));
   }
   const paddingLength = plaintext.byteLength - 20 - decoded.bytesRead;
-  if (paddingLength < 0 || paddingLength > 15) fail('Server DH data has invalid padding.');
-  const actualHash = await crypto.sha1(decoded.encoded);
+  if (paddingLength < 0 || paddingLength > 15)
+    return yield* Effect.fail(fail('Server DH data has invalid padding.'));
+  const actualHash = yield* sha1(decoded.encoded);
   if (!equalBytesConstantTime(expectedHash, actualHash))
-    fail('Server DH data failed its hash check.');
+    return yield* Effect.fail(fail('Server DH data failed its hash check.'));
 
   const inner = decoded.value;
-  validateNonces(inner, nonce, response.serverNonce, 'server DH data');
-  const prime = validateDhParameters(inner.dhPrime, inner.generator);
+  yield* validateNonces(inner, nonce, response.serverNonce, 'server DH data');
+  const prime = yield* validateDhParameters(inner.dhPrime, inner.generator);
   const serverPublic = bytesToBigInt(inner.serverPublic);
-  validateDhPublicValue(serverPublic, prime, 'g_a');
+  yield* validateDhPublicValue(serverPublic, prime, 'g_a');
   const nowSeconds = Math.floor((options.now ?? Date.now)() / 1_000);
   const timeOffset = inner.serverTime - nowSeconds;
-  let retryId = 0n;
+  const retryId = yield* Ref.make(0n);
 
-  for (let attempt = 0; attempt < MAX_DH_ATTEMPTS; attempt += 1) {
-    const privateExponent = generateDhPrivateExponent(prime, (length) =>
-      crypto.randomBytes(length),
-    );
-    const values = calculateDhValues(inner.generator, serverPublic, privateExponent, prime);
+  return yield* Effect.gen(function* () {
+    const privateExponent = yield* generateDhPrivateExponent(prime);
+    const values = yield* calculateDhValues(inner.generator, serverPublic, privateExponent, prime);
     const authKeyBytes = bigIntToBytes(values.sharedSecret, DH_PRIME_BYTES);
-    const authKey = await createAuthKey(authKeyBytes, crypto);
-    const clientInner = options.wire.encodeClientDhInner({
-      nonce,
-      serverNonce: response.serverNonce,
-      retryId,
-      clientPublic: bigIntToBytes(values.clientPublic, DH_PRIME_BYTES),
+    const authKey = yield* createAuthKey(authKeyBytes);
+    const currentRetryId = yield* Ref.get(retryId);
+    const clientInner = yield* Effect.try({
+      try: () =>
+        options.wire.encodeClientDhInner({
+          nonce,
+          serverNonce: response.serverNonce,
+          retryId: currentRetryId,
+          clientPublic: bigIntToBytes(values.clientPublic, DH_PRIME_BYTES),
+        }),
+      catch: (cause) =>
+        createMtprotoError('protocol', 'Could not encode client DH data.', { cause }),
     });
-    const encrypted = aesIgeEncrypt(
-      temporary.key,
-      temporary.iv,
-      concatBytes(await crypto.sha1(clientInner), clientInner),
-      { randomBytes: (length) => crypto.randomBytes(length) },
-    );
-    const result = await options.wire.setClientDh({
+    const digest = yield* sha1(clientInner);
+    const unpadded = concatBytes(digest, clientInner);
+    const paddingLength = (16 - (unpadded.byteLength % 16)) % 16;
+    const padding = yield* randomBytes(paddingLength);
+    const encrypted = yield* Effect.try({
+      try: () =>
+        aesIgeEncrypt(temporary.key, temporary.iv, concatBytes(unpadded, padding), {
+          padding: 'none',
+        }),
+      catch: (cause) =>
+        createMtprotoError('crypto', 'Could not encrypt client DH data.', { cause }),
+    });
+    const result = yield* options.wire.setClientDh({
       nonce,
       serverNonce: response.serverNonce,
       encryptedData: encrypted,
     });
-    validateNonces(result, nonce, response.serverNonce, `DH ${result.kind}`);
+    yield* validateNonces(result, nonce, response.serverNonce, `DH ${result.kind}`);
     const hashNumber = result.kind === 'ok' ? 1 : result.kind === 'retry' ? 2 : 3;
-    const expectedNonceHash = await authKey.calculateNewNonceHash(
+    const expectedNonceHash = yield* authKey.calculateNewNonceHash(
       newNonce,
       hashNumber as 1 | 2 | 3,
     );
     if (result.newNonceHash !== expectedNonceHash)
-      fail('DH result contained the wrong nonce hash.');
+      return yield* Effect.fail(fail('DH result contained the wrong nonce hash.'));
     if (result.kind === 'ok') {
-      trace('Authorization key created.');
-      return Object.freeze({
+      yield* Effect.sync(() => trace('Authorization key created.'));
+      return {
         authKey,
         timeOffset,
         serverSalt: calculateServerSalt(newNonce, response.serverNonce),
-      });
+      } satisfies AuthorizationResult;
     }
-    if (result.kind === 'fail') fail('Telegram rejected the generated DH key.');
-    retryId = bytesToBigInt(authKey.hash.subarray(0, 8), {
-      littleEndian: true,
-      signed: true,
-    });
-  }
-  fail('DH generation exceeded its retry limit.');
-}
+    if (result.kind === 'fail')
+      return yield* Effect.fail(fail('Telegram rejected the generated DH key.'));
+    yield* Ref.set(
+      retryId,
+      bytesToBigInt(authKey.hash.subarray(0, 8), {
+        littleEndian: true,
+        signed: true,
+      }),
+    );
+    return yield* Effect.fail(
+      createMtprotoError('protocol', 'Telegram requested another DH key.', {
+        details: { retry: true },
+      }),
+    );
+  }).pipe(
+    Effect.retry({
+      schedule: Schedule.recurs(MAX_DH_ATTEMPTS - 1),
+      while: (error) => error.details?.retry === true,
+    }),
+  );
+});
 
-function validatePqEncoding(pq: Uint8Array) {
+const validatePqEncoding = Effect.fn('mtproto.auth.validatePq')(function* (pq: Uint8Array) {
   if (
     pq.byteLength === 0 ||
     pq.byteLength > MAX_PQ_BYTES ||
@@ -257,26 +289,22 @@ function validatePqEncoding(pq: Uint8Array) {
     bytesToBigInt(pq) > 0x7fff_ffff_ffff_ffffn ||
     bytesToBigInt(pq) % 2n === 0n
   ) {
-    fail('resPQ contained an invalid pq value.');
+    return yield* Effect.fail(fail('resPQ contained an invalid pq value.'));
   }
-}
+});
 
-function validateNonces(
+const validateNonces = Effect.fn('mtproto.auth.validateNonces')(function* (
   value: { readonly nonce: bigint; readonly serverNonce: bigint },
   nonce: bigint,
   serverNonce: bigint,
   label: string,
 ) {
-  if (value.nonce !== nonce) fail(`${label} contained the wrong nonce.`);
-  if (value.serverNonce !== serverNonce) fail(`${label} contained the wrong server nonce.`);
-}
+  if (value.nonce !== nonce) return yield* Effect.fail(fail(`${label} contained the wrong nonce.`));
+  if (value.serverNonce !== serverNonce)
+    return yield* Effect.fail(fail(`${label} contained the wrong server nonce.`));
+});
 
-function requireLength(bytes: Uint8Array, length: number, label: string) {
-  if (bytes.byteLength !== length) {
-    throw createMtprotoError('crypto', `Random source returned the wrong ${label} length.`);
-  }
+function fail(message: string) {
+  return createMtprotoError('protocol', message);
 }
-
-function fail(message: string): never {
-  throw createMtprotoError('protocol', message);
-}
+import { Effect, Ref, Schedule } from 'effect';

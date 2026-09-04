@@ -1,15 +1,11 @@
-import type {
-  CacheStore,
-  DraftReservation,
-  LatestStateCache,
-  TimedCacheValue,
-  WorkspaceCache,
-} from './store';
+import { Effect } from 'effect';
+import { type DraftReservation, type LatestStateCache, type TimedCacheValue } from './store';
 import type {
   CachedDialog,
   CachedMessage,
   PendingSend,
   SyncCursor,
+  TelegramDraftDetails,
   TelegramGroupMember,
   TelegramMessage,
 } from '../types';
@@ -28,11 +24,12 @@ export interface MemoryCacheStoreInitialState {
   messages?: readonly CachedMessage[] | undefined;
   drafts?: Readonly<Record<string, string>> | undefined;
   draftRevisions?: Readonly<Record<string, number>> | undefined;
+  draftDetails?: Readonly<Record<string, TelegramDraftDetails>> | undefined;
   pending?: readonly PendingSend[] | undefined;
-  lastPeerId?: string | undefined;
   pinned?: SeededMap<TimedCacheValue<TelegramMessage[]>> | undefined;
   pinnedMessages?: SeededMap<TimedCacheValue<TelegramMessage[]>> | undefined;
   groupMembers?: SeededMap<TimedCacheValue<TelegramGroupMember[]>> | undefined;
+  metadata?: SeededMap<TimedCacheValue<unknown>> | undefined;
   blobs?: SeededMap<Blob> | undefined;
 }
 
@@ -41,321 +38,367 @@ export interface MemoryCacheStoreInitialState {
  *
  * The store clones values at its boundary, just as IndexedDB does. Callers can
  * mutate fixtures and loaded values without changing the store's cached state.
- */
-export class MemoryCacheStore implements CacheStore {
-  private transportSession: unknown;
-  private accountId: string | undefined;
-  private cursor: SyncCursor | undefined;
-  private epoch: number;
-  private dialogs: CachedDialog[];
-  private messages: CachedMessage[];
-  private drafts: Map<string, string>;
-  private draftRevisions: Map<string, number>;
-  private pending: PendingSend[];
-  private lastPeerId: string | undefined;
-  private readonly pinnedMessages: Map<string, TimedCacheValue<TelegramMessage[]>>;
-  private readonly groupMembers: Map<string, TimedCacheValue<TelegramGroupMember[]>>;
-  private readonly blobs: Map<string, Blob>;
-  constructor(initialState: MemoryCacheStoreInitialState = {}) {
-    this.transportSession = clone(initialState.transportSession);
-    this.accountId = initialState.accountId;
-    this.cursor = clone(initialState.cursor);
-    this.epoch = initialState.epoch ?? 0;
-    this.dialogs = [...clone(initialState.dialogs ?? [])];
-    this.messages = [...clone(initialState.messages ?? [])];
-    this.drafts = new Map(Object.entries(clone(initialState.drafts ?? {})));
-    this.draftRevisions = new Map(Object.entries(clone(initialState.draftRevisions ?? {})));
-    this.pending = [...clone(initialState.pending ?? [])];
-    this.lastPeerId = initialState.lastPeerId;
-    this.pinnedMessages = seedMap(initialState.pinnedMessages ?? initialState.pinned);
-    this.groupMembers = seedMap(initialState.groupMembers);
-    this.blobs = seedMap(initialState.blobs);
+ */ export function makeMemoryCacheStore(initialState: MemoryCacheStoreInitialState = {}) {
+  let storedTransportSession: unknown = clone(initialState.transportSession);
+  let storedAccountId: string | undefined = initialState.accountId;
+  let storedCursor: SyncCursor | undefined = clone(initialState.cursor);
+  let storedEpoch: number = initialState.epoch ?? 0;
+  let storedDialogs: CachedDialog[] = [...clone(initialState.dialogs ?? [])];
+  let storedMessages: CachedMessage[] = [...clone(initialState.messages ?? [])];
+  let storedDrafts: Map<string, string> = new Map(Object.entries(clone(initialState.drafts ?? {})));
+  let storedDraftRevisions: Map<string, number> = new Map(
+    Object.entries(clone(initialState.draftRevisions ?? {})),
+  );
+  let storedDraftDetails: Map<string, TelegramDraftDetails> = new Map(
+    Object.entries(clone(initialState.draftDetails ?? {})),
+  );
+  let storedPending: PendingSend[] = [...clone(initialState.pending ?? [])];
+  let storedPinnedMessages: Map<string, TimedCacheValue<TelegramMessage[]>> = seedMap(
+    initialState.pinnedMessages ?? initialState.pinned,
+  );
+  let storedGroupMembers: Map<string, TimedCacheValue<TelegramGroupMember[]>> = seedMap(
+    initialState.groupMembers,
+  );
+  let storedMetadata: Map<string, TimedCacheValue<unknown>> = seedMap(initialState.metadata);
+  let storedBlobs: Map<string, Blob> = seedMap(initialState.blobs);
+  function loadTransportSessionInternal() {
+    return Effect.sync(() => clone(storedTransportSession));
   }
-
-  async loadTransportSession() {
-    return clone(this.transportSession);
+  function saveTransportSession(session: unknown) {
+    return Effect.sync(() => {
+      storedTransportSession = clone(session);
+    });
   }
-
-  async saveTransportSession(session: unknown) {
-    this.transportSession = clone(session);
+  function clearAccountData() {
+    return Effect.sync(() => {
+      storedTransportSession = undefined;
+      storedAccountId = undefined;
+      storedCursor = undefined;
+      storedEpoch = 0;
+      storedDialogs = [];
+      storedMessages = [];
+      storedDrafts.clear();
+      storedDraftRevisions.clear();
+      storedDraftDetails.clear();
+      storedPending = [];
+      storedPinnedMessages.clear();
+      storedGroupMembers.clear();
+      storedMetadata.clear();
+      storedBlobs.clear();
+    });
   }
-
-  async clearAccountData() {
-    this.transportSession = undefined;
-    this.accountId = undefined;
-    this.cursor = undefined;
-    this.epoch = 0;
-    this.dialogs = [];
-    this.messages = [];
-    this.drafts.clear();
-    this.draftRevisions.clear();
-    this.pending = [];
-    this.lastPeerId = undefined;
-    this.pinnedMessages.clear();
-    this.groupMembers.clear();
-    this.blobs.clear();
+  function clearCacheData() {
+    return Effect.sync(() => {
+      storedCursor = undefined;
+      storedEpoch = 0;
+      storedDialogs = [];
+      storedMessages = [];
+      storedPinnedMessages.clear();
+      storedGroupMembers.clear();
+      storedMetadata.clear();
+      storedBlobs.clear();
+    });
   }
-
-  async clearCacheData() {
-    this.cursor = undefined;
-    this.epoch = 0;
-    this.dialogs = [];
-    this.messages = [];
-    this.lastPeerId = undefined;
-    this.pinnedMessages.clear();
-    this.groupMembers.clear();
-    this.blobs.clear();
+  function prepareOutboxWrite(_bytes: number, _forceEviction = false) {
+    return Effect.sync(() => {
+      // Memory-backed writes have no storage quota to reserve.
+    });
   }
-
-  async prepareOutboxWrite(_bytes: number, _forceEviction = false) {
-    // Memory-backed writes have no storage quota to reserve.
+  function loadAccountId() {
+    return Effect.sync(() => {
+      return storedAccountId;
+    });
   }
-
-  async loadAccountId() {
-    return this.accountId;
+  function claimAccount(accountId: string) {
+    return Effect.sync(() => {
+      storedAccountId = accountId;
+      storedPending = storedPending.map((send) =>
+        send.accountId === undefined ? { ...send, accountId } : send,
+      );
+    });
   }
-
-  async claimAccount(accountId: string) {
-    this.accountId = accountId;
-    this.pending = this.pending.map((send) =>
-      send.accountId === undefined ? { ...send, accountId } : send,
-    );
+  function resetForAccount(accountId: string) {
+    return Effect.sync(() => {
+      const previousAccountId = storedAccountId;
+      storedAccountId = accountId;
+      storedCursor = undefined;
+      storedEpoch = 0;
+      storedDialogs = [];
+      storedMessages = [];
+      storedDrafts.clear();
+      storedDraftRevisions.clear();
+      storedDraftDetails.clear();
+      storedPinnedMessages.clear();
+      storedGroupMembers.clear();
+      storedMetadata.clear();
+      storedBlobs.clear();
+      storedPending = storedPending.map((send) =>
+        send.accountId === undefined
+          ? {
+              ...send,
+              accountId: previousAccountId ?? LEGACY_ACCOUNT_ID,
+              lastError: 'Queued for a different Telegram account.',
+            }
+          : send,
+      );
+    });
   }
-
-  async resetForAccount(accountId: string) {
-    const previousAccountId = this.accountId;
-    this.accountId = accountId;
-    this.cursor = undefined;
-    this.epoch = 0;
-    this.dialogs = [];
-    this.messages = [];
-    this.drafts.clear();
-    this.draftRevisions.clear();
-    this.lastPeerId = undefined;
-    this.pinnedMessages.clear();
-    this.groupMembers.clear();
-    this.blobs.clear();
-    this.pending = this.pending.map((send) =>
-      send.accountId === undefined
-        ? {
-            ...send,
-            accountId: previousAccountId ?? LEGACY_ACCOUNT_ID,
-            lastError: 'Queued for a different Telegram account.',
-          }
-        : send,
-    );
+  function loadCursor() {
+    return Effect.sync(() => {
+      return clone(storedCursor);
+    });
   }
-
-  async loadCursor() {
-    return clone(this.cursor);
+  function saveCursor(cursor: SyncCursor) {
+    return Effect.sync(() => {
+      storedCursor = clone(cursor);
+    });
   }
-
-  async saveCursor(cursor: SyncCursor) {
-    this.cursor = clone(cursor);
+  function loadEpoch() {
+    return Effect.sync(() => {
+      return storedEpoch;
+    });
   }
-
-  async loadEpoch() {
-    return this.epoch;
+  function beginNewEpoch() {
+    return Effect.sync(() => {
+      storedEpoch += 1;
+      return storedEpoch;
+    });
   }
-
-  async beginNewEpoch() {
-    this.epoch += 1;
-    return this.epoch;
+  function commitLatestState(state: LatestStateCache) {
+    return Effect.sync(() => {
+      const snapshot = clone(state);
+      const epoch = storedEpoch + 1;
+      const dialogs = snapshot.dialogs.map((dialog) => ({ ...dialog, cacheEpoch: epoch }));
+      storedEpoch = epoch;
+      storedCursor = snapshot.cursor;
+      storedDialogs = dialogs;
+      storedMessages = [];
+      for (const key of snapshot.discardBlobKeys ?? []) storedBlobs.delete(key);
+      for (const key of snapshot.discardMetadataKeys ?? []) storedMetadata.delete(key);
+      return epoch;
+    });
   }
-
-  async commitLatestState(state: LatestStateCache) {
-    const snapshot = clone(state);
-    const epoch = this.epoch + 1;
-    const dialogs = snapshot.dialogs.map((dialog) => ({ ...dialog, cacheEpoch: epoch }));
-    const messages =
-      snapshot.activeHistory?.messages.map((message) => ({ ...message, cacheEpoch: epoch })) ?? [];
-
-    this.epoch = epoch;
-    this.cursor = snapshot.cursor;
-    this.dialogs = dialogs;
-    this.messages = messages;
-    for (const key of snapshot.discardBlobKeys ?? []) this.blobs.delete(key);
-    return epoch;
+  function loadWorkspace() {
+    return Effect.sync(() => {
+      return {
+        accountId: storedAccountId,
+        dialogs: clone(storedDialogs),
+        drafts: Object.fromEntries(storedDrafts),
+        draftDetails: Object.fromEntries(storedDraftDetails),
+        draftRevisions: Object.fromEntries(storedDraftRevisions),
+        pending: sortedPending(),
+        epoch: storedEpoch,
+      };
+    });
   }
-
-  async loadWorkspace(): Promise<WorkspaceCache> {
-    return {
-      accountId: this.accountId,
-      dialogs: clone(this.dialogs),
-      drafts: Object.fromEntries(this.drafts),
-      draftRevisions: Object.fromEntries(this.draftRevisions),
-      pending: this.sortedPending(),
-      epoch: this.epoch,
-      lastPeerId: this.lastPeerId,
-    };
+  function loadDialogs() {
+    return Effect.sync(() => {
+      return clone(storedDialogs);
+    });
   }
-
-  async loadDialogs() {
-    return clone(this.dialogs);
+  function replaceDialogs(dialogs: CachedDialog[]) {
+    return Effect.sync(() => {
+      storedDialogs = clone(dialogs);
+    });
   }
-
-  async replaceDialogs(dialogs: CachedDialog[]) {
-    this.dialogs = clone(dialogs);
+  function putDialog(dialog: CachedDialog) {
+    return Effect.sync(() => {
+      const next = clone(dialog);
+      storedDialogs = [...storedDialogs.filter(({ peer }) => peer.id !== next.peer.id), next];
+    });
   }
-
-  async putDialog(dialog: CachedDialog) {
-    const next = clone(dialog);
-    this.dialogs = [...this.dialogs.filter(({ peer }) => peer.id !== next.peer.id), next];
+  function loadMessages(peerId: string, limit = DEFAULT_MESSAGE_LOAD_LIMIT) {
+    return Effect.sync(() => {
+      const requested = normalizeLimit(limit);
+      if (requested === 0) return [];
+      const messages = storedMessages
+        .filter((message) => message.peerId === peerId)
+        .sort((left, right) => left.id - right.id)
+        .slice(-requested);
+      return clone(messages);
+    });
   }
-
-  async loadMessages(peerId: string, limit = DEFAULT_MESSAGE_LOAD_LIMIT) {
-    const requested = normalizeLimit(limit);
-    if (requested === 0) return [];
-    const messages = this.messages
-      .filter((message) => message.peerId === peerId)
-      .sort((left, right) => left.id - right.id)
-      .slice(-requested);
-    return clone(messages);
-  }
-
-  async loadMessagesBefore(
+  function loadMessagesBefore(
     peerId: string,
     beforeMessageId: number,
     limit = DEFAULT_MESSAGE_LOAD_LIMIT,
   ) {
-    const requested = normalizeLimit(limit);
-    if (requested === 0) return [];
-    const messages = this.messages
-      .filter((message) => message.peerId === peerId && message.id < beforeMessageId)
-      .sort((left, right) => left.id - right.id)
-      .slice(-requested);
-    return clone(messages);
+    return Effect.sync(() => {
+      const requested = normalizeLimit(limit);
+      if (requested === 0) return [];
+      const messages = storedMessages
+        .filter((message) => message.peerId === peerId && message.id < beforeMessageId)
+        .sort((left, right) => left.id - right.id)
+        .slice(-requested);
+      return clone(messages);
+    });
   }
-
-  async loadMessage(peerId: string, messageId: number) {
-    const message = this.messages.find(
-      (candidate) => candidate.peerId === peerId && candidate.id === messageId,
-    );
-    return clone(message);
+  function loadMessage(peerId: string, messageId: number) {
+    return Effect.sync(() => {
+      const message = storedMessages.find(
+        (candidate) => candidate.peerId === peerId && candidate.id === messageId,
+      );
+      return clone(message);
+    });
   }
-
-  async replaceMessages(peerId: string, messages: CachedMessage[]) {
-    const replacements = clone(messages);
-    this.messages = [
-      ...this.messages.filter((message) => message.peerId !== peerId),
-      ...replacements,
-    ];
-  }
-
-  async putMessages(messages: CachedMessage[]) {
-    const replacements = clone(messages);
-    let nextMessages = this.messages;
-    for (const replacement of replacements) {
-      const replacementKey = messageKey(replacement.peerId, replacement.id);
-      nextMessages = [
-        ...nextMessages.filter(
-          (message) => messageKey(message.peerId, message.id) !== replacementKey,
-        ),
-        replacement,
+  function replaceMessages(peerId: string, messages: CachedMessage[]) {
+    return Effect.sync(() => {
+      const replacements = clone(messages);
+      storedMessages = [
+        ...storedMessages.filter((message) => message.peerId !== peerId),
+        ...replacements,
       ];
-    }
-    this.messages = nextMessages;
+    });
   }
-
-  async putMessage(message: CachedMessage) {
-    await this.putMessages([message]);
+  function putMessages(messages: CachedMessage[]) {
+    return Effect.sync(() => {
+      const replacements = clone(messages);
+      let nextMessages = storedMessages;
+      for (const replacement of replacements) {
+        const replacementKey = messageKey(replacement.peerId, replacement.id);
+        nextMessages = [
+          ...nextMessages.filter(
+            (message) => messageKey(message.peerId, message.id) !== replacementKey,
+          ),
+          replacement,
+        ];
+      }
+      storedMessages = nextMessages;
+    });
   }
-
-  async deleteMessages(peerId: string | undefined, messageIds: number[]) {
-    const ids = new Set(messageIds);
-    this.messages = this.messages.filter(
-      (message) => (peerId !== undefined && message.peerId !== peerId) || !ids.has(message.id),
-    );
+  const putMessage = Effect.fn('MemoryCacheStore.putMessage')(function* (message: CachedMessage) {
+    yield* putMessages([message]);
+  });
+  function findMessagePeers(messageIds: number[]) {
+    return Effect.sync(() => {
+      const ids = new Set(messageIds);
+      return [
+        ...new Set(
+          storedMessages.filter((message) => ids.has(message.id)).map(({ peerId }) => peerId),
+        ),
+      ];
+    });
   }
-
-  async loadPinnedMessages(peerId: string) {
-    return clone(this.pinnedMessages.get(peerId));
+  function deleteMessages(peerId: string, messageIds: number[]) {
+    return Effect.sync(() => {
+      const ids = new Set(messageIds);
+      storedMessages = storedMessages.filter(
+        (message) => message.peerId !== peerId || !ids.has(message.id),
+      );
+    });
   }
-
-  async savePinnedMessages(peerId: string, messages: TelegramMessage[]) {
-    this.pinnedMessages.set(peerId, { value: clone(messages), savedAt: Date.now() });
+  function loadPinnedMessages(peerId: string) {
+    return Effect.sync(() => {
+      return clone(storedPinnedMessages.get(peerId));
+    });
   }
-
-  async deletePinnedMessages(peerId: string) {
-    this.pinnedMessages.delete(peerId);
+  function savePinnedMessages(peerId: string, messages: TelegramMessage[]) {
+    return Effect.sync(() => {
+      storedPinnedMessages.set(peerId, { value: clone(messages), savedAt: Date.now() });
+    });
   }
-
-  async loadGroupMembers(peerId: string) {
-    return clone(this.groupMembers.get(peerId));
+  function deletePinnedMessages(peerId: string) {
+    return Effect.sync(() => {
+      storedPinnedMessages.delete(peerId);
+    });
   }
-
-  async saveGroupMembers(peerId: string, members: TelegramGroupMember[]) {
-    this.groupMembers.set(peerId, { value: clone(members), savedAt: Date.now() });
+  function loadGroupMembers(peerId: string) {
+    return Effect.sync(() => {
+      return clone(storedGroupMembers.get(peerId));
+    });
   }
-
-  async deleteGroupMembers(peerId: string) {
-    this.groupMembers.delete(peerId);
+  function saveGroupMembers(peerId: string, members: TelegramGroupMember[]) {
+    return Effect.sync(() => {
+      storedGroupMembers.set(peerId, { value: clone(members), savedAt: Date.now() });
+    });
   }
-
-  async loadDrafts() {
-    return Object.fromEntries(this.drafts);
+  function deleteGroupMembers(peerId: string) {
+    return Effect.sync(() => {
+      storedGroupMembers.delete(peerId);
+    });
   }
-
-  async loadDraftRevisions() {
-    return Object.fromEntries(this.draftRevisions);
+  function loadMetadata<Value>(key: string) {
+    return Effect.sync(() => clone(storedMetadata.get(key) as TimedCacheValue<Value> | undefined));
   }
-
-  async saveDraft(peerId: string, text: string, revision = 0) {
-    if (text) {
-      this.drafts.set(peerId, text);
-      this.draftRevisions.set(peerId, revision);
-      return;
-    }
-    this.drafts.delete(peerId);
-    this.draftRevisions.delete(peerId);
+  function saveMetadata<Value>(key: string, value: Value) {
+    return Effect.sync(() => {
+      storedMetadata.set(key, { value: clone(value), savedAt: Date.now() });
+    });
   }
-
-  async loadOutbox() {
-    return this.sortedPending();
+  function deleteMetadata(key: string) {
+    return Effect.sync(() => {
+      storedMetadata.delete(key);
+    });
   }
-
-  async commitOutbox(sends: PendingSend | PendingSend[], draft?: DraftReservation) {
-    const batch = clone(Array.isArray(sends) ? sends : [sends]);
-    if (batch.length === 0) return;
-
-    const ids = new Set(batch.map(({ id }) => id));
-    this.pending = [...this.pending.filter(({ id }) => !ids.has(id)), ...batch];
-    if (
-      draft &&
-      this.drafts.get(draft.peerId) === draft.text &&
-      (this.draftRevisions.get(draft.peerId) ?? 0) === (draft.revision ?? 0)
-    ) {
-      this.drafts.delete(draft.peerId);
-      this.draftRevisions.delete(draft.peerId);
-    }
+  function loadDrafts() {
+    return Effect.sync(() => {
+      return Object.fromEntries(storedDrafts);
+    });
   }
-
-  async deletePending(id: string) {
-    this.pending = this.pending.filter((send) => send.id !== id);
+  function loadDraftRevisions() {
+    return Effect.sync(() => {
+      return Object.fromEntries(storedDraftRevisions);
+    });
   }
-
-  async loadBlob(key: string) {
-    return clone(this.blobs.get(key));
+  function saveDraft(peerId: string, text: string, revision = 0, details?: TelegramDraftDetails) {
+    return Effect.sync(() => {
+      if (text || details) {
+        storedDrafts.set(peerId, text);
+        storedDraftRevisions.set(peerId, revision);
+        if (details) storedDraftDetails.set(peerId, clone(details));
+        else storedDraftDetails.delete(peerId);
+        return;
+      }
+      storedDrafts.delete(peerId);
+      storedDraftRevisions.delete(peerId);
+      storedDraftDetails.delete(peerId);
+    });
   }
-
-  async saveBlob(key: string, blob: Blob) {
-    this.blobs.set(key, clone(blob));
+  function loadOutbox() {
+    return Effect.sync(() => {
+      return sortedPending();
+    });
   }
+  function commitOutbox(sends: PendingSend | PendingSend[], draft?: DraftReservation) {
+    return Effect.sync(() => {
+      const batch = clone(Array.isArray(sends) ? sends : [sends]);
+      if (batch.length === 0) return;
 
-  async deleteBlob(key: string) {
-    this.blobs.delete(key);
+      const ids = new Set(batch.map(({ id }) => id));
+      storedPending = [...storedPending.filter(({ id }) => !ids.has(id)), ...batch];
+      if (
+        draft &&
+        storedDrafts.get(draft.peerId) === draft.text &&
+        (storedDraftRevisions.get(draft.peerId) ?? 0) === (draft.revision ?? 0)
+      ) {
+        storedDrafts.delete(draft.peerId);
+        storedDraftRevisions.delete(draft.peerId);
+        storedDraftDetails.delete(draft.peerId);
+      }
+    });
   }
-
-  async loadLastPeerId() {
-    return this.lastPeerId;
+  function deletePending(id: string) {
+    return Effect.sync(() => {
+      storedPending = storedPending.filter((send) => send.id !== id);
+    });
   }
-
-  async saveLastPeerId(peerId: string) {
-    this.lastPeerId = peerId;
+  function loadBlob(key: string) {
+    return Effect.sync(() => {
+      return clone(storedBlobs.get(key));
+    });
   }
-
-  private sortedPending() {
-    return clone(this.pending).sort((left, right) => {
+  function saveBlob(key: string, blob: Blob) {
+    return Effect.sync(() => {
+      storedBlobs.set(key, clone(blob));
+    });
+  }
+  function deleteBlob(key: string) {
+    return Effect.sync(() => {
+      storedBlobs.delete(key);
+    });
+  }
+  function sortedPending() {
+    return clone(storedPending).sort((left, right) => {
       if (
         left.peer.id === right.peer.id &&
         left.queueOrder !== undefined &&
@@ -367,7 +410,55 @@ export class MemoryCacheStore implements CacheStore {
       return left.createdAt - right.createdAt || left.id.localeCompare(right.id);
     });
   }
+  return {
+    get loadTransportSession() {
+      return loadTransportSessionInternal();
+    },
+    saveTransportSession: saveTransportSession,
+    clearAccountData: clearAccountData,
+    clearCacheData: clearCacheData,
+    prepareOutboxWrite: prepareOutboxWrite,
+    loadAccountId: loadAccountId,
+    claimAccount: claimAccount,
+    resetForAccount: resetForAccount,
+    loadCursor: loadCursor,
+    saveCursor: saveCursor,
+    loadEpoch: loadEpoch,
+    beginNewEpoch: beginNewEpoch,
+    commitLatestState: commitLatestState,
+    loadWorkspace: loadWorkspace,
+    loadDialogs: loadDialogs,
+    replaceDialogs: replaceDialogs,
+    putDialog: putDialog,
+    loadMessages: loadMessages,
+    loadMessagesBefore: loadMessagesBefore,
+    loadMessage: loadMessage,
+    replaceMessages: replaceMessages,
+    putMessages: putMessages,
+    putMessage: putMessage,
+    findMessagePeers: findMessagePeers,
+    deleteMessages: deleteMessages,
+    loadPinnedMessages: loadPinnedMessages,
+    savePinnedMessages: savePinnedMessages,
+    deletePinnedMessages: deletePinnedMessages,
+    loadGroupMembers: loadGroupMembers,
+    saveGroupMembers: saveGroupMembers,
+    deleteGroupMembers: deleteGroupMembers,
+    loadMetadata: loadMetadata,
+    saveMetadata: saveMetadata,
+    deleteMetadata: deleteMetadata,
+    loadDrafts: loadDrafts,
+    loadDraftRevisions: loadDraftRevisions,
+    saveDraft: saveDraft,
+    loadOutbox: loadOutbox,
+    commitOutbox: commitOutbox,
+    deletePending: deletePending,
+    loadBlob: loadBlob,
+    saveBlob: saveBlob,
+    deleteBlob: deleteBlob,
+  };
 }
+export type MemoryCacheStore = ReturnType<typeof makeMemoryCacheStore>;
 
 function clone<T>(value: T): T {
   return structuredClone(value);

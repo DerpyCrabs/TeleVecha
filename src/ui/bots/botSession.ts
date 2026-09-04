@@ -1,6 +1,8 @@
 import { createEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js';
+import type { Effect } from 'effect';
 
-import type { Conversation } from '../../telegram/core/conversation';
+import type { EffectConversation } from '../../telegram/core/conversation';
+import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
   EngineSnapshot,
   TelegramBotButton,
@@ -12,6 +14,7 @@ import type {
   TelegramUrlAuthResult,
 } from '../../telegram/types';
 import { safeExternalUrl } from '../shared/safeUrl';
+import { subscribeAtUi, type UiEffectRunner } from '../app/appRuntime';
 
 interface PendingBotUrlAuth {
   peer: TelegramPeer;
@@ -30,16 +33,20 @@ interface PendingInlineSwitch {
 }
 
 interface BotSessionOptions {
-  conversation: Accessor<Conversation | undefined>;
+  conversation: Accessor<EffectConversation | undefined>;
+  runEffect: UiEffectRunner;
   snapshot: Accessor<EngineSnapshot>;
   activePeerId: Accessor<string>;
   activeDialog: Accessor<TelegramDialog | undefined>;
   selectChat: (peerId: string) => Promise<boolean>;
   setDraft: (value: string) => void;
+  setPeerDraft: (peerId: string, value: string) => Effect.Effect<unknown, MessagingError>;
   dismissSingleUseKeyboard: (owner: string) => void;
   focusComposer: () => void;
   resources: {
-    subscribeResources(listener: (event: TelegramResourceInvalidation) => void): () => void;
+    subscribeResources(
+      listener: (event: TelegramResourceInvalidation) => void,
+    ): Effect.Effect<Effect.Effect<void>, MessagingError>;
   };
 }
 
@@ -99,7 +106,10 @@ export function createBotSession(options: BotSessionOptions) {
     const generation = ++commandsGeneration;
     setCommandsLoading(true);
     try {
-      const next = await currentConversation(peerId)?.getBotCommands();
+      const conversation = currentConversation(peerId);
+      const next = conversation
+        ? await options.runEffect(conversation.getBotCommands())
+        : undefined;
       if (options.activePeerId() !== peerId || generation !== commandsGeneration) return;
       setCommands(next ?? []);
       setCommandsPeerId(peerId);
@@ -138,22 +148,25 @@ export function createBotSession(options: BotSessionOptions) {
   );
 
   onCleanup(
-    options.resources.subscribeResources((event) => {
-      if (
-        event.kind !== 'bot-commands' ||
-        (event.peerId !== undefined && event.peerId !== options.activePeerId())
-      )
-        return;
-      const hadLoadedCommands = commandsPeerId() === options.activePeerId();
-      commandsGeneration += 1;
-      setCommands([]);
-      setCommandsPeerId('');
-      setCommandsLoading(false);
-      const dialog = options.activeDialog();
-      if ((dialog?.bot || dialog?.peer.kind === 'group') && (hadLoadedCommands || menuOpen())) {
-        void loadCommands().catch(() => undefined);
-      }
-    }),
+    subscribeAtUi(
+      options.runEffect,
+      options.resources.subscribeResources((event) => {
+        if (
+          event.kind !== 'bot-commands' ||
+          (event.peerId !== undefined && event.peerId !== options.activePeerId())
+        )
+          return;
+        const hadLoadedCommands = commandsPeerId() === options.activePeerId();
+        commandsGeneration += 1;
+        setCommands([]);
+        setCommandsPeerId('');
+        setCommandsLoading(false);
+        const dialog = options.activeDialog();
+        if ((dialog?.bot || dialog?.peer.kind === 'group') && (hadLoadedCommands || menuOpen())) {
+          void loadCommands().catch(() => undefined);
+        }
+      }),
+    ),
   );
 
   const toggleMenu = () => {
@@ -169,7 +182,8 @@ export function createBotSession(options: BotSessionOptions) {
     setStarting(true);
     setMenuOpen(false);
     try {
-      await currentConversation(peerId)?.startBot();
+      const conversation = currentConversation(peerId);
+      if (conversation) await options.runEffect(conversation.startBot());
     } finally {
       if (isCurrent(peerId, generation)) setStarting(false);
     }
@@ -179,9 +193,12 @@ export function createBotSession(options: BotSessionOptions) {
     if (!dialog) return;
     setMenuOpen(false);
     const suffix = dialog.bot || !command.botUsername ? '' : `@${command.botUsername}`;
-    void currentConversation(dialog.peer.id)
-      ?.sendDraft(`/${command.command}${suffix}`)
-      .catch(() => undefined);
+    const conversation = currentConversation(dialog.peer.id);
+    if (conversation) {
+      void options
+        .runEffect(conversation.sendDraft(`/${command.command}${suffix}`))
+        .catch(() => undefined);
+    }
   };
 
   const press = async (
@@ -198,7 +215,8 @@ export function createBotSession(options: BotSessionOptions) {
     setButtonBusy({ owner, key });
     try {
       if (button.kind === 'text') {
-        await currentConversation(peerId)?.sendDraft(button.text);
+        const conversation = currentConversation(peerId);
+        if (conversation) await options.runEffect(conversation.sendDraft(button.text));
         if (isCurrent(peerId, generation)) options.dismissSingleUseKeyboard(owner);
         return;
       }
@@ -216,10 +234,10 @@ export function createBotSession(options: BotSessionOptions) {
           }
           return;
         }
-        const result = await currentConversation(peerId)?.requestUrlAuth(
-          messageId,
-          button.buttonId,
-        );
+        const conversation = currentConversation(peerId);
+        const result = conversation
+          ? await options.runEffect(conversation.requestUrlAuth(messageId, button.buttonId))
+          : undefined;
         if (!isCurrent(peerId, generation)) return;
         if (!result) {
           showNotice('Telegram sign-in is unavailable for this button.');
@@ -256,7 +274,10 @@ export function createBotSession(options: BotSessionOptions) {
           }
           return;
         }
-        const answer = await currentConversation(peerId)?.answerBotCallback(messageId, button.data);
+        const conversation = currentConversation(peerId);
+        const answer = conversation
+          ? await options.runEffect(conversation.answerBotCallback(messageId, button.data))
+          : undefined;
         if (!isCurrent(peerId, generation)) return;
         if (answer?.url) openUrl(answer.url);
         if (answer?.message) showNotice(answer.message);
@@ -278,7 +299,8 @@ export function createBotSession(options: BotSessionOptions) {
         const nextDraft = `${prefix}${button.query ?? ''}`;
         if (!isCurrent(peerId, generation)) return;
         options.setDraft(nextDraft);
-        await currentConversation(peerId)?.setDraft(nextDraft);
+        const conversation = currentConversation(peerId);
+        if (conversation) await options.runEffect(conversation.setDraft(nextDraft));
         if (!isCurrent(peerId, generation)) return;
         options.dismissSingleUseKeyboard(owner);
         focusComposer();
@@ -299,13 +321,13 @@ export function createBotSession(options: BotSessionOptions) {
   const chooseInlineChat = async (peerId: string) => {
     const pending = inlineSwitch();
     if (!pending) return;
-    options.dismissSingleUseKeyboard(pending.owner);
-    setInlineSwitch(undefined);
-    if (!(await options.selectChat(peerId))) return;
     const prefix = pending.botUsername ? `@${pending.botUsername} ` : '';
     const nextDraft = `${prefix}${pending.query}`;
+    options.dismissSingleUseKeyboard(pending.owner);
+    setInlineSwitch(undefined);
+    await options.runEffect(options.setPeerDraft(peerId, nextDraft));
+    if (!(await options.selectChat(peerId))) return;
     options.setDraft(nextDraft);
-    await currentConversation(peerId)?.setDraft(nextDraft);
     if (options.activePeerId() === peerId) focusComposer();
   };
 
@@ -314,11 +336,12 @@ export function createBotSession(options: BotSessionOptions) {
     if (!pending || urlAuthBusy()) return;
     setUrlAuthBusy(true);
     try {
-      const result = await currentConversation(pending.peer.id)?.acceptUrlAuth(
-        pending.messageId,
-        pending.buttonId,
-        acceptOptions,
-      );
+      const conversation = currentConversation(pending.peer.id);
+      const result = conversation
+        ? await options.runEffect(
+            conversation.acceptUrlAuth(pending.messageId, pending.buttonId, acceptOptions),
+          )
+        : undefined;
       if (!isCurrent(pending.peer.id, pending.generation)) return;
       if (!result) throw new Error('Telegram URL authorization is unavailable.');
       if (result.kind === 'request') {

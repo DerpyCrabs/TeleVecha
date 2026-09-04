@@ -11419,6 +11419,28 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     fields: [],
   },
   {
+    id: 3222347747,
+    name: 'channels.deleteChannel',
+    typeName: 'channels.DeleteChannel',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
     id: 2227305806,
     name: 'channels.deleteMessages',
     typeName: 'channels.DeleteMessages',
@@ -43182,6 +43204,26 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 1540419152,
+    name: 'messages.deleteChat',
+    typeName: 'messages.DeleteChat',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'chatId',
+        wireName: 'chat_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
     id: 2719505579,
     name: 'messages.deleteChatUser',
     typeName: 'messages.DeleteChatUser',
@@ -45318,6 +45360,27 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
             bare: false,
           },
           bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 3602468338,
+    name: 'messages.getPinnedDialogs',
+    typeName: 'messages.GetPinnedDialogs',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.PeerDialogs',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'folderId',
+        wireName: 'folder_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
         },
       },
     ],

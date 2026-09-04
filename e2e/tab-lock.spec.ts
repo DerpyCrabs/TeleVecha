@@ -2,17 +2,20 @@ import { expect, test } from '@playwright/test';
 
 import { chatButton, fixtureStats, openReady, selectAlice } from './helpers';
 
-test('shares the active-tab lease between app instances in the same document', async ({ page }) => {
+test('keeps one active-tab lease until its scoped release runs', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('chat-list')).toBeVisible();
 
   const acquired = await page.evaluate(async () => {
     const { acquireSingleTabLease } = await import('../src/telegram/session/tabLock');
-    const first = await acquireSingleTabLease();
-    const second = await acquireSingleTabLease();
-    first?.release();
-    second?.release();
-    return Boolean(first && second);
+    const runtime = window.__televechaRuntimes?.get('fixture:default');
+    if (!runtime) return false;
+    const first = await runtime.runEffect(acquireSingleTabLease());
+    const second = await runtime.runEffect(acquireSingleTabLease());
+    if (first) await runtime.runEffect(first.release);
+    const third = await runtime.runEffect(acquireSingleTabLease());
+    if (third) await runtime.runEffect(third.release);
+    return Boolean(first && !second && third);
   });
 
   expect(acquired).toBe(true);
@@ -66,17 +69,23 @@ test('marks a chat read when any live tab is visible and forgets a closed follow
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.evaluate(async () => {
     const runtime = window.__televechaRuntimes?.get('fixture:default');
-    await runtime?.engine.setActiveConversationVisibility('u:101', {
-      visible: false,
-      atBottom: true,
-    });
+    if (runtime)
+      await runtime.runEffect(
+        runtime.engine.setActiveConversationVisibility('u:101', {
+          visible: false,
+          atBottom: true,
+        }),
+      );
   });
   await second.evaluate(async () => {
     const runtime = window.__televechaRuntimes?.get('fixture:default');
-    await runtime?.engine.setActiveConversationVisibility('u:101', {
-      visible: true,
-      atBottom: true,
-    });
+    if (runtime)
+      await runtime.runEffect(
+        runtime.engine.setActiveConversationVisibility('u:101', {
+          visible: true,
+          atBottom: true,
+        }),
+      );
   });
 
   const readsBefore = (await fixtureStats(page))?.readHistory ?? 0;
@@ -101,18 +110,24 @@ test('marks a chat read when any live tab is visible and forgets a closed follow
 
   await second.evaluate(async () => {
     const runtime = window.__televechaRuntimes?.get('fixture:default');
-    await runtime?.engine.setActiveConversationVisibility('u:101', {
-      visible: true,
-      atBottom: true,
-    });
+    if (runtime)
+      await runtime.runEffect(
+        runtime.engine.setActiveConversationVisibility('u:101', {
+          visible: true,
+          atBottom: true,
+        }),
+      );
   });
   await second.close();
   await page.evaluate(async () => {
     const runtime = window.__televechaRuntimes?.get('fixture:default');
-    await runtime?.engine.setActiveConversationVisibility('u:101', {
-      visible: false,
-      atBottom: true,
-    });
+    if (runtime)
+      await runtime.runEffect(
+        runtime.engine.setActiveConversationVisibility('u:101', {
+          visible: false,
+          atBottom: true,
+        }),
+      );
   });
 
   const readsAfterClose = (await fixtureStats(page))?.readHistory ?? 0;
@@ -182,16 +197,17 @@ test('synchronizes canonical drafts and promotes a follower after the owner clos
   await expect(second.getByRole('textbox', { name: 'Message' })).toHaveValue('Shared draft');
 
   await page.close();
-  await expect(second.getByRole('button', { name: 'Send message' })).toBeDisabled({
-    timeout: 5_000,
-  });
+  await expect
+    .poll(() => second.evaluate(() => Boolean(window.__televechaFixture)), { timeout: 15_000 })
+    .toBe(true);
   const send = second.getByRole('button', { name: 'Send message' });
-  await expect(send).toBeEnabled({ timeout: 15_000 });
+  await expect(send).toBeEnabled();
   await second.getByRole('textbox', { name: 'Message' }).fill('Sent after automatic takeover');
   await send.click();
   await expect(
     second.locator('article.message', { hasText: 'Sent after automatic takeover' }),
   ).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => (await fixtureStats(second))?.sendText).toBe(1);
 });
 
 test('never replaces rapid local input with another tab draft snapshot', async ({

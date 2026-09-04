@@ -1,61 +1,104 @@
-/**
- * Owns request coalescing and versioning for disposable Telegram resources.
- * The engine decides how a resource is loaded; this module guarantees that
- * concurrent callers share one request and stale media cannot be persisted.
- */
-export class ResourceCache {
-  private readonly requests = new Map<string, Promise<unknown>>();
-  private readonly values = new Map<string, unknown>();
-  private readonly versions = new Map<string, number>();
-  private epoch = 0;
+import { Effect, Fiber, FiberMap, Option } from 'effect';
 
-  async load<T>(key: string, loader: () => Promise<T>): Promise<T> {
-    const current = this.requests.get(key) as Promise<T> | undefined;
-    if (current) return current;
+/** Owns keyed single-flight requests and cached values. */
+export const makeResourceCache = Effect.fn('ResourceCache.make')(function* () {
+  const fibers = yield* FiberMap.make<string, unknown, unknown>();
+  const values = new Map<string, unknown>();
+  const versions = new Map<string, number>();
+  let epoch = 0;
 
-    const request = loader();
-    this.requests.set(key, request);
-    try {
-      return await request;
-    } finally {
-      if (this.requests.get(key) === request) this.requests.delete(key);
-    }
-  }
+  const version = (key: string) => versions.get(key) ?? 0;
 
-  async cached<T>(key: string, loader: () => Promise<T>): Promise<T> {
-    if (this.values.has(key)) return this.values.get(key) as T;
-    const epoch = this.epoch;
-    const version = this.version(key);
-    return this.load(key, async () => {
-      const value = await loader();
-      if (this.epoch === epoch && this.version(key) === version) this.values.set(key, value);
-      return value;
+  const load = <Value, Error, Requirements>(
+    key: string,
+    loader: () => Effect.Effect<Value, Error, Requirements>,
+  ): Effect.Effect<Value, Error, Requirements> =>
+    Effect.suspend(() => {
+      const current = FiberMap.getUnsafe(fibers, key);
+      if (Option.isSome(current)) {
+        return Fiber.join(current.value) as Effect.Effect<Value, Error>;
+      }
+
+      return FiberMap.run(fibers, key, Effect.suspend(loader), { startImmediately: false }).pipe(
+        Effect.flatMap(Fiber.join),
+      );
     });
-  }
 
-  forget(key: string) {
-    this.requests.delete(key);
-    this.values.delete(key);
-    this.versions.set(key, this.version(key) + 1);
-  }
+  const cached = <Value, Error, Requirements>(
+    key: string,
+    loader: () => Effect.Effect<Value, Error, Requirements>,
+  ): Effect.Effect<Value, Error, Requirements> =>
+    Effect.suspend(() => {
+      if (values.has(key)) return Effect.succeed(values.get(key) as Value);
+      const capturedEpoch = epoch;
+      const capturedVersion = version(key);
+      return load(key, loader).pipe(
+        Effect.tap((value) =>
+          Effect.sync(() => {
+            if (epoch === capturedEpoch && version(key) === capturedVersion) {
+              values.set(key, value);
+            }
+          }),
+        ),
+      );
+    });
 
-  version(key: string) {
-    return this.versions.get(key) ?? 0;
-  }
+  const forget = Effect.fn('ResourceCache.forget')(function* (key: string) {
+    values.delete(key);
+    versions.set(key, version(key) + 1);
+    yield* FiberMap.remove(fibers, key);
+  });
 
-  invalidate(key: string, ...requestKeys: string[]) {
-    this.versions.set(key, this.version(key) + 1);
-    for (const requestKey of requestKeys) this.requests.delete(requestKey);
-  }
+  const invalidate = Effect.fn('ResourceCache.invalidate')(function* (
+    key: string,
+    ...requestKeys: string[]
+  ) {
+    versions.set(key, version(key) + 1);
+    yield* Effect.forEach(requestKeys, (requestKey) => FiberMap.remove(fibers, requestKey), {
+      discard: true,
+    });
+  });
 
-  deleteRequest(key: string) {
-    this.requests.delete(key);
-  }
+  const invalidatePrefix = Effect.fn('ResourceCache.invalidatePrefix')(function* (prefix: string) {
+    for (const key of values.keys()) {
+      if (key.startsWith(prefix)) values.delete(key);
+    }
+    for (const key of versions.keys()) {
+      if (key.startsWith(prefix)) versions.set(key, version(key) + 1);
+    }
+    const keys = [...fibers].map(([key]) => key).filter((key) => key.startsWith(prefix));
+    yield* Effect.forEach(keys, (key) => FiberMap.remove(fibers, key), { discard: true });
+  });
 
-  clear() {
-    this.epoch += 1;
-    this.requests.clear();
-    this.values.clear();
-    this.versions.clear();
-  }
-}
+  const clear = Effect.gen(function* () {
+    epoch += 1;
+    values.clear();
+    versions.clear();
+    yield* FiberMap.clear(fibers);
+  });
+
+  return {
+    load,
+    cached,
+    pending: (key: string) => FiberMap.hasUnsafe(fibers, key),
+    pendingValue: <Value>(key: string): Effect.Effect<Value | undefined> =>
+      Effect.suspend(() => {
+        const current = FiberMap.getUnsafe(fibers, key);
+        return Option.isSome(current)
+          ? (Fiber.join(current.value).pipe(
+              Effect.map((value) => value as Value),
+              Effect.orElseSucceed(() => undefined),
+            ) as Effect.Effect<Value | undefined>)
+          : Effect.succeed(undefined);
+      }),
+    pendingWithPrefix: (prefix: string) =>
+      [...fibers].filter(([key]) => key.startsWith(prefix)).map(([, fiber]) => Fiber.join(fiber)),
+    forget,
+    version,
+    invalidate,
+    invalidatePrefix,
+    clear,
+  };
+});
+
+export type ResourceCache = Effect.Success<ReturnType<typeof makeResourceCache>>;

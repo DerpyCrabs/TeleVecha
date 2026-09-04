@@ -85,7 +85,7 @@ test('exports a compact account-free snapshot and inspects it without Telegram',
   await inspector.goto('/');
   await expect
     .poll(() => inspector.evaluate(() => window.__televechaTvBugStatus?.state))
-    .not.toBe('loading');
+    .toBe('ready');
   const inspectionStatus = await inspector.evaluate(() => window.__televechaTvBugStatus);
   if (inspectionStatus?.state !== 'ready') {
     throw new Error(`Snapshot did not become ready: ${JSON.stringify(inspectionStatus)}`);

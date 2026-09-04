@@ -8,6 +8,7 @@ function GifOption(props: {
   load: () => Promise<string>;
   cachedUrl: () => string | undefined;
   send: () => void;
+  enabled: boolean;
 }) {
   const [source, setSource] = createSignal(props.cachedUrl() ?? '');
   let button: HTMLButtonElement | undefined;
@@ -30,6 +31,7 @@ function GifOption(props: {
     <button
       ref={(element) => (button = element)}
       onClick={props.send}
+      disabled={!props.enabled}
       aria-label={`Send GIF ${props.gif.title ?? props.gif.emoji}`}
     >
       <Show when={source()} fallback={<span class="gif-placeholder">GIF</span>}>
@@ -54,6 +56,7 @@ export function GifPicker(props: {
   cachedUrl: (gif: TelegramSticker) => string | undefined;
   search: (query: string) => Promise<TelegramSticker[]>;
   send: (gif: TelegramSticker) => void;
+  enabled: boolean;
   retry: () => Promise<void>;
 }) {
   const [searchResults, setSearchResults] = createSignal<TelegramSticker[]>([]);
@@ -111,6 +114,7 @@ export function GifPicker(props: {
                 load={() => props.load(gif)}
                 cachedUrl={() => props.cachedUrl(gif)}
                 send={() => props.send(gif)}
+                enabled={props.enabled}
               />
             )}
           </For>

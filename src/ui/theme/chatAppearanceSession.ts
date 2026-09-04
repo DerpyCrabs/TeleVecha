@@ -8,8 +8,11 @@ import {
   untrack,
   type Accessor,
 } from 'solid-js';
+import type { Effect } from 'effect';
 
 import type { TelegramChatAppearance, TelegramDialog, TelegramPeer } from '../../telegram/types';
+import type { MessagingError } from '../../telegram/core/messagingError';
+import type { UiEffectRunner } from '../app/appRuntime';
 import {
   readableTextColor,
   telegramWallpaperBackground,
@@ -17,8 +20,10 @@ import {
 } from './themePreferences';
 
 interface ChatAppearanceSource {
-  getChatAppearance(peer: TelegramPeer): Promise<TelegramChatAppearance | undefined>;
-  downloadWallpaper(wallpaperId: string): Promise<Blob>;
+  getChatAppearance(
+    peer: TelegramPeer,
+  ): Effect.Effect<TelegramChatAppearance | undefined, MessagingError>;
+  downloadWallpaper(wallpaperId: string): Effect.Effect<Blob, MessagingError>;
 }
 
 function themeSettings(
@@ -68,6 +73,7 @@ function reportAppearance(
 /** Owns chat-scoped Telegram theme resolution, downloads, and object URLs. */
 export function createChatAppearanceSession(options: {
   source: ChatAppearanceSource;
+  runEffect: UiEffectRunner;
   activeDialog: Accessor<TelegramDialog | undefined>;
   preferences: Accessor<ThemePreferences>;
 }) {
@@ -163,8 +169,8 @@ export function createChatAppearanceSession(options: {
             cachedWallpaper ? (wallpaperObjectUrls.get(cachedWallpaper.id) ?? '') : '',
           );
         });
-        void options.source
-          .getChatAppearance(dialog.peer)
+        void options
+          .runEffect(options.source.getChatAppearance(dialog.peer))
           .then(async (nextAppearance) => {
             if (!nextAppearance) return;
             appearances.set(dialog.peer.id, nextAppearance);
@@ -188,7 +194,9 @@ export function createChatAppearanceSession(options: {
               return;
             }
             if (generation === loadGeneration) setChatAppearance(nextAppearance);
-            const blob = await options.source.downloadWallpaper(nextWallpaper.id);
+            const blob = await options.runEffect(
+              options.source.downloadWallpaper(nextWallpaper.id),
+            );
             let objectUrl = wallpaperObjectUrls.get(nextWallpaper.id);
             if (!objectUrl) {
               objectUrl = URL.createObjectURL(blob);

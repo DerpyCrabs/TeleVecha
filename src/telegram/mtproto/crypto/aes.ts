@@ -1,7 +1,6 @@
 import { unsafe as nobleAes } from '@noble/ciphers/aes.js';
 
 import { concatBytes } from '../bytes';
-import { browserCrypto } from './primitives';
 
 const AES_BLOCK_BYTES = 16;
 
@@ -63,8 +62,10 @@ export function aesIgeEncrypt(
       throw new RangeError('AES-IGE plaintext must contain complete blocks.');
     }
     const paddingLength = AES_BLOCK_BYTES - remainder;
-    const random = options.randomBytes ?? ((length: number) => browserCrypto().randomBytes(length));
-    const padding = random(paddingLength);
+    if (!options.randomBytes) {
+      throw new RangeError('AES-IGE random padding must be supplied by the caller.');
+    }
+    const padding = options.randomBytes(paddingLength);
     requireLength(padding, paddingLength, 'AES-IGE padding');
     input = concatBytes(input, padding);
   }

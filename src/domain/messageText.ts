@@ -1,7 +1,7 @@
 import type { ChatMessage } from './models';
 import type { RichBlock, RichCaption, RichListItem, RichText } from './richMessage';
 
-export function richTextToPlainText(value: RichText): string {
+function richTextToPlainText(value: RichText): string {
   if (value.kind === 'text') return value.text;
   if (value.kind === 'concat') return value.children.map(richTextToPlainText).join('');
   if (value.kind === 'customEmoji') return value.alt;

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Effect } from 'effect';
 
-import { MemoryCacheStore } from './memoryStore';
+import { makeMemoryCacheStore } from './memoryStore';
 import type {
   CachedDialog,
   CachedMessage,
@@ -61,6 +62,7 @@ const member: TelegramGroupMember = {
 };
 
 describe('MemoryCacheStore', () => {
+  const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
   it('loads a cloned seeded workspace, ordered history, and cache metadata', async () => {
     const firstDialog = dialog(peer, 'First', 4);
     const latestMessage = {
@@ -76,7 +78,7 @@ describe('MemoryCacheStore', () => {
         duration: 17,
       },
     };
-    const store = new MemoryCacheStore({
+    const store = makeMemoryCacheStore({
       accountId: 'self',
       cursor: { pts: 8, qts: 3, date: 5, seq: 2 },
       epoch: 4,
@@ -85,7 +87,6 @@ describe('MemoryCacheStore', () => {
       drafts: { [peer.id]: 'draft' },
       draftRevisions: { [peer.id]: 7 },
       pending: [send('pending', 10)],
-      lastPeerId: peer.id,
       pinned: { [peer.id]: { value: [latestMessage], savedAt: 111 } },
       groupMembers: new Map([[secondPeer.id, { value: [member], savedAt: 222 }]]),
       blobs: { 'media:peer-1:9': new Blob(['generated media']) },
@@ -94,85 +95,94 @@ describe('MemoryCacheStore', () => {
     firstDialog.title = 'mutated fixture';
     latestMessage.media.width = 1;
 
-    const workspace = await store.loadWorkspace();
+    const workspace = await run(store.loadWorkspace());
     expect(workspace).toMatchObject({
       accountId: 'self',
       epoch: 4,
       drafts: { [peer.id]: 'draft' },
       draftRevisions: { [peer.id]: 7 },
-      lastPeerId: peer.id,
     });
     expect(workspace.dialogs.map(({ title }) => title)).toEqual(['First', 'Second']);
-    expect((await store.loadMessages(peer.id)).map(({ id }) => id)).toEqual([2, 9]);
-    expect((await store.loadMessage(peer.id, 9))?.media).toMatchObject({
+    expect((await run(store.loadMessages(peer.id))).map(({ id }) => id)).toEqual([2, 9]);
+    expect((await run(store.loadMessage(peer.id, 9)))?.media).toMatchObject({
       size: 2_048,
       width: 1_920,
       height: 1_080,
       duration: 17,
     });
-    expect((await store.loadMessage(peer.id, 9))?.text).toHaveLength(87);
-    expect(await store.loadPinnedMessages(peer.id)).toEqual({
+    expect((await run(store.loadMessage(peer.id, 9)))?.text).toHaveLength(87);
+    expect(await run(store.loadPinnedMessages(peer.id))).toEqual({
       value: [expect.objectContaining({ id: 9 })],
       savedAt: 111,
     });
-    expect(await store.loadGroupMembers(secondPeer.id)).toEqual({ value: [member], savedAt: 222 });
-    expect(await (await store.loadBlob('media:peer-1:9'))?.text()).toBe('generated media');
+    expect(await run(store.loadGroupMembers(secondPeer.id))).toEqual({
+      value: [member],
+      savedAt: 222,
+    });
+    expect(await (await run(store.loadBlob('media:peer-1:9')))?.text()).toBe('generated media');
 
     workspace.dialogs[0]!.title = 'mutated load';
-    expect((await store.loadWorkspace()).dialogs[0]?.title).toBe('First');
+    expect((await run(store.loadWorkspace())).dialogs[0]?.title).toBe('First');
   });
 
   it('supports cache writes, scoped replacement, draft revisions, and metadata deletion', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(12_345);
-    const store = new MemoryCacheStore({
+    const store = makeMemoryCacheStore({
       dialogs: [dialog(peer, 'First')],
       messages: [message(peer, 1), message(secondPeer, 1)],
     });
 
     const renamed = dialog(peer, 'Renamed');
-    await store.putDialog(renamed);
+    await run(store.putDialog(renamed));
     renamed.title = 'changed after write';
-    await store.replaceMessages(peer.id, [message(peer, 3), message(peer, 2)]);
-    await store.putMessage({ ...message(peer, 3), text: 'updated' });
-    await store.saveDraft(peer.id, 'draft', 9);
-    await store.savePinnedMessages(peer.id, [message(peer, 3)]);
-    await store.saveGroupMembers(secondPeer.id, [member]);
-    await store.saveBlob('file', new Blob(['payload'], { type: 'text/plain' }));
+    await run(store.replaceMessages(peer.id, [message(peer, 3), message(peer, 2)]));
+    await run(store.putMessage({ ...message(peer, 3), text: 'updated' }));
+    await run(store.saveDraft(peer.id, 'draft', 9));
+    await run(store.saveMetadata('wallpaper-catalog:v1', [{ id: 'lagoon' }]));
+    await run(store.savePinnedMessages(peer.id, [message(peer, 3)]));
+    await run(store.saveGroupMembers(secondPeer.id, [member]));
+    await run(store.saveBlob('file', new Blob(['payload'], { type: 'text/plain' })));
 
-    expect((await store.loadDialogs()).map(({ title }) => title)).toEqual(['Renamed']);
-    expect((await store.loadMessages(peer.id)).map(({ id, text }) => [id, text])).toEqual([
+    expect((await run(store.loadDialogs())).map(({ title }) => title)).toEqual(['Renamed']);
+    expect((await run(store.loadMessages(peer.id))).map(({ id, text }) => [id, text])).toEqual([
       [2, 'peer-1-2'],
       [3, 'updated'],
     ]);
-    expect((await store.loadMessages(secondPeer.id)).map(({ id }) => id)).toEqual([1]);
-    expect(await store.loadDrafts()).toEqual({ [peer.id]: 'draft' });
-    expect(await store.loadDraftRevisions()).toEqual({ [peer.id]: 9 });
-    expect(await store.loadPinnedMessages(peer.id)).toEqual({
+    expect((await run(store.loadMessages(secondPeer.id))).map(({ id }) => id)).toEqual([1]);
+    expect(await run(store.loadDrafts())).toEqual({ [peer.id]: 'draft' });
+    expect(await run(store.loadDraftRevisions())).toEqual({ [peer.id]: 9 });
+    expect(await run(store.loadMetadata('wallpaper-catalog:v1'))).toEqual({
+      value: [{ id: 'lagoon' }],
+      savedAt: 12_345,
+    });
+    expect(await run(store.loadPinnedMessages(peer.id))).toEqual({
       value: [expect.objectContaining({ id: 3 })],
       savedAt: 12_345,
     });
-    expect(await store.loadGroupMembers(secondPeer.id)).toEqual({
+    expect(await run(store.loadGroupMembers(secondPeer.id))).toEqual({
       value: [member],
       savedAt: 12_345,
     });
-    expect((await store.loadBlob('file'))?.type).toBe('text/plain');
+    expect((await run(store.loadBlob('file')))?.type).toBe('text/plain');
 
-    await store.deleteMessages(undefined, [1]);
-    await store.saveDraft(peer.id, '');
-    await store.deletePinnedMessages(peer.id);
-    await store.deleteGroupMembers(secondPeer.id);
-    await store.deleteBlob('file');
-    expect(await store.loadMessages(secondPeer.id)).toEqual([]);
-    expect(await store.loadDrafts()).toEqual({});
-    expect(await store.loadPinnedMessages(peer.id)).toBeUndefined();
-    expect(await store.loadGroupMembers(secondPeer.id)).toBeUndefined();
-    expect(await store.loadBlob('file')).toBeUndefined();
+    await run(store.deleteMessages(secondPeer.id, [1]));
+    await run(store.saveDraft(peer.id, ''));
+    await run(store.deletePinnedMessages(peer.id));
+    await run(store.deleteGroupMembers(secondPeer.id));
+    await run(store.deleteMetadata('wallpaper-catalog:v1'));
+    await run(store.deleteBlob('file'));
+    expect(await run(store.loadMessages(secondPeer.id))).toEqual([]);
+    expect(await run(store.loadDrafts())).toEqual({});
+    expect(await run(store.loadPinnedMessages(peer.id))).toBeUndefined();
+    expect(await run(store.loadGroupMembers(secondPeer.id))).toBeUndefined();
+    expect(await run(store.loadMetadata('wallpaper-catalog:v1'))).toBeUndefined();
+    expect(await run(store.loadBlob('file'))).toBeUndefined();
     vi.useRealTimers();
   });
 
   it('increments epochs and replaces only latest-state cache data in one commit', async () => {
-    const store = new MemoryCacheStore({
+    const store = makeMemoryCacheStore({
       epoch: 6,
       cursor: { pts: 1, qts: 0, date: 1, seq: 1 },
       dialogs: [dialog(peer, 'Old', 6)],
@@ -186,36 +196,32 @@ describe('MemoryCacheStore', () => {
     });
     const cursor = { pts: 20, qts: 2, date: 30, seq: 4 };
 
-    expect(await store.beginNewEpoch()).toBe(7);
-    const epoch = await store.commitLatestState({
-      cursor,
-      dialogs: [dialog(secondPeer, 'Current', 0)],
-      activeHistory: {
-        peerId: secondPeer.id,
-        messages: [{ ...message(secondPeer, 8, 0), text: 'Current message' }],
-      },
-      discardBlobKeys: ['discard'],
-    });
+    expect(await run(store.beginNewEpoch())).toBe(7);
+    const epoch = await run(
+      store.commitLatestState({
+        cursor,
+        dialogs: [dialog(secondPeer, 'Current', 0)],
+        discardBlobKeys: ['discard'],
+      }),
+    );
     cursor.pts = 999;
 
     expect(epoch).toBe(8);
-    expect(await store.loadEpoch()).toBe(8);
-    expect(await store.loadCursor()).toEqual({ pts: 20, qts: 2, date: 30, seq: 4 });
-    expect(await store.loadDialogs()).toEqual([
+    expect(await run(store.loadEpoch())).toBe(8);
+    expect(await run(store.loadCursor())).toEqual({ pts: 20, qts: 2, date: 30, seq: 4 });
+    expect(await run(store.loadDialogs())).toEqual([
       expect.objectContaining({ title: 'Current', cacheEpoch: 8 }),
     ]);
-    expect(await store.loadMessages(peer.id)).toEqual([]);
-    expect(await store.loadMessages(secondPeer.id)).toEqual([
-      expect.objectContaining({ id: 8, cacheEpoch: 8 }),
-    ]);
-    expect(await store.loadDrafts()).toEqual({ [peer.id]: 'keep' });
-    expect((await store.loadOutbox()).map(({ id }) => id)).toEqual(['keep']);
-    expect(await store.loadBlob('discard')).toBeUndefined();
-    expect(await (await store.loadBlob('preserve'))?.text()).toBe('preserve');
+    expect(await run(store.loadMessages(peer.id))).toEqual([]);
+    expect(await run(store.loadMessages(secondPeer.id))).toEqual([]);
+    expect(await run(store.loadDrafts())).toEqual({ [peer.id]: 'keep' });
+    expect((await run(store.loadOutbox())).map(({ id }) => id)).toEqual(['keep']);
+    expect(await run(store.loadBlob('discard'))).toBeUndefined();
+    expect(await (await run(store.loadBlob('preserve')))?.text()).toBe('preserve');
   });
 
   it('upserts and orders the outbox while clearing only the captured draft revision', async () => {
-    const store = new MemoryCacheStore({
+    const store = makeMemoryCacheStore({
       drafts: { [peer.id]: 'caption' },
       draftRevisions: { [peer.id]: 4 },
       pending: [send('later', 30)],
@@ -223,29 +229,35 @@ describe('MemoryCacheStore', () => {
     const second = { ...send('second', 10), queueOrder: 2 };
     const first = { ...send('first', 20), queueOrder: 1 };
 
-    await store.commitOutbox([second, first], {
-      peerId: peer.id,
-      text: 'caption',
-      revision: 4,
-    });
+    await run(
+      store.commitOutbox([second, first], {
+        peerId: peer.id,
+        text: 'caption',
+        revision: 4,
+      }),
+    );
     first.text = 'mutated after write';
-    await store.commitOutbox({ ...send('later', 30), attempts: 2 });
+    await run(store.commitOutbox({ ...send('later', 30), attempts: 2 }));
 
-    expect((await store.loadOutbox()).map(({ id }) => id)).toEqual(['first', 'second', 'later']);
-    expect((await store.loadOutbox()).find(({ id }) => id === 'later')?.attempts).toBe(2);
-    expect((await store.loadOutbox()).find(({ id }) => id === 'first')?.text).toBe('first');
-    expect(await store.loadDrafts()).toEqual({});
-    await store.deletePending('second');
-    expect((await store.loadOutbox()).map(({ id }) => id)).toEqual(['first', 'later']);
+    expect((await run(store.loadOutbox())).map(({ id }) => id)).toEqual([
+      'first',
+      'second',
+      'later',
+    ]);
+    expect((await run(store.loadOutbox())).find(({ id }) => id === 'later')?.attempts).toBe(2);
+    expect((await run(store.loadOutbox())).find(({ id }) => id === 'first')?.text).toBe('first');
+    expect(await run(store.loadDrafts())).toEqual({});
+    await run(store.deletePending('second'));
+    expect((await run(store.loadOutbox())).map(({ id }) => id)).toEqual(['first', 'later']);
   });
 
   it('clones a transport session at its boundary', async () => {
-    const ordinary = new MemoryCacheStore();
+    const ordinary = makeMemoryCacheStore();
     const session = { dcId: 2 };
-    await ordinary.saveTransportSession(session);
+    await run(ordinary.saveTransportSession(session));
     session.dcId = 4;
-    expect(await ordinary.loadTransportSession()).toEqual({ dcId: 2 });
-    await ordinary.saveTransportSession(undefined);
-    expect(await ordinary.loadTransportSession()).toBeUndefined();
+    expect(await run(ordinary.loadTransportSession)).toEqual({ dcId: 2 });
+    await run(ordinary.saveTransportSession(undefined));
+    expect(await run(ordinary.loadTransportSession)).toBeUndefined();
   });
 });

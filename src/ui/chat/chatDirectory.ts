@@ -1,10 +1,15 @@
 import type { Accessor } from 'solid-js';
 
-import type { MessagingClient } from '../../telegram/core/client';
-import type { TelegramDialog, TelegramPeerSearchResult } from '../../telegram/types';
+import type { EffectMessagingClient } from '../../telegram/core/client';
+import type {
+  TelegramDeleteDialogAction,
+  TelegramDialog,
+  TelegramPeerSearchResult,
+} from '../../telegram/types';
+import type { UiEffectRunner } from '../app/appRuntime';
 
 type DirectorySource = Pick<
-  MessagingClient,
+  EffectMessagingClient,
   | 'searchPeers'
   | 'addPeer'
   | 'getUserDetails'
@@ -16,58 +21,43 @@ type DirectorySource = Pick<
 >;
 
 /** Owns peer lookup and chat-list commands, including stale remote-search selection. */
-export class ChatDirectory {
-  private openGeneration = 0;
+export function createChatDirectory(
+  source: DirectorySource,
+  runEffect: UiEffectRunner,
+  dialogs: Accessor<TelegramDialog[]>,
+  selectPeer: (peerId: string) => Promise<boolean>,
+) {
+  let openGeneration = 0;
+  const dialog = (peerId: string) => {
+    const current = dialogs().find(({ peer }) => peer.id === peerId);
+    if (!current) throw new Error('Chat is no longer available.');
+    return current;
+  };
 
-  constructor(
-    private readonly source: DirectorySource,
-    private readonly dialogs: Accessor<TelegramDialog[]>,
-    private readonly selectPeer: (peerId: string) => Promise<boolean>,
-  ) {}
-
-  private dialog(peerId: string) {
-    const dialog = this.dialogs().find(({ peer }) => peer.id === peerId);
-    if (!dialog) throw new Error('Chat is no longer available.');
-    return dialog;
-  }
-
-  search(query: string) {
-    return this.source.searchPeers(query);
-  }
-
-  select(peerId: string) {
-    this.openGeneration += 1;
-    return this.selectPeer(peerId);
-  }
-
-  async open(result: TelegramPeerSearchResult) {
-    const generation = ++this.openGeneration;
-    await this.source.addPeer(result);
-    if (generation !== this.openGeneration) return false;
-    return this.selectPeer(result.peer.id);
-  }
-
-  details(peerId: string) {
-    return this.source.getUserDetails(this.dialog(peerId).peer);
-  }
-
-  setMuted(peerId: string, muted: boolean) {
-    return this.source.setMuted(this.dialog(peerId).peer, muted);
-  }
-
-  setBlocked(peerId: string, blocked: boolean) {
-    return this.source.setBlocked(this.dialog(peerId).peer, blocked);
-  }
-
-  setPinned(peerId: string, pinned: boolean) {
-    return this.source.setPinnedDialog(this.dialog(peerId).peer, pinned);
-  }
-
-  setArchived(peerId: string, archived: boolean) {
-    return this.source.setArchived(this.dialog(peerId).peer, archived);
-  }
-
-  delete(peerId: string) {
-    return this.source.deleteDialog(this.dialog(peerId).peer);
-  }
+  return {
+    search: (query: string) => runEffect(source.searchPeers(query)),
+    select(peerId: string) {
+      openGeneration += 1;
+      return selectPeer(peerId);
+    },
+    async open(result: TelegramPeerSearchResult) {
+      const generation = ++openGeneration;
+      await runEffect(source.addPeer(result));
+      if (generation !== openGeneration) return false;
+      return selectPeer(result.peer.id);
+    },
+    details: (peerId: string) => runEffect(source.getUserDetails(dialog(peerId).peer)),
+    setMuted: (peerId: string, muted: boolean) =>
+      runEffect(source.setMuted(dialog(peerId).peer, muted)),
+    setBlocked: (peerId: string, blocked: boolean) =>
+      runEffect(source.setBlocked(dialog(peerId).peer, blocked)),
+    setPinned: (peerId: string, pinned: boolean) =>
+      runEffect(source.setPinnedDialog(dialog(peerId).peer, pinned)),
+    setArchived: (peerId: string, archived: boolean) =>
+      runEffect(source.setArchived(dialog(peerId).peer, archived)),
+    delete: (peerId: string, action: TelegramDeleteDialogAction) =>
+      runEffect(source.deleteDialog(dialog(peerId).peer, action)),
+  };
 }
+
+export type ChatDirectory = ReturnType<typeof createChatDirectory>;

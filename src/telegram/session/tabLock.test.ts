@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Effect } from 'effect';
 
-import { acquireSingleTabLease, TabLockUnsupportedError } from './tabLock';
+import { acquireSingleTabLease } from './tabLock';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -8,28 +9,32 @@ afterEach(() => {
 });
 
 describe('acquireSingleTabLease', () => {
+  const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
+
   it('fails closed when Web Locks are unavailable in a browser', async () => {
     vi.stubGlobal('window', {});
     vi.stubGlobal('navigator', {});
 
-    await expect(acquireSingleTabLease()).rejects.toThrow(TabLockUnsupportedError);
-    await expect(acquireSingleTabLease()).rejects.toThrow('safe single-tab sync');
+    const result = await run(acquireSingleTabLease().pipe(Effect.result));
+    expect(result).toMatchObject({
+      _tag: 'Failure',
+      failure: {
+        _tag: 'TabLockUnsupportedError',
+        message: expect.stringContaining('safe single-tab sync'),
+      },
+    });
   });
 
   it('uses a no-op lease outside a browser where multiple tabs cannot exist', async () => {
     vi.stubGlobal('window', undefined);
     vi.stubGlobal('navigator', undefined);
 
-    const lease = await acquireSingleTabLease();
+    const lease = await run(acquireSingleTabLease());
     expect(lease).toBeDefined();
-    expect(() => lease?.release()).not.toThrow();
+    if (lease) await run(lease.release);
   });
 
-  it('shares one document lease and releases the browser lock after the last reference', async () => {
-    const browserWindow: {
-      __televechaTabLease?: unknown;
-      __televechaTabLeasePending?: unknown;
-    } = {};
+  it('releases the browser lock through the Effect lease', async () => {
     let browserLockReleased = false;
     const request = vi.fn(
       async (_name: string, _options: unknown, callback: (lock: object) => Promise<void>) => {
@@ -37,22 +42,18 @@ describe('acquireSingleTabLease', () => {
         browserLockReleased = true;
       },
     );
-    vi.stubGlobal('window', browserWindow);
+    vi.stubGlobal('window', {});
     vi.stubGlobal('navigator', { locks: { request } });
 
-    const first = await acquireSingleTabLease();
-    const second = await acquireSingleTabLease();
+    const first = await run(acquireSingleTabLease());
     expect(request).toHaveBeenCalledTimes(1);
 
-    first?.release();
-    await Promise.resolve();
-    expect(browserLockReleased).toBe(false);
-    second?.release();
+    if (first) await run(first.release);
     await vi.waitFor(() => expect(browserLockReleased).toBe(true));
 
-    const third = await acquireSingleTabLease();
+    const second = await run(acquireSingleTabLease());
     expect(request).toHaveBeenCalledTimes(2);
-    third?.release();
+    if (second) await run(second.release);
   });
 
   it('returns no lease after another tab rejects both lock attempts', async () => {
@@ -63,7 +64,7 @@ describe('acquireSingleTabLease', () => {
     vi.stubGlobal('window', {});
     vi.stubGlobal('navigator', { locks: { request } });
 
-    await expect(acquireSingleTabLease()).resolves.toBeUndefined();
+    await expect(run(acquireSingleTabLease())).resolves.toBeUndefined();
     expect(request).toHaveBeenCalledTimes(2);
   });
 
@@ -72,9 +73,14 @@ describe('acquireSingleTabLease', () => {
     vi.stubGlobal('window', {});
     vi.stubGlobal('navigator', { locks: { request } });
 
-    const acquisition = acquireSingleTabLease();
-    await expect(acquisition).rejects.toThrow(TabLockUnsupportedError);
-    await expect(acquisition).rejects.toThrow('locks disabled');
+    const acquisition = await run(acquireSingleTabLease().pipe(Effect.result));
+    expect(acquisition).toMatchObject({
+      _tag: 'Failure',
+      failure: {
+        _tag: 'TabLockUnsupportedError',
+        message: expect.stringContaining('locks disabled'),
+      },
+    });
     expect(request).toHaveBeenCalledOnce();
   });
 });

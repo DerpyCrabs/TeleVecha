@@ -98,8 +98,10 @@ export function SearchPanel(props: SearchPanelProps) {
     setSubmitted(false);
   };
 
-  const title = (peerId: string) =>
-    props.dialogs.find(({ peer }) => peer.id === peerId)?.title ?? peerId;
+  const title = (message: TelegramMessage) =>
+    props.dialogs.find(({ peer }) => peer.id === message.peerId)?.title ??
+    message.peerTitle ??
+    message.peerId;
 
   return (
     <Portal>
@@ -193,7 +195,7 @@ export function SearchPanel(props: SearchPanelProps) {
                     class="grid w-full gap-[0.2rem] rounded-[0.6rem] border-0 bg-transparent p-[0.65rem] text-left text-ink hover:bg-white/5 [&>span]:text-[0.78rem] [&>span]:text-muted"
                     onClick={() => props.openResult(message)}
                   >
-                    <strong>{title(message.peerId)}</strong>
+                    <strong>{title(message)}</strong>
                     <span>{message.text || message.media?.name || 'Message'}</span>
                   </button>
                 )}

@@ -1,5 +1,7 @@
+import { Effect, Schedule } from 'effect';
+
 import { bytesToBigInt, concatBytes, modPow, bigIntToBytes } from '../bytes';
-import { aesIgeEncrypt, type CryptoAdapter } from '../crypto';
+import { aesIgeEncrypt, randomBytes, sha256 } from '../crypto';
 import { createMtprotoError } from '../errors';
 
 export interface TelegramRsaKey {
@@ -43,57 +45,36 @@ export function findTelegramRsaKey(fingerprints: readonly bigint[]) {
   return undefined;
 }
 
-export async function encryptRsaPaddedInnerData(
+export const encryptRsaPaddedInnerData = Effect.fn('mtproto.auth.rsaEncrypt')(function* (
   innerData: Uint8Array,
   key: TelegramRsaKey,
-  crypto: Pick<CryptoAdapter, 'randomBytes' | 'sha256'>,
   maximumAttempts = 20,
 ) {
   if (innerData.byteLength > 144) {
-    throw createMtprotoError('protocol', 'PQ inner data exceeds the secure RSA payload limit.');
+    return yield* Effect.fail(
+      createMtprotoError('protocol', 'PQ inner data exceeds the secure RSA payload limit.'),
+    );
   }
   if (!Number.isSafeInteger(maximumAttempts) || maximumAttempts <= 0) {
-    throw new RangeError('RSA attempt limit must be a positive safe integer.');
-  }
-  const data = concatBytes(
-    innerData,
-    requireLength(
-      crypto.randomBytes(192 - innerData.byteLength),
-      192 - innerData.byteLength,
-      'RSA padding',
-    ),
-  );
-  const reversed = new Uint8Array(data).reverse();
-
-  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
-    const temporaryKey = requireLength(crypto.randomBytes(32), 32, 'RSA temporary AES key');
-    const hash = requireLength(
-      await crypto.sha256(concatBytes(temporaryKey, data)),
-      32,
-      'SHA-256 digest',
+    return yield* Effect.fail(
+      createMtprotoError('configuration', 'RSA attempt limit must be a positive safe integer.'),
     );
+  }
+  const data = concatBytes(innerData, yield* randomBytes(192 - innerData.byteLength));
+  const reversed = new Uint8Array(data).reverse();
+  return yield* Effect.gen(function* () {
+    const temporaryKey = yield* randomBytes(32);
+    const hash = yield* sha256(concatBytes(temporaryKey, data));
     const encrypted = aesIgeEncrypt(temporaryKey, new Uint8Array(32), concatBytes(reversed, hash), {
       padding: 'none',
     });
-    const keyMask = requireLength(await crypto.sha256(encrypted), 32, 'SHA-256 digest');
-    const maskedKey = new Uint8Array(32);
-    for (let index = 0; index < maskedKey.byteLength; index += 1) {
-      maskedKey[index] = temporaryKey[index]! ^ keyMask[index]!;
-    }
-    const payload = concatBytes(maskedKey, encrypted);
-    const numericPayload = bytesToBigInt(payload);
-    if (numericPayload >= key.modulus) continue;
-    return bigIntToBytes(modPow(numericPayload, key.exponent, key.modulus), 256);
-  }
-  throw createMtprotoError('crypto', 'Could not produce an RSA payload below the server modulus.');
-}
-
-function requireLength(bytes: Uint8Array, expected: number, label: string) {
-  if (bytes.byteLength !== expected) {
-    throw createMtprotoError(
-      'crypto',
-      `${label} must contain ${expected} bytes, received ${bytes.byteLength}.`,
-    );
-  }
-  return bytes;
-}
+    const keyMask = yield* sha256(encrypted);
+    const maskedKey = Uint8Array.from(temporaryKey, (byte, index) => byte ^ keyMask[index]!);
+    const numericPayload = bytesToBigInt(concatBytes(maskedKey, encrypted));
+    return yield* numericPayload < key.modulus
+      ? Effect.succeed(bigIntToBytes(modPow(numericPayload, key.exponent, key.modulus), 256))
+      : Effect.fail(
+          createMtprotoError('crypto', 'Generated an RSA payload above the server modulus.'),
+        );
+  }).pipe(Effect.retry(Schedule.recurs(maximumAttempts - 1)));
+});

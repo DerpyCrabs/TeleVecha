@@ -26,6 +26,7 @@ export declare namespace Tl {
     | Tl.auth.LogOut
     | Tl.auth.SendCode
     | Tl.auth.SignIn
+    | Tl.channels.DeleteChannel
     | Tl.channels.DeleteMessages
     | Tl.channels.GetChannels
     | Tl.channels.GetFullChannel
@@ -43,6 +44,7 @@ export declare namespace Tl {
     | Tl.folders.EditPeerFolders
     | Tl.help.GetConfig
     | Tl.messages.AcceptUrlAuth
+    | Tl.messages.DeleteChat
     | Tl.messages.DeleteChatUser
     | Tl.messages.DeleteHistory
     | Tl.messages.DeleteMessages
@@ -58,6 +60,7 @@ export declare namespace Tl {
     | Tl.messages.GetInlineBotResults
     | Tl.messages.GetMessages
     | Tl.messages.GetPeerDialogs
+    | Tl.messages.GetPinnedDialogs
     | Tl.messages.GetRecentStickers
     | Tl.messages.GetSavedGifs
     | Tl.messages.GetSearchCounters
@@ -7603,6 +7606,12 @@ export declare namespace Tl {
     export type ChannelParticipantsNotModified =
       TlObject<'channels.channelParticipantsNotModified'> & ChannelParticipantsNotModifiedFields;
     export type ChannelParticipantsNotModifiedFields = Readonly<Record<never, never>>;
+    export type DeleteChannel = TlObject<'channels.deleteChannel'> &
+      DeleteChannelFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type DeleteChannelFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+    }>;
     export type DeleteMessages = TlObject<'channels.deleteMessages'> &
       DeleteMessagesFields &
       TlRequest<Tl.messages.TypeAffectedMessages>;
@@ -7824,6 +7833,12 @@ export declare namespace Tl {
       count: number;
       chats: readonly Tl.TypeChat[];
     }>;
+    export type DeleteChat = TlObject<'messages.deleteChat'> &
+      DeleteChatFields &
+      TlRequest<boolean>;
+    export type DeleteChatFields = Readonly<{
+      chatId: bigint;
+    }>;
     export type DeleteChatUser = TlObject<'messages.deleteChatUser'> &
       DeleteChatUserFields &
       TlRequest<Tl.TypeUpdates>;
@@ -8011,6 +8026,12 @@ export declare namespace Tl {
       TlRequest<Tl.messages.TypePeerDialogs>;
     export type GetPeerDialogsFields = Readonly<{
       peers: readonly Tl.TypeInputDialogPeer[];
+    }>;
+    export type GetPinnedDialogs = TlObject<'messages.getPinnedDialogs'> &
+      GetPinnedDialogsFields &
+      TlRequest<Tl.messages.TypePeerDialogs>;
+    export type GetPinnedDialogsFields = Readonly<{
+      folderId: number;
     }>;
     export type GetRecentStickers = TlObject<'messages.getRecentStickers'> &
       GetRecentStickersFields &

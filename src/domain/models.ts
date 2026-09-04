@@ -25,6 +25,7 @@ export type MessageStatus = 'sending' | 'sent' | 'read' | 'failed';
 
 export interface ChatMessage {
   id: string;
+  peerId?: string | undefined;
   author: string;
   senderId?: string | undefined;
   senderHasAvatar?: boolean | undefined;
@@ -105,11 +106,26 @@ export interface ChatMessage {
   linkPreview?:
     | {
         url: string;
+        webPageId?: string | undefined;
+        type?: string | undefined;
+        hasEmbed?: boolean | undefined;
         siteName?: string | undefined;
         title?: string | undefined;
         description?: string | undefined;
         hasPhoto?: boolean | undefined;
         photoSize?: 'small' | 'large' | undefined;
+        media?:
+          | {
+              kind: 'video' | 'animation';
+              name: string;
+              mimeType: string;
+              size?: number | undefined;
+              width?: number | undefined;
+              height?: number | undefined;
+              duration?: number | undefined;
+              cacheKey?: string | undefined;
+            }
+          | undefined;
       }
     | undefined;
   formats?:

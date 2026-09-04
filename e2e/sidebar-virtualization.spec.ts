@@ -1,8 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import type { EngineSnapshot, TelegramDialog } from '../src/telegram/types';
-import { openReady } from './helpers';
-
+import type { TelegramDialog } from '../src/telegram/types';
 test('virtualizes a complete dialog list and reuses avatar observation', async ({ page }) => {
   await page.addInitScript(() => {
     const NativeIntersectionObserver = window.IntersectionObserver;
@@ -15,15 +13,25 @@ test('virtualizes a complete dialog list and reuses avatar observation', async (
     }
     window.IntersectionObserver = CountingIntersectionObserver;
   });
-  await openReady(page);
+  await page.goto('/?scenario=held-connect');
+  await expect(page.getByText('Connecting to Telegram')).toBeVisible();
+  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+  await expect(page.getByText('Connecting to Telegram')).toHaveCount(0);
+  await expect(page.getByTestId('chat-list')).toBeVisible();
   const observersBefore =
     (await page.evaluate(() => window.__intersectionObserverConstructions)) ?? 0;
 
-  await page.evaluate(() => {
-    const engine = window.__televechaRuntimes?.get('fixture:default')?.engine;
-    if (!engine) throw new Error('Fixture engine is unavailable');
-    const current = engine.snapshot();
-    const template = current.dialogs[0];
+  await page.evaluate(async () => {
+    const opened = indexedDB.open('televecha-e2e-held-connect');
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      opened.onsuccess = () => resolve(opened.result);
+      opened.onerror = () => reject(opened.error);
+    });
+    const template = await new Promise<TelegramDialog | undefined>((resolve, reject) => {
+      const request = database.transaction('dialogs').objectStore('dialogs').getAll();
+      request.onsuccess = () => resolve((request.result as TelegramDialog[])[0]);
+      request.onerror = () => reject(request.error);
+    });
     if (!template) throw new Error('Fixture dialog is unavailable');
     const synthetic: TelegramDialog[] = Array.from({ length: 1_997 }, (_, index) => ({
       ...template,
@@ -37,16 +45,21 @@ test('virtualizes a complete dialog list and reuses avatar observation', async (
         peerId: `u:virtual-${index}`,
         senderId: `u:virtual-${index}`,
         text: `Virtual preview ${index + 1}`,
-        date: 1_600_000_000 + index,
+        date: 1_600_000_000 - index,
         outgoing: false,
       },
     }));
-    (
-      engine as unknown as {
-        patch(next: Partial<EngineSnapshot>): void;
-      }
-    ).patch({ dialogs: [...current.dialogs, ...synthetic] });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('dialogs', 'readwrite');
+      const store = transaction.objectStore('dialogs');
+      for (const dialog of synthetic) store.put(dialog);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
   });
+  await page.goto('/?scenario=held-connect');
+  await expect(page.getByTestId('chat-list')).toBeVisible();
 
   const list = page.getByTestId('chat-list');
   const rows = list.locator('.chat-row');

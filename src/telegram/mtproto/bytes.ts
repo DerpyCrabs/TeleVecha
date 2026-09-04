@@ -11,10 +11,6 @@ export function concatBytes(...parts: readonly Uint8Array[]) {
   return result;
 }
 
-export function copyBytes(bytes: Uint8Array) {
-  return new Uint8Array(bytes);
-}
-
 export function xorBytes(left: Uint8Array, right: Uint8Array) {
   if (left.byteLength !== right.byteLength) {
     throw new RangeError('Byte arrays must have the same length.');

@@ -33,6 +33,22 @@ test('opens a chat at the first unread message instead of the latest message', a
   await expect(scroller.getByText('Unread messages')).toBeVisible();
 });
 
+test('opens a chat with one unread message at the end of the conversation', async ({ page }) => {
+  await openReady(page, '/?scenario=single-unread');
+  await chatButton(page, /Alice Fixture/).click();
+
+  const scroller = page.getByTestId('message-scroller');
+  await expect(page.locator('article[data-message-id="80"]')).toBeVisible();
+  await expect
+    .poll(() =>
+      scroller.evaluate(
+        (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+      ),
+    )
+    .toBeLessThanOrEqual(2);
+  await expect(page.getByRole('button', { name: 'Jump to present' })).toHaveCount(0);
+});
+
 test('removes the unread divider after replying from the unread section', async ({ page }) => {
   await openReady(page, '/?scenario=unread-history');
   await chatButton(page, /Long History/).click();

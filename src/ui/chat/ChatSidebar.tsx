@@ -24,12 +24,12 @@ import {
 import type { ChatSummary } from '../../domain/models';
 import type { TelegramPeerSearchResult, TelegramUserDetails } from '../../telegram/types';
 import type { SidebarLayout } from '../app/sidebarLayout';
-import { MediaAssets } from '../media/mediaAssets';
+import type { MediaAssets } from '../media/mediaAssets';
 import { Avatar } from '../shared/Avatar';
-import { ChatDirectory } from './chatDirectory';
+import type { ChatDirectory } from './chatDirectory';
 import { describeUnreadCount, formatUnreadCount, normalizeUnreadCount } from './unreadCount';
 
-type ChatFilter = 'all' | 'unread' | 'groups';
+type ChatFilter = 'all' | 'unread' | 'groups' | 'archived';
 
 const CHAT_ROW_HEIGHT = 64;
 const CHAT_LIST_OVERSCAN = 8;
@@ -80,10 +80,12 @@ interface ChatSidebarProps {
 }
 
 export function ChatSidebar(props: ChatSidebarProps) {
+  const runInBackground = (task: Promise<unknown>) => {
+    void task.catch(() => undefined);
+  };
   const compact = () => props.layout.compact() && !props.layout.mobileOpen();
   const [query, setQuery] = createSignal('');
   const [filter, setFilter] = createSignal<ChatFilter>('all');
-  const [archiveOpen, setArchiveOpen] = createSignal(false);
   const [peerResults, setPeerResults] = createSignal<TelegramPeerSearchResult[]>([]);
   const [searchingPeers, setSearchingPeers] = createSignal(false);
   const [peerSearchFailed, setPeerSearchFailed] = createSignal(false);
@@ -103,6 +105,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
     url.searchParams.set('chat', peerId);
     return `${url.pathname}${url.search}${url.hash}`;
   };
+  const archiveOpen = () => filter() === 'archived';
   const archivedChats = createMemo(() => props.chats.filter((chat) => chat.archived));
   const archivedUnreadCount = createMemo(() =>
     archivedChats().reduce((total, chat) => total + normalizeUnreadCount(chat.unread), 0),
@@ -117,11 +120,12 @@ export function ChatSidebar(props: ChatSidebarProps) {
       const matchesQuery =
         !term ||
         `${chat.title} ${chat.username ?? ''} ${chat.preview}`.toLocaleLowerCase().includes(term);
-      const matchesArchive = archiveOpen() ? Boolean(chat.archived) : term ? true : !chat.archived;
+      const matchesArchive = archiveOpen() ? Boolean(chat.archived) : !chat.archived;
       const matchesFilter =
         filter() === 'all' ||
         (filter() === 'unread' && chat.unread > 0) ||
-        (filter() === 'groups' && chat.kind === 'group');
+        (filter() === 'groups' && chat.kind === 'group') ||
+        filter() === 'archived';
       return matchesQuery && matchesArchive && matchesFilter;
     });
   });
@@ -137,12 +141,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
   const virtualRange = createMemo(() => {
     const count = filteredChats().length;
     if (count <= CHAT_LIST_VIRTUALIZATION_THRESHOLD) return { start: 0, end: count };
-    const archiveOffset =
-      !archiveOpen() && !query().trim() && filter() === 'all' && archivedChats().length > 0
-        ? CHAT_ROW_HEIGHT
-        : 0;
-    const localScrollTop = Math.max(0, listScrollTop() - archiveOffset);
-    const start = Math.max(0, Math.floor(localScrollTop / CHAT_ROW_HEIGHT) - CHAT_LIST_OVERSCAN);
+    const start = Math.max(0, Math.floor(listScrollTop() / CHAT_ROW_HEIGHT) - CHAT_LIST_OVERSCAN);
     const visibleCount = Math.ceil(listViewportHeight() / CHAT_ROW_HEIGHT);
     return {
       start,
@@ -185,12 +184,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
             rendered.scrollIntoView({ block: 'nearest' });
             return;
           }
-          const archiveOffset =
-            !archiveOpen() && !query().trim() && filter() === 'all' && archivedChats().length > 0
-              ? CHAT_ROW_HEIGHT
-              : 0;
           const centeredTop =
-            archiveOffset +
             index * CHAT_ROW_HEIGHT -
             Math.max(0, (chatListElement.clientHeight - CHAT_ROW_HEIGHT) / 2);
           chatListElement.scrollTop = Math.max(0, centeredTop);
@@ -203,11 +197,11 @@ export function ChatSidebar(props: ChatSidebarProps) {
   createEffect(
     on(
       () => [query().trim(), props.online, archiveOpen(), filter(), peerSearchRetry()] as const,
-      ([term, online, archived, selectedFilter]) => {
+      ([term, _online, archived, selectedFilter]) => {
         const generation = ++peerSearchGeneration;
         setPeerResults([]);
         setPeerSearchFailed(false);
-        if (!term || !online || archived || selectedFilter === 'unread') {
+        if (!term || archived || selectedFilter === 'unread') {
           setSearchingPeers(false);
           return;
         }
@@ -263,7 +257,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
       classList={{
         compact: compact(),
         'mobile-open': props.layout.mobileOpen(),
-        'archive-open': archiveOpen(),
       }}
       data-testid="chat-sidebar"
       data-compact={compact() ? 'true' : 'false'}
@@ -283,12 +276,12 @@ export function ChatSidebar(props: ChatSidebarProps) {
           '!justify-center !px-0': compact() && archiveOpen(),
         }}
       >
-        <Show when={archiveOpen()}>
+        <Show when={compact() && archiveOpen()}>
           <button
             class="icon-button shrink-0"
             aria-label="Back to chats"
             onClick={() => {
-              setArchiveOpen(false);
+              setFilter('all');
               setQuery('');
             }}
           >
@@ -310,13 +303,21 @@ export function ChatSidebar(props: ChatSidebarProps) {
       </header>
 
       <div
-        class="chat-filters flex items-center gap-2 px-4 pb-3 text-xs font-medium text-muted"
+        class="chat-filters flex items-center gap-2 overflow-x-auto px-4 pb-3 text-xs font-medium text-muted"
         classList={{ hidden: compact() }}
+        onWheel={(event) => {
+          const delta =
+            Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+          if (delta === 0) return;
+          const before = event.currentTarget.scrollLeft;
+          event.currentTarget.scrollLeft += delta;
+          if (event.currentTarget.scrollLeft !== before) event.preventDefault();
+        }}
       >
-        <For each={['all', 'unread', 'groups'] as const}>
+        <For each={['all', 'unread', 'groups', 'archived'] as const}>
           {(value) => (
             <button
-              class="rounded-full px-3 py-1.5"
+              class="shrink-0 rounded-full px-3 py-1.5"
               classList={{
                 'bg-[var(--accent-soft)] text-[var(--accent)]': filter() === value,
                 'hover:bg-white/5': filter() !== value,
@@ -324,11 +325,35 @@ export function ChatSidebar(props: ChatSidebarProps) {
               aria-pressed={filter() === value}
               onClick={() => setFilter(value)}
             >
-              {value === 'all' ? 'All' : value === 'unread' ? 'Unread' : 'Groups'}
+              {value === 'all'
+                ? 'All'
+                : value === 'unread'
+                  ? 'Unread'
+                  : value === 'groups'
+                    ? 'Groups'
+                    : 'Archived'}
             </button>
           )}
         </For>
       </div>
+
+      <Show when={compact() && filter() === 'all' && archivedChats().length > 0}>
+        <button
+          class="chat-row archived-chats-row relative flex h-16 w-full items-center justify-center border-0 bg-transparent py-[0.55rem] text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
+          aria-label={`Archived chats, ${archivedChats().length} ${
+            archivedChats().length === 1 ? 'chat' : 'chats'
+          }${archivedUnreadCount() > 0 ? `, ${describeUnreadCount(archivedUnreadCount())}` : ''}`}
+          onClick={() => {
+            setFilter('archived');
+            setContextMenu(undefined);
+          }}
+        >
+          <div class="grid size-[2.65rem] shrink-0 place-items-center rounded-full bg-[color-mix(in_srgb,var(--accent)_82%,#26303b)] text-white">
+            <Archive size={19} />
+          </div>
+          <UnreadBadge count={archivedUnreadCount()} muted={archivedUnreadMuted()} compact />
+        </button>
+      </Show>
 
       <div
         ref={(element) => (chatListElement = element)}
@@ -340,41 +365,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
           setContextMenu(undefined);
         }}
       >
-        <Show
-          when={
-            !archiveOpen() && !query().trim() && filter() === 'all' && archivedChats().length > 0
-          }
-        >
-          <button
-            class="chat-row archived-chats-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
-            classList={{
-              '!justify-center !gap-0 !rounded-none !px-0 !py-[0.55rem]': compact(),
-            }}
-            aria-label={`Archived chats, ${archivedChats().length} ${
-              archivedChats().length === 1 ? 'chat' : 'chats'
-            }${archivedUnreadCount() > 0 ? `, ${describeUnreadCount(archivedUnreadCount())}` : ''}`}
-            onClick={() => {
-              setArchiveOpen(true);
-              setContextMenu(undefined);
-            }}
-          >
-            <div class="grid size-[2.65rem] shrink-0 place-items-center rounded-full bg-[color-mix(in_srgb,var(--accent)_82%,#26303b)] text-white">
-              <Archive size={19} />
-            </div>
-            <Show when={compact()}>
-              <UnreadBadge count={archivedUnreadCount()} muted={archivedUnreadMuted()} compact />
-            </Show>
-            <span class="min-w-0 flex-1 text-left" classList={{ hidden: compact() }}>
-              <span class="block text-[14px] font-semibold">Archived chats</span>
-              <span class="mt-1 block truncate text-[13px] text-[var(--muted)]">
-                {archivedChats().length} {archivedChats().length === 1 ? 'chat' : 'chats'}
-              </span>
-            </span>
-            <Show when={!compact()}>
-              <UnreadBadge count={archivedUnreadCount()} muted={archivedUnreadMuted()} />
-            </Show>
-          </button>
-        </Show>
         <Show when={virtualRange().start > 0}>
           <div
             aria-hidden="true"
@@ -405,14 +395,14 @@ export function ChatSidebar(props: ChatSidebarProps) {
                 }
                 event.preventDefault();
                 setContextMenu(undefined);
-                void props.directory.select(chat.id);
+                runInBackground(props.directory.select(chat.id));
                 props.layout.setMobileOpen(false);
               }}
               onKeyDown={(event) => {
                 if (event.key !== ' ') return;
                 event.preventDefault();
                 setContextMenu(undefined);
-                void props.directory.select(chat.id);
+                runInBackground(props.directory.select(chat.id));
                 props.layout.setMobileOpen(false);
               }}
               onContextMenu={(event) => {
@@ -509,8 +499,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
                 aria-label={`${result.title}, ${result.category}`}
                 onClick={() => {
                   setQuery('');
-                  setArchiveOpen(false);
-                  void props.directory.open(result);
+                  runInBackground(props.directory.open(result));
                   props.layout.setMobileOpen(false);
                 }}
               >
@@ -591,7 +580,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
                   onClick={() => {
                     const selected = chat();
                     setContextMenu(undefined);
-                    if (selected) void props.directory.setMuted(selected.id, !selected.muted);
+                    if (selected)
+                      runInBackground(props.directory.setMuted(selected.id, !selected.muted));
                   }}
                 >
                   <BellOff size={16} />
@@ -602,7 +592,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
                   onClick={() => {
                     const selected = chat();
                     setContextMenu(undefined);
-                    if (selected) void props.directory.setPinned(selected.id, !selected.pinned);
+                    if (selected)
+                      runInBackground(props.directory.setPinned(selected.id, !selected.pinned));
                   }}
                 >
                   {chat()?.pinned ? <PinOff size={16} /> : <Pin size={16} />}
@@ -613,7 +604,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
                   onClick={() => {
                     const selected = chat();
                     setContextMenu(undefined);
-                    if (selected) void props.directory.setArchived(selected.id, !selected.archived);
+                    if (selected)
+                      runInBackground(props.directory.setArchived(selected.id, !selected.archived));
                   }}
                 >
                   {chat()?.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
@@ -628,7 +620,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
                       const details = contextUser();
                       setContextMenu(undefined);
                       if (selected && details)
-                        void props.directory.setBlocked(selected.id, !details.blocked);
+                        runInBackground(props.directory.setBlocked(selected.id, !details.blocked));
                     }}
                   >
                     <Ban size={16} />

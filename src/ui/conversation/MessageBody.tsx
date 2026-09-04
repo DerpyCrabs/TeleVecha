@@ -196,6 +196,7 @@ function Part(props: { part: TextPart }) {
 export function MessageBody(props: {
   message: ChatMessage;
   loadPreviewPhoto?: (() => Promise<string>) | undefined;
+  loadPreviewMedia?: (() => Promise<string>) | undefined;
 }) {
   return (
     <>
@@ -210,7 +211,13 @@ export function MessageBody(props: {
         {(rich) => <RichMessageBody blocks={rich().blocks} rtl={rich().rtl} />}
       </Show>
       <Show when={props.message.linkPreview}>
-        {(preview) => <LinkPreview preview={preview()} loadPhoto={props.loadPreviewPhoto} />}
+        {(preview) => (
+          <LinkPreview
+            preview={preview()}
+            loadPhoto={props.loadPreviewPhoto}
+            loadMedia={props.loadPreviewMedia}
+          />
+        )}
       </Show>
     </>
   );

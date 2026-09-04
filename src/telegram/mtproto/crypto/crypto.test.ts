@@ -1,20 +1,22 @@
 import { describe, expect, it } from 'vitest';
+import { BrowserCrypto } from '@effect/platform-browser';
+import { Effect } from 'effect';
 
 import { bytesToHex, hexToBytes, utf8Bytes } from '../bytes';
-import { aesIgeDecrypt, aesIgeEncrypt, createAesCtr, createBrowserCryptoAdapter } from './index';
+import { aesIgeDecrypt, aesIgeEncrypt, createAesCtr, pbkdf2Sha512, sha1, sha256 } from './index';
 
 describe('MTProto cryptography', () => {
-  const crypto = createBrowserCryptoAdapter();
-
   it('matches SHA and PBKDF2 published vectors', async () => {
-    await expect(crypto.sha1(utf8Bytes('abc')).then(bytesToHex)).resolves.toBe(
+    const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Effect.runPromise(effect.pipe(Effect.provide(BrowserCrypto.layer)) as Effect.Effect<A, E>);
+    await expect(run(sha1(utf8Bytes('abc'))).then(bytesToHex)).resolves.toBe(
       'a9993e364706816aba3e25717850c26c9cd0d89d',
     );
-    await expect(crypto.sha256(utf8Bytes('abc')).then(bytesToHex)).resolves.toBe(
+    await expect(run(sha256(utf8Bytes('abc'))).then(bytesToHex)).resolves.toBe(
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
     );
     await expect(
-      crypto.pbkdf2Sha512(utf8Bytes('password'), utf8Bytes('salt'), 1, 512).then(bytesToHex),
+      run(pbkdf2Sha512(utf8Bytes('password'), utf8Bytes('salt'), 1, 512)).then(bytesToHex),
     ).resolves.toBe(
       '867f70cf1ade02cff3752599a3a53dc4af34c7a669815ae5d513554e1c8cf252' +
         'c02d470a285a0501bad999bfe943c08f050235d7d68b1da55e63f73b60a57fce',

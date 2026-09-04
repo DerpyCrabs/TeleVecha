@@ -1,75 +1,146 @@
+import { Deferred, Effect, Fiber, Scope } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ResourceCache } from './resourceCache';
+import { makeResourceCache } from './resourceCache';
+
+const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
+  Effect.runPromise(Effect.scoped(effect));
 
 describe('ResourceCache', () => {
-  it('coalesces concurrent loads and releases the request afterward', async () => {
-    const cache = new ResourceCache();
-    const loader = vi.fn(async () => new Blob(['media']));
+  it('coalesces concurrent loads and releases the request afterward', () =>
+    run(
+      Effect.gen(function* () {
+        const cache = yield* makeResourceCache();
+        const release = yield* Deferred.make<Blob>();
+        const loader = vi.fn(() => Deferred.await(release));
+        const firstLoad = yield* cache
+          .load('media:1', loader)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        const secondLoad = yield* cache
+          .load('media:1', loader)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        const value = new Blob(['media']);
+        yield* Deferred.succeed(release, value);
+        const [first, second] = yield* Effect.all([Fiber.join(firstLoad), Fiber.join(secondLoad)]);
+        expect(first).toBe(second);
+        expect(loader).toHaveBeenCalledOnce();
+        yield* cache.load('media:1', loader);
+        expect(loader).toHaveBeenCalledTimes(2);
+      }),
+    ));
 
-    const [first, second] = await Promise.all([
-      cache.load('media:1', loader),
-      cache.load('media:1', loader),
-    ]);
+  it('exposes pending work without exposing its request registry', () =>
+    run(
+      Effect.gen(function* () {
+        const release = yield* Deferred.make<void>();
+        const cache = yield* makeResourceCache();
+        const loading = yield* cache
+          .load('read-receipt:u:1', () => Deferred.await(release))
+          .pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        expect(cache.pending('read-receipt:u:1')).toBe(true);
+        expect(cache.pendingWithPrefix('read-receipt:')).toHaveLength(1);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(loading);
+        expect(cache.pending('read-receipt:u:1')).toBe(false);
+      }),
+    ));
 
-    expect(first).toBe(second);
-    expect(loader).toHaveBeenCalledOnce();
-    await cache.load('media:1', loader);
-    expect(loader).toHaveBeenCalledTimes(2);
-  });
+  it('invalidates versions and selected in-flight keys together', () =>
+    run(
+      Effect.gen(function* () {
+        const cache = yield* makeResourceCache();
+        const loader = vi.fn(() => Effect.succeed({ theme: 'night' }));
+        expect(yield* cache.cached('appearance:1', loader)).toEqual({ theme: 'night' });
+        yield* cache.invalidate('message:1', 'media:old');
+        expect(cache.version('message:1')).toBe(1);
+        yield* cache.forget('appearance:1');
+        yield* cache.cached('appearance:1', loader);
+        expect(loader).toHaveBeenCalledTimes(2);
+      }),
+    ));
 
-  it('invalidates resource versions and selected in-flight keys together', async () => {
-    const cache = new ResourceCache();
-    const loader = vi.fn(async () => ({ theme: 'night' }));
-    await expect(cache.cached('appearance:1', loader)).resolves.toEqual({ theme: 'night' });
+  it('caches an explicit undefined value', () =>
+    run(
+      Effect.gen(function* () {
+        const cache = yield* makeResourceCache();
+        const loader = vi.fn(() => Effect.succeed(undefined));
+        expect(yield* cache.cached('appearance:missing', loader)).toBeUndefined();
+        expect(yield* cache.cached('appearance:missing', loader)).toBeUndefined();
+        expect(loader).toHaveBeenCalledOnce();
+      }),
+    ));
 
-    cache.invalidate('message:1', 'media:old');
+  it('does not retain failures', () =>
+    run(
+      Effect.gen(function* () {
+        const cache = yield* makeResourceCache();
+        const load = vi.fn(() => Effect.fail(new Error('download failed')));
+        const cached = vi.fn(() => Effect.fail(new Error('metadata failed')));
+        for (const operation of [
+          cache.load('media:failed', load),
+          cache.load('media:failed', load),
+          cache.cached('metadata:failed', cached),
+          cache.cached('metadata:failed', cached),
+        ]) {
+          expect((yield* Effect.result(operation))._tag).toBe('Failure');
+        }
+        expect(load).toHaveBeenCalledTimes(2);
+        expect(cached).toHaveBeenCalledTimes(2);
+      }),
+    ));
 
-    expect(cache.version('message:1')).toBe(1);
-    cache.forget('appearance:1');
-    await cache.cached('appearance:1', loader);
-    expect(loader).toHaveBeenCalledTimes(2);
-  });
+  it('does not let forgotten or cleared work restore stale data', () =>
+    run(
+      Effect.gen(function* () {
+        const cache = yield* makeResourceCache();
+        const stale = yield* Deferred.make<string>();
+        const first = yield* cache
+          .cached('appearance:1', () => Deferred.await(stale))
+          .pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        yield* cache.forget('appearance:1');
+        yield* Fiber.await(first);
+        expect(yield* cache.cached('appearance:1', () => Effect.succeed('fresh'))).toBe('fresh');
 
-  it('owns cached-value reuse, including an explicit undefined value', async () => {
-    const cache = new ResourceCache();
-    const loader = vi.fn(async () => undefined);
+        const oldAccount = yield* Deferred.make<string>();
+        const old = yield* cache
+          .cached('account-scoped', () => Deferred.await(oldAccount))
+          .pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        yield* cache.clear;
+        yield* Fiber.await(old);
+        expect(yield* cache.cached('account-scoped', () => Effect.succeed('new account'))).toBe(
+          'new account',
+        );
+      }),
+    ));
 
-    await expect(cache.cached('appearance:missing', loader)).resolves.toBeUndefined();
-    await expect(cache.cached('appearance:missing', loader)).resolves.toBeUndefined();
-
-    expect(loader).toHaveBeenCalledOnce();
-  });
-
-  it('does not let a forgotten in-flight load restore stale data', async () => {
-    let resolve!: (value: string) => void;
-    const stale = new Promise<string>((settle) => {
-      resolve = settle;
-    });
-    const cache = new ResourceCache();
-    const first = cache.cached('appearance:1', () => stale);
-
-    cache.forget('appearance:1');
-    resolve('stale');
-    await first;
-
-    await expect(cache.cached('appearance:1', async () => 'fresh')).resolves.toBe('fresh');
-  });
-
-  it('does not let an in-flight load repopulate the cache after clear', async () => {
-    let resolve!: (value: string) => void;
-    const stale = new Promise<string>((settle) => {
-      resolve = settle;
-    });
-    const cache = new ResourceCache();
-    const first = cache.cached('account-scoped', () => stale);
-
-    cache.clear();
-    resolve('old account');
-    await first;
-
-    await expect(cache.cached('account-scoped', async () => 'new account')).resolves.toBe(
-      'new account',
-    );
-  });
+  it('keeps a replacement request when an old finalizer completes', () =>
+    run(
+      Effect.gen(function* () {
+        const cache = yield* makeResourceCache();
+        const oldValue = yield* Deferred.make<string>();
+        const freshValue = yield* Deferred.make<string>();
+        const oldLoad = yield* cache
+          .load('media:1', () => Deferred.await(oldValue))
+          .pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        yield* cache.invalidate('message:1', 'media:1');
+        const freshLoader = vi.fn(() => Deferred.await(freshValue));
+        const freshLoad = yield* cache
+          .load('media:1', freshLoader)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Fiber.await(oldLoad);
+        const joinedFreshLoad = yield* cache
+          .load('media:1', freshLoader)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Deferred.succeed(freshValue, 'fresh');
+        expect(yield* Effect.all([Fiber.join(freshLoad), Fiber.join(joinedFreshLoad)])).toEqual([
+          'fresh',
+          'fresh',
+        ]);
+        expect(freshLoader).toHaveBeenCalledOnce();
+      }),
+    ));
 });

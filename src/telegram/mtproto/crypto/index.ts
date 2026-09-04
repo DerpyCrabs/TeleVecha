@@ -1,9 +1,2 @@
 export { aesIgeDecrypt, aesIgeEncrypt, createAesCtr, type AesCtr } from './aes';
-export {
-  browserCrypto,
-  createBrowserCryptoAdapter,
-  createCrypto,
-  sha1,
-  sha256,
-  type CryptoAdapter,
-} from './primitives';
+export { pbkdf2Sha512, randomBytes, sha1, sha256 } from './primitives';

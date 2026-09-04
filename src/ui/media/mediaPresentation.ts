@@ -26,7 +26,9 @@ export function mediaPresentation(media: TelegramMedia): MediaPresentation {
   return {
     display: 'file',
     ...(media.mimeType.startsWith('image/') ? { preview: 'image' as const } : {}),
-    preload: false,
+    // Telegram shows a thumbnail for image documents while keeping the document
+    // filename and download affordance. Only non-visual files stay lazy.
+    preload: media.mimeType.startsWith('image/'),
   };
 }
 

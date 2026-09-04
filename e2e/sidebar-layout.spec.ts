@@ -89,6 +89,36 @@ test('resizes the chat sidebar and restores its width after reload', async ({ pa
     .toBe(250);
 });
 
+test('keeps every chat filter reachable without a visible horizontal scrollbar', async ({
+  page,
+}) => {
+  const separator = page.getByRole('separator', { name: 'Resize chat list' });
+  await separator.focus();
+  for (let step = 0; step < 11; step += 1) await separator.press('ArrowLeft');
+
+  const filters = page.locator('.chat-filters');
+  await expect(filters).toBeVisible();
+  await expect
+    .poll(() =>
+      filters.evaluate((element) => ({
+        overflows: element.scrollWidth > element.clientWidth,
+        scrollbarWidth: getComputedStyle(element).scrollbarWidth,
+        webkitScrollbarDisplay: getComputedStyle(element, '::-webkit-scrollbar').display,
+      })),
+    )
+    .toEqual({ overflows: true, scrollbarWidth: 'none', webkitScrollbarDisplay: 'none' });
+
+  const filterBox = await filters.boundingBox();
+  if (!filterBox) throw new Error('Chat filters are not visible');
+  await page.mouse.move(filterBox.x + filterBox.width / 2, filterBox.y + filterBox.height / 2);
+  await page.mouse.wheel(0, 100);
+  await expect.poll(() => filters.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+
+  const archived = page.getByRole('button', { name: 'Archived', exact: true });
+  await archived.click();
+  await expect(archived).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('switches compact content while the resize pointer is still down', async ({ page }) => {
   const sidebar = page.getByTestId('chat-sidebar');
   const separator = page.getByRole('separator', { name: 'Resize chat list' });

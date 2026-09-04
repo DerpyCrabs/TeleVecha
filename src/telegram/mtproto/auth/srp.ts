@@ -9,7 +9,7 @@ import {
   utf8Bytes,
   xorBytes,
 } from '../bytes';
-import { browserCrypto, type CryptoAdapter } from '../crypto';
+import { pbkdf2Sha512, randomBytes, sha256 } from '../crypto';
 import { createMtprotoError } from '../errors';
 import { TELEGRAM_DH_PRIME, validateDhParameters } from './dh';
 
@@ -36,121 +36,122 @@ export interface InputCheckPasswordSrp {
   readonly M1: Uint8Array;
 }
 
-export async function computePasswordHash(
+export const computePasswordHash = Effect.fn('mtproto.auth.passwordHash')(function* (
   algorithm: PasswordKdfAlgorithm,
   password: string,
-  crypto: CryptoAdapter = browserCrypto(),
 ) {
-  const first = await crypto.sha256(
-    concatBytes(algorithm.salt1, utf8Bytes(password), algorithm.salt1),
-  );
-  const second = await crypto.sha256(concatBytes(algorithm.salt2, first, algorithm.salt2));
-  const stretched = await crypto.pbkdf2Sha512(second, algorithm.salt1, 100_000, 512);
-  return crypto.sha256(concatBytes(algorithm.salt2, stretched, algorithm.salt2));
-}
+  const first = yield* sha256(concatBytes(algorithm.salt1, utf8Bytes(password), algorithm.salt1));
+  const second = yield* sha256(concatBytes(algorithm.salt2, first, algorithm.salt2));
+  const stretched = yield* pbkdf2Sha512(second, algorithm.salt1, 100_000, 512);
+  return yield* sha256(concatBytes(algorithm.salt2, stretched, algorithm.salt2));
+});
 
-export async function computePasswordSrpCheck(
+export const computePasswordSrpCheck = Effect.fn('mtproto.auth.passwordSrpCheck')(function* (
   state: PasswordSrpState,
   password: string,
-  crypto: CryptoAdapter = browserCrypto(),
-): Promise<InputCheckPasswordSrp> {
+) {
   const algorithm = state.currentAlgo;
   if (!algorithm)
-    throw createMtprotoError('protocol', 'Telegram did not provide a password algorithm.');
-  validatePasswordAlgorithm(algorithm);
+    return yield* Effect.fail(
+      createMtprotoError('protocol', 'Telegram did not provide a password algorithm.'),
+    );
+  yield* validatePasswordAlgorithm(algorithm);
   if (!state.srpB || state.srpId === undefined) {
-    throw createMtprotoError('protocol', 'Telegram did not provide complete SRP state.');
+    return yield* Effect.fail(
+      createMtprotoError('protocol', 'Telegram did not provide complete SRP state.'),
+    );
   }
 
   const p = bytesToBigInt(algorithm.p);
   const B = bytesToBigInt(state.srpB);
-  if (B <= 0n || B >= p) throw createMtprotoError('protocol', 'SRP B is outside the modulus.');
+  if (B <= 0n || B >= p)
+    return yield* Effect.fail(createMtprotoError('protocol', 'SRP B is outside the modulus.'));
 
-  const passwordHash = await computePasswordHash(algorithm, password, crypto);
+  const passwordHash = yield* computePasswordHash(algorithm, password);
   const x = bytesToBigInt(passwordHash);
   const pBytes = paddedNumber(p);
   const gBytes = paddedNumber(BigInt(algorithm.g));
-  const bBytes = paddedBytes(state.srpB);
+  if (state.srpB.byteLength > HASH_NUMBER_BYTES) {
+    return yield* Effect.fail(
+      createMtprotoError('protocol', 'SRP number exceeds the modulus size.'),
+    );
+  }
+  const bBytes = concatBytes(new Uint8Array(HASH_NUMBER_BYTES - state.srpB.byteLength), state.srpB);
   const gX = modPow(BigInt(algorithm.g), x, p);
-  const k = bytesToBigInt(await crypto.sha256(concatBytes(pBytes, gBytes)));
+  const k = bytesToBigInt(yield* sha256(concatBytes(pBytes, gBytes)));
   const kgX = mod(k * gX, p);
 
-  const { privateValue, publicBytes, scrambling } = await generateClientValue(
+  const { privateValue, publicBytes, scrambling } = yield* generateClientValue(
     algorithm.g,
     p,
     bBytes,
-    crypto,
   );
   const adjustedServer = mod(B - kgX, p);
-  requireSafeModExp(adjustedServer, p, 'SRP g_b');
+  yield* requireSafeModExp(adjustedServer, p, 'SRP g_b');
   const sharedSecret = modPow(adjustedServer, privateValue + scrambling * x, p);
 
-  const [sessionKey, pHash, gHash, salt1Hash, salt2Hash] = await Promise.all([
-    crypto.sha256(paddedNumber(sharedSecret)),
-    crypto.sha256(pBytes),
-    crypto.sha256(gBytes),
-    crypto.sha256(algorithm.salt1),
-    crypto.sha256(algorithm.salt2),
-  ]);
-  const proof = await crypto.sha256(
+  const [sessionKey, pHash, gHash, salt1Hash, salt2Hash] = yield* Effect.all(
+    [
+      sha256(paddedNumber(sharedSecret)),
+      sha256(pBytes),
+      sha256(gBytes),
+      sha256(algorithm.salt1),
+      sha256(algorithm.salt2),
+    ],
+    { concurrency: 'unbounded' },
+  );
+  const proof = yield* sha256(
     concatBytes(xorBytes(pHash, gHash), salt1Hash, salt2Hash, publicBytes, bBytes, sessionKey),
   );
 
-  return Object.freeze({
+  return {
     _: 'inputCheckPasswordSRP' as const,
     srpId: state.srpId,
     A: publicBytes,
     M1: proof,
-  });
-}
+  } satisfies InputCheckPasswordSrp;
+});
 
-export async function computePasswordDigest(
+export const computePasswordDigest = Effect.fn('mtproto.auth.passwordDigest')(function* (
   algorithm: PasswordKdfAlgorithm,
   password: string,
-  crypto: CryptoAdapter = browserCrypto(),
 ) {
-  validatePasswordAlgorithm(algorithm);
+  yield* validatePasswordAlgorithm(algorithm);
   const p = bytesToBigInt(algorithm.p);
-  const hash = await computePasswordHash(algorithm, password, crypto);
+  const hash = yield* computePasswordHash(algorithm, password);
   return paddedNumber(modPow(BigInt(algorithm.g), bytesToBigInt(hash), p));
-}
+});
 
-function validatePasswordAlgorithm(algorithm: PasswordKdfAlgorithm) {
+const validatePasswordAlgorithm = Effect.fn('mtproto.auth.validatePasswordAlgorithm')(function* (
+  algorithm: PasswordKdfAlgorithm,
+) {
   if (!equalBytesConstantTime(algorithm.p, TELEGRAM_DH_PRIME)) {
-    throw createMtprotoError('protocol', 'Unsupported password modulus.');
+    return yield* Effect.fail(createMtprotoError('protocol', 'Unsupported password modulus.'));
   }
-  try {
-    validateDhParameters(algorithm.p, algorithm.g);
-  } catch {
-    throw createMtprotoError('protocol', 'Unsupported password generator.');
-  }
-}
+  return yield* validateDhParameters(algorithm.p, algorithm.g).pipe(
+    Effect.asVoid,
+    Effect.mapError(() => createMtprotoError('protocol', 'Unsupported password generator.')),
+  );
+});
 
-async function generateClientValue(
+const generateClientValue = Effect.fn('mtproto.auth.srpClientValue')(function* (
   generator: number,
   prime: bigint,
   serverPublicBytes: Uint8Array,
-  crypto: CryptoAdapter,
 ) {
-  for (let attempt = 0; attempt < PRIVATE_RANDOM_ATTEMPTS; attempt += 1) {
-    const privateValue = bytesToBigInt(crypto.randomBytes(HASH_NUMBER_BYTES));
+  return yield* Effect.gen(function* () {
+    const privateValue = bytesToBigInt(yield* randomBytes(HASH_NUMBER_BYTES));
     const publicValue = modPow(BigInt(generator), privateValue, prime);
-    if (!isSafeModExp(publicValue, prime)) continue;
+    if (!isSafeModExp(publicValue, prime)) {
+      return yield* Effect.fail(createMtprotoError('crypto', 'Generated an unsafe SRP value.'));
+    }
     const publicBytes = paddedNumber(publicValue);
-    const scrambling = bytesToBigInt(
-      await crypto.sha256(concatBytes(publicBytes, serverPublicBytes)),
-    );
-    if (scrambling > 0n) return { privateValue, publicBytes, scrambling };
-  }
-  throw createMtprotoError('crypto', 'Could not generate a safe SRP client value.');
-}
-
-function paddedBytes(value: Uint8Array) {
-  if (value.byteLength > HASH_NUMBER_BYTES) {
-    throw createMtprotoError('protocol', 'SRP number exceeds the modulus size.');
-  }
-  return concatBytes(new Uint8Array(HASH_NUMBER_BYTES - value.byteLength), value);
-}
+    const scrambling = bytesToBigInt(yield* sha256(concatBytes(publicBytes, serverPublicBytes)));
+    return yield* scrambling > 0n
+      ? Effect.succeed({ privateValue, publicBytes, scrambling })
+      : Effect.fail(createMtprotoError('crypto', 'Generated an invalid SRP scramble.'));
+  }).pipe(Effect.retry(Schedule.recurs(PRIVATE_RANDOM_ATTEMPTS - 1)));
+});
 
 function paddedNumber(value: bigint) {
   return bigIntToBytes(value, HASH_NUMBER_BYTES);
@@ -166,8 +167,15 @@ function isSafeModExp(value: bigint, prime: bigint) {
   );
 }
 
-function requireSafeModExp(value: bigint, prime: bigint, label: string) {
+const requireSafeModExp = Effect.fn('mtproto.auth.requireSafeModExp')(function* (
+  value: bigint,
+  prime: bigint,
+  label: string,
+) {
   if (!isSafeModExp(value, prime)) {
-    throw createMtprotoError('protocol', `${label} is outside the safe range.`);
+    return yield* Effect.fail(
+      createMtprotoError('protocol', `${label} is outside the safe range.`),
+    );
   }
-}
+});
+import { Effect, Schedule } from 'effect';

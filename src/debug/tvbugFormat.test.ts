@@ -9,6 +9,7 @@ import type {
 } from '../telegram/types';
 import {
   TVBUG_FIXED_EPOCH_SECONDS,
+  TvBugFormatError,
   createTvBugManifest,
   createTvBugSanitizer,
   createTvBugBundle,
@@ -172,6 +173,16 @@ function manifest() {
 }
 
 describe('.tvbug snapshot format', () => {
+  it('uses a tagged format error', () => {
+    const error = new TvBugFormatError('Malformed bundle.');
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({
+      _tag: 'TvBugFormatError',
+      name: 'TvBugFormatError',
+      message: 'Malformed bundle.',
+    });
+  });
+
   it('uses allowlisted fields and bundle-local aliases without leaking account data', () => {
     const message = sourceMessage();
     const sanitizer = createTvBugSanitizer({ sourceEpochMs: sourceEpochSeconds * 1_000 });
@@ -529,7 +540,7 @@ describe('.tvbug snapshot format', () => {
         ],
       }),
     ).toThrow(/sequence numbers/u);
-    expect(() => parseTvBugBundle(new Uint8Array())).toThrow(/empty/u);
+    expect(() => parseTvBugBundle(new Uint8Array())).toThrow(TvBugFormatError);
 
     const valid = createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] });
     const files = unzipSync(valid);

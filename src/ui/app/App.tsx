@@ -26,26 +26,38 @@ import {
   onMount,
 } from 'solid-js';
 import { createStore, reconcile, type SetStoreFunction } from 'solid-js/store';
+import { Effect } from 'effect';
 
 import type { ChatMessage, ChatSummary } from '../../domain/models';
 import { messageTextForClipboard } from '../../domain/messageText';
 import { telegramPeerColor } from '../../domain/peerColor';
-import type { Conversation } from '../../telegram/core/conversation';
+import type { EffectConversation } from '../../telegram/core/conversation';
 import type {
   EngineSnapshot,
   PendingSend,
+  TelegramChatPermissions,
+  TelegramDialog,
   TelegramMessage,
   TelegramPeer,
+  TelegramPeerSearchResult,
+  SharedMediaCounts,
   SharedMediaKind,
 } from '../../telegram/types';
-import type { AppEnvironment } from './appRuntime';
+import {
+  canSendMessageToDialog,
+  canSendMessageToPermissions,
+  messageCapabilities,
+  permissionsForDialog,
+  type TelegramMessageCapabilities,
+} from '../../telegram/core/chatPermissions';
+import { subscribeAtUi, type AppEnvironment } from './appRuntime';
 import { BotControls } from '../bots/BotControls';
 import { BotKeyboard } from '../bots/BotKeyboard';
 import { BotUrlAuthDialog } from '../bots/BotUrlAuthDialog';
 import { createBotSession } from '../bots/botSession';
 import { createReplyKeyboardSession } from '../bots/replyKeyboardSession';
 import { ChatSidebar } from '../chat/ChatSidebar';
-import { ChatDirectory } from '../chat/chatDirectory';
+import { createChatDirectory } from '../chat/chatDirectory';
 import { createContactDetailsSession } from '../chat/contactDetailsSession';
 import { DeleteChatDialog } from '../chat/DeleteChatDialog';
 import { DetailsPane } from '../chat/DetailsPane';
@@ -69,7 +81,7 @@ import { createConversationViewport } from '../conversation/conversationViewport
 import { layoutMessages } from '../conversation/messageLayout';
 import { presentDialog, presentMessage } from '../conversation/presentation';
 import { MediaAttachment, type MediaPreview } from '../media/MediaAttachment';
-import { MediaAssets, type MediaAsset } from '../media/mediaAssets';
+import { createMediaAssets, type MediaAsset } from '../media/mediaAssets';
 import { MediaViewer } from '../media/MediaViewer';
 import { saveMediaUrl } from '../media/mediaActions';
 import { mediaPresentation } from '../media/mediaPresentation';
@@ -81,6 +93,7 @@ import { AuthOverlay } from './AuthOverlay';
 import { createDrawerFocusSession } from './drawerFocusSession';
 import { SettingsDialog } from './SettingsDialog';
 import { createSidebarLayout } from './sidebarLayout';
+import { retainPeerValue } from './retainedPeerValues';
 
 const MAX_CACHED_MESSAGE_VIEWS = 800;
 
@@ -140,12 +153,12 @@ interface AppProps {
 export function App(props: AppProps) {
   const environment = props.environment;
   const { credentials, configurationError } = environment;
-  const { engine } = environment.runtime;
+  const { engine, runEffect, runLatestEffect, runSharedEffect } = environment.runtime;
   let initialUrlPeerId = new URL(window.location.href).searchParams.get('chat') ?? undefined;
   const [snapshot, setSnapshot] = createSignal<EngineSnapshot>(engine.snapshot());
   const [authOpen, setAuthOpen] = createSignal(engine.snapshot().phase !== 'ready');
   const [activeChatId, setActiveChatId] = createSignal('empty');
-  const [activeConversation, setActiveConversation] = createSignal<Conversation>();
+  const [activeConversation, setActiveConversation] = createSignal<EffectConversation>();
   const [initialUnreadAfterId, setInitialUnreadAfterId] = createSignal<number>();
   const sidebarLayout = createSidebarLayout({
     captureConversationAnchor: () => viewport.captureAnchor(),
@@ -171,11 +184,15 @@ export function App(props: AppProps) {
   const [clearingCache, setClearingCache] = createSignal(false);
   const [debugReportBusy, setDebugReportBusy] = createSignal(false);
   const [debugReportError, setDebugReportError] = createSignal('');
+  const [clipboardError, setClipboardError] = createSignal('');
   const [settingsOpen, setSettingsOpen] = createSignal(false);
-  const appearanceSession = createAppearanceSession({
-    getWallpapers: () => engine.getWallpapers(),
-    downloadWallpaper: (wallpaperId) => engine.downloadWallpaper(wallpaperId),
-  });
+  const appearanceSession = createAppearanceSession(
+    {
+      getWallpapers: () => engine.getWallpapers(),
+      downloadWallpaper: (wallpaperId) => engine.downloadWallpaper(wallpaperId),
+    },
+    runEffect,
+  );
   const {
     appearance,
     telegramWallpapers,
@@ -208,8 +225,13 @@ export function App(props: AppProps) {
       }
     | undefined
   >();
-  const [deleteChatTarget, setDeleteChatTarget] = createSignal<ChatSummary>();
-  const mediaAssets = new MediaAssets(engine, () => snapshot().dialogs);
+  const [deleteChatTarget, setDeleteChatTarget] = createSignal<TelegramDialog>();
+  const mediaAssets = createMediaAssets(
+    engine,
+    runEffect,
+    runSharedEffect,
+    () => snapshot().dialogs,
+  );
   const dialogViews = new Map<string, StoredView<ChatSummary>>();
   const messageViews = new Map<string, StoredView<ChatMessage>>();
   let appGridElement: HTMLDivElement | undefined;
@@ -248,9 +270,19 @@ export function App(props: AppProps) {
   };
   const activeConversationReady = () =>
     activePeerMatches() && activeConversation()?.peerId === activeChatId();
+  const conversationCommandsReady = () => activeConversation()?.peerId === activeChatId();
   const hasCachedWorkspace = () => snapshot().dialogs.length > 0;
-  const canSend = () => online() && activeConversationReady();
-  const canQueueMessage = () => activeConversationReady();
+  const canUseLiveCommands = () => online() && activeConversationReady() && canQueueMessage();
+  const activeSendPermissions = (): TelegramChatPermissions | undefined => {
+    const dialog = snapshot().dialogs.find(({ peer }) => peer.id === activeChatId());
+    return dialog ? permissionsForDialog(dialog) : undefined;
+  };
+  const canQueueMessage = () =>
+    conversationCommandsReady() && Boolean(activeSendPermissions()?.canSendMessages);
+  const canSendMedia = () => canQueueMessage() && Boolean(activeSendPermissions()?.canSendMedia);
+  const canSendStickers = () =>
+    canQueueMessage() && Boolean(activeSendPermissions()?.canSendStickers);
+  const canSendGifs = () => canQueueMessage() && Boolean(activeSendPermissions()?.canSendGifs);
 
   const visibleChats = createMemo<ChatSummary[]>((previous) => {
     const current = snapshot();
@@ -308,9 +340,11 @@ export function App(props: AppProps) {
   onCleanup(() => {
     document.title = 'TeleVecha';
   });
-  const activeSharedCounts = createMemo(() =>
-    activePeerMatches() ? snapshot().sharedMediaCounts : undefined,
-  );
+  const sharedCountsByPeer = createMemo((previous: ReadonlyMap<string, SharedMediaCounts>) => {
+    const current = snapshot();
+    return retainPeerValue(previous, current.activePeerId, current.sharedMediaCounts);
+  }, new Map<string, SharedMediaCounts>());
+  const activeSharedCounts = createMemo(() => sharedCountsByPeer().get(activeChatId()));
   const activeHistoryError = createMemo(() =>
     activePeerMatches() ? snapshot().historyError : undefined,
   );
@@ -329,23 +363,55 @@ export function App(props: AppProps) {
       current.activePeerId === peerId &&
       !current.sharedMediaCounts
     ) {
-      runInBackground(engine.ensureSharedMediaCounts(peerId));
+      runInBackground(runEffect(engine.loadConversationSharedMediaCounts(peerId)));
     }
   });
   const activeDialog = createMemo(() =>
     snapshot().dialogs.find(({ peer }) => peer.id === activeChatId()),
   );
+  const noMessageCapabilities = (): TelegramMessageCapabilities => ({
+    canPin: false,
+    canEdit: false,
+    canDelete: false,
+    canDeleteForMe: false,
+    canDeleteForEveryone: false,
+    canForward: false,
+  });
+  const dialogForPeer = (peerId: string | undefined) =>
+    snapshot().dialogs.find(({ peer }) => peer.id === (peerId ?? activeChatId()));
+  const messageCapabilitiesForUi = (message: ChatMessage): TelegramMessageCapabilities => {
+    const dialog = dialogForPeer(message.peerId);
+    if (!dialog) return noMessageCapabilities();
+    return messageCapabilities(dialog, {
+      outgoing: message.outgoing,
+      protected: message.protected,
+      service: message.service ? { kind: 'custom', text: message.service.text } : undefined,
+      forwardedFrom: message.forwardedFrom,
+      media: message.media,
+      text: message.body,
+    });
+  };
+  const telegramMessageCapabilitiesForUi = (
+    message: TelegramMessage,
+  ): TelegramMessageCapabilities => {
+    const dialog = dialogForPeer(message.peerId);
+    return dialog ? messageCapabilities(dialog, message) : noMessageCapabilities();
+  };
   const chatAppearance = createChatAppearanceSession({
     source: engine,
+    runEffect,
     activeDialog,
     preferences: appearance,
   });
   const composer = createComposerSession({
     conversation: activeConversation,
+    runEffect,
+    runLatestEffect,
     snapshot,
     activePeerId: activeChatId,
     activeDialog,
     canSend: canQueueMessage,
+    canSendMedia,
     beforeUiChange: () => {
       const scroller = messageScroller;
       if (!scroller) return;
@@ -388,19 +454,26 @@ export function App(props: AppProps) {
   });
   const canonicalDraft = createMemo(() => {
     const peerId = activeChatId();
-    return peerId === 'empty' ? '' : (snapshot().drafts[peerId] ?? '');
+    return peerId === 'empty'
+      ? { text: '', details: undefined }
+      : {
+          text: snapshot().drafts[peerId] ?? '',
+          details: snapshot().draftDetails[peerId],
+        };
   });
   createEffect(
-    on(canonicalDraft, (draft) => {
-      if (activeChatId() === 'empty' || composer.editing() || composer.draft() === draft) return;
-      composer.syncDraft(draft);
+    on(canonicalDraft, ({ text, details }) => {
+      if (activeChatId() === 'empty' || composer.editing()) return;
+      composer.syncDraft(text, details);
     }),
   );
   const expressions = createExpressionSession({
     source: engine,
+    runEffect,
     conversation: activeConversation,
-    online,
     reply: composer.reply,
+    canSendStickers,
+    canSendGifs,
     clearReply: composer.clearReply,
   });
   const expressionPickerVisible = expressions.visible;
@@ -415,6 +488,7 @@ export function App(props: AppProps) {
   };
   const contactDetails = createContactDetailsSession({
     source: engine,
+    runEffect,
     dialog: activeDialog,
     detailsOpen,
   });
@@ -442,7 +516,7 @@ export function App(props: AppProps) {
         if (!peerId) return;
         const dialog = activeDialog();
         if (dialog?.peer.id === peerId)
-          void engine.getUserDetails(dialog.peer).catch(() => undefined);
+          void runEffect(engine.getUserDetails(dialog.peer)).catch(() => undefined);
       },
     ),
   );
@@ -527,7 +601,6 @@ export function App(props: AppProps) {
     chat: activeChat,
     activePeerId: activeChatId,
     activePeerMatches,
-    online,
   });
   const {
     status: activeStatus,
@@ -549,6 +622,7 @@ export function App(props: AppProps) {
     snapshot,
     activePeerId: activeChatId,
     conversation: activeConversation,
+    runEffect,
     loaded: activeConversationLoaded,
     openingMessage: () => openingMessage,
     unreadAfterId: initialUnreadAfterId,
@@ -589,12 +663,13 @@ export function App(props: AppProps) {
     const generation = ++selectionGeneration;
     const previousPeerId = activeChatId();
     const changingPeer = id !== previousPeerId;
+    const commandConversation = engine.conversation(id);
+    if (activeConversation()?.peerId !== id) setActiveConversation(commandConversation);
     if (changingPeer) {
       const dialog = snapshot().dialogs.find(({ peer }) => peer.id === id);
       setInitialUnreadAfterId(dialog && dialog.unreadCount > 0 ? dialog.readInboxMaxId : undefined);
       initiallyMarkedReadPeer = '';
       conversationRetryGeneration += 1;
-      setActiveConversation(undefined);
       setConversationRetrying(false);
       viewport.resetForPeer();
       history.reset();
@@ -605,7 +680,7 @@ export function App(props: AppProps) {
     closeConversationOverlays();
     composer.switchPeer(previousPeerId, id, changingPeer);
     try {
-      const conversation = await engine.openConversation(id);
+      const conversation = await runEffect(engine.openConversation(id));
       if (generation !== selectionGeneration || activeChatId() !== id) return false;
       setActiveConversation(conversation);
       const current = engine.snapshot();
@@ -628,15 +703,22 @@ export function App(props: AppProps) {
       return false;
     }
   };
-  const chatDirectory = new ChatDirectory(engine, () => snapshot().dialogs, selectChat);
+  const chatDirectory = createChatDirectory(
+    engine,
+    runEffect,
+    () => snapshot().dialogs,
+    selectChat,
+  );
 
   const bot = createBotSession({
     conversation: activeConversation,
+    runEffect,
     snapshot,
     activePeerId: activeChatId,
     activeDialog,
     selectChat: (peerId) => selectChat(peerId),
     setDraft: composer.replaceDraft,
+    setPeerDraft: (peerId, value) => engine.setDraft(peerId, value),
     dismissSingleUseKeyboard: dismissSingleUseReplyKeyboard,
     focusComposer: () =>
       document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.focus(),
@@ -663,9 +745,9 @@ export function App(props: AppProps) {
     setConversationLoadError('');
     viewport.setReady(false);
     try {
-      if (!engine.snapshot().online) await engine.retrySync();
+      if (!engine.snapshot().online) await runEffect(engine.retrySync());
       if (!stillCurrent()) return;
-      await conversation.retryHistory();
+      await runEffect(conversation.retryHistory());
       if (!stillCurrent()) return;
       const current = engine.snapshot();
       if (!current.loadingMessages && current.messages.length === 0 && current.historyError) {
@@ -687,8 +769,8 @@ export function App(props: AppProps) {
     if (syncRetrying()) return;
     setSyncRetrying(true);
     try {
-      await engine.retrySync();
-      if (engine.snapshot().online) await engine.retryOutbox();
+      await runEffect(engine.retrySync());
+      if (engine.snapshot().online) await runEffect(engine.retryOutbox());
     } finally {
       setSyncRetrying(false);
     }
@@ -698,7 +780,7 @@ export function App(props: AppProps) {
     if (loggingOut()) return;
     setLoggingOut(true);
     try {
-      await engine.logOut();
+      await runEffect(engine.logOut());
       conversationRetryGeneration += 1;
       setActiveChatId('empty');
       setActiveConversation(undefined);
@@ -718,7 +800,7 @@ export function App(props: AppProps) {
     setClearingCache(true);
     try {
       mediaAssets.dispose();
-      await engine.clearCache();
+      await runEffect(engine.clearCache());
       conversationRetryGeneration += 1;
       setActiveChatId('empty');
       setActiveConversation(undefined);
@@ -737,7 +819,7 @@ export function App(props: AppProps) {
     setDebugReportBusy(true);
     setDebugReportError('');
     try {
-      const { file } = await reports.prepare();
+      const { file } = await runEffect(reports.prepare());
       const url = URL.createObjectURL(file);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -757,7 +839,7 @@ export function App(props: AppProps) {
     if (pendingActionId()) return;
     setPendingActionId(id);
     try {
-      await engine.retryPendingSend(id);
+      await runEffect(engine.retryPendingSend(id));
     } finally {
       setPendingActionId('');
     }
@@ -767,7 +849,7 @@ export function App(props: AppProps) {
     if (pendingActionId()) return;
     setPendingActionId(id);
     try {
-      await engine.cancelPendingSend(id);
+      await runEffect(engine.cancelPendingSend(id));
     } finally {
       setPendingActionId('');
     }
@@ -802,15 +884,15 @@ export function App(props: AppProps) {
         initiallyMarkedReadPeer !== peerId
       ) {
         initiallyMarkedReadPeer = peerId;
-        runInBackground(engine.retryMarkRead(peerId));
+        runInBackground(
+          runEffect(engine.retryMarkRead(peerId)).then(() =>
+            runEffect(engine.setActiveConversationVisibility(peerId, { visible, atBottom })),
+          ),
+        );
+        return;
       }
       runInBackground(
-        Promise.resolve(
-          engine.setActiveConversationVisibility(peerId, {
-            visible,
-            atBottom,
-          }),
-        ),
+        runEffect(engine.setActiveConversationVisibility(peerId, { visible, atBottom })),
       );
     });
   };
@@ -860,7 +942,7 @@ export function App(props: AppProps) {
   };
   const mediaPreviewAssetFor = (messageId: string | number): MediaAsset | undefined => {
     const source = mediaSourceFor(messageId);
-    return source?.media?.kind === 'photo' || source?.media?.kind === 'video'
+    return source?.media && mediaPresentation(source.media).preview
       ? mediaAssets.messagePreview(source)
       : mediaAssetFor(messageId);
   };
@@ -955,31 +1037,33 @@ export function App(props: AppProps) {
     };
     document.addEventListener('pointerdown', dismissMenus);
     document.addEventListener('keydown', dismissMenusWithKeyboard);
-    let telegramResume: Promise<void> | undefined;
     const resumeTelegramState = () => {
-      if (telegramResume) return;
-      const resume = (async () => {
-        let current = engine.snapshot();
-        if (current.phase !== 'ready') return;
-        if (current.online) {
-          try {
-            await Promise.all([engine.refreshUpdates(), engine.refreshReadReceipt()]);
-          } catch {
-            // The engine records the failure. Re-read its state below so a failed
-            // wake-up refresh can enter the normal reconnect path.
-          }
-        }
-        await Promise.resolve();
-        current = engine.snapshot();
-        if (current.phase !== 'ready') return;
-        if (!current.online) await engine.retrySync();
-        if (engine.snapshot().online) await engine.retryOutbox();
-      })();
-      telegramResume = resume;
       runInBackground(
-        resume.finally(() => {
-          if (telegramResume === resume) telegramResume = undefined;
-        }),
+        runSharedEffect(
+          'app:resume-telegram',
+          Effect.gen(function* () {
+            let current = engine.snapshot();
+            if (current.phase !== 'ready') return;
+            if (current.online) {
+              // The engine records refresh failures. Continue into the normal
+              // reconnect path after re-reading its state.
+              yield* Effect.all(
+                [
+                  engine.refreshUpdates(),
+                  current.activePeerId
+                    ? engine.refreshReadReceipt(current.activePeerId)
+                    : Effect.void,
+                ],
+                { concurrency: 'unbounded' },
+              ).pipe(Effect.ignore);
+            }
+            yield* Effect.yieldNow;
+            current = engine.snapshot();
+            if (current.phase !== 'ready') return;
+            if (!current.online) yield* engine.retrySync();
+            if (engine.snapshot().online) yield* engine.retryOutbox();
+          }),
+        ),
       );
     };
     const handleFocus = () => {
@@ -994,7 +1078,16 @@ export function App(props: AppProps) {
       const peerId = new URL(window.location.href).searchParams.get('chat');
       if (peerId && snapshot().dialogs.some(({ peer }) => peer.id === peerId)) {
         runInBackground(selectChat(peerId, undefined, 'none'));
+        return;
       }
+      const currentPeerId = activeChatId();
+      if (snapshot().dialogs.some(({ peer }) => peer.id === currentPeerId)) {
+        updateChatUrl(currentPeerId, 'replace');
+        return;
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.delete('chat');
+      window.history.replaceState({}, '', url);
     };
     const handleResize = () => {
       viewport.captureAnchor();
@@ -1013,62 +1106,67 @@ export function App(props: AppProps) {
     window.addEventListener('popstate', handlePopState);
     document.addEventListener('visibilitychange', refreshVisibleTelegramState);
 
-    const unsubscribe = engine.subscribe((next) => {
-      setSnapshot(next);
-      if (next.requiresReload) {
-        setAuthOpen(true);
-      } else if (next.phase === 'unauthorized') {
-        setAuthOpen(true);
-      } else if (
-        next.dialogs.length > 0 &&
-        (next.phase === 'connecting' ||
+    const unsubscribe = subscribeAtUi(
+      runEffect,
+      engine.subscribe((next) => {
+        setSnapshot(next);
+        if (next.requiresReload) {
+          setAuthOpen(true);
+        } else if (next.phase === 'unauthorized') {
+          setAuthOpen(true);
+        } else if (
+          next.dialogs.length > 0 &&
+          (next.phase === 'connecting' ||
+            next.phase === 'syncing' ||
+            next.phase === 'ready' ||
+            next.phase === 'error')
+        ) {
+          setAuthOpen(false);
+        } else if (
+          next.phase === 'connecting' ||
           next.phase === 'syncing' ||
-          next.phase === 'ready' ||
-          next.phase === 'error')
-      ) {
-        setAuthOpen(false);
-      } else if (
-        next.phase === 'connecting' ||
-        next.phase === 'syncing' ||
-        next.phase === 'error'
-      ) {
-        setAuthOpen(true);
-      }
-      const currentPeerId = activeChatId();
-      const currentExists = next.dialogs.some(({ peer }) => peer.id === currentPeerId);
-      if (next.dialogs.length === 0) {
-        if (currentPeerId !== 'empty') {
-          viewport.resetForPeer();
-          selectionGeneration += 1;
-          conversationRetryGeneration += 1;
-          history.reset();
-          setActiveChatId('empty');
-          setActiveConversation(undefined);
-          setConversationLoadError('');
-          setConversationRetrying(false);
-          closeConversationOverlays();
-          composer.reset();
+          next.phase === 'error'
+        ) {
+          setAuthOpen(true);
         }
-      } else if (next.phase !== 'unauthorized' && !currentExists) {
-        const requestedPeerExists = next.dialogs.some(({ peer }) => peer.id === initialUrlPeerId);
-        const enginePeerExists = next.dialogs.some(({ peer }) => peer.id === next.activePeerId);
-        const target = requestedPeerExists
-          ? initialUrlPeerId
-          : enginePeerExists
-            ? next.activePeerId
-            : next.dialogs[0]?.peer.id;
-        if (initialUrlPeerId && !requestedPeerExists && next.phase === 'ready') {
-          const url = new URL(window.location.href);
-          url.searchParams.delete('chat');
-          window.history.replaceState({}, '', url);
+        const currentPeerId = activeChatId();
+        const currentExists = next.dialogs.some(({ peer }) => peer.id === currentPeerId);
+        if (next.dialogs.length === 0) {
+          if (currentPeerId !== 'empty') {
+            viewport.resetForPeer();
+            selectionGeneration += 1;
+            conversationRetryGeneration += 1;
+            history.reset();
+            setActiveChatId('empty');
+            setActiveConversation(undefined);
+            setConversationLoadError('');
+            setConversationRetrying(false);
+            closeConversationOverlays();
+            composer.reset();
+          }
+        } else if (next.phase !== 'unauthorized' && !currentExists) {
+          const requestedPeerExists = next.dialogs.some(({ peer }) => peer.id === initialUrlPeerId);
+          const enginePeerExists = next.dialogs.some(({ peer }) => peer.id === next.activePeerId);
+          const target = requestedPeerExists
+            ? initialUrlPeerId
+            : enginePeerExists
+              ? next.activePeerId
+              : next.dialogs[0]?.peer.id;
+          if (initialUrlPeerId && !requestedPeerExists && next.phase === 'ready') {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('chat');
+            window.history.replaceState({}, '', url);
+          }
+          initialUrlPeerId = undefined;
+          if (target) {
+            runInBackground(selectChat(target, undefined, 'replace'));
+          }
         }
-        initialUrlPeerId = undefined;
-        if (target) {
-          runInBackground(selectChat(target, undefined, 'replace'));
-        }
-      }
-    });
-    if (credentials && engine.snapshot().phase === 'idle') void engine.start(credentials);
+      }),
+    );
+    if (credentials && engine.snapshot().phase === 'idle') {
+      runInBackground(runEffect(engine.start(credentials)));
+    }
 
     onCleanup(() => {
       unsubscribe();
@@ -1085,7 +1183,7 @@ export function App(props: AppProps) {
       const peerId = activeChatId();
       if (peerId && peerId !== 'empty') {
         runInBackground(
-          Promise.resolve(
+          runEffect(
             engine.setActiveConversationVisibility(peerId, { visible: false, atBottom: false }),
           ),
         );
@@ -1093,33 +1191,60 @@ export function App(props: AppProps) {
       mediaAssets.dispose();
       const badgeNavigator = navigator as Navigator & { clearAppBadge?: () => Promise<void> };
       if (badgeNavigator.clearAppBadge) runInBackground(badgeNavigator.clearAppBadge());
-      if (!import.meta.hot) runInBackground(engine.stop());
+      if (!import.meta.hot) runInBackground(runEffect(engine.stop()));
     });
   });
 
   const reactToMessage = async (messageId: string, emoji: string) => {
     const id = Number(messageId);
     const dialog = snapshot().dialogs.find(({ peer }) => peer.id === activeChatId());
-    if (!Number.isSafeInteger(id) || !dialog || !online()) return;
+    if (!Number.isSafeInteger(id) || !dialog) return;
     setReactionPickerMessageId('');
-    await activeConversation()?.toggleReaction(id, emoji);
+    const conversation = activeConversation();
+    if (conversation) await runEffect(conversation.toggleReaction(id, emoji));
   };
 
   const deleteMessage = async (messageId: string, revoke: boolean) => {
     const id = Number(messageId);
-    const dialog = snapshot().dialogs.find(({ peer }) => peer.id === activeChatId());
-    if (!Number.isSafeInteger(id) || !dialog || !online()) return;
+    const target =
+      deleteTarget()?.id === messageId
+        ? deleteTarget()
+        : renderedMessages().find(({ id: candidateId }) => candidateId === messageId);
+    const dialog = dialogForPeer(target?.peerId);
+    if (!Number.isSafeInteger(id) || !dialog || !target) return;
+    const capabilities = messageCapabilitiesForUi(target);
+    if (
+      !capabilities.canDelete ||
+      (revoke && !capabilities.canDeleteForEveryone) ||
+      (!revoke && !capabilities.canDeleteForMe)
+    ) {
+      return;
+    }
     setMessageContextMenu(undefined);
-    await activeConversation()?.deleteMessage(id, revoke);
+    const conversation = activeConversation();
+    if (conversation && conversation.peerId === dialog.peer.id) {
+      await runEffect(conversation.deleteMessage(id, dialog.peer.kind === 'channel' || revoke));
+    }
   };
 
-  const forwardMessage = async (targetPeerId: string) => {
+  const forwardMessage = async (targetPeerId: string, result?: TelegramPeerSearchResult) => {
     const message = forwardingMessage();
-    const to = snapshot().dialogs.find(({ peer }) => peer.id === targetPeerId);
+    const to =
+      result?.peer ?? snapshot().dialogs.find(({ peer }) => peer.id === targetPeerId)?.peer;
     const conversation = activeConversation();
-    if (!message || !conversation || !to || !online()) return;
+    if (!message || !conversation || !to || !messageCapabilitiesForUi(message).canForward) return;
+    if (result && !snapshot().dialogs.some(({ peer }) => peer.id === result.peer.id)) {
+      await runEffect(engine.addPeer(result));
+    }
+    const targetDialog = snapshot().dialogs.find(({ peer }) => peer.id === to.id);
+    if (
+      (targetDialog && !canSendMessageToDialog(targetDialog, message)) ||
+      (result?.permissions && !canSendMessageToPermissions(result.permissions, message))
+    ) {
+      return;
+    }
     setForwardingMessage(undefined);
-    await conversation.forwardTo(to.peer, Number(message.id));
+    await runEffect(conversation.forwardTo(to, Number(message.id)));
   };
 
   const centerMessageWindow = (messageId: number) => {
@@ -1186,12 +1311,34 @@ export function App(props: AppProps) {
     viewport.pauseAtHistory();
     let revealed = false;
     try {
+      if (!snapshot().dialogs.some(({ peer }) => peer.id === message.peerId) && message.peer) {
+        const title = message.peerTitle || message.peer.id;
+        await runEffect(
+          engine.addPeer({
+            peer: message.peer,
+            category:
+              message.peer.kind === 'user'
+                ? 'user'
+                : message.peer.kind === 'channel'
+                  ? 'channel'
+                  : 'group',
+            title,
+            initials: senderInitials(title),
+            color: telegramPeerColor(message.peer.id),
+            bot: false,
+            isContact: false,
+            hasAvatar: false,
+            ...(message.permissions ? { permissions: message.permissions } : {}),
+          }),
+        );
+      }
       const selected = await selectChat(message.peerId, generation);
       const selection = selectionGeneration;
       if (!selected || generation !== openMessageGeneration || activeChatId() !== message.peerId)
         return;
       viewport.pauseAtHistory();
-      if (!(await activeConversation()?.openMessage(message))) return;
+      const conversation = activeConversation();
+      if (!conversation || !(await runEffect(conversation.openMessage(message)))) return;
       if (
         generation !== openMessageGeneration ||
         selection !== selectionGeneration ||
@@ -1245,7 +1392,8 @@ export function App(props: AppProps) {
           candidate.outgoing &&
           !candidate.service &&
           Boolean(candidate.body || candidate.media) &&
-          Number.isSafeInteger(Number(candidate.id)),
+          Number.isSafeInteger(Number(candidate.id)) &&
+          messageCapabilitiesForUi(candidate).canEdit,
       );
     if (!message) return false;
     composer.beginEdit(message);
@@ -1254,7 +1402,13 @@ export function App(props: AppProps) {
   const copyMessageText = async (message: ChatMessage) => {
     const text = messageTextForClipboard(message);
     setMessageContextMenu(undefined);
-    if (text) await navigator.clipboard.writeText(text);
+    if (!text) return;
+    setClipboardError('');
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      setClipboardError('Could not copy the message to the clipboard.');
+    }
   };
   const saveMessageMedia = async (message: ChatMessage) => {
     setMessageContextMenu(undefined);
@@ -1265,7 +1419,13 @@ export function App(props: AppProps) {
   };
   const copyMediaFilename = async (message: ChatMessage) => {
     setMessageContextMenu(undefined);
-    if (message.media?.name) await navigator.clipboard.writeText(message.media.name);
+    if (!message.media?.name) return;
+    setClipboardError('');
+    try {
+      await navigator.clipboard.writeText(message.media.name);
+    } catch {
+      setClipboardError('Could not copy the filename to the clipboard.');
+    }
   };
 
   const connectionStatus = createMemo(() => {
@@ -1303,8 +1463,8 @@ export function App(props: AppProps) {
           media={mediaAssets}
           directory={chatDirectory}
           requestDelete={(peerId) => {
-            const chat = visibleChats().find(({ id }) => id === peerId);
-            if (chat) setDeleteChatTarget(chat);
+            const dialog = snapshot().dialogs.find(({ peer }) => peer.id === peerId);
+            if (dialog) setDeleteChatTarget(dialog);
           }}
           openSettings={openSettings}
         />
@@ -1354,8 +1514,8 @@ export function App(props: AppProps) {
                 <span
                   class="block text-xs"
                   classList={{
-                    'text-emerald-400': online(),
-                    'text-muted': !online(),
+                    'text-emerald-400': activeChat().presence === 'online',
+                    'text-muted': activeChat().presence !== 'online',
                   }}
                   role="status"
                 >
@@ -1406,11 +1566,24 @@ export function App(props: AppProps) {
                   </button>
                 </Show>
                 <Show when={readReceiptFailed()}>
-                  <button onClick={() => void engine.retryMarkRead(activeChatId())}>
+                  <button
+                    onClick={() => runInBackground(runEffect(engine.retryMarkRead(activeChatId())))}
+                  >
                     Retry marking as read
                   </button>
                 </Show>
-                <button onClick={() => engine.clearOperationError()}>Dismiss</button>
+                <button onClick={() => runInBackground(runEffect(engine.clearOperationError()))}>
+                  Dismiss
+                </button>
+              </div>
+            )}
+          </Show>
+
+          <Show when={clipboardError()}>
+            {(message) => (
+              <div class="sync-state-banner operation-state-banner" role="alert">
+                <span>{message()}</span>
+                <button onClick={() => setClipboardError('')}>Dismiss</button>
               </div>
             )}
           </Show>
@@ -1737,8 +1910,8 @@ export function App(props: AppProps) {
                                       mediaPreviewAssetFor(message.replyToId!)?.cached()
                                     }
                                     loadPreview={
-                                      message.replyMedia?.kind === 'photo' ||
-                                      message.replyMedia?.kind === 'video'
+                                      message.replyMedia &&
+                                      mediaPresentation(message.replyMedia).preview
                                         ? () => {
                                             const asset = mediaPreviewAssetFor(message.replyToId!);
                                             return asset
@@ -1788,26 +1961,7 @@ export function App(props: AppProps) {
                           </Show>
                           <Show when={layout().media}>
                             {(media) => (
-                              <Show
-                                when={message.uploadProgress === undefined}
-                                fallback={
-                                  <div class="upload-progress">
-                                    <span>{media().name}</span>
-                                    <strong>
-                                      {message.status === 'failed'
-                                        ? 'Upload failed'
-                                        : `${Math.round((message.uploadProgress ?? 0) * 100)}%`}
-                                    </strong>
-                                    <div>
-                                      <i
-                                        style={{
-                                          width: `${Math.round((message.uploadProgress ?? 0) * 100)}%`,
-                                        }}
-                                      />
-                                    </div>
-                                  </div>
-                                }
-                              >
+                              <>
                                 <MediaAttachment
                                   media={media()}
                                   protected={message.protected}
@@ -1817,7 +1971,7 @@ export function App(props: AppProps) {
                                     mediaPreviewAssetFor(message.id)?.cached()
                                   }
                                   loadPreview={
-                                    media().kind === 'photo' || media().kind === 'video'
+                                    mediaPresentation(media()).preview
                                       ? () => {
                                           const asset = mediaPreviewAssetFor(message.id);
                                           return asset
@@ -1838,7 +1992,24 @@ export function App(props: AppProps) {
                                   }}
                                   onOpenPreview={(preview) => openImageViewer(message, preview)}
                                 />
-                              </Show>
+                                <Show when={message.uploadProgress !== undefined}>
+                                  <div class="upload-progress">
+                                    <span>{media().name}</span>
+                                    <strong>
+                                      {message.status === 'failed'
+                                        ? 'Upload failed'
+                                        : `${Math.round((message.uploadProgress ?? 0) * 100)}%`}
+                                    </strong>
+                                    <div>
+                                      <i
+                                        style={{
+                                          width: `${Math.round((message.uploadProgress ?? 0) * 100)}%`,
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                </Show>
+                              </>
                             )}
                           </Show>
                           <div class="message-copy">
@@ -1851,9 +2022,23 @@ export function App(props: AppProps) {
                                         (candidate) => String(candidate.id) === message.id,
                                       );
                                       return source
-                                        ? mediaAssets.loadMedia(source)
+                                        ? mediaAssets.messagePreview(source).load()
                                         : Promise.reject(
                                             new Error('Preview image is unavailable.'),
+                                          );
+                                    }
+                                  : undefined
+                              }
+                              loadPreviewMedia={
+                                message.linkPreview?.media
+                                  ? () => {
+                                      const source = snapshot().messages.find(
+                                        (candidate) => String(candidate.id) === message.id,
+                                      );
+                                      return source
+                                        ? mediaAssets.loadMedia(source)
+                                        : Promise.reject(
+                                            new Error('Preview video is unavailable.'),
                                           );
                                     }
                                   : undefined
@@ -1904,7 +2089,7 @@ export function App(props: AppProps) {
                             {(keyboard) => (
                               <BotKeyboard
                                 keyboard={keyboard()}
-                                disabled={!canSend()}
+                                disabled={!canUseLiveCommands()}
                                 busyButton={
                                   bot.buttonBusy()?.owner === message.id
                                     ? bot.buttonBusy()?.key
@@ -1912,7 +2097,9 @@ export function App(props: AppProps) {
                                 }
                                 label={`Actions for message ${message.id}`}
                                 onPress={(button, key) =>
-                                  void bot.press(button, message.id, key, Number(message.id))
+                                  runInBackground(
+                                    bot.press(button, message.id, key, Number(message.id)),
+                                  )
                                 }
                               />
                             )}
@@ -1948,7 +2135,7 @@ export function App(props: AppProps) {
                               setPickerOpen={(open) =>
                                 setReactionPickerMessageId(open ? message.id : '')
                               }
-                              react={(emoji) => void reactToMessage(message.id, emoji)}
+                              react={(emoji) => runInBackground(reactToMessage(message.id, emoji))}
                               reply={(article) => composer.beginReply(message, article)}
                               loadCustomEmoji={(documentId) =>
                                 mediaAssets.loadCustomEmoji(documentId)
@@ -2015,7 +2202,7 @@ export function App(props: AppProps) {
                               <Copy size={15} /> Copy text
                             </button>
                           </Show>
-                          <Show when={!target().protected}>
+                          <Show when={messageCapabilitiesForUi(target()).canForward}>
                             <button
                               role="menuitem"
                               onClick={() => {
@@ -2026,25 +2213,36 @@ export function App(props: AppProps) {
                               <Forward size={15} /> Forward
                             </button>
                           </Show>
-                          <button
-                            role="menuitem"
-                            onClick={() => {
-                              const message = target();
-                              setMessageContextMenu(undefined);
-                              void activeConversation()?.setPinnedMessage(
-                                Number(message.id),
-                                !snapshot().pinnedMessages.some(
-                                  ({ id }) => id === Number(message.id),
-                                ),
-                              );
-                            }}
-                          >
-                            <Pin size={15} />
-                            {snapshot().pinnedMessages.some(({ id }) => id === Number(target().id))
-                              ? 'Unpin'
-                              : 'Pin'}
-                          </button>
-                          <Show when={target().outgoing && (target().body || target().media)}>
+                          <Show when={messageCapabilitiesForUi(target()).canPin}>
+                            <button
+                              role="menuitem"
+                              onClick={() => {
+                                const message = target();
+                                setMessageContextMenu(undefined);
+                                const conversation = activeConversation();
+                                if (conversation) {
+                                  runInBackground(
+                                    runEffect(
+                                      conversation.setPinnedMessage(
+                                        Number(message.id),
+                                        !snapshot().pinnedMessages.some(
+                                          ({ id }) => id === Number(message.id),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }}
+                            >
+                              <Pin size={15} />
+                              {snapshot().pinnedMessages.some(
+                                ({ id }) => id === Number(target().id),
+                              )
+                                ? 'Unpin'
+                                : 'Pin'}
+                            </button>
+                          </Show>
+                          <Show when={messageCapabilitiesForUi(target()).canEdit}>
                             <button
                               role="menuitem"
                               onClick={() => {
@@ -2056,17 +2254,19 @@ export function App(props: AppProps) {
                               <Pencil size={15} /> Edit
                             </button>
                           </Show>
-                          <button
-                            class="danger"
-                            role="menuitem"
-                            onClick={() => {
-                              const message = target();
-                              setMessageContextMenu(undefined);
-                              setDeleteTarget(message);
-                            }}
-                          >
-                            <Trash2 size={15} /> Delete
-                          </button>
+                          <Show when={messageCapabilitiesForUi(target()).canDelete}>
+                            <button
+                              class="danger"
+                              role="menuitem"
+                              onClick={() => {
+                                const message = target();
+                                setMessageContextMenu(undefined);
+                                setDeleteTarget(message);
+                              }}
+                            >
+                              <Trash2 size={15} /> Delete
+                            </button>
+                          </Show>
                         </div>
                       )}
                     </Show>
@@ -2111,7 +2311,7 @@ export function App(props: AppProps) {
               isBot={Boolean(activeChat().bot)}
               showCommands={Boolean(activeChat().bot || bot.commands().length > 0)}
               started={botStarted()}
-              enabled={canSend()}
+              enabled={canUseLiveCommands()}
               starting={bot.starting()}
               menuOpen={bot.menuOpen()}
               loadingCommands={bot.commandsLoading()}
@@ -2119,10 +2319,10 @@ export function App(props: AppProps) {
               replyKeyboard={visibleReplyKeyboard()?.keyboard}
               busyButton={bot.buttonBusy()?.owner === 'reply' ? bot.buttonBusy()?.key : undefined}
               onToggleMenu={bot.toggleMenu}
-              onStart={() => void bot.start()}
+              onStart={() => runInBackground(bot.start())}
               onCommand={bot.sendCommand}
               onReplyButton={(button, key) =>
-                void bot.press(button, 'reply', key, visibleReplyKeyboard()?.messageId)
+                runInBackground(bot.press(button, 'reply', key, visibleReplyKeyboard()?.messageId))
               }
             />
           </Show>
@@ -2130,6 +2330,9 @@ export function App(props: AppProps) {
             conversationId={activeChatId()}
             placeholder={visibleReplyKeyboard()?.keyboard.placeholder}
             enabled={canQueueMessage()}
+            canSendMedia={canSendMedia()}
+            canSendStickers={canSendStickers()}
+            canSendGifs={canSendGifs()}
             composer={composer}
             expressions={expressions}
             editLastMessage={editLastMessage}
@@ -2144,6 +2347,7 @@ export function App(props: AppProps) {
         <Show when={mediaViewer()}>
           {(viewer) => {
             const message = () => viewer().messages[viewer().index]!;
+            const capabilities = () => messageCapabilitiesForUi(message());
             return (
               <MediaViewer
                 kind={viewer().preview.kind}
@@ -2173,7 +2377,7 @@ export function App(props: AppProps) {
                     : () => saveMediaUrl(viewer().preview.url, viewer().preview.name)
                 }
                 forward={
-                  message().protected
+                  !capabilities().canForward
                     ? undefined
                     : () => {
                         const target = message();
@@ -2182,7 +2386,7 @@ export function App(props: AppProps) {
                       }
                 }
                 edit={
-                  message().outgoing
+                  capabilities().canEdit
                     ? () => {
                         const target = message();
                         setMediaViewer(undefined);
@@ -2190,11 +2394,15 @@ export function App(props: AppProps) {
                       }
                     : undefined
                 }
-                delete={() => {
-                  const target = message();
-                  setMediaViewer(undefined);
-                  setDeleteTarget(target);
-                }}
+                delete={
+                  capabilities().canDelete
+                    ? () => {
+                        const target = message();
+                        setMediaViewer(undefined);
+                        setDeleteTarget(target);
+                      }
+                    : undefined
+                }
                 goToMessage={() => {
                   const target = message();
                   setMediaViewer(undefined);
@@ -2215,7 +2423,8 @@ export function App(props: AppProps) {
           <ForwardMessageDialog
             chats={visibleChats()}
             close={() => setForwardingMessage(undefined)}
-            forward={(peerId) => void forwardMessage(peerId)}
+            search={(query) => runEffect(engine.searchPeers(query))}
+            forward={(peerId, result) => runInBackground(forwardMessage(peerId, result))}
           />
         </Show>
 
@@ -2234,7 +2443,9 @@ export function App(props: AppProps) {
           <SearchPanel
             dialogs={snapshot().dialogs}
             activePeerId={activeChatId()}
-            search={(term, global, offset) => activeConversation()!.search(term, global, offset)}
+            search={(term, global, offset) =>
+              runEffect(activeConversation()!.search(term, global, offset))
+            }
             openResult={(message) => {
               setSearchOpen(false);
               runInBackground(openMessage(message));
@@ -2247,7 +2458,9 @@ export function App(props: AppProps) {
           {(kind) => (
             <SharedMediaPanel
               initialKind={kind}
-              loadItems={(selected, offset) => activeConversation()!.sharedMedia(selected, offset)}
+              loadItems={(selected, offset) =>
+                runEffect(activeConversation()!.sharedMedia(selected, offset))
+              }
               loadMedia={(message, progress) => mediaAssets.loadMedia(message, progress)}
               loadMediaPreview={(message) => mediaAssets.messagePreview(message).load()}
               cachedMedia={(message) => mediaAssets.message(message).cached()}
@@ -2256,14 +2469,18 @@ export function App(props: AppProps) {
                 setSharedMediaKind(undefined);
                 runInBackground(openMessage(message));
               }}
+              canForwardMessage={(message) => telegramMessageCapabilitiesForUi(message).canForward}
               forwardMessage={(message) => {
+                if (!telegramMessageCapabilitiesForUi(message).canForward) return;
                 setSharedMediaKind(undefined);
                 const readOutboxMaxId =
                   snapshot().dialogs.find(({ peer }) => peer.id === message.peerId)
                     ?.readOutboxMaxId ?? 0;
                 setForwardingMessage(presentMessage(message, readOutboxMaxId));
               }}
+              canDeleteMessage={(message) => telegramMessageCapabilitiesForUi(message).canDelete}
               deleteMessage={(message) => {
+                if (!telegramMessageCapabilitiesForUi(message).canDelete) return;
                 setSharedMediaKind(undefined);
                 const readOutboxMaxId =
                   snapshot().dialogs.find(({ peer }) => peer.id === message.peerId)
@@ -2278,12 +2495,13 @@ export function App(props: AppProps) {
         <Show when={deleteTarget()}>
           {(message) => (
             <DeleteMessageDialog
-              outgoing={message().outgoing}
+              canDeleteForMe={messageCapabilitiesForUi(message()).canDeleteForMe}
+              canDeleteForEveryone={messageCapabilitiesForUi(message()).canDeleteForEveryone}
               close={() => setDeleteTarget(undefined)}
               confirm={(revoke) => {
                 const messageId = message().id;
                 setDeleteTarget(undefined);
-                void deleteMessage(messageId, revoke);
+                runInBackground(deleteMessage(messageId, revoke));
               }}
             />
           )}
@@ -2292,14 +2510,16 @@ export function App(props: AppProps) {
         <Show when={deleteChatTarget()}>
           {(chat) => (
             <DeleteChatDialog
-              chat={chat()}
-              hasDraft={Boolean(snapshot().drafts[chat().id]?.trim())}
-              queuedCount={snapshot().pending.filter(({ peer }) => peer.id === chat().id).length}
+              dialog={chat()}
+              hasDraft={Boolean(snapshot().drafts[chat().peer.id]?.trim())}
+              queuedCount={
+                snapshot().pending.filter(({ peer }) => peer.id === chat().peer.id).length
+              }
               close={() => setDeleteChatTarget(undefined)}
-              confirm={() => {
-                const peerId = chat().id;
+              confirm={(action) => {
+                const peerId = chat().peer.id;
                 setDeleteChatTarget(undefined);
-                runInBackground(chatDirectory.delete(peerId));
+                runInBackground(chatDirectory.delete(peerId, action));
               }}
             />
           )}
@@ -2359,7 +2579,7 @@ export function App(props: AppProps) {
             const dialog = activeDialog();
             const conversation = activeConversation();
             if (dialog?.peer.kind === 'user' && conversation?.peerId === dialog.peer.id) {
-              runInBackground(conversation.setBlocked(blocked));
+              runInBackground(runEffect(conversation.setBlocked(blocked)));
             }
           }}
         />
@@ -2370,9 +2590,11 @@ export function App(props: AppProps) {
           snapshot={snapshot()}
           {...(configurationError ? { configurationError } : {})}
           onRetry={retrySync}
-          onPhone={(phone) => engine.requestCode(phone)}
-          onCode={(code) => engine.submitCode(code)}
-          onPassword={(password) => engine.submitPassword(password)}
+          onPhone={(phone) => runEffect(engine.requestCode(phone)).then(() => undefined)}
+          onCode={(code) => runEffect(engine.submitCode(code)).then(() => undefined)}
+          onPassword={(password) =>
+            runEffect(engine.submitPassword(password)).then(() => undefined)
+          }
         />
       </Show>
     </main>

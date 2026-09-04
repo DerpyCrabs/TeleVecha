@@ -18,7 +18,7 @@ describe('media presentation', () => {
     expect(mediaPresentation(media())).toEqual({
       display: 'file',
       preview: 'image',
-      preload: false,
+      preload: true,
     });
   });
 

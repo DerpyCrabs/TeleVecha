@@ -1,3 +1,5 @@
+import { Effect, Schedule } from 'effect';
+
 import {
   bigIntToBytes,
   bitLength,
@@ -8,12 +10,11 @@ import {
   modPow,
   xorBytes,
 } from '../bytes';
-import type { CryptoAdapter } from '../crypto';
+import { randomBytes, sha1 } from '../crypto';
 import { createMtprotoError } from '../errors';
 
 export const DH_PRIME_BYTES = 256;
 const DH_PUBLIC_VALUE_SECURITY_BITS = 64;
-const MAX_PRIVATE_EXPONENT_ATTEMPTS = 128;
 
 export const TELEGRAM_DH_PRIME = hexToBytes(
   'c71caeb9c6b1c9048e6c522f70f13f73980d40238e3e21c14934d037563d930f' +
@@ -26,66 +27,74 @@ export const TELEGRAM_DH_PRIME = hexToBytes(
     'f0d8115f635b105ee2e4e15d04b2454bf6f4fadf034b10403119cd8e3b92fcc5b',
 );
 
-export function validateDhParameters(primeBytes: Uint8Array, generator: number) {
+export const validateDhParameters = Effect.fn('mtproto.auth.validateDhParameters')(function* (
+  primeBytes: Uint8Array,
+  generator: number,
+) {
   const prime = bytesToBigInt(primeBytes);
   if (
     !equalBytesConstantTime(primeBytes, TELEGRAM_DH_PRIME) ||
     !isGeneratorGood(prime, generator)
   ) {
-    throw createMtprotoError('protocol', 'Invalid DH prime or generator.');
+    return yield* Effect.fail(createMtprotoError('protocol', 'Invalid DH prime or generator.'));
   }
   return prime;
-}
+});
 
-export function validateDhPublicValue(value: bigint, prime: bigint, label: string) {
-  if (value <= 1n || value >= prime - 1n) {
-    throw createMtprotoError('protocol', `DH ${label} is outside the modulus.`);
-  }
+export const validateDhPublicValue = Effect.fn('mtproto.auth.validateDhPublicValue')(function* (
+  value: bigint,
+  prime: bigint,
+  label: string,
+) {
   const threshold = 1n << BigInt(bitLength(prime) - DH_PUBLIC_VALUE_SECURITY_BITS);
   if (value <= threshold || value >= prime - threshold) {
-    throw createMtprotoError('protocol', `DH ${label} is outside the safe range.`);
+    return yield* Effect.fail(
+      createMtprotoError('protocol', `DH ${label} is outside the safe range.`),
+    );
   }
-}
+});
 
-export function generateDhPrivateExponent(
+export const generateDhPrivateExponent = Effect.fn('mtproto.auth.privateExponent')(function* (
   prime: bigint,
-  randomBytes: (length: number) => Uint8Array,
   serverRandom?: Uint8Array,
 ) {
-  for (let attempt = 0; attempt < MAX_PRIVATE_EXPONENT_ATTEMPTS; attempt += 1) {
-    const bytes = randomBytes(DH_PRIME_BYTES);
-    if (bytes.byteLength !== DH_PRIME_BYTES) {
-      throw createMtprotoError('crypto', 'Random source returned the wrong DH exponent length.');
-    }
-    if (serverRandom) {
-      const count = Math.min(bytes.byteLength, serverRandom.byteLength);
-      for (let index = 0; index < count; index += 1) {
-        bytes[index] = bytes[index]! ^ serverRandom[index]!;
+  return yield* randomBytes(DH_PRIME_BYTES).pipe(
+    Effect.map((bytes) => {
+      if (serverRandom) {
+        const count = Math.min(bytes.byteLength, serverRandom.byteLength);
+        for (let index = 0; index < count; index += 1) {
+          bytes[index] = bytes[index]! ^ serverRandom[index]!;
+        }
       }
-    }
-    const exponent = bytesToBigInt(bytes);
-    if (exponent > 1n && exponent < prime - 1n) return exponent;
-  }
-  throw createMtprotoError('crypto', 'Could not generate a valid DH private exponent.');
-}
+      return bytesToBigInt(bytes);
+    }),
+    Effect.filterOrFail(
+      (exponent) => exponent > 1n && exponent < prime - 1n,
+      () => createMtprotoError('crypto', 'Generated an invalid DH private exponent.'),
+    ),
+    Effect.retry(Schedule.recurs(127)),
+  );
+});
 
-export async function deriveTemporaryAes(
+export const deriveTemporaryAes = Effect.fn('mtproto.auth.temporaryAes')(function* (
   serverNonce: bigint,
   newNonce: bigint,
-  crypto: Pick<CryptoAdapter, 'sha1'>,
 ) {
   const server = bigIntToBytes(serverNonce, 16, { littleEndian: true, signed: true });
   const fresh = bigIntToBytes(newNonce, 32, { littleEndian: true, signed: true });
-  const [first, second, third] = await Promise.all([
-    crypto.sha1(concatBytes(fresh, server)),
-    crypto.sha1(concatBytes(server, fresh)),
-    crypto.sha1(concatBytes(fresh, fresh)),
-  ]);
-  return Object.freeze({
+  const [first, second, third] = yield* Effect.all(
+    [
+      sha1(concatBytes(fresh, server)),
+      sha1(concatBytes(server, fresh)),
+      sha1(concatBytes(fresh, fresh)),
+    ],
+    { concurrency: 'unbounded' },
+  );
+  return {
     key: concatBytes(first, second.subarray(0, 12)),
     iv: concatBytes(second.subarray(12, 20), third, fresh.subarray(0, 4)),
-  });
-}
+  };
+});
 
 export function calculateServerSalt(newNonce: bigint, serverNonce: bigint) {
   const fresh = bigIntToBytes(newNonce, 32, { littleEndian: true, signed: true });
@@ -96,17 +105,19 @@ export function calculateServerSalt(newNonce: bigint, serverNonce: bigint) {
   });
 }
 
-export function calculateDhValues(
+export const calculateDhValues = Effect.fn('mtproto.auth.calculateDhValues')(function* (
   generator: number,
   serverPublic: bigint,
   privateExponent: bigint,
   prime: bigint,
 ) {
   const clientPublic = modPow(BigInt(generator), privateExponent, prime);
-  const sharedSecret = modPow(serverPublic, privateExponent, prime);
-  validateDhPublicValue(clientPublic, prime, 'g_b');
-  return Object.freeze({ clientPublic, sharedSecret });
-}
+  yield* validateDhPublicValue(clientPublic, prime, 'g_b');
+  return {
+    clientPublic,
+    sharedSecret: modPow(serverPublic, privateExponent, prime),
+  };
+});
 
 function isGeneratorGood(prime: bigint, generator: number) {
   if (generator === 2) return prime % 8n === 7n;

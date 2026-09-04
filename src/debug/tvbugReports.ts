@@ -1,3 +1,5 @@
+import { Effect } from 'effect';
+
 import {
   createTvBugManifest,
   createTvBugSanitizer,
@@ -6,7 +8,6 @@ import {
   type TvBugTraceEventV2,
 } from './tvbugFormat';
 import { subscribeDiagnostics } from '../telegram/core/diagnostics';
-import type { MessagingClient } from '../telegram/core/client';
 import type { CacheCheckpoint, IndexedDbCacheStore } from '../telegram/persistence/store';
 import type { EngineSnapshot, PendingSend, TelegramDialog } from '../telegram/types';
 import { readThemePreferences } from '../ui/theme/themePreferences';
@@ -39,109 +40,111 @@ export interface PreparedDebugReport {
   preview: DebugReportPreview;
 }
 
+interface RecorderState {
+  readonly bootstrapActivePeerId: string | undefined;
+  readonly diagnosticCount: number;
+  readonly engine: SnapshotSource | undefined;
+  readonly order: number;
+  readonly trace: readonly StoredTraceEvent[];
+  readonly truncated: boolean;
+}
+
+interface SnapshotSource {
+  snapshot(): EngineSnapshot;
+}
+
+function appendTrace(state: RecorderState, event: StoredTraceEvent['event']): RecorderState {
+  let trace = state.trace;
+  let diagnosticCount = state.diagnosticCount;
+  let truncated = state.truncated;
+  if (event.kind === 'diagnostic' && diagnosticCount >= MAX_DIAGNOSTIC_EVENTS) {
+    const index = trace.findIndex((stored) => stored.event.kind === 'diagnostic');
+    if (index >= 0) {
+      trace = [...trace.slice(0, index), ...trace.slice(index + 1)];
+      diagnosticCount -= 1;
+      truncated = true;
+    }
+  }
+  if (trace.length >= MAX_TRACE_EVENTS) {
+    const [removed, ...remaining] = trace;
+    trace = remaining;
+    if (removed?.event.kind === 'diagnostic') diagnosticCount -= 1;
+    truncated = true;
+  }
+  const order = state.order + 1;
+  return {
+    ...state,
+    trace: [...trace, { event, order }],
+    order,
+    diagnosticCount: diagnosticCount + (event.kind === 'diagnostic' ? 1 : 0),
+    truncated,
+  };
+}
+
 /**
  * Owns one browser session's account-free recording. Raw IndexedDB values are
  * held only long enough to synthesize the export and never enter the ZIP.
  */
-export class BrowserDebugReportRecorder {
-  private readonly startedAt = performance.now();
-  private readonly sourceEpochMs = Math.floor(Date.now() / 1_000) * 1_000;
-  private bootstrapActivePeerId = currentUrlPeerId();
-  private readonly sanitizer = createTvBugSanitizer({ sourceEpochMs: this.sourceEpochMs });
-  private readonly trace: StoredTraceEvent[] = [];
-  private diagnosticCount = 0;
-  private order = 0;
-  private truncated = false;
-  private engine: MessagingClient | undefined;
+export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
+  const startedAt = performance.now();
+  const sanitizer = createTvBugSanitizer({
+    sourceEpochMs: Math.floor(Date.now() / 1_000) * 1_000,
+  });
+  let recorder: RecorderState = {
+    bootstrapActivePeerId: currentUrlPeerId(),
+    diagnosticCount: 0,
+    engine: undefined,
+    order: 0,
+    trace: [],
+    truncated: false,
+  };
+  const elapsed = () => Math.max(0, Math.round(performance.now() - startedAt));
+  const append = (event: StoredTraceEvent['event']) => {
+    recorder = appendTrace(recorder, event);
+  };
+  const markTruncated = () => {
+    if (!recorder.truncated) recorder = { ...recorder, truncated: true };
+  };
+  const recordUi = (method: string, value: unknown) =>
+    append({ seq: 0, tMs: elapsed(), kind: 'ui', method, value });
+  const sanitizeTraceValue = (value: unknown, kind: string, method?: string) => {
+    try {
+      return sanitizer.sanitizeValue(value, `trace.${kind}.${method ?? 'event'}`) ?? null;
+    } catch {
+      return { level: 'error', message: 'redacted' };
+    }
+  };
 
-  constructor(private readonly store: IndexedDbCacheStore) {
-    subscribeDiagnostics((diagnostic) => {
-      this.append({
-        seq: 0,
-        tMs: this.elapsed(),
-        kind: 'diagnostic',
-        method: diagnostic.area,
-        value: {
-          ...(diagnostic.code ? { code: diagnostic.code } : {}),
-          level: diagnostic.level,
-          message: diagnostic.message,
-          details: diagnostic.details,
-        },
-      });
-    });
-  }
-
-  attachEngine(engine: MessagingClient) {
-    this.engine = engine;
-  }
-
-  recordPeerSelection(peerId: string) {
-    this.bootstrapActivePeerId ??= peerId;
-    this.append({
+  const unsubscribeDiagnostics = subscribeDiagnostics((diagnostic) => {
+    append({
       seq: 0,
-      tMs: this.elapsed(),
-      kind: 'ui',
-      method: 'select-chat',
-      value: { peerId },
+      tMs: elapsed(),
+      kind: 'diagnostic',
+      method: diagnostic.area,
+      value: {
+        ...(diagnostic.code ? { code: diagnostic.code } : {}),
+        level: diagnostic.level,
+        message: diagnostic.message,
+        details: diagnostic.details,
+      },
     });
-  }
+  });
 
-  recordComposerReply(peerId: string, messageId: number) {
-    this.append({
-      seq: 0,
-      tMs: this.elapsed(),
-      kind: 'ui',
-      method: 'composer-reply',
-      value: { peerId, messageId },
-    });
-  }
-
-  recordComposerSend(peerId: string, text: string) {
-    this.append({
-      seq: 0,
-      tMs: this.elapsed(),
-      kind: 'ui',
-      method: 'composer-send',
-      value: { peerId, text },
-    });
-  }
-
-  recordComposerFocus(peerId: string, focused: boolean) {
-    this.append({
-      seq: 0,
-      tMs: this.elapsed(),
-      kind: 'ui',
-      method: 'composer-focus',
-      value: { peerId, focused },
-    });
-  }
-
-  recordViewport(
-    peerId: string,
-    phase: 'before-send' | 'after-send',
-    sample: number,
-    geometry: { scrollTop: number; scrollHeight: number; clientHeight: number },
-  ) {
-    this.append({
-      seq: 0,
-      tMs: this.elapsed(),
-      kind: 'ui',
-      method: 'conversation-viewport',
-      value: { peerId, phase, sample, ...geometry },
-    });
-  }
-
-  async prepare(): Promise<PreparedDebugReport> {
-    const checkpoint = await this.store.captureCheckpoint().catch(() => {
-      this.truncated = true;
-      return emptyCheckpoint();
-    });
-    const snapshot = this.engine?.snapshot();
+  const prepare = Effect.fn('DebugReports.prepare')(function* () {
+    const checkpoint = yield* store.captureCheckpoint().pipe(
+      Effect.catch(() =>
+        Effect.sync(() => {
+          markTruncated();
+          return emptyCheckpoint();
+        }),
+      ),
+    );
+    const snapshot = recorder.engine?.snapshot();
     const activePeerId = snapshot?.activePeerId ?? checkpoint.lastPeerId;
     const sourceDialogs = snapshot?.dialogs ?? checkpoint.dialogs;
     const sourcePending = snapshot?.pending ?? checkpoint.pending;
     if (sourceDialogs.length > MAX_DIALOGS || sourcePending.length > MAX_PENDING_SENDS) {
-      this.truncated = true;
+      markTruncated();
     }
     const dialogs = limitDialogs(sourceDialogs, activePeerId);
     const messages = (
@@ -149,8 +152,9 @@ export class BrowserDebugReportRecorder {
       checkpoint.messages.filter((message) => !activePeerId || message.peerId === activePeerId)
     ).slice(-MAX_ACTIVE_MESSAGES);
     if ((snapshot?.messages.length ?? checkpoint.messages.length) > messages.length) {
-      this.truncated = true;
+      markTruncated();
     }
+    const captured = recorder;
     const drafts = activePeerId
       ? pickRecord(snapshot?.drafts ?? checkpoint.drafts, activePeerId)
       : {};
@@ -181,17 +185,17 @@ export class BrowserDebugReportRecorder {
         online: snapshot?.online,
       },
       runtime: snapshot ? compactRuntime(snapshot) : {},
-      ui: captureUiState(snapshot?.activePeerId, this.bootstrapActivePeerId),
+      ui: captureUiState(snapshot?.activePeerId, captured.bootstrapActivePeerId),
     };
-    const state = this.sanitizer.sanitizeState(stateSource);
-    const trace = this.trace
+    const state = sanitizer.sanitizeState(stateSource);
+    const trace = captured.trace
       .slice()
       .sort((left, right) => left.event.tMs - right.event.tMs || left.order - right.order)
       .map(({ event: { value, ...event } }, index): TvBugTraceEventV2 => ({
         ...event,
         seq: index + 1,
         ...(value !== undefined
-          ? { value: this.sanitizeTraceValue(value, event.kind, event.method) }
+          ? { value: sanitizeTraceValue(value, event.kind, event.method) }
           : {}),
       }));
     const manifest = createTvBugManifest({
@@ -202,15 +206,15 @@ export class BrowserDebugReportRecorder {
           : {}),
       },
       capture: {
-        durationMs: this.elapsed(),
-        complete: !this.truncated,
-        truncated: this.truncated,
+        durationMs: elapsed(),
+        complete: !captured.truncated,
+        truncated: captured.truncated,
         tabCount: 1,
       },
       environment: captureEnvironment(),
     });
     const bytes = createTvBugBundle({ manifest, snapshot: state, trace });
-    const fingerprint = await shortDigest(bytes);
+    const fingerprint = yield* shortDigest(bytes);
     const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
     const file = new File([ownedBuffer(bytes)], `televecha-${date}-${fingerprint}.tvbug`, {
       type: REPORT_MIME_TYPE,
@@ -219,44 +223,44 @@ export class BrowserDebugReportRecorder {
       file,
       preview: {
         compressedBytes: bytes.byteLength,
-        diagnosticCount: this.diagnosticCount,
+        diagnosticCount: captured.diagnosticCount,
         messageCount: state.messages.length,
         traceCount: trace.length,
-        truncated: this.truncated,
+        truncated: captured.truncated,
       },
     };
-  }
+  });
 
-  private append(event: StoredTraceEvent['event']) {
-    if (event.kind === 'diagnostic' && this.diagnosticCount >= MAX_DIAGNOSTIC_EVENTS) {
-      const oldestDiagnostic = this.trace.findIndex((stored) => stored.event.kind === 'diagnostic');
-      if (oldestDiagnostic >= 0) {
-        this.trace.splice(oldestDiagnostic, 1);
-        this.diagnosticCount -= 1;
-        this.truncated = true;
-      }
-    }
-    if (this.trace.length >= MAX_TRACE_EVENTS) {
-      const removed = this.trace.shift();
-      if (removed?.event.kind === 'diagnostic') this.diagnosticCount -= 1;
-      this.truncated = true;
-    }
-    this.trace.push({ event, order: ++this.order });
-    if (event.kind === 'diagnostic') this.diagnosticCount += 1;
-  }
-
-  private sanitizeTraceValue(value: unknown, kind: string, method?: string) {
-    try {
-      return this.sanitizer.sanitizeValue(value, `trace.${kind}.${method ?? 'event'}`) ?? null;
-    } catch {
-      return { level: 'error', message: 'redacted' };
-    }
-  }
-
-  private elapsed() {
-    return Math.max(0, Math.round(performance.now() - this.startedAt));
-  }
+  return {
+    dispose() {
+      unsubscribeDiagnostics();
+    },
+    attachEngine(engine: SnapshotSource) {
+      recorder = { ...recorder, engine };
+    },
+    recordPeerSelection(peerId: string) {
+      recorder = { ...recorder, bootstrapActivePeerId: recorder.bootstrapActivePeerId ?? peerId };
+      recordUi('select-chat', { peerId });
+    },
+    recordComposerReply: (peerId: string, messageId: number) =>
+      recordUi('composer-reply', { peerId, messageId }),
+    recordComposerSend: (peerId: string, text: string) =>
+      recordUi('composer-send', { peerId, text }),
+    recordComposerFocus: (peerId: string, focused: boolean) =>
+      recordUi('composer-focus', { peerId, focused }),
+    recordViewport(
+      peerId: string,
+      phase: 'before-send' | 'after-send',
+      sample: number,
+      geometry: { scrollTop: number; scrollHeight: number; clientHeight: number },
+    ) {
+      recordUi('conversation-viewport', { peerId, phase, sample, ...geometry });
+    },
+    prepare,
+  };
 }
+
+export type BrowserDebugReportRecorder = ReturnType<typeof createBrowserDebugReportRecorder>;
 
 function compactRuntime(snapshot: EngineSnapshot) {
   const { dialogs, messages, drafts, pending, pinnedMessages, authStep, ...runtime } = snapshot;
@@ -395,13 +399,19 @@ function readBoolean(key: string) {
   }
 }
 
-async function shortDigest(bytes: Uint8Array) {
-  if (!globalThis.crypto?.subtle) return String(bytes.byteLength);
-  const digest = await crypto.subtle.digest('SHA-256', ownedBuffer(bytes));
-  return Array.from(new Uint8Array(digest).slice(0, 6), (byte) =>
-    byte.toString(16).padStart(2, '0'),
-  ).join('');
-}
+const shortDigest = (bytes: Uint8Array) =>
+  globalThis.crypto?.subtle
+    ? Effect.tryPromise({
+        try: () => crypto.subtle.digest('SHA-256', ownedBuffer(bytes)),
+        catch: (cause) => cause,
+      }).pipe(
+        Effect.map((digest) =>
+          Array.from(new Uint8Array(digest).slice(0, 6), (byte) =>
+            byte.toString(16).padStart(2, '0'),
+          ).join(''),
+        ),
+      )
+    : Effect.succeed(String(bytes.byteLength));
 
 function ownedBuffer(bytes: Uint8Array): ArrayBuffer {
   const owned = new Uint8Array(bytes.byteLength);

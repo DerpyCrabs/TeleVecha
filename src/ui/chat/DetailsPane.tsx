@@ -14,7 +14,7 @@ import { For, Show } from 'solid-js';
 
 import type { ChatSummary } from '../../domain/models';
 import type { SharedMediaCounts, SharedMediaKind, TelegramGroupMember } from '../../telegram/types';
-import { MediaAssets } from '../media/mediaAssets';
+import type { MediaAssets } from '../media/mediaAssets';
 import { AutoLinkText } from '../shared/AutoLinkText';
 import { Avatar } from '../shared/Avatar';
 import type { ContactDetailsSession } from './contactDetailsSession';
@@ -214,6 +214,14 @@ export function DetailsPane(props: DetailsPaneProps) {
                 <span>Delete contact</span>
               </button>
             </Show>
+            <Show when={!props.details.userDetails()?.isContact}>
+              <button onClick={props.details.add}>
+                <span aria-hidden="true" class="text-base leading-none">
+                  +
+                </span>
+                <span>Add contact</span>
+              </button>
+            </Show>
             <button
               class="!text-red-400"
               disabled={!props.conversationReady}
@@ -228,7 +236,11 @@ export function DetailsPane(props: DetailsPaneProps) {
           <section class="group-members border-b border-line px-2.5 py-3" aria-label="Members">
             <header class="flex items-center justify-between px-2 py-1 pb-2.5 text-xs [&>span]:text-muted">
               <strong>Members</strong>
-              <span>{props.details.membersLoading() ? '…' : props.details.members().length}</span>
+              <span>
+                {props.details.membersLoading()
+                  ? '…'
+                  : props.details.membersTotal() || props.details.members().length}
+              </span>
             </header>
             <Show
               when={!props.details.membersLoading()}
@@ -289,6 +301,15 @@ export function DetailsPane(props: DetailsPaneProps) {
                   </div>
                 )}
               </For>
+              <Show when={props.details.membersHasMore()}>
+                <button
+                  class="mt-1 w-full rounded-[0.45rem] border-0 bg-transparent px-2 py-2 text-xs text-muted hover:bg-[var(--surface-subtle)] hover:text-ink"
+                  disabled={props.details.membersLoadingMore()}
+                  onClick={() => void props.details.loadMoreMembers()}
+                >
+                  {props.details.membersLoadingMore() ? 'Loading…' : 'Load more members'}
+                </button>
+              </Show>
             </Show>
           </section>
         </Show>

@@ -1,27 +1,33 @@
 import { createSignal, onCleanup, type Accessor } from 'solid-js';
+import { Effect } from 'effect';
 
-import type { Conversation } from '../../telegram/core/conversation';
+import type { EffectConversation } from '../../telegram/core/conversation';
+import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
   TelegramReplyTarget,
   TelegramSticker,
   TelegramStickerPack,
   TelegramResourceInvalidation,
 } from '../../telegram/types';
+import { subscribeAtUi, type UiEffectRunner } from '../app/appRuntime';
 
 interface ExpressionSource {
-  getRecentStickers(): Promise<TelegramSticker[]>;
-  getStickerPacks(): Promise<TelegramStickerPack[]>;
-  getSavedGifs(): Promise<TelegramSticker[]>;
-  searchGifs(query: string): Promise<TelegramSticker[]>;
-  subscribeResources(listener: (event: TelegramResourceInvalidation) => void): () => void;
+  getRecentStickers(): Effect.Effect<TelegramSticker[], MessagingError>;
+  getStickerPacks(): Effect.Effect<TelegramStickerPack[], MessagingError>;
+  getSavedGifs(): Effect.Effect<TelegramSticker[], MessagingError>;
+  subscribeResources(
+    listener: (event: TelegramResourceInvalidation) => void,
+  ): Effect.Effect<Effect.Effect<void>, MessagingError>;
 }
 
 /** Owns expression catalogs, picker exclusivity, invalidation, and sends. */
 export function createExpressionSession(options: {
   source: ExpressionSource;
-  conversation: Accessor<Conversation | undefined>;
-  online: Accessor<boolean>;
+  runEffect: UiEffectRunner;
+  conversation: Accessor<EffectConversation | undefined>;
   reply: Accessor<TelegramReplyTarget | undefined>;
+  canSendStickers: Accessor<boolean>;
+  canSendGifs: Accessor<boolean>;
   clearReply: () => void;
 }) {
   const [stickerOpen, setStickerOpen] = createSignal(false);
@@ -37,10 +43,11 @@ export function createExpressionSession(options: {
     if (stickerLoading()) return;
     setStickerLoading(true);
     try {
-      const [recent, installed] = await Promise.all([
-        options.source.getRecentStickers(),
-        options.source.getStickerPacks(),
-      ]);
+      const [recent, installed] = await options.runEffect(
+        Effect.all([options.source.getRecentStickers(), options.source.getStickerPacks()], {
+          concurrency: 'unbounded',
+        }),
+      );
       setStickerPacks([
         ...(recent.length > 0 ? [{ id: 'recent', title: 'Recent', stickers: recent }] : []),
         ...installed,
@@ -55,7 +62,7 @@ export function createExpressionSession(options: {
     setGifLoading(true);
     setGifError('');
     try {
-      setGifs(await options.source.getSavedGifs());
+      setGifs(await options.runEffect(options.source.getSavedGifs()));
     } catch {
       setGifError('GIFs could not be loaded.');
     } finally {
@@ -78,22 +85,31 @@ export function createExpressionSession(options: {
   };
 
   onCleanup(
-    options.source.subscribeResources(({ kind }) => {
-      if (kind !== 'expressions') return;
-      setStickerPacks([]);
-      setGifs([]);
-      if (stickerOpen()) void loadStickers().catch(() => undefined);
-      if (gifOpen()) void loadGifs().catch(() => undefined);
-    }),
+    subscribeAtUi(
+      options.runEffect,
+      options.source.subscribeResources(({ kind }) => {
+        if (kind !== 'expressions') return;
+        setStickerPacks([]);
+        setGifs([]);
+        if (stickerOpen()) void loadStickers().catch(() => undefined);
+        if (gifOpen()) void loadGifs().catch(() => undefined);
+      }),
+    ),
   );
 
-  const sendSticker = async (sticker: TelegramSticker) => {
+  const sendExpression = async (
+    sticker: TelegramSticker,
+    allowed: boolean,
+    kind: 'sticker' | 'gif',
+  ) => {
+    if (!allowed) return;
     const conversation = options.conversation();
-    if (!conversation || !options.online()) return;
+    if (!conversation) return;
     const reply = options.reply();
-    setStickerOpen(false);
+    if (kind === 'gif') setGifOpen(false);
+    else setStickerOpen(false);
     options.clearReply();
-    await conversation.sendSticker(sticker, reply);
+    await options.runEffect(conversation.sendSticker(sticker, reply));
   };
 
   return {
@@ -109,12 +125,16 @@ export function createExpressionSession(options: {
     toggleStickers,
     toggleGifs,
     retryGifs: loadGifs,
-    sendSticker,
+    sendSticker: (sticker: TelegramSticker) =>
+      sendExpression(sticker, options.canSendStickers(), 'sticker'),
     sendGif: async (gif: TelegramSticker) => {
-      setGifOpen(false);
-      await sendSticker(gif);
+      await sendExpression(gif, options.canSendGifs(), 'gif');
     },
-    searchGifs: (query: string) => options.source.searchGifs(query),
+    searchGifs: (query: string) => {
+      if (!options.canSendGifs()) return Promise.resolve([]);
+      const conversation = options.conversation();
+      return options.runEffect(conversation ? conversation.searchGifs(query) : Effect.succeed([]));
+    },
     close: () => {
       setStickerOpen(false);
       setGifOpen(false);

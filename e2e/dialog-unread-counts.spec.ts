@@ -28,11 +28,7 @@ test('keeps unread counts visible and accessible across dialog views', async ({ 
   await alice.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Archive chat' }).click();
 
-  const archived = page.getByRole('button', { name: /Archived chats, 1 chat/ });
-  await expect(archived.locator('.chat-unread-badge-trailing')).toHaveText('2');
-  await expect(archived).toHaveAccessibleName('Archived chats, 1 chat, 2 unread messages');
-
-  await archived.click();
+  await page.getByRole('button', { name: 'Archived', exact: true }).click();
   const archivedAlice = chatButton(page, /Alice Fixture/);
   await expect(archivedAlice.locator('.chat-unread-badge-trailing')).toHaveText('2');
   await expect(archivedAlice.locator('.chat-unread-badge-trailing')).toHaveClass(/muted/);

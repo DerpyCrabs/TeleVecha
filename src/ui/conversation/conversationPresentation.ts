@@ -27,6 +27,7 @@ function pendingMessage(
       : undefined;
   const value: ChatMessage = {
     id,
+    peerId: send.peer.id,
     author: 'You',
     senderId: 'self',
     body: first ? send.text : '',

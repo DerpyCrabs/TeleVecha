@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { Deferred, Effect, Fiber, Stream } from 'effect';
+import { describe, expect, it } from 'vitest';
 
 import {
   connectionStateEvent,
-  createMtprotoEventHub,
+  makeClientEventHub,
   sessionGapEvent,
   updateEvent,
+  type MtprotoClientEvent,
 } from './events';
 
 describe('MTProto client events', () => {
@@ -19,27 +21,60 @@ describe('MTProto client events', () => {
     expect(gap).toEqual({ _: 'sessionGap', firstMessageId: 10n, uniqueId: 20n });
     expect(Object.isFrozen(connected)).toBe(true);
   });
+  it('reports overflow and preserves a dropped connection state without blocking the socket reader', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const hub = yield* makeClientEventHub(2);
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const received: MtprotoClientEvent[] = [];
+          const reader = yield* hub.events.pipe(
+            Stream.take(5),
+            Stream.runForEach((event) =>
+              Effect.gen(function* () {
+                received.push(event);
+                if (received.length === 1) {
+                  yield* Deferred.succeed(entered, undefined);
+                  yield* Deferred.await(release);
+                }
+              }),
+            ),
+            Effect.forkChild,
+          );
+          yield* Effect.yieldNow;
+          yield* hub.publish(updateEvent(0));
+          yield* Deferred.await(entered);
+          yield* hub.publish(connectionStateEvent('disconnected'));
+          for (let i = 1; i <= 3; i += 1) yield* hub.publish(updateEvent(i));
+          yield* Deferred.succeed(release, undefined);
+          yield* Fiber.join(reader);
+          expect(received).toEqual([
+            updateEvent(0),
+            sessionGapEvent(),
+            connectionStateEvent('disconnected'),
+            updateEvent(2),
+            updateEvent(3),
+          ]);
+        }),
+      ),
+    ));
 
-  it('keeps listener ownership local to the hub', () => {
-    const hub = createMtprotoEventHub();
-    const listener = vi.fn();
-    const unsubscribe = hub.subscribe(listener);
-    hub.emit(connectionStateEvent('connected'));
-    unsubscribe();
-    unsubscribe();
-    hub.emit(connectionStateEvent('disconnected'));
-    expect(listener).toHaveBeenCalledOnce();
-  });
-
-  it('isolates transport state from a failing event subscriber', () => {
-    const hub = createMtprotoEventHub();
-    const healthy = vi.fn();
-    hub.subscribe(() => {
-      throw new Error('subscriber failed');
-    });
-    hub.subscribe(healthy);
-
-    expect(() => hub.emit(connectionStateEvent('connected'))).not.toThrow();
-    expect(healthy).toHaveBeenCalledWith(connectionStateEvent('connected'));
-  });
+  it('does not report an old gap to a newly attached consumer', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const hub = yield* makeClientEventHub(2);
+          yield* hub.publish(updateEvent('before subscription'));
+          const reader = yield* hub.events.pipe(
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.forkChild,
+          );
+          yield* Effect.yieldNow;
+          yield* hub.publish(updateEvent('current'));
+          expect(yield* Fiber.join(reader)).toEqual([updateEvent('current')]);
+        }),
+      ),
+    ));
 });

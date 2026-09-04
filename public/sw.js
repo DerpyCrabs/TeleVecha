@@ -1,21 +1,5 @@
-const CACHE_PREFIX = 'televecha-shell-';
-const CACHE_NAME = `${CACHE_PREFIX}v2`;
-const SHELL_URLS = ['/', '/index.html', '/site.webmanifest', '/favicon.svg'];
-
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      await cache.addAll(SHELL_URLS);
-      const response = await fetch('/index.html');
-      const html = await response.clone().text();
-      await cache.put('/index.html', response);
-      const assetUrls = [...html.matchAll(/(?:src|href)="([^"]+)"/gu)]
-        .map((match) => match[1])
-        .filter((url) => url?.startsWith('/'));
-      await cache.addAll(assetUrls);
-      await self.skipWaiting();
-    }),
-  );
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', (event) => {
@@ -24,45 +8,9 @@ self.addEventListener('activate', (event) => {
       .keys()
       .then((keys) =>
         Promise.all(
-          keys
-            .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
-            .map((key) => caches.delete(key)),
+          keys.filter((key) => key.startsWith('televecha-shell-')).map((key) => caches.delete(key)),
         ),
       )
-      .then(() => self.clients.claim()),
-  );
-});
-
-self.addEventListener('fetch', (event) => {
-  const request = event.request;
-  if (request.method !== 'GET') return;
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
-
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          void caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy));
-          return response;
-        })
-        .catch(() => caches.match('/index.html')),
-    );
-    return;
-  }
-
-  event.respondWith(
-    caches.match(request).then(
-      (cached) =>
-        cached ??
-        fetch(request).then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            void caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        }),
-    ),
+      .then(() => self.registration.unregister()),
   );
 });

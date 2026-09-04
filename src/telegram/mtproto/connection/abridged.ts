@@ -1,3 +1,6 @@
+import { Crypto, Effect, Schedule } from 'effect';
+
+import { createMtprotoError, errorMessage, isMtprotoError } from '../errors';
 import type { PacketCodec, StreamingCipherFactory } from './types';
 
 const ALIGNMENT = 4;
@@ -38,17 +41,6 @@ function validHeader(header: Uint8Array) {
   return !equal(header.subarray(4, 8), new Uint8Array(4));
 }
 
-function makeHeader(randomBytes: (length: number) => Uint8Array) {
-  for (let attempt = 0; attempt < 256; attempt += 1) {
-    const candidate = randomBytes(HEADER_LENGTH);
-    if (candidate.length !== HEADER_LENGTH) {
-      throw new Error('The random source returned an invalid MTProto header.');
-    }
-    if (validHeader(candidate)) return candidate.slice();
-  }
-  throw new Error('Could not create an MTProto obfuscation header.');
-}
-
 function packetPrefix(payloadLength: number) {
   if (payloadLength === 0 || payloadLength % ALIGNMENT !== 0) {
     throw new Error('MTProto abridged packets must be non-empty and four-byte aligned.');
@@ -59,54 +51,97 @@ function packetPrefix(payloadLength: number) {
   return Uint8Array.of(0x7f, words & 0xff, (words >>> 8) & 0xff, (words >>> 16) & 0xff);
 }
 
-export function createObfuscatedAbridgedCodec(options: {
-  randomBytes(length: number): Uint8Array;
-  createCipher: StreamingCipherFactory;
-}): PacketCodec {
-  const header = makeHeader((length) => options.randomBytes(length));
-  const reversed = header.slice(8, 56).reverse();
-  const encryptor = options.createCipher(header.slice(8, 40), header.slice(40, 56));
-  const decryptor = options.createCipher(reversed.slice(0, 32), reversed.slice(32, 48));
-  header.set(OBFUSCATED_ABRIDGED_TAG, 56);
-  const encryptedHeader = encryptor.transform(header);
-  header.set(encryptedHeader.subarray(56, 64), 56);
+export const createObfuscatedAbridgedCodec = Effect.fn('mtproto.connection.abridged')(
+  function* (options: { createCipher: StreamingCipherFactory }) {
+    const crypto = yield* Crypto.Crypto;
+    const header = yield* crypto.randomBytes(HEADER_LENGTH).pipe(
+      Effect.mapError((cause) =>
+        createMtprotoError('crypto', 'Could not create an MTProto obfuscation header.', { cause }),
+      ),
+      Effect.filterOrFail(validHeader, () =>
+        createMtprotoError('crypto', 'Generated an invalid MTProto obfuscation header.'),
+      ),
+      Effect.retry(Schedule.recurs(255)),
+      Effect.map((bytes) => bytes.slice()),
+    );
+    const reversed = header.slice(8, 56).reverse();
+    const [encryptor, decryptor] = yield* Effect.try({
+      try: () =>
+        [
+          options.createCipher(header.slice(8, 40), header.slice(40, 56)),
+          options.createCipher(reversed.slice(0, 32), reversed.slice(32, 48)),
+        ] as const,
+      catch: (cause) =>
+        createMtprotoError(
+          'crypto',
+          `Could not initialize MTProto encryption: ${errorMessage(cause)}`,
+          {
+            cause,
+          },
+        ),
+    });
+    header.set(OBFUSCATED_ABRIDGED_TAG, 56);
+    const encryptedHeader = encryptor.transform(header);
+    header.set(encryptedHeader.subarray(56, 64), 56);
 
-  let received = new Uint8Array(0);
+    let received = new Uint8Array(0);
 
-  return {
-    initialPacket() {
-      return header.slice();
-    },
-    encodePacket(payload) {
-      const prefix = packetPrefix(payload.length);
-      return encryptor.transform(concat(prefix, payload));
-    },
-    accept(chunk) {
-      if (chunk.length > 0) received = concat(received, decryptor.transform(chunk));
-      const packets: Uint8Array[] = [];
-
-      while (received.length > 0) {
-        if (received[0]! > 0x7f) {
-          received = new Uint8Array(0);
-          throw new Error('Telegram sent an invalid abridged packet length.');
-        }
-        const prefixLength = received[0] === 0x7f ? 4 : 1;
-        if (received.length < prefixLength) break;
-        const words =
-          prefixLength === 1
-            ? received[0]!
-            : received[1]! | (received[2]! << 8) | (received[3]! << 16);
-        if (words === 0 || words > MAX_WORD_COUNT) {
-          received = new Uint8Array(0);
-          throw new Error('Telegram sent an invalid abridged packet length.');
-        }
-        const payloadLength = words * ALIGNMENT;
-        if (received.length < prefixLength + payloadLength) break;
-        packets.push(received.slice(prefixLength, prefixLength + payloadLength));
-        received = received.slice(prefixLength + payloadLength);
-      }
-
-      return packets;
-    },
-  };
-}
+    return {
+      initialPacket() {
+        return header.slice();
+      },
+      encodePacket(payload) {
+        return Effect.try({
+          try: () => encryptor.transform(concat(packetPrefix(payload.length), payload)),
+          catch: (cause) =>
+            createMtprotoError(
+              'protocol',
+              `Could not encode an MTProto packet: ${errorMessage(cause)}`,
+              {
+                cause,
+              },
+            ),
+        });
+      },
+      accept(chunk) {
+        return Effect.try({
+          try: () => {
+            if (chunk.length > 0) received = concat(received, decryptor.transform(chunk));
+            const packets: Uint8Array[] = [];
+            while (received.length > 0) {
+              if (received[0]! > 0x7f) {
+                received = new Uint8Array(0);
+                throw createMtprotoError(
+                  'protocol',
+                  'Telegram sent an invalid abridged packet length.',
+                );
+              }
+              const prefixLength = received[0] === 0x7f ? 4 : 1;
+              if (received.length < prefixLength) break;
+              const words =
+                prefixLength === 1
+                  ? received[0]!
+                  : received[1]! | (received[2]! << 8) | (received[3]! << 16);
+              if (words === 0 || words > MAX_WORD_COUNT) {
+                received = new Uint8Array(0);
+                throw createMtprotoError(
+                  'protocol',
+                  'Telegram sent an invalid abridged packet length.',
+                );
+              }
+              const payloadLength = words * ALIGNMENT;
+              if (received.length < prefixLength + payloadLength) break;
+              packets.push(received.slice(prefixLength, prefixLength + payloadLength));
+              received = received.slice(prefixLength + payloadLength);
+            }
+            return packets;
+          },
+          catch: (cause) =>
+            isMtprotoError(cause)
+              ? cause
+              : createMtprotoError('protocol', errorMessage(cause), { cause }),
+        });
+      },
+    } satisfies PacketCodec;
+  },
+);

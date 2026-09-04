@@ -1,3 +1,5 @@
+import { Effect, PubSub, Stream } from 'effect';
+
 export type ConnectionStateEvent = Readonly<{
   _: 'connectionState';
   state: 'connected' | 'disconnected';
@@ -54,38 +56,44 @@ export const updateEvent = Object.assign(
   },
 );
 
-export type MtprotoEventListener = (event: MtprotoClientEvent) => void;
-
-export interface MtprotoEventHub {
-  emit(event: MtprotoClientEvent): void;
-  subscribe(listener: MtprotoEventListener): () => void;
-  clear(): void;
-}
-
-export function createMtprotoEventHub(): MtprotoEventHub {
-  const listeners = new Set<MtprotoEventListener>();
-
-  return {
-    emit(event) {
-      for (const listener of Array.from(listeners)) {
-        try {
-          listener(event);
-        } catch {
-          continue;
-        }
-      }
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      let active = true;
-      return () => {
-        if (!active) return;
-        active = false;
-        listeners.delete(listener);
-      };
-    },
-    clear() {
-      listeners.clear();
-    },
-  };
-}
+/** The socket reader must keep dispatching RPC replies even if update consumers
+ * are busy. Bound its update backlog, but make every dropped range observable. */
+export const makeClientEventHub = (capacity = 256) =>
+  Effect.gen(function* () {
+    let sequence = 0;
+    let connection: ConnectionStateEvent | undefined;
+    const hub = yield* PubSub.sliding<{
+      sequence: number;
+      event: MtprotoClientEvent;
+      connection: ConnectionStateEvent | undefined;
+    }>(capacity);
+    yield* Effect.addFinalizer(() => PubSub.shutdown(hub));
+    return {
+      publish: (event: MtprotoClientEvent) =>
+        Effect.suspend(() => {
+          if (connectionStateEvent.is(event)) connection = event;
+          return PubSub.publish(hub, { sequence: ++sequence, event, connection });
+        }),
+      events: Stream.unwrap(
+        Effect.gen(function* () {
+          const subscription = yield* PubSub.subscribe(hub);
+          let previous = sequence;
+          return Stream.fromSubscription(subscription).pipe(
+            Stream.map((entry): readonly MtprotoClientEvent[] => {
+              const missed = entry.sequence !== previous + 1;
+              previous = entry.sequence;
+              if (!missed) return [entry.event];
+              return [
+                sessionGapEvent(),
+                ...(entry.connection && !connectionStateEvent.is(entry.event)
+                  ? [entry.connection]
+                  : []),
+                entry.event,
+              ];
+            }),
+            Stream.flattenIterable,
+          );
+        }),
+      ),
+    };
+  });

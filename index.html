@@ -18,6 +18,29 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module">
+      const controllerIsLegacyShell =
+        navigator.serviceWorker?.controller?.scriptURL.endsWith('/sw.js') ?? false;
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(
+          registrations
+            .filter((registration) => registration.active?.scriptURL.endsWith('/sw.js'))
+            .map((registration) => registration.unregister()),
+        );
+      }
+      if ('caches' in globalThis) {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys.filter((key) => key.startsWith('televecha-shell-')).map((key) => caches.delete(key)),
+        );
+      }
+      if (controllerIsLegacyShell) {
+        location.reload();
+        await new Promise(() => {});
+      }
+
+      await import('/src/main.tsx');
+    </script>
   </body>
 </html>

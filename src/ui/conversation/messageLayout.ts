@@ -39,6 +39,10 @@ function isVisualMedia(message: ChatMessage) {
   );
 }
 
+function isImageDocument(message: ChatMessage) {
+  return message.media?.kind === 'file' && message.media.mimeType.startsWith('image/');
+}
+
 function sameSender(first: ChatMessage | undefined, second: ChatMessage | undefined) {
   const sameIdentity = Boolean(
     first &&
@@ -121,7 +125,7 @@ export function layoutMessages(
     const inlineTime = Boolean(
       !message.service &&
       album.length === 0 &&
-      !message.media &&
+      (!message.media || isImageDocument(message)) &&
       message.body.trim() &&
       !message.linkPreview &&
       message.botKeyboard?.kind !== 'inline',
@@ -148,6 +152,7 @@ export function layoutMessages(
           ? 'min(24rem, 100%)'
           : undefined;
       }
+      if (isImageDocument(message)) return 'min(16.75rem, 100%)';
       if (
         !isVisualMedia(message) ||
         message.uploadProgress !== undefined ||
@@ -185,7 +190,7 @@ export function layoutMessages(
         new Date(message.date * 1000).toDateString() !==
           new Date((messages[index - 1]?.date ?? message.date) * 1000).toDateString()),
     );
-    const className = `message ${message.outgoing ? 'outgoing' : 'incoming'}${message.service ? ' message-service' : ''}${sameSender(previousVisible(index), message) ? ' message-same-sender' : ''}${album.length > 1 ? ' message-has-album' : ''}${mediaOnly ? ' message-media-surface' : ''}${inlineTime ? ' message-inline-time' : ''}${captionedMedia ? ' message-captioned-media' : ''}${cropped ? ' message-media-cropped' : ''}`;
+    const className = `message ${message.outgoing ? 'outgoing' : 'incoming'}${message.service ? ' message-service' : ''}${sameSender(previousVisible(index), message) ? ' message-same-sender' : ''}${album.length > 1 ? ' message-has-album' : ''}${isImageDocument(message) ? ' message-image-document' : ''}${mediaOnly ? ' message-media-surface' : ''}${inlineTime ? ' message-inline-time' : ''}${captionedMedia ? ' message-captioned-media' : ''}${cropped ? ' message-media-cropped' : ''}`;
     const layout = {
       album,
       author: messageAuthor,

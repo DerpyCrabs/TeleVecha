@@ -5,6 +5,4 @@ export type {
   PacketConnection,
   StreamingCipher,
   StreamingCipherFactory,
-  WebSocketFactory,
-  WebSocketLike,
 } from './types';

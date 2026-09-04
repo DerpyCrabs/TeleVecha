@@ -1,6 +1,9 @@
+import type { Crypto, Effect, Scope, Stream } from 'effect';
+import type * as Socket from 'effect/unstable/socket/Socket';
+
 import type { AuthKey } from '../auth';
 import type { PacketConnection } from '../connection';
-import type { CryptoAdapter } from '../crypto';
+import type { MtprotoError } from '../errors';
 import type { MtprotoClientEvent } from '../events';
 
 export type TlObject = { _: string; [field: string]: unknown };
@@ -12,42 +15,45 @@ export interface TlCodec {
 }
 
 export interface PlainMtprotoTransport {
-  invoke<Result extends TlObject = TlObject>(request: TlObject): Promise<Result>;
-  dispose(): void;
+  invoke<Result extends TlObject = TlObject>(
+    request: TlObject,
+  ): Effect.Effect<Result, MtprotoError>;
 }
 
 export interface AuthorizationResult {
-  authKey: AuthKey;
-  timeOffset: number;
-  serverSalt: bigint;
+  readonly authKey: AuthKey;
+  readonly timeOffset: number;
+  readonly serverSalt: bigint;
 }
 
 export interface MtprotoSender {
   readonly dcId: number;
-  connect(): Promise<void>;
-  disconnect(): void;
-  isConnected(): boolean;
-  invoke<Result = unknown>(request: TlObject, options?: { signal?: AbortSignal }): Promise<Result>;
-  subscribe(listener: (event: MtprotoClientEvent) => void): () => void;
+  readonly connected: Effect.Effect<boolean>;
+  readonly invoke: <Result = unknown>(request: TlObject) => Effect.Effect<Result, MtprotoError>;
+  readonly events: Stream.Stream<MtprotoClientEvent>;
 }
 
 export interface MtprotoSenderOptions {
-  dcId: number;
-  connection(): PacketConnection;
-  codec: TlCodec;
-  crypto: CryptoAdapter;
-  authKey?: AuthKey | undefined;
-  serverSalt?: bigint | undefined;
-  timeOffset?: number | undefined;
-  authorize(transport: PlainMtprotoTransport): Promise<AuthorizationResult>;
-  onAuthKey(result: AuthorizationResult): void | Promise<void>;
-  onAuthKeyInvalidated?: (() => void | Promise<void>) | undefined;
-  now?: (() => number) | undefined;
-  requestTimeoutMs?: number | undefined;
-  reconnect?:
+  readonly dcId: number;
+  readonly connection: PacketConnection<Crypto.Crypto | Socket.WebSocketConstructor>;
+  readonly codec: TlCodec;
+  readonly authKey?: AuthKey | undefined;
+  readonly serverSalt?: bigint | undefined;
+  readonly timeOffset?: number | undefined;
+  readonly authorize: (
+    transport: PlainMtprotoTransport,
+  ) => Effect.Effect<AuthorizationResult, MtprotoError, Crypto.Crypto>;
+  readonly onAuthKey: (result: AuthorizationResult) => Effect.Effect<void, MtprotoError>;
+  readonly onAuthKeyInvalidated?: (() => Effect.Effect<void, MtprotoError>) | undefined;
+  readonly now?: (() => number) | undefined;
+  readonly requestTimeoutMs?: number | undefined;
+  readonly receiveQueueCapacity?: number | undefined;
+  readonly reconnect?:
     | {
-        retries?: number | undefined;
-        delayMs?: number | undefined;
+        readonly retries?: number | undefined;
+        readonly delayMs?: number | undefined;
       }
     | undefined;
 }
+
+export type MtprotoSenderRequirements = Crypto.Crypto | Socket.WebSocketConstructor | Scope.Scope;

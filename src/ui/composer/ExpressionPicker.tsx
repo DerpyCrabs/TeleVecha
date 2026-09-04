@@ -17,6 +17,9 @@ interface ExpressionPickerProps {
   gifs: TelegramSticker[];
   packs: TelegramStickerPack[];
   insertEmoji: (emoji: string) => void;
+  canSend: boolean;
+  canSendGifs: boolean;
+  canSendStickers: boolean;
   load: (sticker: TelegramSticker) => Promise<string>;
   stickerUrl: (sticker: TelegramSticker) => string | undefined;
   sendSticker: (sticker: TelegramSticker) => void;
@@ -41,6 +44,10 @@ export function ExpressionPicker(props: ExpressionPickerProps) {
             <button
               classList={{ active: props.tab === tab }}
               aria-pressed={props.tab === tab}
+              disabled={
+                (tab === 'gifs' && !props.canSendGifs) ||
+                (tab === 'stickers' && !props.canSendStickers)
+              }
               onClick={() => props.setTab(tab)}
             >
               {tab === 'emoji' ? 'Emoji' : tab === 'gifs' ? 'GIFs' : 'Stickers'}
@@ -63,6 +70,7 @@ export function ExpressionPicker(props: ExpressionPickerProps) {
             <For each={matchingEmoji()} fallback={<p>No emoji found</p>}>
               {(item) => (
                 <button
+                  disabled={!props.canSend}
                   onClick={() => props.insertEmoji(item.value)}
                   aria-label={`Insert ${item.value}`}
                 >
@@ -83,6 +91,7 @@ export function ExpressionPicker(props: ExpressionPickerProps) {
             cachedUrl={props.stickerUrl}
             search={props.searchGifs}
             retry={props.retryGifs}
+            enabled={props.canSend && props.canSendGifs}
           />
         </Show>
         <Show when={props.tab === 'stickers'}>
@@ -93,6 +102,7 @@ export function ExpressionPicker(props: ExpressionPickerProps) {
             send={props.sendSticker}
             query={query()}
             cachedUrl={props.stickerUrl}
+            enabled={props.canSend && props.canSendStickers}
           />
         </Show>
       </div>

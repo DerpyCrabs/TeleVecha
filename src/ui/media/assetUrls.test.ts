@@ -1,44 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Effect } from 'effect';
 
-import { cachedAssetUrl, loadAssetUrl, rememberAssetUrl } from './assetUrls';
-
-const assetGlobals = globalThis as typeof globalThis & {
-  __televechaAssetUrls?: Map<string, string>;
-  __televechaPendingAssetUrls?: Map<string, Promise<string>>;
-};
+import { cachedAssetUrl, clearAssetUrls, loadAssetUrl, rememberAssetUrl } from './assetUrls';
 
 describe('asset URL loading', () => {
   beforeEach(() => {
-    delete assetGlobals.__televechaAssetUrls;
-    delete assetGlobals.__televechaPendingAssetUrls;
+    clearAssetUrls();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    clearAssetUrls();
   });
 
-  it('deduplicates concurrent loads and reuses the resulting URL', async () => {
-    const load = vi.fn(async () => new Blob(['asset']));
-    const [first, second] = await Promise.all([
-      loadAssetUrl('test:deduplicated', load),
-      loadAssetUrl('test:deduplicated', load),
-    ]);
+  it('reuses the cached object URL without loading the asset again', async () => {
+    const load = vi.fn(() => Effect.succeed(new Blob(['asset'])));
+    const first = await Effect.runPromise(loadAssetUrl('test:cached', load));
+    const second = await Effect.runPromise(loadAssetUrl('test:cached', load));
 
     expect(load).toHaveBeenCalledOnce();
     expect(first).toBe(second);
-    await expect(loadAssetUrl('test:deduplicated', load)).resolves.toBe(first);
-    expect(cachedAssetUrl('test:deduplicated')).toBe(first);
+    expect(cachedAssetUrl('test:cached')).toBe(first);
   });
 
-  it('clears a rejected pending load so retry can succeed', async () => {
+  it('does not cache a failed load', async () => {
     const load = vi
-      .fn<() => Promise<Blob>>()
-      .mockRejectedValueOnce(new Error('failed'))
-      .mockResolvedValueOnce(new Blob(['retry']));
+      .fn<() => Effect.Effect<Blob, Error>>()
+      .mockReturnValueOnce(Effect.fail(new Error('failed')))
+      .mockReturnValueOnce(Effect.succeed(new Blob(['retry'])));
 
-    await expect(loadAssetUrl('test:retry', load)).rejects.toThrow('failed');
-    await expect(loadAssetUrl('test:retry', load)).resolves.toMatch(/^blob:/u);
+    await expect(Effect.runPromise(loadAssetUrl('test:retry', load))).rejects.toThrow('failed');
+    await expect(Effect.runPromise(loadAssetUrl('test:retry', load))).resolves.toMatch(/^blob:/u);
     expect(load).toHaveBeenCalledTimes(2);
   });
 
@@ -47,15 +40,18 @@ describe('asset URL loading', () => {
       constructor(readonly src: string) {}
     }
     const mounted = Array.from({ length: 256 }, (_, index) => new FakeImage(`blob:old-${index}`));
-    assetGlobals.__televechaAssetUrls = new Map(
-      mounted.map(({ src }, index) => [`old:${index}`, src]),
-    );
     vi.stubGlobal('HTMLImageElement', FakeImage);
     vi.stubGlobal('HTMLVideoElement', class FakeVideo {});
     vi.stubGlobal('HTMLAnchorElement', class FakeAnchor {});
     vi.stubGlobal('document', { querySelectorAll: () => mounted });
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:new');
+    let sequence = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() =>
+      sequence < 256 ? `blob:old-${sequence++}` : 'blob:new',
+    );
     const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    for (let index = 0; index < 256; index += 1) {
+      rememberAssetUrl(`old:${index}`, new Blob([String(index)]));
+    }
 
     expect(rememberAssetUrl('new', new Blob(['new']))).toBe('blob:new');
     expect(cachedAssetUrl('new')).toBe('blob:new');
@@ -67,17 +63,20 @@ describe('asset URL loading', () => {
       constructor(readonly src: string) {}
     }
     const mountedAudio = new FakeAudio('blob:voice');
-    assetGlobals.__televechaAssetUrls = new Map([
-      ['voice', mountedAudio.src],
-      ...Array.from({ length: 256 }, (_, index) => [`old:${index}`, `blob:old-${index}`] as const),
-    ]);
     vi.stubGlobal('HTMLImageElement', class FakeImage {});
     vi.stubGlobal('HTMLVideoElement', class FakeVideo {});
     vi.stubGlobal('HTMLAudioElement', FakeAudio);
     vi.stubGlobal('HTMLAnchorElement', class FakeAnchor {});
     vi.stubGlobal('document', { querySelectorAll: () => [mountedAudio] });
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:new');
+    let sequence = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() =>
+      sequence++ === 0 ? 'blob:voice' : `blob:old-${sequence}`,
+    );
     const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    rememberAssetUrl('voice', new Blob(['voice']));
+    for (let index = 0; index < 256; index += 1) {
+      rememberAssetUrl(`old:${index}`, new Blob([String(index)]));
+    }
 
     rememberAssetUrl('new', new Blob(['new']));
 

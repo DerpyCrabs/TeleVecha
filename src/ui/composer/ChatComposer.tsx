@@ -24,6 +24,9 @@ import { canTransformImage } from './outgoingAttachments';
 interface ChatComposerProps {
   conversationId: string;
   enabled: boolean;
+  canSendMedia: boolean;
+  canSendStickers: boolean;
+  canSendGifs: boolean;
   placeholder?: string | undefined;
   composer: ComposerSession;
   expressions: ExpressionSession;
@@ -73,6 +76,25 @@ export function ChatComposer(props: ChatComposerProps) {
   const editingAttachment = () =>
     props.composer.attachments().find(({ id }) => id === editingAttachmentId());
 
+  const hasImageBatch = () => {
+    const attachments = props.composer.attachments();
+    return (
+      attachments.length > 1 && attachments.every(({ file }) => file.type.startsWith('image/'))
+    );
+  };
+
+  const setAllAttachmentModes = (sendAs: 'media' | 'file') => {
+    for (const attachment of props.composer.attachments()) {
+      props.composer.updateAttachment(attachment.id, { sendAs });
+    }
+  };
+
+  const removeAllAttachments = () => {
+    for (const attachment of props.composer.attachments()) {
+      props.composer.removeAttachment(attachment.id);
+    }
+  };
+
   const closeExpression = (restoreFocus = false) => {
     const focusWasInside = Boolean(
       expressionRoot && document.activeElement && expressionRoot.contains(document.activeElement),
@@ -85,7 +107,11 @@ export function ChatComposer(props: ChatComposerProps) {
     void props.conversationId;
     setEditingAttachmentId('');
     setFormatMenu(undefined);
+    setExpressionTab('emoji');
     closeExpression();
+  });
+  createEffect(() => {
+    if (!props.enabled) closeExpression();
   });
   onMount(() => {
     const dismiss = (event: PointerEvent) => {
@@ -125,6 +151,7 @@ export function ChatComposer(props: ChatComposerProps) {
   });
 
   const attachTransferredFiles = (files: FileList | null, fallbackName: string) => {
+    if (!props.canSendMedia) return;
     const sources = [...(files ?? [])];
     if (sources.length === 0) return;
     props.composer.attach(
@@ -161,6 +188,7 @@ export function ChatComposer(props: ChatComposerProps) {
   };
 
   const insertEmoji = (emoji: string) => {
+    if (!props.enabled) return;
     const input = textarea;
     const draft = props.composer.draft();
     const offset = input?.selectionStart ?? draft.length;
@@ -177,6 +205,8 @@ export function ChatComposer(props: ChatComposerProps) {
   };
 
   const selectExpressionTab = (tab: ExpressionTab) => {
+    if (tab === 'stickers' && !props.canSendStickers) return;
+    if (tab === 'gifs' && !props.canSendGifs) return;
     setExpressionTab(tab);
     if (tab === 'stickers' && !props.expressions.stickerOpen()) {
       void props.expressions.toggleStickers();
@@ -197,15 +227,20 @@ export function ChatComposer(props: ChatComposerProps) {
             gifs={props.expressions.gifs()}
             packs={props.expressions.stickerPacks()}
             insertEmoji={insertEmoji}
+            canSend={props.enabled}
+            canSendGifs={props.canSendGifs}
+            canSendStickers={props.canSendStickers}
             load={(sticker) => props.media.loadSticker(sticker)}
             stickerUrl={(sticker) => props.media.stickerUrl(sticker)}
             sendSticker={(sticker) => {
+              if (!props.canSendStickers) return;
               closeExpression();
-              void props.expressions.sendSticker(sticker);
+              void props.expressions.sendSticker(sticker).catch(() => undefined);
             }}
             sendGif={(gif) => {
+              if (!props.canSendGifs) return;
               closeExpression();
-              void props.expressions.sendGif(gif);
+              void props.expressions.sendGif(gif).catch(() => undefined);
             }}
             searchGifs={props.expressions.searchGifs}
             retryGifs={props.expressions.retryGifs}
@@ -239,7 +274,42 @@ export function ChatComposer(props: ChatComposerProps) {
         )}
       </Show>
       <Show when={props.composer.attachments().length > 0}>
-        <div class="composer-attachments" aria-label="Staged attachments">
+        <div
+          class="composer-attachments"
+          classList={{ 'composer-image-batch': hasImageBatch() }}
+          aria-label="Staged attachments"
+        >
+          <Show when={hasImageBatch()}>
+            <div class="composer-attachment-batch-bar">
+              <strong>{props.composer.attachments().length} images</strong>
+              <div class="composer-attachment-batch-mode" role="group" aria-label="Send all as">
+                <button
+                  type="button"
+                  aria-pressed={props.composer
+                    .attachments()
+                    .every(({ sendAs }) => sendAs === 'media')}
+                  onClick={() => setAllAttachmentModes('media')}
+                >
+                  Media
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={props.composer
+                    .attachments()
+                    .every(({ sendAs }) => sendAs === 'file')}
+                  onClick={() => setAllAttachmentModes('file')}
+                >
+                  Files
+                </button>
+              </div>
+              <button type="button" onClick={() => fileInput?.click()}>
+                Add
+              </button>
+              <button type="button" onClick={removeAllAttachments}>
+                Clear
+              </button>
+            </div>
+          </Show>
           <For each={props.composer.attachments()}>
             {(attachment, index) => (
               <div
@@ -247,7 +317,9 @@ export function ChatComposer(props: ChatComposerProps) {
                 data-testid="composer-attachment"
                 data-attachment-id={attachment.id}
               >
-                <AttachmentThumbnail file={attachment.file} />
+                <div class="composer-attachment-preview">
+                  <AttachmentThumbnail file={attachment.file} />
+                </div>
                 <span>
                   <strong>{attachment.file.name}</strong>
                   <small>
@@ -291,6 +363,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </Show>
                 <button
                   type="button"
+                  class="composer-attachment-remove"
                   onClick={() => props.composer.removeAttachment(attachment.id)}
                   aria-label={`Remove attachment ${attachment.file.name}`}
                 >
@@ -316,9 +389,10 @@ export function ChatComposer(props: ChatComposerProps) {
           class="sr-only"
           type="file"
           multiple={!props.composer.editing()}
+          disabled={!props.canSendMedia}
           onChange={(event) => {
             const files = event.currentTarget.files;
-            if (files?.length) props.composer.attach([...files]);
+            if (props.canSendMedia && files?.length) props.composer.attach([...files]);
             event.currentTarget.value = '';
           }}
         />
@@ -329,6 +403,7 @@ export function ChatComposer(props: ChatComposerProps) {
             if (transfer?.types.includes('Files')) event.preventDefault();
           }}
           onDrop={(event) => {
+            if (!props.canSendMedia) return;
             const transfer = event.dataTransfer;
             if (!transfer?.files.length) return;
             event.preventDefault();
@@ -407,6 +482,10 @@ export function ChatComposer(props: ChatComposerProps) {
               props.onGeometryChange?.();
             }}
             onKeyDown={(event) => {
+              if (!props.enabled) {
+                event.preventDefault();
+                return;
+              }
               if (event.key === 'Escape' && props.composer.editing()) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -448,12 +527,14 @@ export function ChatComposer(props: ChatComposerProps) {
               }
             }}
             onPaste={(event) => {
+              if (!props.canSendMedia) return;
               const clipboard = event.clipboardData;
               if (!clipboard?.files.length) return;
               event.preventDefault();
               attachTransferredFiles(clipboard.files, `pasted-image-${Date.now()}.png`);
             }}
             onContextMenu={(event) => {
+              if (!props.enabled) return;
               if (event.currentTarget.selectionStart === event.currentTarget.selectionEnd) return;
               event.preventDefault();
               setExpressionOpen(false);
@@ -464,11 +545,12 @@ export function ChatComposer(props: ChatComposerProps) {
             }}
             placeholder={props.placeholder || 'Write a message'}
             aria-label="Message"
+            readOnly={!props.enabled}
           />
           <button
             class="composer-icon-button"
             onClick={() => fileInput?.click()}
-            disabled={!props.enabled}
+            disabled={!props.canSendMedia}
             aria-label={props.composer.editing() ? 'Replace media' : 'Attach files'}
           >
             <Paperclip size={20} />

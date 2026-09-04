@@ -1,7 +1,12 @@
-import { Conversation } from '../telegram/core/conversation';
-import type { MessagingClient } from '../telegram/core/client';
+import { Effect, Predicate } from 'effect';
+
+import { makeConversation } from '../telegram/core/conversation';
+import type { EffectMessagingClient } from '../telegram/core/client';
+import { MessagingError } from '../telegram/core/messagingError';
+import { conversationViewSnapshot } from '../telegram/core/engineState';
 import type {
   EngineSnapshot,
+  SharedMediaCounts,
   SharedMediaKind,
   TelegramMessage,
   TelegramPeer,
@@ -9,7 +14,6 @@ import type {
   TelegramSearchOffset,
   TelegramSearchPage,
   TelegramSticker,
-  TelegramUserDetails,
 } from '../telegram/types';
 import { hydrateTvBugState, type TvBugBundleV2, type TvBugStateV2 } from './tvbugFormat';
 import { createTvBugPlaceholder } from './tvbugMedia';
@@ -43,7 +47,7 @@ export function injectedTvBugBundle() {
 /**
  * Opens the captured state directly without starting the messaging engine or Telegram transport.
  */
-export function createTvBugSnapshotClient(bundle: TvBugBundleV2): MessagingClient {
+export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagingClient {
   try {
     const hydrated = hydrateTvBugState(bundle.snapshot);
     const histories = hydrated.histories;
@@ -51,7 +55,7 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): MessagingClien
     const listeners = new Set<(snapshot: EngineSnapshot) => void>();
     const runtime = runtimeRecord(bundle.snapshot);
     let snapshot = snapshotFromState(bundle.snapshot, runtime, hydrated);
-    let client: MessagingClient;
+    let client: EffectMessagingClient;
 
     const emit = () => {
       for (const listener of listeners) listener(snapshot);
@@ -77,114 +81,193 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): MessagingClien
     const target = {
       snapshot: () => snapshot,
       subscribe(listener: (value: EngineSnapshot) => void) {
-        listeners.add(listener);
-        listener(snapshot);
-        return () => listeners.delete(listener);
+        return Effect.sync(() => {
+          listeners.add(listener);
+          listener(snapshot);
+          return Effect.sync(() => {
+            listeners.delete(listener);
+          });
+        });
       },
       subscribeResources() {
-        return () => undefined;
+        return Effect.succeed(Effect.void);
       },
-      async openConversation(peerId: string) {
-        select(peerId);
-        return new Conversation(client as never, peerId);
+      conversation(peerId: string) {
+        const dialog = snapshot.dialogs.find(({ peer }) => peer.id === peerId);
+        return dialog ? makeConversation(client, dialog.peer) : undefined;
       },
-      async selectChat(peerId: string) {
-        select(peerId);
-      },
+      openConversation: (peerId: string) =>
+        Effect.sync(() => {
+          select(peerId);
+          return target.conversation(peerId)!;
+        }),
       mediaAssetKey(message: TelegramMessage) {
         return `${message.peerId}:${message.id}:${message.media?.cacheKey ?? 'snapshot'}`;
       },
-      async downloadMedia(message: TelegramMessage) {
-        return placeholderForMessage(message);
-      },
-      async downloadAvatar() {
-        return createTvBugPlaceholder({
-          byteSize: 1_024,
-          mimeType: 'image/svg+xml',
-          width: 96,
-          height: 96,
-        });
-      },
-      async loadCachedAvatar() {
-        return undefined;
-      },
-      async downloadSticker(sticker: TelegramSticker) {
-        return createTvBugPlaceholder({
-          byteSize: sticker.size ?? 4_096,
-          mimeType: sticker.mimeType,
-          width: 512,
-          height: 512,
-        });
-      },
-      async downloadCustomEmoji() {
-        return createTvBugPlaceholder({
-          byteSize: 4_096,
-          mimeType: 'image/svg+xml',
-          width: 64,
-          height: 64,
-        });
-      },
-      async getUserDetails(peer: TelegramPeer): Promise<TelegramUserDetails> {
+      downloadMedia: (message: TelegramMessage) => Effect.succeed(placeholderForMessage(message)),
+      downloadAvatar: () =>
+        Effect.succeed(
+          createTvBugPlaceholder({
+            byteSize: 1_024,
+            mimeType: 'image/svg+xml',
+            width: 96,
+            height: 96,
+          }),
+        ),
+      loadCachedAvatar: () => Effect.succeed(undefined),
+      downloadSticker: (sticker: TelegramSticker) =>
+        Effect.succeed(
+          createTvBugPlaceholder({
+            byteSize: sticker.size ?? 4_096,
+            mimeType: sticker.mimeType,
+            width: 512,
+            height: 512,
+          }),
+        ),
+      downloadCustomEmoji: () =>
+        Effect.succeed(
+          createTvBugPlaceholder({
+            byteSize: 4_096,
+            mimeType: 'image/svg+xml',
+            width: 64,
+            height: 64,
+          }),
+        ),
+      getUserDetails(peer: TelegramPeer) {
         const details = snapshot.dialogs.find((dialog) => dialog.peer.id === peer.id)?.userDetails;
-        if (!details) throw new Error('User details were not present in the captured snapshot.');
-        return details;
+        return details
+          ? Effect.succeed(details)
+          : Effect.fail(
+              new MessagingError({
+                message: 'User details were not present in the captured snapshot.',
+                operation: 'getUserDetails',
+              }),
+            );
       },
-      async searchPeers(query: string): Promise<TelegramPeerSearchResult[]> {
+      searchPeers(query: string) {
         const needle = query.trim().toLocaleLowerCase();
-        return snapshot.dialogs
-          .filter((dialog) => !needle || dialog.title.toLocaleLowerCase().includes(needle))
-          .map((dialog) => ({
-            peer: dialog.peer,
-            category: dialog.bot ? ('bot' as const) : dialog.peer.kind,
-            title: dialog.title,
-            initials: dialog.initials,
-            color: dialog.color,
-            username: dialog.username,
-            bot: dialog.bot ?? false,
-            isContact: dialog.userDetails?.isContact ?? false,
-            hasAvatar: dialog.hasAvatar,
-            avatarId: dialog.avatarId,
-          }));
+        return Effect.succeed(
+          snapshot.dialogs
+            .filter((dialog) => !needle || dialog.title.toLocaleLowerCase().includes(needle))
+            .map(
+              (dialog) =>
+                ({
+                  peer: dialog.peer,
+                  category: dialog.bot ? ('bot' as const) : dialog.peer.kind,
+                  title: dialog.title,
+                  initials: dialog.initials,
+                  color: dialog.color,
+                  username: dialog.username,
+                  bot: dialog.bot ?? false,
+                  isContact: dialog.userDetails?.isContact ?? false,
+                  hasAvatar: dialog.hasAvatar,
+                  avatarId: dialog.avatarId,
+                }) satisfies TelegramPeerSearchResult,
+            ),
+        );
       },
-      async searchMessages(
+      searchConversationMessages(
+        peer: TelegramPeer,
         query: string,
         global: boolean,
         offset?: TelegramSearchOffset,
-      ): Promise<TelegramSearchPage> {
+      ) {
         void offset;
-        return localSearch(histories, snapshot.activePeerId, query, global);
+        return Effect.succeed(localSearch(histories, peer.id, query, global));
       },
-      async getSharedMedia(
+      getConversationSharedMedia(
+        peer: TelegramPeer,
         kind: SharedMediaKind,
         offset?: TelegramSearchOffset,
-      ): Promise<TelegramSearchPage> {
+      ) {
         void offset;
-        const messages = snapshot.messages.filter((message) => matchesMediaKind(message, kind));
-        return { messages, hasMore: false };
+        const messages = (histories[peer.id] ?? []).filter((message) =>
+          matchesMediaKind(message, kind),
+        );
+        return Effect.succeed({ messages, hasMore: false });
       },
-      async openMessage(message: TelegramMessage) {
-        if (message.peerId !== snapshot.activePeerId) select(message.peerId);
-        return snapshot.messages.some((candidate) => candidate.id === message.id);
+      openMessageInConversationView(
+        message: TelegramMessage,
+        currentView = conversationViewSnapshot(snapshot),
+      ) {
+        const messages = histories[message.peerId] ?? [];
+        return Effect.succeed({
+          conversation: { ...currentView, activePeerId: message.peerId, messages },
+          found: messages.some(({ id }) => id === message.id),
+        });
       },
-      async stop() {},
-      async start() {},
-      async refreshUpdates() {},
-      async refreshReadReceipt() {},
-      async retrySync() {},
-      async retryOutbox() {},
-      async ensureSharedMediaCounts() {},
-      async setActiveConversationVisibility() {},
-      clearOperationError() {},
+      loadOlderConversationView(_peerId: string, currentView = conversationViewSnapshot(snapshot)) {
+        return Effect.succeed(currentView);
+      },
+      loadHistoryGapConversationView(
+        _peerId: string,
+        _gap: unknown,
+        currentView = conversationViewSnapshot(snapshot),
+      ) {
+        return Effect.succeed(currentView);
+      },
+      retryConversationView(_peerId: string, currentView = conversationViewSnapshot(snapshot)) {
+        return Effect.succeed(currentView);
+      },
+      loadConversationSharedMediaCounts: () => Effect.succeed(undefined),
     };
 
-    client = new Proxy(target, {
-      get(current, property, receiver) {
-        const member = Reflect.get(current, property, receiver);
-        if (member !== undefined) return member;
-        if (typeof property !== 'string') return undefined;
-        return async () => snapshotDefaultResult(property);
-      },
-    }) as unknown as MessagingClient;
+    client = {
+      ...target,
+      start: () => Effect.void,
+      stop: () => Effect.void,
+      retrySync: () => Effect.void,
+      refreshUpdates: () => Effect.void,
+      refreshReadReceipt: () => Effect.void,
+      retryMarkRead: () => Effect.void,
+      clearOperationError: () => Effect.void,
+      requestCode: () => Effect.void,
+      submitCode: () => Effect.succeed(undefined),
+      submitPassword: () => Effect.void,
+      logOut: () => Effect.void,
+      clearCache: () => Effect.succeed(undefined),
+      setActiveConversationVisibility: () => Effect.void,
+      setDraft: () => Effect.void,
+      setTyping: () => Effect.void,
+      sendDraft: () => Effect.void,
+      sendAttachments: () => Effect.void,
+      sendSticker: () => Effect.void,
+      forwardMessage: () => Effect.succeed(undefined),
+      editMessage: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Captured reports are read-only.',
+            operation: 'editMessage',
+          }),
+        ),
+      deleteMessage: () => Effect.succeed(false),
+      toggleReaction: () => Effect.void,
+      retryPendingSend: () => Effect.void,
+      cancelPendingSend: () => Effect.succeed(false),
+      retryOutbox: () => Effect.void,
+      addPeer: () => Effect.void,
+      getGroupMembers: () => Effect.succeed({ members: [], totalCount: 0, hasMore: false }),
+      setMuted: () => Effect.succeed(false),
+      setBlocked: () => Effect.succeed(false),
+      updateContact: () => Effect.succeed(false),
+      deleteContact: () => Effect.succeed(false),
+      setPinnedDialog: () => Effect.succeed(false),
+      setPinnedMessage: () => Effect.succeed(undefined),
+      setArchived: () => Effect.succeed(false),
+      deleteDialog: () => Effect.succeed(false),
+      getWallpapers: () => Effect.succeed([]),
+      getChatAppearance: () => Effect.succeed(undefined),
+      downloadWallpaper: () => Effect.succeed(new Blob()),
+      getRecentStickers: () => Effect.succeed([]),
+      getStickerPacks: () => Effect.succeed([]),
+      getSavedGifs: () => Effect.succeed([]),
+      searchGifs: () => Effect.succeed([]),
+      getBotCommands: () => Effect.succeed([]),
+      startBot: () => Effect.void,
+      answerBotCallback: () => Effect.succeed(undefined),
+      requestUrlAuth: () => Effect.succeed(undefined),
+      acceptUrlAuth: () => Effect.succeed(undefined),
+    };
     setTvBugStatus({ state: 'ready' });
     return client;
   } catch (error) {
@@ -249,6 +332,7 @@ function snapshotFromState(
   hydrated: ReturnType<typeof hydrateTvBugState>,
 ): EngineSnapshot {
   const activePeerId = snapshotBootstrapPeerId(state);
+  const sharedMediaCounts = decodeSharedMediaCounts(runtime.sharedMediaCounts);
   return {
     phase: capturedPhase(runtime.phase ?? state.workspace.phase, hydrated.dialogs.length),
     sync: capturedSync(runtime.sync ?? state.workspace.sync),
@@ -260,16 +344,12 @@ function snapshotFromState(
       ? (hydrated.histories[activePeerId] ?? hydrated.messages)
       : hydrated.messages,
     drafts: hydrated.drafts,
+    draftDetails: {},
     pending: hydrated.pending,
     loadingMessages: booleanValue(runtime.loadingMessages),
     hasOlderMessages: booleanValue(runtime.hasOlderMessages),
     loadingOlderMessages: booleanValue(runtime.loadingOlderMessages),
-    ...(isRecord(runtime.sharedMediaCounts)
-      ? {
-          sharedMediaCounts:
-            runtime.sharedMediaCounts as unknown as EngineSnapshot['sharedMediaCounts'],
-        }
-      : {}),
+    ...(sharedMediaCounts === undefined ? {} : { sharedMediaCounts }),
     pinnedMessages: activePeerId ? (hydrated.pinnedMessages[activePeerId]?.value ?? []) : [],
     historyGaps: Array.isArray(runtime.historyGaps)
       ? (runtime.historyGaps as EngineSnapshot['historyGaps'])
@@ -295,8 +375,33 @@ function snapshotFromState(
   };
 }
 
+function decodeSharedMediaCounts(value: unknown): SharedMediaCounts | undefined {
+  if (!Predicate.isObject(value)) return undefined;
+  const number = (key: keyof SharedMediaCounts) =>
+    typeof value[key] === 'number' ? value[key] : undefined;
+  const photos = number('photos');
+  const videos = number('videos');
+  const files = number('files');
+  const audio = number('audio');
+  const links = number('links');
+  const voice = number('voice');
+  const gifs = number('gifs');
+  if ([photos, videos, files, audio, links, voice, gifs].some((count) => count === undefined)) {
+    return undefined;
+  }
+  return {
+    photos: photos!,
+    videos: videos!,
+    files: files!,
+    audio: audio!,
+    links: links!,
+    voice: voice!,
+    gifs: gifs!,
+  };
+}
+
 function runtimeRecord(state: TvBugStateV2) {
-  return isRecord(state.runtime) ? state.runtime : {};
+  return Predicate.isObject(state.runtime) ? state.runtime : {};
 }
 
 function capturedPhase(value: unknown, dialogCount: number): EngineSnapshot['phase'] {
@@ -320,11 +425,12 @@ function optionalString(record: Record<string, unknown>, key: string) {
 }
 
 function placeholderForMessage(message: TelegramMessage) {
+  const media = message.media ?? message.linkPreview?.media;
   return createTvBugPlaceholder({
-    byteSize: message.media?.size ?? 4_096,
-    mimeType: message.media?.mimeType ?? 'image/svg+xml',
-    width: message.media?.width ?? (message.linkPreview?.photoSize === 'small' ? 96 : 640),
-    height: message.media?.height ?? (message.linkPreview?.photoSize === 'small' ? 96 : 360),
+    byteSize: media?.size ?? 4_096,
+    mimeType: media?.mimeType ?? 'image/svg+xml',
+    width: media?.width ?? (message.linkPreview?.photoSize === 'small' ? 96 : 640),
+    height: media?.height ?? (message.linkPreview?.photoSize === 'small' ? 96 : 360),
   });
 }
 
@@ -354,13 +460,6 @@ function matchesMediaKind(message: TelegramMessage, kind: SharedMediaKind) {
   return kind === 'files';
 }
 
-function snapshotDefaultResult(method: string) {
-  if (/^(?:get|search)/u.test(method)) return [];
-  if (/^(?:download)/u.test(method)) return new Blob();
-  if (method === 'openMessage') return false;
-  return undefined;
-}
-
 function tvbugWallpaper(
   kind: NonNullable<NonNullable<TvBugStateV2['ui']>['appearance']>['wallpaperKind'],
 ): WallpaperId {
@@ -368,10 +467,6 @@ function tvbugWallpaper(
   if (kind === 'solid') return 'graphite';
   if (kind === 'gradient') return 'aurora';
   return 'none';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function setTvBugStatus(status: TvBugStatus) {

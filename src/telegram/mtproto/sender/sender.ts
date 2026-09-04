@@ -1,6 +1,19 @@
 import { gunzipSync, gzipSync } from 'fflate';
+import {
+  Cause,
+  Crypto,
+  Deferred,
+  Effect,
+  Result,
+  Fiber,
+  Queue,
+  Schedule,
+  Stream,
+  SubscriptionRef,
+} from 'effect';
 
 import {
+  bigIntToBytes,
   bytesToBigInt,
   concatBytes,
   readInt32Le,
@@ -8,16 +21,10 @@ import {
   writeInt32Le,
   writeUint32Le,
 } from '../bytes';
-import type { PacketConnection } from '../connection';
-import { createMtprotoError } from '../errors';
-import {
-  connectionStateEvent,
-  createMtprotoEventHub,
-  sessionGapEvent,
-  updateEvent,
-} from '../events';
+import { randomBytes } from '../crypto';
+import { createMtprotoError, errorMessage, isMtprotoError, type MtprotoError } from '../errors';
+import { connectionStateEvent, makeClientEventHub, sessionGapEvent, updateEvent } from '../events';
 import { createEncryptedMessageState, type EncryptedMessageState } from './encryptedState';
-import { createPlainMtprotoTransport } from './plain';
 import type { MtprotoSender, MtprotoSenderOptions, TlObject } from './types';
 
 const MESSAGE_CONTAINER_ID = 0x73f1f8dc;
@@ -28,6 +35,7 @@ const MSG_COPY_ID = 0xe06046b2;
 const MSGS_ACK_ID = 0x62d6b459;
 const NEW_SESSION_CREATED_ID = 0x9ec20908;
 const MAX_CONTAINER_MESSAGES = 1_024;
+const DEFAULT_RECEIVE_QUEUE_CAPACITY = 256;
 const MAX_OUTGOING_CONTAINER_MESSAGES = 100;
 const MAX_OUTGOING_CONTAINER_BYTES = 1_044_456 - 8;
 const MAX_GZIP_BYTES = 64 * 1024 * 1024;
@@ -50,18 +58,13 @@ const TIME_CORRECTION_CODES = new Set([16, 17]);
 
 interface PendingRequest {
   request: TlObject;
-  resolve(value: unknown): void;
-  reject(error: unknown): void;
-  signal?: AbortSignal | undefined;
-  abort?: (() => void) | undefined;
-  timeout?: ReturnType<typeof globalThis.setTimeout> | undefined;
+  deferred: Deferred.Deferred<unknown, MtprotoError>;
   messageId?: bigint | undefined;
   sequenceNumber?: number | undefined;
   containerId?: bigint | undefined;
   containerSequenceNumber?: number | undefined;
   dependencyMessageId?: bigint | undefined;
   dependencyRetryCount?: number | undefined;
-  sendGeneration?: number | undefined;
   queued: boolean;
   settled: boolean;
   expectResponse: boolean;
@@ -169,31 +172,36 @@ function rpcError(record: TlObject, request: TlObject) {
   });
 }
 
-function timeout<Value>(promise: Promise<Value>, milliseconds: number, onTimeout?: () => void) {
-  return new Promise<Value>((resolve, reject) => {
-    const timer = globalThis.setTimeout(() => {
-      reject(createMtprotoError('transport', 'Telegram request timed out.'));
-      onTimeout?.();
-    }, milliseconds);
-    promise.then(
-      (value) => {
-        globalThis.clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        globalThis.clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
+function senderError(error: unknown): MtprotoError {
+  return isMtprotoError(error)
+    ? error
+    : createMtprotoError('transport', errorMessage(error), { cause: error });
 }
 
-export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSender {
+export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
+  options: MtprotoSenderOptions,
+) {
+  const crypto = yield* Crypto.Crypto;
+  const runCrypto = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>) =>
+    effect.pipe(Effect.provideService(Crypto.Crypto, crypto));
   const requestTimeoutMs = Math.trunc(options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
   if (requestTimeoutMs <= 0) {
-    throw createMtprotoError('configuration', 'Telegram request timeout must be positive.');
+    return yield* Effect.fail(
+      createMtprotoError('configuration', 'Telegram request timeout must be positive.'),
+    );
   }
-  const events = createMtprotoEventHub();
+  const receiveQueueCapacity = Math.trunc(
+    options.receiveQueueCapacity ?? DEFAULT_RECEIVE_QUEUE_CAPACITY,
+  );
+  if (receiveQueueCapacity <= 0) {
+    return yield* Effect.fail(
+      createMtprotoError('configuration', 'Telegram receive queue capacity must be positive.'),
+    );
+  }
+  const eventHub = yield* makeClientEventHub();
+  const connectedState = yield* SubscriptionRef.make(false);
+  const flushSignals = yield* Queue.dropping<void>(1);
+  const outgoingPackets = yield* Queue.bounded<Uint8Array>(receiveQueueCapacity);
   const waiting: PendingRequest[] = [];
   const pendingByMessageId = new Map<bigint, PendingRequest>();
   const requestsByContainerId = new Map<bigint, PendingRequest[]>();
@@ -202,29 +210,14 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
   const incomingMessages = new Map<bigint, IncomingMessageState>();
   const copiedMessageIds: bigint[] = [];
   const copiedMessages = new Map<bigint, IncomingMessageState>();
-  let connection: ReturnType<MtprotoSenderOptions['connection']> | undefined;
   let encryptedState: EncryptedMessageState | undefined;
   let authKey = options.authKey;
   let serverSalt = options.serverSalt ?? 0n;
   let timeOffset = options.timeOffset ?? 0;
   let connected = false;
-  let connecting: Promise<void> | undefined;
-  let userDisconnected = false;
-  let reconnecting: Promise<void> | undefined;
-  let flushScheduled = false;
-  let flushing: Promise<void> | undefined;
-  let receiveChain = Promise.resolve();
-  let pingTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
   let lastSessionFirstMessageId: bigint | undefined;
   let lastSessionUniqueId: bigint | undefined;
-  let connectionGeneration = 0;
   let terminalError: unknown;
-
-  const clearPing = () => {
-    if (pingTimer === undefined) return;
-    globalThis.clearTimeout(pingTimer);
-    pingTimer = undefined;
-  };
 
   const resetIncomingTracking = () => {
     incomingMessageIds.length = 0;
@@ -250,15 +243,19 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     }
   };
 
-  const settle = (request: PendingRequest, result: { value?: unknown; error?: unknown }) => {
+  const settle = Effect.fn('mtproto.sender.settle')(function* (
+    request: PendingRequest,
+    result: { value?: unknown; error?: unknown },
+  ) {
     if (request.settled) return;
     request.settled = true;
-    request.abort?.();
-    if (request.timeout !== undefined) globalThis.clearTimeout(request.timeout);
     unlink(request);
-    if ('error' in result) request.reject(result.error);
-    else request.resolve(result.value);
-  };
+    if ('error' in result) {
+      yield* Deferred.fail(request.deferred, senderError(result.error));
+    } else {
+      yield* Deferred.succeed(request.deferred, result.value);
+    }
+  });
 
   const takeRequests = (messageId: bigint) => {
     const direct = pendingByMessageId.get(messageId);
@@ -285,75 +282,41 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     return 2;
   };
 
-  const requeue = (requests: readonly PendingRequest[], ownerGeneration?: number) => {
+  const requeue = (requests: readonly PendingRequest[]) => {
     for (const request of requests) {
-      if (ownerGeneration !== undefined && request.sendGeneration !== ownerGeneration) continue;
-      if (
-        !request.expectResponse &&
-        ownerGeneration !== undefined &&
-        ownerGeneration !== connectionGeneration
-      ) {
-        settle(request, {
-          error: createMtprotoError('cancelled', 'Telegram connection was replaced.'),
-        });
-        continue;
-      }
-      if (request.settled || request.signal?.aborted) {
-        settle(request, {
-          error: createMtprotoError('cancelled', 'Telegram request was cancelled.'),
-        });
-        continue;
-      }
+      if (request.settled) continue;
       unlink(request);
       request.messageId = undefined;
       request.sequenceNumber = undefined;
       request.containerId = undefined;
       request.containerSequenceNumber = undefined;
       request.dependencyMessageId = undefined;
-      request.sendGeneration = undefined;
       enqueue(request);
     }
     scheduleFlush();
   };
 
   const scheduleFlush = () => {
-    if (flushScheduled) return;
-    flushScheduled = true;
-    queueMicrotask(() => {
-      flushScheduled = false;
-      void flush().catch(() => undefined);
-    });
+    Queue.offerUnsafe(flushSignals, undefined);
   };
 
-  const flushAcks = () => {
+  const flushAcks = Effect.fn('mtproto.sender.flushAcks')(function* () {
     if (pendingAcks.size === 0) return;
     const ids = [...pendingAcks].slice(0, MAX_ACK_IDS);
     for (const id of ids) pendingAcks.delete(id);
+    const deferred = yield* Deferred.make<unknown, MtprotoError>();
     enqueue({
       request: { _: 'msgs_ack', msgIds: ids },
-      resolve() {},
-      reject() {},
+      deferred,
       queued: false,
       settled: false,
       expectResponse: false,
     });
-  };
+  });
 
-  const flush = () => {
-    if (flushing) return flushing;
-    const operation = drain();
-    const tracked = operation.finally(() => {
-      if (flushing !== tracked) return;
-      flushing = undefined;
-      if (connected && waiting.length > 0) scheduleFlush();
-    });
-    flushing = tracked;
-    return tracked;
-  };
-
-  async function drain() {
-    if (!connected || !connection || !encryptedState) return;
-    flushAcks();
+  const drain = Effect.fn('mtproto.sender.drain')(function* () {
+    if (!connected || !encryptedState) return;
+    yield* flushAcks();
     while (waiting.length > 0 && connected) {
       const batch: PendingRequest[] = [];
       let estimatedSize = 0;
@@ -364,28 +327,22 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
           candidate.queued = false;
           continue;
         }
-        if (candidate.signal?.aborted) {
+        const encoded = yield* Effect.try({
+          try: () => options.codec.encode(candidate.request),
+          catch: senderError,
+        }).pipe(Effect.result);
+        if (Result.isFailure(encoded)) {
           waiting.shift();
           candidate.queued = false;
-          settle(candidate, {
-            error: createMtprotoError('cancelled', 'Telegram request was cancelled.'),
-          });
+          yield* settle(candidate, { error: encoded.failure });
           continue;
         }
-        let encodedLength: number;
-        try {
-          encodedLength = options.codec.encode(candidate.request).length + 16;
-        } catch (error) {
-          waiting.shift();
-          candidate.queued = false;
-          settle(candidate, { error });
-          continue;
-        }
+        const encodedLength = encoded.success.length + 16;
         if (batch.length > 0 && estimatedSize + encodedLength > MAX_OUTGOING_CONTAINER_BYTES) break;
         waiting.shift();
         candidate.queued = false;
         if (encodedLength > MAX_OUTGOING_CONTAINER_BYTES) {
-          settle(candidate, {
+          yield* settle(candidate, {
             error: createMtprotoError('protocol', 'Telegram request is too large.'),
           });
           continue;
@@ -395,94 +352,78 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
       }
       if (batch.length === 0) return;
 
-      const activeConnection: PacketConnection = connection;
       const activeState: EncryptedMessageState = encryptedState;
-      const activeGeneration = connectionGeneration;
-      let encrypted: Uint8Array;
-      try {
-        const prepared: ReturnType<EncryptedMessageState['prepare']>[] = [];
-        let previousSequentialMessageId: bigint | undefined;
-        for (const request of batch) {
-          let value = request.request;
-          if (SEQUENTIAL_REQUESTS.has(request.request._)) {
-            if (previousSequentialMessageId !== undefined) {
-              value = {
-                _: 'invokeAfterMsg',
-                msgId: previousSequentialMessageId,
-                query: request.request,
-              };
-              request.dependencyMessageId = previousSequentialMessageId;
-            }
-          }
-          const body = gzipBody(options.codec.encode(value));
-          const message = activeState.prepare(body, request.expectResponse);
-          request.sendGeneration = activeGeneration;
-          request.messageId = message.messageId;
-          request.sequenceNumber = message.sequenceNumber;
-          prepared.push(message);
-          if (SEQUENTIAL_REQUESTS.has(request.request._))
-            previousSequentialMessageId = message.messageId;
-          if (request.expectResponse) pendingByMessageId.set(message.messageId, request);
-        }
-
-        if (prepared.length === 1) {
-          encrypted = await activeState.encryptPrepared(prepared[0]!.data);
-        } else {
-          const containerBody = concatBytes(
-            writeUint32Le(MESSAGE_CONTAINER_ID),
-            writeInt32Le(prepared.length),
-            ...prepared.map((message) => message.data),
-          );
-          const container = activeState.prepare(containerBody, false);
+      const preparedResult = yield* Effect.try({
+        try: () => {
+          const prepared: ReturnType<EncryptedMessageState['prepare']>[] = [];
+          let previousSequentialMessageId: bigint | undefined;
           for (const request of batch) {
-            request.containerId = container.messageId;
-            request.containerSequenceNumber = container.sequenceNumber;
+            let value = request.request;
+            if (SEQUENTIAL_REQUESTS.has(request.request._)) {
+              if (previousSequentialMessageId !== undefined) {
+                value = {
+                  _: 'invokeAfterMsg',
+                  msgId: previousSequentialMessageId,
+                  query: request.request,
+                };
+                request.dependencyMessageId = previousSequentialMessageId;
+              }
+            }
+            const body = gzipBody(options.codec.encode(value));
+            const message = activeState.prepare(body, request.expectResponse);
+            request.messageId = message.messageId;
+            request.sequenceNumber = message.sequenceNumber;
+            prepared.push(message);
+            if (SEQUENTIAL_REQUESTS.has(request.request._))
+              previousSequentialMessageId = message.messageId;
+            if (request.expectResponse) pendingByMessageId.set(message.messageId, request);
           }
-          requestsByContainerId.set(
-            container.messageId,
-            batch.filter(({ expectResponse }) => expectResponse),
-          );
-          encrypted = await activeState.encryptPrepared(container.data);
-        }
-      } catch (error) {
-        const batchStillOwned =
-          connected &&
-          connection === activeConnection &&
-          encryptedState === activeState &&
-          connectionGeneration === activeGeneration;
+
+          if (prepared.length === 1) return prepared[0]!.data;
+          {
+            const containerBody = concatBytes(
+              writeUint32Le(MESSAGE_CONTAINER_ID),
+              writeInt32Le(prepared.length),
+              ...prepared.map((message) => message.data),
+            );
+            const container = activeState.prepare(containerBody, false);
+            for (const request of batch) {
+              request.containerId = container.messageId;
+              request.containerSequenceNumber = container.sequenceNumber;
+            }
+            requestsByContainerId.set(
+              container.messageId,
+              batch.filter(({ expectResponse }) => expectResponse),
+            );
+            return container.data;
+          }
+        },
+        catch: senderError,
+      }).pipe(Effect.result);
+      if (Result.isFailure(preparedResult)) {
+        const batchStillOwned = connected && encryptedState === activeState;
         for (const request of batch) {
-          if (batchStillOwned || request.sendGeneration === activeGeneration) {
-            settle(request, { error });
-          }
+          if (batchStillOwned) yield* settle(request, { error: preparedResult.failure });
         }
         continue;
       }
+      const encryptedResult = yield* activeState
+        .encryptPrepared(preparedResult.success)
+        .pipe(Effect.result);
+      if (Result.isFailure(encryptedResult)) {
+        for (const request of batch) yield* settle(request, { error: encryptedResult.failure });
+        continue;
+      }
+      const encrypted = encryptedResult.success;
       if (batch.some(({ settled }) => settled)) {
-        requeue(batch, activeGeneration);
+        requeue(batch);
         continue;
       }
-      if (
-        !connected ||
-        connection !== activeConnection ||
-        encryptedState !== activeState ||
-        connectionGeneration !== activeGeneration
-      ) {
-        requeue(batch, activeGeneration);
+      if (!connected || encryptedState !== activeState) {
+        requeue(batch);
         return;
       }
-      try {
-        activeConnection.send(encrypted);
-      } catch (error) {
-        for (const request of batch) {
-          if (!request.expectResponse) settle(request, { error });
-        }
-        requeue(
-          batch.filter(({ expectResponse }) => expectResponse),
-          activeGeneration,
-        );
-        void reconnect(error);
-        return;
-      }
+      yield* Queue.offer(outgoingPackets, encrypted);
       for (const request of batch) {
         if (!request.expectResponse) {
           if (request.request._ === 'msgs_ack') {
@@ -492,11 +433,11 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
               if (incoming?.contentRelated) incoming.acknowledged = true;
             }
           }
-          settle(request, { value: undefined });
+          yield* settle(request, { value: undefined });
         }
       }
     }
-  }
+  });
 
   const decodeObject = (body: Uint8Array, expected?: unknown) => {
     const unpacked = unpackGzipBody(body);
@@ -506,36 +447,46 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     return options.codec.decode(unpacked, expected);
   };
 
-  const processRpcResult = (body: Uint8Array) => {
-    if (body.length < 16)
-      throw createMtprotoError('protocol', 'Telegram sent a truncated RPC result.');
+  const processRpcResult = Effect.fn('mtproto.sender.processRpcResult')(function* (
+    body: Uint8Array,
+  ) {
+    if (body.length < 16) {
+      return yield* Effect.fail(
+        createMtprotoError('protocol', 'Telegram sent a truncated RPC result.'),
+      );
+    }
     const requestMessageId = bytesToBigInt(body.slice(4, 12), { littleEndian: true });
     const request = pendingByMessageId.get(requestMessageId);
     if (!request) return;
     const resultBody = body.slice(12);
-    try {
-      const unpacked = unpackGzipBody(resultBody);
-      if (unpacked.length >= 4 && readUint32Le(unpacked) === RPC_ERROR_ID) {
-        const errorRecord = options.codec.decode(unpacked) as TlObject;
-        const errorMessage = field<string>(errorRecord, 'errorMessage', 'error_message');
-        if (
-          errorMessage === 'MSG_WAIT_FAILED' &&
-          request.dependencyMessageId !== undefined &&
-          (request.dependencyRetryCount ?? 0) < 1
-        ) {
-          request.dependencyRetryCount = (request.dependencyRetryCount ?? 0) + 1;
-          requeue([request]);
-          return;
+    const decoded = yield* Effect.try({
+      try: () => {
+        const unpacked = unpackGzipBody(resultBody);
+        if (unpacked.length >= 4 && readUint32Le(unpacked) === RPC_ERROR_ID) {
+          const errorRecord = options.codec.decode(unpacked) as TlObject;
+          const errorMessage = field<string>(errorRecord, 'errorMessage', 'error_message');
+          if (
+            errorMessage === 'MSG_WAIT_FAILED' &&
+            request.dependencyMessageId !== undefined &&
+            (request.dependencyRetryCount ?? 0) < 1
+          ) {
+            request.dependencyRetryCount = (request.dependencyRetryCount ?? 0) + 1;
+            requeue([request]);
+            return { _tag: 'requeued' as const };
+          }
+          return { _tag: 'error' as const, error: rpcError(errorRecord, request.request) };
         }
-        settle(request, { error: rpcError(errorRecord, request.request) });
-        return;
-      }
-      const expected = options.codec.resultTypeFor(request.request._);
-      settle(request, { value: options.codec.decode(unpacked, expected) });
-    } catch (error) {
-      settle(request, { error });
-    }
-  };
+        const expected = options.codec.resultTypeFor(request.request._);
+        return { _tag: 'value' as const, value: options.codec.decode(unpacked, expected) };
+      },
+      catch: senderError,
+    }).pipe(Effect.result);
+    if (Result.isFailure(decoded)) return yield* settle(request, { error: decoded.failure });
+    if (decoded.success._tag === 'error')
+      return yield* settle(request, { error: decoded.success.error });
+    if (decoded.success._tag === 'value')
+      return yield* settle(request, { value: decoded.success.value });
+  });
 
   const containerMessages = (message: IncomingMessage) => {
     if (message.body.length < 8) {
@@ -756,17 +707,39 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     return isApplicableBadMessage(value, message, TIME_CORRECTION_CODES);
   };
 
-  const containsApplicableTimeCorrection = (message: IncomingMessage): boolean => {
-    const wasGzip = message.body.length >= 4 && readUint32Le(message.body) === GZIP_PACKED_ID;
-    const body = unpackGzipBody(message.body);
-    if (body.length >= 4 && readUint32Le(body) === MESSAGE_CONTAINER_ID) {
-      if (wasGzip) {
-        throw createMtprotoError('protocol', 'Telegram gzip-wrapped a message container.');
-      }
-      return containerMessages({ ...message, body }).some(containsApplicableTimeCorrection);
+  const timeCorrectionKey = (value: unknown) => {
+    if (!value || typeof value !== 'object' || (value as TlObject)._ !== 'bad_msg_notification') {
+      return undefined;
     }
-    if (body.length >= 4 && readUint32Le(body) === RPC_RESULT_ID) return false;
-    return isApplicableTimeCorrection(options.codec.decode(body) as TlObject, message);
+    const record = value as TlObject;
+    const errorCode = field<number>(record, 'errorCode', 'error_code');
+    const badMessageId = field<bigint>(record, 'badMsgId', 'bad_msg_id');
+    const badSequenceNumber = field<number>(record, 'badMsgSeqno', 'bad_msg_seqno');
+    return errorCode === 16 || errorCode === 17
+      ? `${badMessageId}:${badSequenceNumber}:${errorCode}`
+      : undefined;
+  };
+
+  const prevalidatedTimeCorrections = (message: IncomingMessage): ReadonlySet<string> => {
+    const found = new Set<string>();
+    const visit = (candidate: IncomingMessage) => {
+      const wasGzip = candidate.body.length >= 4 && readUint32Le(candidate.body) === GZIP_PACKED_ID;
+      const body = unpackGzipBody(candidate.body);
+      if (body.length >= 4 && readUint32Le(body) === MESSAGE_CONTAINER_ID) {
+        if (wasGzip) {
+          throw createMtprotoError('protocol', 'Telegram gzip-wrapped a message container.');
+        }
+        for (const inner of containerMessages({ ...candidate, body })) visit(inner);
+        return;
+      }
+      if (body.length >= 4 && readUint32Le(body) === RPC_RESULT_ID) return;
+      const record = decodeObject(body);
+      if (!isApplicableTimeCorrection(record, candidate)) return;
+      const key = timeCorrectionKey(record);
+      if (key) found.add(key);
+    };
+    visit(message);
+    return found;
   };
 
   const isApplicableBadServerSalt = (
@@ -825,51 +798,65 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     );
   };
 
-  const processCopiedMessage = async (wrapper: IncomingMessage, copyDepth: number) => {
-    if (copyDepth >= MAX_MESSAGE_COPY_NESTING) {
-      throw createMtprotoError('protocol', 'Telegram nested message copies too deeply.');
-    }
-    const original = copiedMessage(wrapper);
-    const packet = copiedPacketMessages(original);
-    const receivedBefore = new Set(
-      packet
-        .filter(({ messageId }) => incomingMessages.has(messageId) || copiedMessages.has(messageId))
-        .map(({ messageId }) => messageId),
-    );
-    pendingAcks.add(wrapper.messageId);
-    pendingAcks.add(original.messageId);
-    for (const item of packet) rememberCopiedMessage(item);
-    if (receivedBefore.has(original.messageId)) {
-      scheduleFlush();
-      return;
-    }
-    const body = unpackGzipBody(original.body);
-    if (body.length >= 4 && readUint32Le(body) === MESSAGE_CONTAINER_ID) {
-      for (const inner of containerMessages({ ...original, body })) {
-        if (!receivedBefore.has(inner.messageId)) {
-          await processMessage(inner, true, copyDepth + 1);
-        }
+  const processCopiedMessage: (
+    wrapper: IncomingMessage,
+    copyDepth: number,
+  ) => Effect.Effect<void, MtprotoError> = Effect.fn('mtproto.sender.processCopiedMessage')(
+    function* (wrapper: IncomingMessage, copyDepth: number) {
+      if (copyDepth >= MAX_MESSAGE_COPY_NESTING) {
+        throw createMtprotoError('protocol', 'Telegram nested message copies too deeply.');
       }
-    } else {
-      await processMessage(original, true, copyDepth + 1);
-    }
-    scheduleFlush();
-  };
+      const original = copiedMessage(wrapper);
+      const packet = copiedPacketMessages(original);
+      const receivedBefore = new Set(
+        packet
+          .filter(
+            ({ messageId }) => incomingMessages.has(messageId) || copiedMessages.has(messageId),
+          )
+          .map(({ messageId }) => messageId),
+      );
+      pendingAcks.add(wrapper.messageId);
+      pendingAcks.add(original.messageId);
+      for (const item of packet) rememberCopiedMessage(item);
+      if (receivedBefore.has(original.messageId)) {
+        scheduleFlush();
+        return;
+      }
+      const body = unpackGzipBody(original.body);
+      if (body.length >= 4 && readUint32Le(body) === MESSAGE_CONTAINER_ID) {
+        for (const inner of containerMessages({ ...original, body })) {
+          if (!receivedBefore.has(inner.messageId)) {
+            yield* processMessage(inner, true, copyDepth + 1);
+          }
+        }
+      } else {
+        yield* processMessage(original, true, copyDepth + 1);
+      }
+      scheduleFlush();
+    },
+  );
 
-  const processContainer = async (
+  const processContainer = Effect.fn('mtproto.sender.processContainer')(function* (
     message: IncomingMessage,
     skipTimeValidation: boolean,
     copyDepth: number,
-  ) => {
+    timeCorrections?: ReadonlySet<string>,
+  ) {
     for (const inner of containerMessages(message)) {
-      await processMessage(inner, skipTimeValidation, copyDepth);
+      yield* processMessage(inner, skipTimeValidation, copyDepth, timeCorrections);
     }
-  };
+  });
 
-  async function processMessage(
+  const processMessage: (
+    message: IncomingMessage,
+    skipTimeValidation?: boolean,
+    copyDepth?: number,
+    timeCorrections?: ReadonlySet<string>,
+  ) => Effect.Effect<void, MtprotoError> = Effect.fn('mtproto.sender.processMessage')(function* (
     message: IncomingMessage,
     skipTimeValidation = false,
     copyDepth = 0,
+    timeCorrections?: ReadonlySet<string>,
   ) {
     if ((message.sequenceNumber & 1) === 1) pendingAcks.add(message.messageId);
     const wasGzip = message.body.length >= 4 && readUint32Le(message.body) === GZIP_PACKED_ID;
@@ -879,19 +866,19 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
       if (wasGzip) {
         throw createMtprotoError('protocol', 'Telegram gzip-wrapped a message copy.');
       }
-      await processCopiedMessage({ ...message, body }, copyDepth);
+      yield* processCopiedMessage({ ...message, body }, copyDepth);
       return;
     }
     if (constructorId === MESSAGE_CONTAINER_ID) {
       if (wasGzip) {
         throw createMtprotoError('protocol', 'Telegram gzip-wrapped a message container.');
       }
-      await processContainer({ ...message, body }, skipTimeValidation, copyDepth);
+      yield* processContainer({ ...message, body }, skipTimeValidation, copyDepth, timeCorrections);
       scheduleFlush();
       return;
     }
     if (constructorId === RPC_RESULT_ID) {
-      processRpcResult(body);
+      yield* processRpcResult(body);
       scheduleFlush();
       return;
     }
@@ -922,7 +909,8 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
       const errorCode = field<number>(record, 'errorCode', 'error_code');
       if (
         (errorCode === 16 || errorCode === 17 || errorCode === 32 || errorCode === 33) &&
-        !isApplicableBadMessage(record, message, new Set([errorCode]))
+        !isApplicableBadMessage(record, message, new Set([errorCode])) &&
+        !timeCorrections?.has(timeCorrectionKey(record) ?? '')
       ) {
         throw createMtprotoError('protocol', 'Telegram sent an inapplicable bad-message notice.');
       }
@@ -930,16 +918,18 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
       if (errorCode === 16 || errorCode === 17) {
         timeOffset =
           Number(message.messageId >> 32n) - Math.floor((options.now ?? Date.now)() / 1_000);
-        const sessionReset = encryptedState?.updateTimeOffset(message.messageId) === true;
+        const sessionReset = encryptedState
+          ? yield* encryptedState.updateTimeOffset(message.messageId)
+          : false;
         if (sessionReset) resetIncomingTracking();
         requeue(sessionReset ? [...new Set(pendingByMessageId.values())] : requests);
       } else if (errorCode === 32 || errorCode === 33) {
-        encryptedState?.resetSession();
+        if (encryptedState) yield* encryptedState.resetSession();
         resetIncomingTracking();
         requeue([...new Set(pendingByMessageId.values())]);
       } else {
         for (const request of requests) {
-          settle(request, {
+          yield* settle(request, {
             error: createMtprotoError(
               'protocol',
               `Telegram rejected an MTProto message (${errorCode ?? 0}).`,
@@ -960,7 +950,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
       if (firstMessageId !== lastSessionFirstMessageId || uniqueId !== lastSessionUniqueId) {
         lastSessionFirstMessageId = firstMessageId;
         lastSessionUniqueId = uniqueId;
-        events.emit(sessionGapEvent(firstMessageId, uniqueId));
+        yield* eventHub.publish(sessionGapEvent(firstMessageId, uniqueId));
       }
       return;
     }
@@ -976,12 +966,16 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
             receivedPingId === undefined ||
             receivedPingId !== expectedPingId
           ) {
-            throw createMtprotoError('protocol', 'Telegram returned a mismatched pong.');
+            return yield* Effect.fail(
+              createMtprotoError('protocol', 'Telegram returned a mismatched pong.'),
+            );
           }
-          settle(request, { value: record });
+          yield* settle(request, { value: record });
           timeOffset =
             Number(message.messageId >> 32n) - Math.floor((options.now ?? Date.now)() / 1_000);
-          const sessionReset = encryptedState?.updateTimeOffset(message.messageId) === true;
+          const sessionReset = encryptedState
+            ? yield* encryptedState.updateTimeOffset(message.messageId)
+            : false;
           if (sessionReset) {
             resetIncomingTracking();
             requeue([...new Set(pendingByMessageId.values())]);
@@ -1005,7 +999,7 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
         requestedCount! < 0 ||
         rawSalts.length > requestedCount!
       ) {
-        settle(request, {
+        yield* settle(request, {
           error: createMtprotoError('protocol', 'Telegram sent invalid future salts.'),
         });
         return;
@@ -1021,13 +1015,13 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
           : [{ validSince, validUntil, salt: saltValue }];
       });
       if (salts.length !== rawSalts.length || encryptedState?.setFutureSalts(salts) !== true) {
-        settle(request, {
+        yield* settle(request, {
           error: createMtprotoError('protocol', 'Telegram sent invalid future salts.'),
         });
         return;
       }
       serverSalt = encryptedState.getServerSalt();
-      settle(request, { value: record });
+      yield* settle(request, { value: record });
       return;
     }
     if (record._ === 'msg_detailed_info' || record._ === 'msg_new_detailed_info') {
@@ -1043,14 +1037,14 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     }
     if (record._ === 'msgs_state_req') {
       const ids = field<bigint[]>(record, 'msgIds', 'msg_ids') ?? [];
+      const deferred = yield* Deferred.make<unknown, MtprotoError>();
       enqueue({
         request: {
           _: 'msgs_state_info',
           reqMsgId: message.messageId,
           info: Uint8Array.from(ids, incomingMessageState),
         },
-        resolve() {},
-        reject() {},
+        deferred,
         queued: false,
         settled: false,
         expectResponse: false,
@@ -1061,326 +1055,287 @@ export function createMtprotoSender(options: MtprotoSenderOptions): MtprotoSende
     if (record._ === 'msgs_ack' || record._ === 'msgs_state_info' || record._ === 'msgs_all_info') {
       return;
     }
-    events.emit(updateEvent(record));
-  }
+    yield* eventHub.publish(updateEvent(record));
+  });
 
-  const handlePacket = (
-    packet: Uint8Array,
-    sourceConnection: PacketConnection,
-    generation: number,
-  ) => {
-    if (sourceConnection !== connection || generation !== connectionGeneration) return;
-    const sourceState = encryptedState;
-    if (!sourceState) return;
-    receiveChain = receiveChain
-      .then(async () => {
-        if (
-          sourceConnection !== connection ||
-          sourceState !== encryptedState ||
-          generation !== connectionGeneration
-        ) {
-          return;
-        }
-        if (packet.length === 4 && readInt32Le(packet) === -404) {
-          authKey = undefined;
-          const error = createMtprotoError('session', 'Telegram forgot this authorization key.', {
-            code: -404,
-          });
-          if (!options.onAuthKeyInvalidated) throw error;
-          terminalError = error;
-          clearPing();
-          const requests = new Set([...pendingByMessageId.values(), ...waiting]);
-          try {
-            void Promise.resolve(options.onAuthKeyInvalidated()).catch(() => undefined);
-          } catch {
-            // The authoritative -404 error must still reach every affected request.
-          }
-          const wasConnected = connected;
-          connected = false;
-          connection = undefined;
-          connectionGeneration += 1;
-          sourceConnection.disconnect();
-          encryptedState = undefined;
-          resetIncomingTracking();
-          if (wasConnected) events.emit(connectionStateEvent('disconnected'));
-          for (const request of requests) settle(request, { error });
-          waiting.length = 0;
-          pendingByMessageId.clear();
-          requestsByContainerId.clear();
-          return;
-        }
-        const message = await sourceState.decrypt(packet);
-        if (
-          sourceConnection !== connection ||
-          sourceState !== encryptedState ||
-          generation !== connectionGeneration
-        ) {
-          return;
-        }
-        const incoming = {
-          messageId: message.messageId,
-          sequenceNumber: message.sequenceNumber,
-          body: message.body,
-        };
-        const canCorrectTime = message.timeInvalid && containsApplicableTimeCorrection(incoming);
-        if (message.timeInvalid && !canCorrectTime) {
-          throw createMtprotoError(
-            'protocol',
-            'Telegram sent a message outside the accepted time window.',
+  let plainMessageId = 0n;
+  let plainPending: Deferred.Deferred<TlObject, MtprotoError> | undefined;
+
+  const nextPlainMessageId = () => {
+    const value = (BigInt(Math.floor((options.now ?? Date.now)())) * (1n << 32n)) / 1_000n;
+    const aligned = value - (value % 4n);
+    plainMessageId = aligned > plainMessageId ? aligned : plainMessageId + 4n;
+    return plainMessageId;
+  };
+
+  const plainTransport = {
+    invoke: <Result extends TlObject = TlObject>(request: TlObject) =>
+      Effect.gen(function* () {
+        if (plainPending) {
+          return yield* Effect.fail(
+            createMtprotoError('protocol', 'Authorization key requests must run sequentially.'),
           );
         }
-        const canUpdateSalt =
-          message.saltInvalid && containsApplicableSaltUpdate(incoming, message.serverSalt);
-        if (message.saltInvalid && !canUpdateSalt) {
-          throw createMtprotoError('protocol', 'Telegram sent a message with an invalid salt.');
-        }
-        if (canUpdateSalt) {
-          serverSalt = message.serverSalt;
-          sourceState.setServerSalt(message.serverSalt);
-        }
-        rememberIncomingPacket(incoming, canCorrectTime);
-        await processMessage(incoming, canCorrectTime);
-      })
-      .catch((error: unknown) => {
-        if (sourceConnection === connection && generation === connectionGeneration) {
-          void reconnect(error);
-        }
-      });
-  };
-
-  const startPing = () => {
-    clearPing();
-    const tick = async () => {
-      if (!connected || userDisconnected) return;
-      try {
-        const pingId = bytesToBigInt(options.crypto.randomBytes(8), {
-          littleEndian: true,
-          signed: true,
+        const body = yield* Effect.try({
+          try: () => options.codec.encode(request),
+          catch: (cause) =>
+            createMtprotoError('protocol', 'Could not encode authorization request.', { cause }),
         });
-        const controller = new AbortController();
-        await timeout(
-          invoke(
-            { _: 'ping_delay_disconnect', pingId, disconnectDelay: PING_DISCONNECT_SECONDS },
-            { signal: controller.signal },
+        if (body.length < 4 || body.length > 64 * 1024 || body.length % 4 !== 0) {
+          return yield* Effect.fail(
+            createMtprotoError('protocol', 'Plain MTProto request is too large.'),
+          );
+        }
+        const deferred = yield* Deferred.make<TlObject, MtprotoError>();
+        plainPending = deferred;
+        yield* Queue.offer(
+          outgoingPackets,
+          concatBytes(
+            new Uint8Array(8),
+            bigIntToBytes(nextPlainMessageId(), 8, { littleEndian: true }),
+            writeInt32Le(body.length),
+            body,
           ),
-          PING_TIMEOUT_MS,
-          () => controller.abort(),
         );
-      } catch (error) {
-        void reconnect(error);
-        return;
-      }
-      pingTimer = globalThis.setTimeout(tick, PING_INTERVAL_MS);
-    };
-    pingTimer = globalThis.setTimeout(tick, PING_INTERVAL_MS);
+        return yield* Deferred.await(deferred).pipe(
+          Effect.timeoutOrElse({
+            duration: requestTimeoutMs,
+            orElse: () =>
+              Effect.fail(createMtprotoError('transport', 'Telegram key request timed out.')),
+          }),
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (plainPending === deferred) plainPending = undefined;
+            }),
+          ),
+        ) as Effect.Effect<Result, MtprotoError>;
+      }),
   };
 
-  const open = async (generation: number) => {
-    const nextConnection = options.connection();
-    let fullyOpened = false;
-    connection = nextConnection;
-    receiveChain = Promise.resolve();
-    const assertCurrentConnection = () => {
-      if (
-        !userDisconnected &&
-        generation === connectionGeneration &&
-        connection === nextConnection &&
-        nextConnection.isConnected()
-      ) {
-        return;
-      }
-      nextConnection.disconnect();
-      throw createMtprotoError('cancelled', 'Telegram connection attempt was superseded.');
-    };
-    nextConnection.subscribePackets((packet) => handlePacket(packet, nextConnection, generation));
-    nextConnection.subscribeState((nextConnected) => {
-      if (nextConnection !== connection || nextConnected || userDisconnected || !fullyOpened) {
-        return;
-      }
-      connected = false;
-      void reconnect(createMtprotoError('transport', 'Telegram WebSocket disconnected.'));
-    });
-    await nextConnection.connect();
-    assertCurrentConnection();
-
-    if (!authKey) {
-      const plain = createPlainMtprotoTransport({
-        connection: nextConnection,
-        codec: options.codec,
-        ...(options.now ? { now: options.now } : {}),
-      });
-      try {
-        const authorization = await options.authorize(plain);
-        authKey = authorization.authKey;
-        serverSalt = authorization.serverSalt;
-        timeOffset = authorization.timeOffset;
-        await options.onAuthKey(authorization);
-        assertCurrentConnection();
-      } finally {
-        plain.dispose();
-      }
-    }
-    encryptedState = createEncryptedMessageState({
-      authKey,
-      crypto: options.crypto,
-      serverSalt,
-      timeOffset,
-      ...(options.now ? { now: options.now } : {}),
-    });
-    assertCurrentConnection();
-    resetIncomingTracking();
-    fullyOpened = true;
-    connected = true;
-    events.emit(connectionStateEvent('connected'));
-    const interrupted = [...pendingByMessageId.values()].filter((request) => !request.settled);
-    requestsByContainerId.clear();
-    requeue(interrupted);
-    startPing();
-    void invoke<TlObject>({ _: 'get_future_salts', num: 32 }).catch(() => undefined);
-    scheduleFlush();
-  };
-
-  const openWithRetries = async (generation: number) => {
-    const retries = Math.max(0, options.reconnect?.retries ?? 5);
-    const delayMs = Math.max(0, options.reconnect?.delayMs ?? 1_000);
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
-      if (userDisconnected || generation !== connectionGeneration) {
-        throw createMtprotoError('cancelled', 'Telegram connection attempt was superseded.');
-      }
-      if (attempt > 0 && delayMs > 0) {
-        await new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs * attempt));
-      }
-      try {
-        await open(generation);
-        return;
-      } catch (error) {
-        lastError = error;
-        if (userDisconnected || generation !== connectionGeneration) throw error;
-        const failedConnection = connection;
-        connection = undefined;
-        failedConnection?.disconnect();
-      }
-    }
-    throw lastError ?? createMtprotoError('transport', 'Telegram connection failed.');
-  };
-
-  const connect = () => {
-    if (terminalError !== undefined) return Promise.reject(terminalError);
-    if (connected) return Promise.resolve();
-    if (connecting) return connecting;
-    if (reconnecting) return reconnecting;
-    userDisconnected = false;
-    const generation = ++connectionGeneration;
-    const operation = openWithRetries(generation);
-    const tracked = operation.finally(() => {
-      if (connecting === tracked) connecting = undefined;
-    });
-    connecting = tracked;
-    return tracked;
-  };
-
-  async function reconnect(_reason: unknown) {
-    if (userDisconnected || terminalError !== undefined) return;
-    if (reconnecting) return reconnecting;
-    clearPing();
-    connected = false;
-    const previousConnection = connection;
-    connection = undefined;
-    const generation = ++connectionGeneration;
-    const operation = Promise.resolve().then(async () => {
-      previousConnection?.disconnect();
-      try {
-        await openWithRetries(generation);
-        return;
-      } catch (lastError) {
-        for (const request of [...pendingByMessageId.values(), ...waiting]) {
-          settle(request, { error: lastError });
-        }
-        waiting.length = 0;
-        if (!userDisconnected && generation === connectionGeneration) {
-          events.emit(connectionStateEvent('disconnected'));
-        }
-      }
-    });
-    const tracked = operation.finally(() => {
-      if (reconnecting === tracked) reconnecting = undefined;
-    });
-    reconnecting = tracked;
-    return tracked;
-  }
-
-  function invoke<Result = unknown>(
-    request: TlObject,
-    invokeOptions: { signal?: AbortSignal } = {},
+  const processPlainPacket = Effect.fn('mtproto.sender.processPlainPacket')(function* (
+    packet: Uint8Array,
   ) {
-    if (terminalError !== undefined) return Promise.reject(terminalError);
-    if (userDisconnected) {
-      return Promise.reject(createMtprotoError('transport', 'Telegram sender is disconnected.'));
+    const pending = plainPending;
+    if (!pending) return;
+    if (packet.length < 20 || packet.length > 20 + 64 * 1024) {
+      return yield* Effect.fail(
+        createMtprotoError('protocol', 'Telegram sent an invalid plain MTProto packet.'),
+      );
     }
-    if (invokeOptions.signal?.aborted) {
-      return Promise.reject(createMtprotoError('cancelled', 'Telegram request was cancelled.'));
+    const authKeyId = bytesToBigInt(packet.slice(0, 8), { littleEndian: true });
+    const length = readInt32Le(packet, 16);
+    if (authKeyId !== 0n || length < 4 || length % 4 !== 0 || length !== packet.length - 20) {
+      return yield* Effect.fail(
+        createMtprotoError('protocol', 'Telegram sent an invalid plain MTProto header.'),
+      );
     }
-    return new Promise<Result>((resolve, reject) => {
+    const value = yield* Effect.try({
+      try: () => options.codec.decode(packet.slice(20)) as TlObject,
+      catch: (cause) =>
+        createMtprotoError('protocol', 'Could not decode authorization response.', { cause }),
+    });
+    plainPending = undefined;
+    yield* Deferred.succeed(pending, value);
+  });
+
+  const processPacket = Effect.fn('mtproto.sender.processPacket')(function* (packet: Uint8Array) {
+    if (!encryptedState) return yield* processPlainPacket(packet);
+    const sourceState = encryptedState;
+    if (packet.length === 4 && readInt32Le(packet) === -404) {
+      authKey = undefined;
+      encryptedState = undefined;
+      const error = createMtprotoError('session', 'Telegram forgot this authorization key.', {
+        code: -404,
+      });
+      terminalError = error;
+      if (options.onAuthKeyInvalidated) {
+        yield* options.onAuthKeyInvalidated().pipe(Effect.ignore);
+      }
+      for (const request of new Set([...pendingByMessageId.values(), ...waiting])) {
+        yield* settle(request, { error });
+      }
+      waiting.length = 0;
+      pendingByMessageId.clear();
+      requestsByContainerId.clear();
+      return yield* Effect.fail(error);
+    }
+    const message = yield* sourceState.decrypt(packet);
+    const incoming = {
+      messageId: message.messageId,
+      sequenceNumber: message.sequenceNumber,
+      body: message.body,
+    };
+    const timeCorrections = prevalidatedTimeCorrections(incoming);
+    const canCorrectTime = message.timeInvalid && timeCorrections.size > 0;
+    if (message.timeInvalid && !canCorrectTime) {
+      return yield* Effect.fail(
+        createMtprotoError('protocol', 'Telegram sent a message outside the accepted time window.'),
+      );
+    }
+    const canUpdateSalt =
+      message.saltInvalid && containsApplicableSaltUpdate(incoming, message.serverSalt);
+    if (message.saltInvalid && !canUpdateSalt) {
+      return yield* Effect.fail(
+        createMtprotoError('protocol', 'Telegram sent a message with an invalid salt.'),
+      );
+    }
+    if (canUpdateSalt) {
+      serverSalt = message.serverSalt;
+      sourceState.setServerSalt(message.serverSalt);
+    }
+    yield* Effect.try({
+      try: () => rememberIncomingPacket(incoming, canCorrectTime),
+      catch: senderError,
+    });
+    yield* processMessage(incoming, canCorrectTime, 0, timeCorrections);
+  });
+
+  const publishConnectionState = (value: boolean) =>
+    Effect.all(
+      [
+        SubscriptionRef.set(connectedState, value),
+        eventHub.publish(connectionStateEvent(value ? 'connected' : 'disconnected')),
+      ],
+      { discard: true },
+    );
+
+  const disconnectAttempt = Effect.fn('mtproto.sender.disconnectAttempt')(function* () {
+    const wasConnected = connected;
+    connected = false;
+    encryptedState = undefined;
+    plainPending = undefined;
+    yield* Queue.clear(outgoingPackets);
+    if (wasConnected) yield* publishConnectionState(false);
+    requeue([...new Set(pendingByMessageId.values())]);
+  });
+
+  const runConnection = () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const receiver = yield* options.connection.packets(Stream.fromQueue(outgoingPackets)).pipe(
+          Stream.runForEach((packet) =>
+            processPacket(packet).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.failCause(cause)
+                  : Effect.fail(senderError(Cause.squash(cause))),
+              ),
+            ),
+          ),
+          Effect.forkScoped({ startImmediately: true }),
+        );
+        const receiverCompletion = Fiber.join(receiver).pipe(
+          Effect.andThen(
+            Effect.fail(createMtprotoError('transport', 'Telegram WebSocket closed unexpectedly.')),
+          ),
+        );
+
+        if (!authKey) {
+          const authorization = yield* Effect.raceFirst(
+            options.authorize(plainTransport),
+            receiverCompletion,
+          );
+          authKey = authorization.authKey;
+          serverSalt = authorization.serverSalt;
+          timeOffset = authorization.timeOffset;
+          yield* options.onAuthKey(authorization);
+        }
+        encryptedState = yield* runCrypto(
+          createEncryptedMessageState({
+            authKey,
+            serverSalt,
+            timeOffset,
+            ...(options.now ? { now: options.now } : {}),
+          }),
+        );
+        resetIncomingTracking();
+        connected = true;
+        yield* publishConnectionState(true);
+        scheduleFlush();
+        return yield* receiverCompletion;
+      }),
+    );
+
+  const supervisor = runConnection().pipe(
+    Effect.ensuring(disconnectAttempt()),
+    Effect.retry({
+      schedule: Schedule.exponential(options.reconnect?.delayMs ?? 1_000),
+      times: options.reconnect?.retries ?? 5,
+    }),
+    Effect.tapError((error) =>
+      Effect.gen(function* () {
+        terminalError = error;
+        for (const request of new Set([...pendingByMessageId.values(), ...waiting])) {
+          yield* settle(request, { error });
+        }
+      }),
+    ),
+  );
+  yield* supervisor.pipe(Effect.forkScoped({ startImmediately: true }));
+
+  yield* Stream.fromQueue(flushSignals).pipe(
+    Stream.runForEach(() => drain()),
+    Effect.forkScoped({ startImmediately: true }),
+  );
+
+  const invoke: MtprotoSender['invoke'] = <Result = unknown>(request: TlObject) =>
+    Effect.gen(function* () {
+      if (terminalError !== undefined) return yield* Effect.fail(senderError(terminalError));
+      const deferred = yield* Deferred.make<unknown, MtprotoError>();
       const pending: PendingRequest = {
         request,
-        resolve: (value) => resolve(value as Result),
-        reject,
-        ...(invokeOptions.signal ? { signal: invokeOptions.signal } : {}),
+        deferred,
         queued: false,
         settled: false,
         expectResponse: true,
       };
-      if (invokeOptions.signal) {
-        const abort = () =>
+      enqueue(pending);
+      scheduleFlush();
+      return yield* Deferred.await(deferred).pipe(
+        Effect.timeoutOrElse({
+          duration: requestTimeoutMs,
+          orElse: () => Effect.fail(createMtprotoError('transport', 'Telegram request timed out.')),
+        }),
+        Effect.onInterrupt(() =>
           settle(pending, {
             error: createMtprotoError('cancelled', 'Telegram request was cancelled.'),
-          });
-        invokeOptions.signal.addEventListener('abort', abort, { once: true });
-        pending.abort = () => invokeOptions.signal?.removeEventListener('abort', abort);
-      }
-      if (!invokeOptions.signal) {
-        pending.timeout = globalThis.setTimeout(
-          () =>
-            settle(pending, {
-              error: createMtprotoError('transport', 'Telegram request timed out.'),
-            }),
-          requestTimeoutMs,
-        );
-      }
-      enqueue(pending);
-      if (connected) scheduleFlush();
-      else void connect().catch((error: unknown) => settle(pending, { error }));
+          }),
+        ),
+      ) as Effect.Effect<Result, MtprotoError>;
     });
-  }
 
+  const ping = Effect.gen(function* () {
+    if (!connected) return;
+    const pingId = bytesToBigInt(yield* runCrypto(randomBytes(8)), {
+      littleEndian: true,
+      signed: true,
+    });
+    yield* invoke({
+      _: 'ping_delay_disconnect',
+      pingId,
+      disconnectDelay: PING_DISCONNECT_SECONDS,
+    }).pipe(
+      Effect.timeoutOrElse({
+        duration: PING_TIMEOUT_MS,
+        orElse: () => Effect.fail(createMtprotoError('transport', 'Telegram ping timed out.')),
+      }),
+      Effect.ignore,
+    );
+  }).pipe(Effect.delay(PING_INTERVAL_MS), Effect.forever);
+  yield* ping.pipe(Effect.forkScoped);
+
+  yield* SubscriptionRef.changes(connectedState).pipe(
+    Stream.filter(Boolean),
+    Stream.runHead,
+    Effect.timeoutOrElse({
+      duration: requestTimeoutMs,
+      orElse: () => Effect.fail(createMtprotoError('transport', 'Telegram connection timed out.')),
+    }),
+  );
   return {
     dcId: options.dcId,
-    connect,
-    disconnect() {
-      userDisconnected = true;
-      connectionGeneration += 1;
-      connecting = undefined;
-      reconnecting = undefined;
-      clearPing();
-      connected = false;
-      const activeConnection = connection;
-      connection = undefined;
-      activeConnection?.disconnect();
-      encryptedState = undefined;
-      resetIncomingTracking();
-      const error = createMtprotoError('cancelled', 'Telegram sender disconnected.');
-      const requests = new Set([...pendingByMessageId.values(), ...waiting]);
-      for (const request of requests) settle(request, { error });
-      waiting.length = 0;
-      pendingByMessageId.clear();
-      requestsByContainerId.clear();
-      pendingAcks.clear();
-    },
-    isConnected() {
-      return connected && Boolean(connection?.isConnected());
-    },
+    connected: SubscriptionRef.get(connectedState),
     invoke,
-    subscribe: (listener) => events.subscribe(listener),
-  };
-}
+    events: eventHub.events,
+  } satisfies MtprotoSender;
+});

@@ -41,6 +41,38 @@ test('sends adjacent media as a Telegram album and a file-mode item separately',
   );
 });
 
+test('packs image batches into a compact grid with batch actions', async ({ page }) => {
+  await page
+    .locator('input[type="file"]')
+    .setInputFiles([imagePath, imagePath, imagePath, imagePath, imagePath]);
+
+  const batch = page.getByLabel('Staged attachments');
+  const attachments = page.getByTestId('composer-attachment');
+  await expect(batch).toHaveClass(/composer-image-batch/u);
+  await expect(batch.getByText('5 images')).toBeVisible();
+  await expect(attachments).toHaveCount(5);
+
+  const bounds = await attachments.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().toJSON()),
+  );
+  expect(bounds.every(({ width, height }) => width < 150 && height < 120)).toBe(true);
+  expect(new Set(bounds.map(({ top }) => Math.round(top))).size).toBe(1);
+
+  await batch
+    .getByRole('group', { name: 'Send all as' })
+    .getByRole('button', { name: 'Files' })
+    .click();
+  for (const attachment of await attachments.all()) {
+    await expect(attachment.getByRole('button', { name: 'File', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  }
+
+  await batch.getByRole('button', { name: 'Clear' }).click();
+  await expect(attachments).toHaveCount(0);
+});
+
 test('renders a generic file with one attachment card', async ({ page }) => {
   await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
   await page.getByRole('button', { name: 'Send message' }).click();
@@ -65,8 +97,7 @@ test('renders a generic file with one attachment card', async ({ page }) => {
 });
 
 test('renders a staged album as one group while its upload is pending', async ({ page }) => {
-  await page.goto('/?scenario=held-upload');
-  await selectAlice(page);
+  await page.evaluate(() => window.__televechaFixture?.holdNextUpload());
   await page.locator('input[type="file"]').setInputFiles([imagePath, imagePath]);
   await page.getByRole('button', { name: 'Send message' }).click();
 
@@ -80,6 +111,19 @@ test('renders a staged album as one group while its upload is pending', async ({
 
   await page.evaluate(() => window.__televechaFixture?.releaseUpload());
   await expect.poll(async () => (await fixtureStats(page))?.sendAlbum).toBe(1);
+});
+
+test('shows a local image preview while a single upload is pending', async ({ page }) => {
+  await page.evaluate(() => window.__televechaFixture?.holdNextUpload());
+  await page.locator('input[type="file"]').setInputFiles(imagePath);
+  await page.getByRole('button', { name: 'Send message' }).click();
+
+  const pending = page.locator('article[data-media-kind="photo"]').last();
+  await expect(pending.getByRole('img', { name: 'outgoing-media.png' })).toBeVisible();
+  await expect(pending.getByText('25%')).toBeVisible();
+
+  await page.evaluate(() => window.__televechaFixture?.releaseUpload());
+  await expect.poll(async () => (await fixtureStats(page))?.sendFile).toBe(1);
 });
 
 test('crops and rotates a staged image before sending', async ({ page }) => {
@@ -180,18 +224,7 @@ test('does not overwrite a newer draft when a slow edit finishes', async ({ page
   const composer = page.getByRole('textbox', { name: 'Message' });
   await composer.fill('Original saved draft');
   await page.evaluate(() => {
-    const transport = window.__televechaRuntimes?.get('fixture:default')?.transport;
-    if (!transport) throw new Error('Fixture transport is unavailable');
-    const original = transport.editMessage.bind(transport);
-    let release: () => void = () => undefined;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    window.__releaseFixtureEdit = release;
-    transport.editMessage = async (peer, messageId, text, formats, replacement) => {
-      await held;
-      return original(peer, messageId, text, formats, replacement);
-    };
+    window.__televechaFixture?.holdNextEdit();
   });
 
   const message = page.locator('article[data-message-id="78"]');
@@ -208,7 +241,7 @@ test('does not overwrite a newer draft when a slow edit finishes', async ({ page
     )
     .toBe('Newer draft while edit saves');
 
-  await page.evaluate(() => window.__releaseFixtureEdit?.());
+  await page.evaluate(() => window.__televechaFixture?.releaseEdit());
   await expect(message).toContainText('Edited caption');
   await page
     .getByTestId('chat-list')

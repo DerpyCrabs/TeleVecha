@@ -68,6 +68,7 @@ export function StickerPicker(props: {
   load: (sticker: TelegramSticker) => Promise<string>;
   cachedUrl: (sticker: TelegramSticker) => string | undefined;
   send: (sticker: TelegramSticker) => void;
+  enabled: boolean;
 }) {
   const [activePackId, setActivePackId] = createSignal('recent');
   const activePack = () => props.packs.find(({ id }) => id === activePackId()) ?? props.packs[0];
@@ -135,6 +136,7 @@ export function StickerPicker(props: {
             {(sticker) => (
               <button
                 class="sticker-option"
+                disabled={!props.enabled}
                 onClick={() => props.send(sticker)}
                 aria-label={`Send ${sticker.emoji} sticker`}
                 title={sticker.emoji}

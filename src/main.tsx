@@ -1,8 +1,10 @@
+import { BrowserRuntime } from '@effect/platform-browser';
+import { Effect } from 'effect';
 import { render } from 'solid-js/web';
 
 import { App } from './ui/app/App';
 import { applyTvBugUiState, injectedTvBugBundle } from './debug/tvbugRuntime';
-import { defaultAppEnvironment } from './ui/app/appRuntime';
+import { appRuntimeLayer, makeDefaultAppEnvironment } from './ui/app/appRuntime';
 import { applyThemePreferences, readThemePreferences } from './ui/theme/themePreferences';
 import './styles.css';
 import './ui/app/app-shell.css';
@@ -15,21 +17,20 @@ import './ui/app/chrome.css';
 import './ui/app/responsive.css';
 import './ui/bots/bot.css';
 
-const root = document.querySelector<HTMLDivElement>('#root');
+const main = Effect.scoped(
+  Effect.gen(function* () {
+    const root = document.querySelector<HTMLDivElement>('#root');
+    if (!root) return yield* Effect.die(new Error('TeleVecha could not find its root element.'));
+    yield* Effect.sync(() => {
+      const tvbugBundle = injectedTvBugBundle();
+      if (tvbugBundle) applyTvBugUiState(tvbugBundle.snapshot);
+      applyThemePreferences(readThemePreferences());
+    });
+    const environment = yield* makeDefaultAppEnvironment();
+    const dispose = yield* Effect.sync(() => render(() => <App environment={environment} />, root));
+    yield* Effect.addFinalizer(() => Effect.sync(dispose));
+    return yield* Effect.never;
+  }),
+).pipe(Effect.provide(appRuntimeLayer));
 
-const tvbugBundle = injectedTvBugBundle();
-if (tvbugBundle) applyTvBugUiState(tvbugBundle.snapshot);
-applyThemePreferences(readThemePreferences());
-
-if (!root) {
-  throw new Error('TeleVecha could not find its root element.');
-}
-
-const environment = defaultAppEnvironment();
-render(() => <App environment={environment} />, root);
-
-if (!environment.tvbug && import.meta.env.PROD && 'serviceWorker' in navigator) {
-  void navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
-    console.warn('TeleVecha could not register its offline application shell.', error);
-  });
-}
+BrowserRuntime.runMain(main);

@@ -1,23 +1,11 @@
-const registryKey = '__televechaAssetUrls';
-const pendingRegistryKey = '__televechaPendingAssetUrls';
+import { Effect } from 'effect';
+
 const MAX_CACHED_ASSET_URLS = 256;
 
 type AssetRegistry = Map<string, string>;
-
-function registry(): AssetRegistry {
-  const root = globalThis as typeof globalThis & { [registryKey]?: AssetRegistry };
-  return (root[registryKey] ??= new Map());
-}
-
-function pendingRegistry() {
-  const root = globalThis as typeof globalThis & {
-    [pendingRegistryKey]?: Map<string, Promise<string>>;
-  };
-  return (root[pendingRegistryKey] ??= new Map());
-}
+const assets: AssetRegistry = new Map();
 
 export function cachedAssetUrl(key: string) {
-  const assets = registry();
   const url = assets.get(key);
   if (url) {
     assets.delete(key);
@@ -44,13 +32,11 @@ function activeObjectUrls() {
 }
 
 export function clearAssetUrls() {
-  for (const url of registry().values()) URL.revokeObjectURL(url);
-  registry().clear();
-  pendingRegistry().clear();
+  for (const url of assets.values()) URL.revokeObjectURL(url);
+  assets.clear();
 }
 
 export function pruneAssetUrls(protectedUrls: ReadonlySet<string> = new Set()) {
-  const assets = registry();
   if (assets.size <= MAX_CACHED_ASSET_URLS) return;
   const active = activeObjectUrls();
   for (const [key, url] of assets) {
@@ -69,22 +55,14 @@ export function rememberAssetUrl(key: string, blob: Blob) {
   // before the resolved promise can put it in an image or video element.
   pruneAssetUrls();
   const url = URL.createObjectURL(blob);
-  registry().set(key, url);
+  assets.set(key, url);
   pruneAssetUrls(new Set([url]));
   return url;
 }
 
-export function loadAssetUrl(key: string, load: () => Promise<Blob>) {
-  const cached = cachedAssetUrl(key);
-  if (cached) return Promise.resolve(cached);
-  const pending = pendingRegistry();
-  const current = pending.get(key);
-  if (current) return current;
-  const request = load().then((blob) => rememberAssetUrl(key, blob));
-  pending.set(key, request);
-  const clear = () => {
-    if (pending.get(key) === request) pending.delete(key);
-  };
-  void request.then(clear, clear);
-  return request;
-}
+export const loadAssetUrl = <Error>(key: string, load: () => Effect.Effect<Blob, Error>) =>
+  Effect.suspend(() => {
+    const cached = cachedAssetUrl(key);
+    if (cached) return Effect.succeed(cached);
+    return load().pipe(Effect.map((blob) => rememberAssetUrl(key, blob)));
+  });

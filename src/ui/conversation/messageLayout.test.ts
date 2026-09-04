@@ -148,4 +148,21 @@ describe('layoutMessages', () => {
     expect(layout?.className).toContain('message-captioned-media');
     expect(layout?.width).toBe('min(24rem, 100%)');
   });
+
+  it('uses Telegram Desktop document width for thumbnail files', () => {
+    const [layout] = layoutMessages(
+      [
+        message('1', {
+          body: 'caption',
+          replyTo: 'A reply whose full text must not widen the document',
+          media: { kind: 'file', name: 'image.png', mimeType: 'image/png' },
+        }),
+      ],
+      { ...chat, kind: 'user' },
+      [],
+    );
+
+    expect(layout?.className).toContain('message-image-document');
+    expect(layout?.width).toBe('min(16.75rem, 100%)');
+  });
 });

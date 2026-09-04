@@ -1,22 +1,296 @@
-import { Conversation } from '../core/conversation';
-import type { MessagingClient } from '../core/client';
+import { Deferred, Effect, Exit, Queue, Schema, Scope, Stream } from 'effect';
+
+import { makeConversation } from '../core/conversation';
+import { reportDiagnostic } from '../core/diagnostics';
+import { messagingCapabilities, type EffectMessagingClient } from '../core/client';
 import type { MessagingEngine } from '../core/engine';
+import { telegramMediaAssetKey } from '../core/mediaAssetKey';
+import {
+  MessagingErrorPayload,
+  messagingErrorFromPayload,
+  messagingErrorPayload,
+  toMessagingError,
+} from '../core/messagingError';
+import { makeResourceCache, type ResourceCache } from '../core/resourceCache';
+import {
+  EngineState,
+  accountSnapshot,
+  conversationViewSnapshot,
+  engineSnapshot,
+  initialEngineSnapshot,
+  mergeAccountSnapshot,
+  shareEqualSnapshotFields,
+} from '../core/engineState';
+import { CoordinatorTasks } from './coordinatorTasks';
+import { acquireAvailableTabLease } from './tabLock';
+import { makeClientRegistry } from './clientRegistry';
+import { makeRequestJournal, type PendingRequest } from './requestJournal';
 import type {
+  AccountSnapshot,
+  ConversationViewSnapshot,
   EngineSnapshot,
   TelegramCredentials,
+  TelegramConversationEvent,
   TelegramDownloadOptions,
+  TelegramHistoryGap,
   TelegramMessage,
   TelegramResourceInvalidation,
 } from '../types';
 
-const PROTOCOL_VERSION = 3;
+const PROTOCOL_VERSION = 7;
 const OWNER_HEARTBEAT_MS = 2_000;
 const OWNER_TIMEOUT_MS = 7_000;
+const REQUEST_RETRY_MS = 2_000;
+const REQUEST_TIMEOUT_MS = 60_000;
 const MAX_COMPLETED_REQUESTS = 128;
 const CHANNEL_ERROR = 'This browser cannot provide the channel required for safe multi-tab sync.';
 const LOCKS_ERROR = 'This browser cannot provide the locking required for safe multi-tab sync.';
 const LOCK_ACCESS_ERROR =
   'This browser could not access the locking required for safe multi-tab sync.';
+
+type RemoteMethod = Exclude<
+  keyof EffectMessagingClient,
+  | 'snapshot'
+  | 'subscribe'
+  | 'subscribeResources'
+  | 'start'
+  | 'stop'
+  | 'conversation'
+  | 'mediaAssetKey'
+  | 'loadCachedAvatar'
+>;
+
+type RemoteArguments<Method extends RemoteMethod> = EffectMessagingClient[Method] extends (
+  ...args: infer Arguments
+) => unknown
+  ? Arguments
+  : never;
+
+type RemoteResult<Method extends RemoteMethod> = EffectMessagingClient[Method] extends (
+  ...args: never[]
+) => infer Result
+  ? Result
+  : never;
+
+const invokeEngineCommand = (
+  engine: MessagingEngine,
+  method: RemoteMethod,
+  args: readonly unknown[],
+): Effect.Effect<unknown, unknown> => {
+  switch (method) {
+    case 'retrySync':
+      return engine.retrySync();
+    case 'refreshUpdates':
+      return engine.refreshUpdates();
+    case 'refreshReadReceipt':
+      return engine.refreshReadReceipt(
+        ...(args as Parameters<MessagingEngine['refreshReadReceipt']>),
+      );
+    case 'retryMarkRead':
+      return engine.retryMarkRead(...(args as Parameters<MessagingEngine['retryMarkRead']>));
+    case 'clearOperationError':
+      return engine.clearOperationError();
+    case 'requestCode':
+      return engine.requestCode(...(args as Parameters<MessagingEngine['requestCode']>));
+    case 'submitCode':
+      return engine.submitCode(...(args as Parameters<MessagingEngine['submitCode']>));
+    case 'submitPassword':
+      return engine.submitPassword(...(args as Parameters<MessagingEngine['submitPassword']>));
+    case 'logOut':
+      return engine.logOut();
+    case 'clearCache':
+      return engine.clearCache();
+    case 'loadConversationSharedMediaCounts':
+      return engine.loadConversationSharedMediaCounts(
+        ...(args as Parameters<MessagingEngine['loadConversationSharedMediaCounts']>),
+      );
+    case 'loadOlderConversationView':
+      return engine.loadOlderConversationView(
+        ...(args as Parameters<MessagingEngine['loadOlderConversationView']>),
+      );
+    case 'loadHistoryGapConversationView':
+      return engine.loadHistoryGapConversationView(
+        ...(args as Parameters<MessagingEngine['loadHistoryGapConversationView']>),
+      );
+    case 'retryConversationView':
+      return engine.retryConversationView(
+        ...(args as Parameters<MessagingEngine['retryConversationView']>),
+      );
+    case 'openMessageInConversationView':
+      return engine.openMessageInConversationView(
+        ...(args as Parameters<MessagingEngine['openMessageInConversationView']>),
+      );
+    case 'searchConversationMessages':
+      return engine.searchConversationMessages(
+        ...(args as Parameters<MessagingEngine['searchConversationMessages']>),
+      );
+    case 'getConversationSharedMedia':
+      return engine.getConversationSharedMedia(
+        ...(args as Parameters<MessagingEngine['getConversationSharedMedia']>),
+      );
+    case 'setActiveConversationVisibility':
+      return engine.setActiveConversationVisibility(
+        ...(args as Parameters<MessagingEngine['setActiveConversationVisibility']>),
+      );
+    case 'setDraft':
+      return engine.setDraft(...(args as Parameters<MessagingEngine['setDraft']>));
+    case 'setTyping':
+      return engine.setTyping(...(args as Parameters<MessagingEngine['setTyping']>));
+    case 'sendDraft':
+      return engine.sendDraft(...(args as Parameters<MessagingEngine['sendDraft']>));
+    case 'sendAttachments':
+      return engine.sendAttachments(...(args as Parameters<MessagingEngine['sendAttachments']>));
+    case 'sendSticker':
+      return engine.sendSticker(...(args as Parameters<MessagingEngine['sendSticker']>));
+    case 'forwardMessage':
+      return engine.forwardMessage(...(args as Parameters<MessagingEngine['forwardMessage']>));
+    case 'editMessage':
+      return engine.editMessage(...(args as Parameters<MessagingEngine['editMessage']>));
+    case 'deleteMessage':
+      return engine.deleteMessage(...(args as Parameters<MessagingEngine['deleteMessage']>));
+    case 'toggleReaction':
+      return engine.toggleReaction(...(args as Parameters<MessagingEngine['toggleReaction']>));
+    case 'retryPendingSend':
+      return engine.retryPendingSend(...(args as Parameters<MessagingEngine['retryPendingSend']>));
+    case 'cancelPendingSend':
+      return engine.cancelPendingSend(
+        ...(args as Parameters<MessagingEngine['cancelPendingSend']>),
+      );
+    case 'retryOutbox':
+      return engine.retryOutbox();
+    case 'searchPeers':
+      return engine.searchPeers(...(args as Parameters<MessagingEngine['searchPeers']>));
+    case 'addPeer':
+      return engine.addPeer(...(args as Parameters<MessagingEngine['addPeer']>));
+    case 'getUserDetails':
+      return engine.getUserDetails(...(args as Parameters<MessagingEngine['getUserDetails']>));
+    case 'getGroupMembers':
+      return engine.getGroupMembers(...(args as Parameters<MessagingEngine['getGroupMembers']>));
+    case 'setMuted':
+      return engine.setMuted(...(args as Parameters<MessagingEngine['setMuted']>));
+    case 'setBlocked':
+      return engine.setBlocked(...(args as Parameters<MessagingEngine['setBlocked']>));
+    case 'updateContact':
+      return engine.updateContact(...(args as Parameters<MessagingEngine['updateContact']>));
+    case 'deleteContact':
+      return engine.deleteContact(...(args as Parameters<MessagingEngine['deleteContact']>));
+    case 'setPinnedDialog':
+      return engine.setPinnedDialog(...(args as Parameters<MessagingEngine['setPinnedDialog']>));
+    case 'setPinnedMessage':
+      return engine.setPinnedMessage(...(args as Parameters<MessagingEngine['setPinnedMessage']>));
+    case 'setArchived':
+      return engine.setArchived(...(args as Parameters<MessagingEngine['setArchived']>));
+    case 'deleteDialog':
+      return engine.deleteDialog(...(args as Parameters<MessagingEngine['deleteDialog']>));
+    case 'getWallpapers':
+      return engine.getWallpapers();
+    case 'getChatAppearance':
+      return engine.getChatAppearance(
+        ...(args as Parameters<MessagingEngine['getChatAppearance']>),
+      );
+    case 'downloadWallpaper':
+      return engine.downloadWallpaper(
+        ...(args as Parameters<MessagingEngine['downloadWallpaper']>),
+      );
+    case 'getRecentStickers':
+      return engine.getRecentStickers();
+    case 'getStickerPacks':
+      return engine.getStickerPacks();
+    case 'getSavedGifs':
+      return engine.getSavedGifs();
+    case 'searchGifs':
+      return engine.searchGifs(...(args as Parameters<MessagingEngine['searchGifs']>));
+    case 'getBotCommands':
+      return engine.getBotCommands(...(args as Parameters<MessagingEngine['getBotCommands']>));
+    case 'startBot':
+      return engine.startBot(...(args as Parameters<MessagingEngine['startBot']>));
+    case 'answerBotCallback':
+      return engine.answerBotCallback(
+        ...(args as Parameters<MessagingEngine['answerBotCallback']>),
+      );
+    case 'requestUrlAuth':
+      return engine.requestUrlAuth(...(args as Parameters<MessagingEngine['requestUrlAuth']>));
+    case 'acceptUrlAuth':
+      return engine.acceptUrlAuth(...(args as Parameters<MessagingEngine['acceptUrlAuth']>));
+    case 'downloadAvatar':
+      return engine.downloadAvatar(...(args as Parameters<MessagingEngine['downloadAvatar']>));
+    case 'downloadMedia':
+      return engine.downloadMedia(...(args as Parameters<MessagingEngine['downloadMedia']>));
+    case 'downloadSticker':
+      return engine.downloadSticker(...(args as Parameters<MessagingEngine['downloadSticker']>));
+    case 'downloadCustomEmoji':
+      return engine.downloadCustomEmoji(
+        ...(args as Parameters<MessagingEngine['downloadCustomEmoji']>),
+      );
+    case 'openConversation':
+      return Effect.fail(new Error('openConversation is handled by the coordinator view router.'));
+  }
+};
+
+const localCapabilities = new Set<keyof EffectMessagingClient>([
+  'snapshot',
+  'subscribe',
+  'subscribeResources',
+  'start',
+  'stop',
+  'conversation',
+  'mediaAssetKey',
+  'loadCachedAvatar',
+]);
+const remoteCapabilities = messagingCapabilities.filter(
+  (method): method is RemoteMethod => !localCapabilities.has(method),
+);
+const RemoteMethodSchema = Schema.Literals(remoteCapabilities as [RemoteMethod, ...RemoteMethod[]]);
+
+type CoordinatorInternalEvent =
+  | { readonly _tag: 'message'; readonly input: unknown }
+  | { readonly _tag: 'snapshot'; readonly snapshot: AccountSnapshot }
+  | { readonly _tag: 'resource'; readonly event: TelegramResourceInvalidation }
+  | { readonly _tag: 'conversation'; readonly event: TelegramConversationEvent }
+  | { readonly _tag: 'pagehide' };
+
+function isCrossTabValue(input: unknown, seen = new WeakSet<object>()): boolean {
+  if (
+    input === null ||
+    input === undefined ||
+    typeof input === 'string' ||
+    typeof input === 'number' ||
+    typeof input === 'boolean' ||
+    typeof input === 'bigint'
+  ) {
+    return true;
+  }
+  if (typeof input !== 'object') return false;
+  if (
+    input instanceof Blob ||
+    input instanceof ArrayBuffer ||
+    ArrayBuffer.isView(input) ||
+    input instanceof Date
+  ) {
+    return true;
+  }
+  if (seen.has(input)) return true;
+  seen.add(input);
+  if (Array.isArray(input)) return input.every((value) => isCrossTabValue(value, seen));
+  if (input instanceof Map) {
+    return [...input].every(
+      ([key, value]) => isCrossTabValue(key, seen) && isCrossTabValue(value, seen),
+    );
+  }
+  if (input instanceof Set) return [...input].every((value) => isCrossTabValue(value, seen));
+  const prototype = Object.getPrototypeOf(input);
+  return (
+    (prototype === Object.prototype || prototype === null) &&
+    Object.values(input).every((value) => isCrossTabValue(value, seen))
+  );
+}
+
+const CrossTabValueSchema = Schema.declare(
+  (input: unknown): input is unknown => isCrossTabValue(input),
+  {
+    identifier: 'CrossTabStructuredCloneValue',
+  },
+);
 
 type CoordinatorMessage =
   | { type: 'hello'; version: number; from: string }
@@ -29,8 +303,9 @@ type CoordinatorMessage =
       version: number;
       from: string;
       to: string;
-      snapshot: EngineSnapshot;
-      pendingPayloadIds: string[];
+      account: AccountSnapshot;
+      conversation: ConversationViewSnapshot;
+      pendingPayloadIds?: string[] | undefined;
     }
   | {
       type: 'resource';
@@ -43,9 +318,8 @@ type CoordinatorMessage =
       version: number;
       from: string;
       id: string;
-      method: string;
+      method: RemoteMethod;
       args: unknown[];
-      activePeerId?: string | undefined;
     }
   | {
       type: 'response';
@@ -54,20 +328,370 @@ type CoordinatorMessage =
       to: string;
       id: string;
       result?: unknown;
-      error?: string;
+      error?: MessagingErrorPayload;
     }
   | { type: 'version-mismatch'; version: number; from: string; to: string };
 
-interface PendingRequest {
-  resolve(value: unknown): void;
-  reject(error: unknown): void;
-}
-
-interface VisibilityReport {
-  peerId: string;
-  visible: boolean;
-  atBottom: boolean;
-}
+const envelope = { version: Schema.Number, from: Schema.String };
+const PeerSchema = Schema.Struct({
+  id: Schema.String,
+  accessHash: Schema.optional(Schema.String),
+  kind: Schema.Literals(['user', 'group', 'channel']),
+});
+const ChatPermissionsSchema = Schema.Struct({
+  canSendMessages: Schema.Boolean,
+  canSendMedia: Schema.Boolean,
+  canSendStickers: Schema.Boolean,
+  canSendGifs: Schema.Boolean,
+  canPinMessages: Schema.Boolean,
+  canEditMessages: Schema.Boolean,
+  canDeleteMessages: Schema.Boolean,
+  canDeleteForEveryone: Schema.Boolean,
+  canDeleteChat: Schema.Boolean,
+  canDeleteChannel: Schema.Boolean,
+  canLeave: Schema.Boolean,
+  canViewMembers: Schema.Boolean,
+  memberCount: Schema.optional(Schema.Number),
+});
+const UserDetailsSchema = Schema.Struct({
+  firstName: Schema.optional(Schema.String),
+  lastName: Schema.optional(Schema.String),
+  phone: Schema.optional(Schema.String),
+  username: Schema.optional(Schema.String),
+  bio: Schema.optional(Schema.String),
+  birthday: Schema.optional(
+    Schema.Struct({
+      day: Schema.Number,
+      month: Schema.Number,
+      year: Schema.optional(Schema.Number),
+    }),
+  ),
+  isContact: Schema.optional(Schema.Boolean),
+  blocked: Schema.Boolean,
+});
+const ForwardedFromSchema = Schema.Struct({
+  name: Schema.String,
+  peerId: Schema.optional(Schema.String),
+  messageId: Schema.optional(Schema.Number),
+  hasAvatar: Schema.optional(Schema.Boolean),
+  avatarId: Schema.optional(Schema.String),
+  color: Schema.optional(Schema.String),
+});
+const ServiceMessageSchema = Schema.Struct({
+  kind: Schema.Literals([
+    'chat-created',
+    'title-changed',
+    'photo-changed',
+    'photo-removed',
+    'users-added',
+    'user-removed',
+    'joined-by-link',
+    'joined-by-request',
+    'message-pinned',
+    'history-cleared',
+    'auto-delete-changed',
+    'topic-created',
+    'topic-changed',
+    'screenshot-taken',
+    'custom',
+    'other',
+  ]),
+  text: Schema.String,
+  actorId: Schema.optional(Schema.String),
+  targetUserIds: Schema.optional(Schema.Array(Schema.String)),
+  title: Schema.optional(Schema.String),
+});
+const BotButtonSchema = Schema.Struct({
+  kind: Schema.Literals([
+    'text',
+    'url',
+    'url-auth',
+    'callback',
+    'copy',
+    'switch-inline',
+    'unsupported',
+  ]),
+  text: Schema.String,
+  url: Schema.optional(Schema.String),
+  buttonId: Schema.optional(Schema.Number),
+  data: Schema.optional(Schema.Array(Schema.Number)),
+  copyText: Schema.optional(Schema.String),
+  query: Schema.optional(Schema.String),
+  samePeer: Schema.optional(Schema.Boolean),
+  botUsername: Schema.optional(Schema.String),
+});
+const BotKeyboardSchema = Schema.Struct({
+  kind: Schema.Literals(['inline', 'reply']),
+  rows: Schema.Array(Schema.Array(BotButtonSchema)),
+  hidden: Schema.optional(Schema.Boolean),
+  forceReply: Schema.optional(Schema.Boolean),
+  singleUse: Schema.optional(Schema.Boolean),
+  persistent: Schema.optional(Schema.Boolean),
+  placeholder: Schema.optional(Schema.String),
+});
+const MediaSchema = Schema.Struct({
+  kind: Schema.Literals(['photo', 'video', 'round-video', 'voice', 'animation', 'sticker', 'file']),
+  name: Schema.String,
+  mimeType: Schema.String,
+  size: Schema.optional(Schema.Number),
+  width: Schema.optional(Schema.Number),
+  height: Schema.optional(Schema.Number),
+  duration: Schema.optional(Schema.Number),
+  cacheKey: Schema.optional(Schema.String),
+  spoiler: Schema.optional(Schema.Boolean),
+});
+const ReactionSchema = Schema.Struct({
+  emoji: Schema.String,
+  customEmojiId: Schema.optional(Schema.String),
+  count: Schema.Number,
+  chosen: Schema.Boolean,
+});
+const MentionSchema = Schema.Struct({
+  offset: Schema.Number,
+  length: Schema.Number,
+  userId: Schema.optional(Schema.String),
+});
+const LinkSchema = Schema.Struct({
+  offset: Schema.Number,
+  length: Schema.Number,
+  url: Schema.optional(Schema.String),
+});
+const LinkPreviewSchema = Schema.Struct({
+  url: Schema.String,
+  webPageId: Schema.optional(Schema.String),
+  type: Schema.optional(Schema.String),
+  hasEmbed: Schema.optional(Schema.Boolean),
+  siteName: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  hasPhoto: Schema.optional(Schema.Boolean),
+  photoSize: Schema.optional(Schema.Literals(['small', 'large'])),
+  media: Schema.optional(MediaSchema),
+});
+const TextFormatSchema = Schema.Struct({
+  offset: Schema.Number,
+  length: Schema.Number,
+  kind: Schema.Literals([
+    'bold',
+    'italic',
+    'underline',
+    'strike',
+    'code',
+    'pre',
+    'spoiler',
+    'blockquote',
+    'expandableBlockquote',
+    'textUrl',
+    'customEmoji',
+    'formattedDate',
+    'diffInsert',
+    'diffReplace',
+    'diffDelete',
+  ]),
+  url: Schema.optional(Schema.String),
+  customEmojiId: Schema.optional(Schema.String),
+  timestamp: Schema.optional(Schema.Number),
+  oldText: Schema.optional(Schema.String),
+});
+const DraftDetailsSchema = Schema.Struct({
+  formats: Schema.Array(TextFormatSchema),
+  reply: Schema.optional(
+    Schema.Struct({
+      messageId: Schema.Number,
+      preview: Schema.String,
+      quoteText: Schema.optional(Schema.String),
+    }),
+  ),
+});
+const MessageSchema = Schema.Struct({
+  id: Schema.Number,
+  peerId: Schema.String,
+  peer: Schema.optional(PeerSchema),
+  peerTitle: Schema.optional(Schema.String),
+  permissions: Schema.optional(ChatPermissionsSchema),
+  senderId: Schema.String,
+  senderName: Schema.optional(Schema.String),
+  senderHasAvatar: Schema.optional(Schema.Boolean),
+  senderAvatarId: Schema.optional(Schema.String),
+  senderColor: Schema.optional(Schema.String),
+  senderColorVersion: Schema.optional(Schema.Number),
+  senderRole: Schema.optional(Schema.String),
+  senderRoleKind: Schema.optional(Schema.Literals(['owner', 'admin'])),
+  text: Schema.String,
+  date: Schema.Number,
+  outgoing: Schema.Boolean,
+  protected: Schema.optional(Schema.Boolean),
+  editedAt: Schema.optional(Schema.Number),
+  replyToId: Schema.optional(Schema.Number),
+  replyQuote: Schema.optional(Schema.String),
+  randomId: Schema.optional(Schema.String),
+  groupedId: Schema.optional(Schema.String),
+  forwardedFrom: Schema.optional(ForwardedFromSchema),
+  service: Schema.optional(ServiceMessageSchema),
+  botKeyboard: Schema.optional(BotKeyboardSchema),
+  media: Schema.optional(MediaSchema),
+  reactions: Schema.optional(Schema.Array(ReactionSchema)),
+  mentions: Schema.optional(Schema.Array(MentionSchema)),
+  links: Schema.optional(Schema.Array(LinkSchema)),
+  linkPreview: Schema.optional(LinkPreviewSchema),
+  formats: Schema.optional(Schema.Array(TextFormatSchema)),
+  richMessage: Schema.optional(Schema.Json),
+  pinned: Schema.optional(Schema.Boolean),
+});
+const DialogSchema = Schema.Struct({
+  peer: PeerSchema,
+  transient: Schema.optional(Schema.Boolean),
+  channelPts: Schema.optional(Schema.Number),
+  title: Schema.String,
+  initials: Schema.String,
+  color: Schema.String,
+  username: Schema.optional(Schema.String),
+  archived: Schema.optional(Schema.Boolean),
+  topMessageId: Schema.Number,
+  topMessage: Schema.optional(MessageSchema),
+  unreadCount: Schema.Number,
+  readInboxMaxId: Schema.Number,
+  readOutboxMaxId: Schema.Number,
+  muted: Schema.Boolean,
+  pinned: Schema.Boolean,
+  pinnedOrder: Schema.optional(Schema.Number),
+  permissions: Schema.optional(ChatPermissionsSchema),
+  bot: Schema.optional(Schema.Boolean),
+  hasAvatar: Schema.Boolean,
+  avatarId: Schema.optional(Schema.String),
+  presence: Schema.optional(Schema.Literals(['online', 'recently', 'offline'])),
+  lastSeenAt: Schema.optional(Schema.Number),
+  userDetails: Schema.optional(UserDetailsSchema),
+});
+const StickerSchema = Schema.Struct({
+  id: Schema.String,
+  accessHash: Schema.String,
+  fileReference: Schema.instanceOf(Uint8Array),
+  emoji: Schema.String,
+  mimeType: Schema.String,
+  dcId: Schema.optional(Schema.Number),
+  size: Schema.optional(Schema.Number),
+  title: Schema.optional(Schema.String),
+  inlineQueryId: Schema.optional(Schema.String),
+  inlineResultId: Schema.optional(Schema.String),
+});
+const PendingSendSchema = Schema.Struct({
+  id: Schema.String,
+  accountId: Schema.optional(Schema.String),
+  peer: PeerSchema,
+  text: Schema.String,
+  randomId: Schema.String,
+  createdAt: Schema.Number,
+  queueOrder: Schema.optional(Schema.Number),
+  attempts: Schema.Number,
+  lastError: Schema.optional(Schema.String),
+  uploadProgress: Schema.optional(Schema.Number),
+  reply: Schema.optional(
+    Schema.Struct({ messageId: Schema.Number, quoteText: Schema.optional(Schema.String) }),
+  ),
+  formats: Schema.optional(Schema.Array(TextFormatSchema)),
+  sticker: Schema.optional(StickerSchema),
+  forward: Schema.optional(
+    Schema.Struct({
+      fromPeer: PeerSchema,
+      messageId: Schema.Number,
+      mediaKind: Schema.optional(
+        Schema.Literals(['photo', 'video', 'round-video', 'voice', 'animation', 'sticker', 'file']),
+      ),
+    }),
+  ),
+  botStart: Schema.optional(Schema.Struct({ startParam: Schema.String })),
+});
+const ActivitySchema = Schema.Struct({
+  peerId: Schema.String,
+  senderId: Schema.String,
+  kind: Schema.Literals(['typing', 'uploading', 'recording', 'choosing-sticker']),
+});
+const SharedMediaCountsSchema = Schema.Struct({
+  photos: Schema.Number,
+  videos: Schema.Number,
+  files: Schema.Number,
+  audio: Schema.Number,
+  links: Schema.Number,
+  voice: Schema.Number,
+  gifs: Schema.Number,
+});
+const HistoryGapSchema = Schema.Struct({
+  olderMaxMessageId: Schema.Number,
+  newerMinMessageId: Schema.Number,
+});
+const AccountSnapshotSchema = Schema.Struct({
+  phase: Schema.Literals(['idle', 'connecting', 'unauthorized', 'syncing', 'ready', 'error']),
+  sync: Schema.Literals(['current', 'recovering', 'stale']),
+  online: Schema.Boolean,
+  dialogs: Schema.Array(DialogSchema),
+  drafts: Schema.Record(Schema.String, Schema.String),
+  draftDetails: Schema.Record(Schema.String, DraftDetailsSchema),
+  pending: Schema.Array(PendingSendSchema),
+  activities: Schema.Array(ActivitySchema),
+  authStep: Schema.optional(Schema.Literals(['phone', 'code', 'password'])),
+  codeViaApp: Schema.optional(Schema.Boolean),
+  operationError: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+  requiresReload: Schema.optional(Schema.Boolean),
+});
+const ConversationViewSnapshotSchema = Schema.Struct({
+  activePeerId: Schema.optional(Schema.String),
+  messages: Schema.Array(MessageSchema),
+  loadingMessages: Schema.Boolean,
+  hasOlderMessages: Schema.Boolean,
+  loadingOlderMessages: Schema.Boolean,
+  sharedMediaCounts: Schema.optional(SharedMediaCountsSchema),
+  pinnedMessages: Schema.Array(MessageSchema),
+  historyGaps: Schema.Array(HistoryGapSchema),
+  historyError: Schema.optional(Schema.String),
+  historyRetryAt: Schema.optional(Schema.Number),
+});
+const ResourceInvalidationSchema = Schema.Struct({
+  kind: Schema.Literals(['expressions', 'bot-commands', 'group-members', 'peer-metadata']),
+  peerId: Schema.optional(Schema.String),
+});
+const CoordinatorMessageSchema = Schema.Union([
+  Schema.Struct({ ...envelope, type: Schema.Literals(['hello']) }),
+  Schema.Struct({ ...envelope, type: Schema.Literals(['client-heartbeat']) }),
+  Schema.Struct({ ...envelope, type: Schema.Literals(['owner']), at: Schema.Number }),
+  Schema.Struct({ ...envelope, type: Schema.Literals(['owner-gone']) }),
+  Schema.Struct({ ...envelope, type: Schema.Literals(['client-gone']) }),
+  Schema.Struct({
+    ...envelope,
+    type: Schema.Literals(['state']),
+    to: Schema.String,
+    account: AccountSnapshotSchema,
+    conversation: ConversationViewSnapshotSchema,
+    pendingPayloadIds: Schema.optional(Schema.Array(Schema.String)),
+  }),
+  Schema.Struct({
+    ...envelope,
+    type: Schema.Literals(['resource']),
+    event: ResourceInvalidationSchema,
+  }),
+  Schema.Struct({
+    ...envelope,
+    type: Schema.Literals(['request']),
+    id: Schema.String,
+    method: RemoteMethodSchema,
+    args: Schema.Array(CrossTabValueSchema),
+  }),
+  Schema.Struct({
+    ...envelope,
+    type: Schema.Literals(['response']),
+    to: Schema.String,
+    id: Schema.String,
+    result: Schema.optional(CrossTabValueSchema),
+    error: Schema.optional(MessagingErrorPayload),
+  }),
+  Schema.Struct({
+    ...envelope,
+    type: Schema.Literals(['version-mismatch']),
+    to: Schema.String,
+  }),
+]);
+const decodeCoordinatorMessage = Schema.decodeUnknownEffect(CoordinatorMessageSchema);
 
 export interface TabCoordinatorOwner {
   engine: MessagingEngine;
@@ -76,143 +700,138 @@ export interface TabCoordinatorOwner {
 
 export interface TabCoordinatorOptions {
   key: string;
-  createOwner(): TabCoordinatorOwner;
-  loadBlob(key: string): Promise<Blob | undefined>;
+  createOwner(): Effect.Effect<TabCoordinatorOwner, unknown, Scope.Scope>;
+  loadBlob(key: string): Effect.Effect<Blob | undefined, unknown>;
   hydrateSnapshot?(
     snapshot: EngineSnapshot,
     pendingPayloadIds: readonly string[],
-  ): Promise<EngineSnapshot>;
-  ownerChanged?(owner: TabCoordinatorOwner | undefined): void;
+  ): Effect.Effect<EngineSnapshot, unknown>;
+  ownerChanged?(owner: TabCoordinatorOwner | undefined): Effect.Effect<void>;
 }
 
-function emptySnapshot(): EngineSnapshot {
-  return {
-    phase: 'idle',
-    sync: 'stale',
-    online: false,
-    dialogs: [],
-    messages: [],
-    drafts: {},
-    pending: [],
-    loadingMessages: false,
-    hasOlderMessages: false,
-    loadingOlderMessages: false,
-    pinnedMessages: [],
-    historyGaps: [],
-    activities: [],
-  };
+// Each remote command declares its coordination policy in one place. Workspace
+// reads can serve durable data during reconnect; the engine decides whether to
+// refresh them. Concurrent commands must not wait behind a slow network mutation.
+interface CommandPolicy {
+  readiness: 'workspace' | 'startup' | 'account';
+  concurrent?: boolean;
+  coalesce?: boolean;
+  surfaceError?: boolean;
 }
+const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
+  retrySync: { readiness: 'startup' },
+  refreshUpdates: { readiness: 'account', coalesce: true },
+  refreshReadReceipt: { readiness: 'account', coalesce: true },
+  retryMarkRead: { readiness: 'workspace' },
+  clearOperationError: { readiness: 'workspace' },
+  requestCode: { readiness: 'startup' },
+  submitCode: { readiness: 'startup' },
+  submitPassword: { readiness: 'startup' },
+  logOut: { readiness: 'workspace', surfaceError: true },
+  clearCache: { readiness: 'workspace', surfaceError: true },
+  openConversation: { readiness: 'workspace', concurrent: true },
+  loadConversationSharedMediaCounts: { readiness: 'workspace', concurrent: true },
+  loadOlderConversationView: { readiness: 'workspace', concurrent: true },
+  loadHistoryGapConversationView: { readiness: 'workspace', concurrent: true },
+  retryConversationView: { readiness: 'workspace', coalesce: true },
+  openMessageInConversationView: { readiness: 'workspace', concurrent: true },
+  searchConversationMessages: { readiness: 'workspace', concurrent: true },
+  getConversationSharedMedia: { readiness: 'workspace', concurrent: true },
+  setActiveConversationVisibility: { readiness: 'workspace' },
+  setDraft: { readiness: 'workspace', concurrent: true, surfaceError: true },
+  setTyping: { readiness: 'workspace', concurrent: true },
+  sendDraft: { readiness: 'workspace', concurrent: true, surfaceError: true },
+  sendAttachments: { readiness: 'workspace', concurrent: true, surfaceError: true },
+  sendSticker: { readiness: 'workspace', concurrent: true, surfaceError: true },
+  forwardMessage: { readiness: 'workspace', concurrent: true, surfaceError: true },
+  editMessage: { readiness: 'account', concurrent: true, surfaceError: true },
+  deleteMessage: { readiness: 'account', concurrent: true, surfaceError: true },
+  toggleReaction: { readiness: 'account', concurrent: true, surfaceError: true },
+  retryPendingSend: { readiness: 'workspace', surfaceError: true },
+  cancelPendingSend: { readiness: 'workspace', surfaceError: true },
+  retryOutbox: { readiness: 'workspace', coalesce: true, surfaceError: true },
+  searchPeers: { readiness: 'workspace', concurrent: true },
+  addPeer: { readiness: 'account' },
+  getUserDetails: { readiness: 'account', concurrent: true, coalesce: true },
+  getGroupMembers: { readiness: 'workspace', concurrent: true, coalesce: true },
+  setMuted: { readiness: 'account', concurrent: true, surfaceError: true },
+  setBlocked: { readiness: 'account', concurrent: true, surfaceError: true },
+  updateContact: { readiness: 'account', concurrent: true, surfaceError: true },
+  deleteContact: { readiness: 'account', concurrent: true, surfaceError: true },
+  setPinnedDialog: { readiness: 'account', concurrent: true, surfaceError: true },
+  setPinnedMessage: { readiness: 'account', concurrent: true, surfaceError: true },
+  setArchived: { readiness: 'account', concurrent: true, surfaceError: true },
+  deleteDialog: { readiness: 'account', concurrent: true, surfaceError: true },
+  getWallpapers: { readiness: 'workspace' },
+  getChatAppearance: { readiness: 'workspace', concurrent: true, coalesce: true },
+  downloadWallpaper: { readiness: 'account', concurrent: true },
+  getRecentStickers: { readiness: 'workspace', concurrent: true },
+  getStickerPacks: { readiness: 'workspace', concurrent: true },
+  getSavedGifs: { readiness: 'workspace', concurrent: true },
+  searchGifs: { readiness: 'workspace' },
+  getBotCommands: { readiness: 'workspace', concurrent: true, coalesce: true },
+  startBot: { readiness: 'workspace', concurrent: true, surfaceError: true },
+  answerBotCallback: { readiness: 'account', concurrent: true, surfaceError: true },
+  requestUrlAuth: { readiness: 'account' },
+  acceptUrlAuth: { readiness: 'account', concurrent: true, surfaceError: true },
+  downloadAvatar: { readiness: 'account', concurrent: true },
+  downloadMedia: { readiness: 'account', concurrent: true },
+  downloadSticker: { readiness: 'account', concurrent: true },
+  downloadCustomEmoji: { readiness: 'account', concurrent: true },
+};
 
-const chatScopedMethods = new Set([
-  'ensureSharedMediaCounts',
-  'getSharedMedia',
-  'loadHistoryGap',
-  'loadOlderMessages',
-  'openMessage',
-  'refreshReadReceipt',
-  'retryHistory',
-  'searchMessages',
-]);
-
-const viewMutationMethods = new Set([
-  'deleteMessage',
-  'editMessage',
-  'forwardMessage',
-  'sendAttachments',
-  'sendDraft',
-  'sendSticker',
-  'setPinnedMessage',
-  'toggleReaction',
-]);
-
-// These operations must not wait behind a slow network mutation. In particular,
-// a draft typed while an edit is saving must become canonical promptly, and a
-// newer chat selection must be able to supersede any in-flight request.
-const concurrentMethods = new Set([
-  'downloadAvatar',
-  'downloadCustomEmoji',
-  'downloadMedia',
-  'downloadSticker',
-  'downloadWallpaper',
-  'getBotCommands',
-  'getChatAppearance',
-  'getGroupMembers',
-  'getRecentStickers',
-  'getSavedGifs',
-  'getStickerPacks',
-  'getUserDetails',
-  'openMessage',
-  'searchPeers',
-  'sendDraft',
-  'setDraft',
-  'setTyping',
-]);
-
-const concurrentAfterConversationOpenMethods = new Set(['sendDraft']);
-
-const coalescedMethods = new Set([
-  'ensureSharedMediaCounts',
-  'getBotCommands',
-  'getChatAppearance',
-  'getGroupMembers',
-  'getUserDetails',
-  'refreshReadReceipt',
-  'refreshUpdates',
-  'retryOutbox',
-]);
-
-function sharedSnapshot(previous: EngineSnapshot, next: EngineSnapshot): EngineSnapshot {
+function retainWorkspaceWhileStarting(
+  previous: EngineSnapshot,
+  next: AccountSnapshot,
+): AccountSnapshot {
   if (
-    previous.phase === next.phase &&
-    previous.sync === next.sync &&
-    previous.online === next.online &&
-    previous.dialogs === next.dialogs &&
-    previous.drafts === next.drafts &&
-    previous.pending === next.pending &&
-    previous.activities === next.activities &&
-    previous.authStep === next.authStep &&
-    previous.codeViaApp === next.codeViaApp &&
-    previous.operationError === next.operationError &&
-    previous.error === next.error
+    previous.dialogs.length === 0 ||
+    next.dialogs.length > 0 ||
+    (next.phase !== 'idle' && next.phase !== 'connecting' && next.phase !== 'syncing')
   ) {
-    return previous;
+    return next;
   }
   return {
-    ...previous,
-    phase: next.phase,
-    sync: next.sync,
-    online: next.online,
-    dialogs: next.dialogs,
-    drafts: next.drafts,
-    pending: next.pending,
-    activities: next.activities,
-    authStep: next.authStep,
-    codeViaApp: next.codeViaApp,
+    ...accountSnapshot(previous),
+    sync: 'recovering',
+    online: false,
     operationError: next.operationError,
     error: next.error,
   };
 }
 
-function inactiveConversationSnapshot(
-  previous: EngineSnapshot,
-  next: EngineSnapshot,
-): EngineSnapshot {
-  const shared = sharedSnapshot(previous, next);
-  const peerId = previous.activePeerId;
-  if (!peerId) return shared;
-  const topMessage = next.dialogs.find(({ peer }) => peer.id === peerId)?.topMessage;
-  if (!topMessage) return shared;
-  const known = previous.messages.some(
-    (message) => message.peerId === peerId && String(message.id) === String(topMessage.id),
-  );
-  const messages = known
-    ? previous.messages.map((message) =>
-        message.peerId === peerId && String(message.id) === String(topMessage.id)
-          ? topMessage
-          : message,
-      )
-    : [...previous.messages, topMessage];
-  return { ...shared, messages };
+function conversationLoadingSnapshot(
+  previous: EngineSnapshot | undefined,
+  peerId: string,
+): ConversationViewSnapshot {
+  if (previous?.activePeerId === peerId) {
+    return {
+      ...conversationViewSnapshot(previous),
+      loadingMessages: previous.messages.length === 0,
+      loadingOlderMessages: false,
+    };
+  }
+  return {
+    ...conversationViewSnapshot(initialEngineSnapshot()),
+    activePeerId: peerId,
+    loadingMessages: true,
+  };
+}
+
+function retainConversationMetadata(
+  previous: EngineSnapshot | undefined,
+  next: ConversationViewSnapshot,
+): ConversationViewSnapshot {
+  if (!previous || previous.activePeerId !== next.activePeerId) return next;
+  return {
+    ...next,
+    ...(next.pinnedMessages.length === 0 && previous.pinnedMessages.length > 0
+      ? { pinnedMessages: previous.pinnedMessages }
+      : {}),
+    ...(next.sharedMediaCounts === undefined && previous.sharedMediaCounts !== undefined
+      ? { sharedMediaCounts: previous.sharedMediaCounts }
+      : {}),
+  };
 }
 
 function transferableSnapshot(snapshot: EngineSnapshot): EngineSnapshot {
@@ -237,202 +856,316 @@ function errorMessage(error: unknown) {
 /**
  * Owns tab election, RPC, failover, and per-tab view snapshots behind one small
  * messaging interface. Only the elected owner constructs a MessagingEngine.
- */
-export class TabCoordinator {
-  readonly client: MessagingClient;
-
-  private readonly clientId = crypto.randomUUID();
-  private readonly channel: BroadcastChannel | undefined;
-  private readonly listeners = new Set<(snapshot: EngineSnapshot) => void>();
-  private readonly resourceListeners = new Set<(event: TelegramResourceInvalidation) => void>();
-  private readonly pending = new Map<string, PendingRequest>();
-  private readonly coalescedOperations = new Map<string, Promise<unknown>>();
-  private readonly conversationOpens = new Map<string, Promise<void>>();
-  private readonly activeRequests = new Set<string>();
-  private readonly completedRequests = new Map<string, { result?: unknown; error?: string }>();
-  private readonly queuedStateClients = new Set<string>();
-  private readonly clientSnapshots = new Map<string, EngineSnapshot>();
-  private readonly clientActivePeers = new Map<string, string>();
-  private readonly visibility = new Map<string, VisibilityReport>();
-  private readonly clientSeenAt = new Map<string, number>();
-  private snapshotValue = emptySnapshot();
-  private owner: TabCoordinatorOwner | undefined;
-  private credentials: TelegramCredentials | undefined;
-  private ownerId: string | undefined;
-  private ownerSeenAt = 0;
-  private stateRevision = 0;
-  private versionMismatch = false;
-  private coordinationError: string | undefined;
-  private ownerUnsubscribe: (() => void) | undefined;
-  private resourceUnsubscribe: (() => void) | undefined;
-  private ownerStarting: Promise<void> | undefined;
-  private heartbeat: ReturnType<typeof setInterval> | undefined;
-  private monitor: ReturnType<typeof setInterval> | undefined;
-  private releaseOwnerLock: (() => void) | undefined;
-  private electionPending = false;
-  private stopped = false;
-  private operationTail = Promise.resolve();
-  private stateFlushTimer: ReturnType<typeof setTimeout> | undefined;
-  private lastVisibilityKey = '';
-  private readonly handlePageHide = () => this.announceClosing();
-
-  constructor(private readonly options: TabCoordinatorOptions) {
-    let channel: BroadcastChannel | undefined;
-    try {
-      channel =
-        typeof BroadcastChannel === 'undefined'
-          ? undefined
-          : new BroadcastChannel(`televecha:${options.key}`);
-    } catch {
-      channel = undefined;
-    }
-    this.channel = channel;
-    this.channel?.addEventListener('message', (event: MessageEvent<CoordinatorMessage>) => {
-      this.receive(event.data);
-    });
-    if (!this.channel) {
-      this.coordinationError = CHANNEL_ERROR;
-      this.snapshotValue = {
-        ...this.snapshotValue,
-        phase: 'error',
-        online: false,
-        error: CHANNEL_ERROR,
-      };
-    }
-    window.addEventListener('pagehide', this.handlePageHide);
-    const target = {
-      snapshot: () => this.snapshotValue,
-      subscribe: (listener: (snapshot: EngineSnapshot) => void) => this.subscribe(listener),
-      subscribeResources: (listener: (event: TelegramResourceInvalidation) => void) =>
-        this.subscribeResources(listener),
-      start: (credentials: TelegramCredentials) => this.start(credentials),
-      stop: () => this.stop(),
-      openConversation: (peerId: string) => this.openConversation(peerId),
-      clearOperationError: () => {
-        void this.invoke('clearOperationError', []).catch(() => undefined);
-      },
-      setActiveConversationVisibility: (
-        peerId: string | undefined,
-        state: { visible: boolean; atBottom: boolean },
-      ) => {
-        const key = JSON.stringify([peerId, state]);
-        if (key === this.lastVisibilityKey) return Promise.resolve();
-        this.lastVisibilityKey = key;
-        return this.invokeCoalesced('setActiveConversationVisibility', [peerId, state]).catch(
-          (error) => {
-            if (this.lastVisibilityKey === key) this.lastVisibilityKey = '';
-            throw error;
-          },
-        );
-      },
-      mediaAssetKey: (message: TelegramMessage) => this.mediaAssetKey(message),
-      loadCachedAvatar: (peer: { id: string }, avatarId?: string) =>
-        this.options.loadBlob(`avatar:${peer.id}:${avatarId ?? 'unknown'}`),
-      downloadAvatar: async (peer: { id: string }, avatarId?: string) => {
-        const key = `avatar:${peer.id}:${avatarId ?? 'unknown'}`;
-        const cached = await this.options.loadBlob(key);
-        if (cached) return cached;
-        const downloaded = await this.invokeCoalesced('downloadAvatar', [peer, avatarId]);
-        if (downloaded instanceof Blob) return downloaded;
-        return this.options.loadBlob(key);
-      },
-      downloadMedia: async (message: TelegramMessage, options?: TelegramDownloadOptions) => {
-        const key = `${options?.preview ? 'preview:' : ''}${this.mediaAssetKey(message)}`;
-        const cached = await this.options.loadBlob(key);
-        if (cached) return cached;
-        // Progress callbacks cannot cross BroadcastChannel. The elected owner can
-        // preserve the interactive transfer contract by calling its engine directly.
-        if (options?.progress && this.owner) {
-          return this.owner.engine.downloadMedia(message, options);
-        }
-        const downloaded = await this.invokeCoalesced('downloadMedia', [
-          message,
-          options?.preview ? { preview: true } : undefined,
-        ]);
-        if (downloaded instanceof Blob) return downloaded;
-        const blob = await this.options.loadBlob(key);
-        if (!blob) throw new Error('The downloaded media was not committed to the shared cache.');
-        return blob;
-      },
-      downloadSticker: async (sticker: { id: string }) => {
-        const key = `sticker:${sticker.id}`;
-        const cached = await this.options.loadBlob(key);
-        if (cached) return cached;
-        const downloaded = await this.invokeCoalesced('downloadSticker', [sticker]);
-        if (downloaded instanceof Blob) return downloaded;
-        const blob = await this.options.loadBlob(key);
-        if (!blob) throw new Error('The downloaded sticker was not committed to the shared cache.');
-        return blob;
-      },
-      downloadCustomEmoji: async (documentId: string) => {
-        const key = `custom-emoji:${documentId}`;
-        const cached = await this.options.loadBlob(key);
-        if (cached) return cached;
-        const downloaded = await this.invokeCoalesced('downloadCustomEmoji', [documentId]);
-        if (downloaded instanceof Blob) return downloaded;
-        const blob = await this.options.loadBlob(key);
-        if (!blob) throw new Error('The custom emoji was not committed to the shared cache.');
-        return blob;
-      },
-      downloadWallpaper: async (wallpaperId: string) => {
-        const key = `wallpaper:${wallpaperId}`;
-        const cached = await this.options.loadBlob(key);
-        if (cached) return cached;
-        const downloaded = await this.invokeCoalesced('downloadWallpaper', [wallpaperId]);
-        if (downloaded instanceof Blob) return downloaded;
-        const blob = await this.options.loadBlob(key);
-        if (!blob) throw new Error('The wallpaper was not committed to the shared cache.');
-        return blob;
-      },
+ */ function makeTabCoordinatorModule(
+  options: TabCoordinatorOptions,
+  state: EngineState,
+  tasks: CoordinatorTasks,
+  events: Queue.Queue<CoordinatorInternalEvent>,
+  channel: BroadcastChannel | undefined,
+  rootScope: Scope.Scope,
+  coalescedOperations: ResourceCache,
+) {
+  const fork = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.forkIn(effect, rootScope);
+  let coordinatorOptions = options;
+  let engineState = state;
+  let coordinatorTasks = tasks;
+  let eventQueue = events;
+  let client!: EffectMessagingClient;
+  let thisClientId = crypto.randomUUID();
+  let broadcastChannel: BroadcastChannel | undefined = channel;
+  let requestJournal = makeRequestJournal<RemoteMethod>(MAX_COMPLETED_REQUESTS);
+  let coalescedRequests = coalescedOperations;
+  let clientRegistry = makeClientRegistry();
+  let activeOwner: TabCoordinatorOwner | undefined;
+  let activeCredentials: TelegramCredentials | undefined;
+  let activeOwnerId: string | undefined;
+  let ownerSeenAt = 0;
+  let stateRevision = 0;
+  let versionMismatch = false;
+  let coordinationError: string | undefined;
+  let ownerUnsubscribe: Effect.Effect<void> | undefined;
+  let resourceUnsubscribe: Effect.Effect<void> | undefined;
+  let conversationUnsubscribe: Effect.Effect<void> | undefined;
+  let ownerStarting: Deferred.Deferred<void, unknown> | undefined;
+  let activeOwnerScope: Scope.Closeable | undefined;
+  let stopped = false;
+  let lastVisibilityKey = '';
+  const downloadSharedBlob = Effect.fn('TabCoordinator.downloadSharedBlob')(function* (
+    key: string,
+    method: RemoteMethod,
+    args: unknown[],
+    missingMessage: string,
+  ) {
+    const cached = yield* options.loadBlob(key);
+    if (cached) return cached;
+    const downloaded = yield* invokeCoalesced(method, args);
+    if (downloaded instanceof Blob) return downloaded;
+    const blob = yield* options.loadBlob(key);
+    if (!blob) return yield* Effect.fail(new Error(missingMessage));
+    return blob;
+  });
+  const clientOperation = <Value, Error, Requirements>(
+    operation: string,
+    effect: Effect.Effect<Value, Error, Requirements>,
+  ) => effect.pipe(Effect.mapError((error) => toMessagingError(error, operation)));
+  const target = {
+    snapshot: () => currentSnapshot(),
+    subscribe: (listener: (snapshot: EngineSnapshot) => void) => subscribe(listener),
+    subscribeResources: (listener: (event: TelegramResourceInvalidation) => void) =>
+      subscribeResources(listener),
+    start: (credentials: TelegramCredentials) =>
+      start(credentials).pipe(Effect.mapError((error) => toMessagingError(error, 'start'))),
+    stop: () => stop().pipe(Effect.mapError((error) => toMessagingError(error, 'stop'))),
+    conversation: (peerId: string) => conversation(peerId),
+    openConversation: (peerId: string) =>
+      openConversation(peerId).pipe(
+        Effect.mapError((error) => toMessagingError(error, 'openConversation')),
+      ),
+    clearOperationError: () => invoke('clearOperationError', []).pipe(Effect.ignore),
+    setActiveConversationVisibility: (
+      peerId: string | undefined,
+      state: { visible: boolean; atBottom: boolean },
+    ) => {
+      return clientOperation(
+        'setActiveConversationVisibility',
+        Effect.gen(function* () {
+          const key = JSON.stringify([peerId, state]);
+          if (key === lastVisibilityKey) return;
+          lastVisibilityKey = key;
+          return yield* invokeCoalesced('setActiveConversationVisibility', [peerId, state]).pipe(
+            Effect.tapError(() =>
+              Effect.sync(() => {
+                if (lastVisibilityKey === key) lastVisibilityKey = '';
+              }),
+            ),
+            Effect.asVoid,
+          );
+        }),
+      );
+    },
+    mediaAssetKey: (message: TelegramMessage) => mediaAssetKey(message),
+    loadCachedAvatar: (peer: { id: string }, avatarId?: string) =>
+      clientOperation(
+        'loadCachedAvatar',
+        coordinatorOptions.loadBlob(`avatar:${peer.id}:${avatarId ?? 'unknown'}`),
+      ),
+    downloadAvatar: (peer: { id: string }, avatarId?: string) =>
+      clientOperation(
+        'downloadAvatar',
+        Effect.gen(function* () {
+          const key = `avatar:${peer.id}:${avatarId ?? 'unknown'}`;
+          const cached = yield* options.loadBlob(key);
+          if (cached) return cached;
+          const downloaded = yield* invokeCoalesced('downloadAvatar', [peer, avatarId]);
+          if (downloaded instanceof Blob) return downloaded;
+          return yield* options.loadBlob(key);
+        }),
+      ),
+    downloadMedia: (message: TelegramMessage, options?: TelegramDownloadOptions) =>
+      clientOperation(
+        'downloadMedia',
+        Effect.gen(function* () {
+          const key = `${options?.preview ? 'preview:' : ''}${mediaAssetKey(message)}`;
+          const cached = yield* coordinatorOptions.loadBlob(key);
+          if (cached) return cached;
+          // Progress callbacks cannot cross BroadcastChannel. Keep them local when
+          // this tab is the owner, but still use the normal readiness gate.
+          if (options?.progress && activeOwner) {
+            return (yield* callOwner('downloadMedia', [message, options])) as Blob;
+          }
+          const downloaded = yield* invokeCoalesced('downloadMedia', [
+            message,
+            options?.preview ? { preview: true } : undefined,
+          ]);
+          if (downloaded instanceof Blob) return downloaded;
+          const blob = yield* coordinatorOptions.loadBlob(key);
+          if (!blob)
+            return yield* Effect.fail(
+              new Error('The downloaded media was not committed to the shared cache.'),
+            );
+          return blob;
+        }),
+      ),
+    downloadSticker: (sticker: { id: string }) =>
+      clientOperation(
+        'downloadSticker',
+        downloadSharedBlob(
+          `sticker:${sticker.id}`,
+          'downloadSticker',
+          [sticker],
+          'The downloaded sticker was not committed to the shared cache.',
+        ),
+      ),
+    downloadCustomEmoji: (documentId: string) =>
+      clientOperation(
+        'downloadCustomEmoji',
+        downloadSharedBlob(
+          `custom-emoji:${documentId}`,
+          'downloadCustomEmoji',
+          [documentId],
+          'The custom emoji was not committed to the shared cache.',
+        ),
+      ),
+    downloadWallpaper: (wallpaperId: string) =>
+      clientOperation(
+        'downloadWallpaper',
+        downloadSharedBlob(
+          `wallpaper:${wallpaperId}`,
+          'downloadWallpaper',
+          [wallpaperId],
+          'The wallpaper was not committed to the shared cache.',
+        ),
+      ),
+  };
+  const remote =
+    <Method extends RemoteMethod>(method: Method) =>
+    (...args: RemoteArguments<Method>): RemoteResult<Method> => {
+      const operation = commandPolicies[method].coalesce
+        ? invokeCoalesced(method, args)
+        : invoke(method, args);
+      const surfaced = commandPolicies[method].surfaceError
+        ? surfaceCommandFailure(operation)
+        : operation;
+      return surfaced.pipe(
+        Effect.mapError((error) => toMessagingError(error, method)),
+      ) as RemoteResult<Method>;
     };
-    this.client = new Proxy(target, {
-      get: (source, property) => {
-        if (property in source) {
-          const value = Reflect.get(source, property);
-          return typeof value === 'function' ? value.bind(source) : value;
-        }
-        if (typeof property !== 'string') return undefined;
-        return (...args: unknown[]) =>
-          coalescedMethods.has(property)
-            ? this.invokeCoalesced(property, args)
-            : this.invoke(property, args);
-      },
-    }) as unknown as MessagingClient;
+  client = {
+    ...target,
+    retrySync: remote('retrySync'),
+    refreshUpdates: remote('refreshUpdates'),
+    refreshReadReceipt: remote('refreshReadReceipt'),
+    retryMarkRead: remote('retryMarkRead'),
+    requestCode: remote('requestCode'),
+    submitCode: remote('submitCode'),
+    submitPassword: remote('submitPassword'),
+    logOut: remote('logOut'),
+    clearCache: remote('clearCache'),
+    loadConversationSharedMediaCounts: remote('loadConversationSharedMediaCounts'),
+    loadOlderConversationView: remote('loadOlderConversationView'),
+    loadHistoryGapConversationView: remote('loadHistoryGapConversationView'),
+    retryConversationView: remote('retryConversationView'),
+    openMessageInConversationView: remote('openMessageInConversationView'),
+    searchConversationMessages: remote('searchConversationMessages'),
+    getConversationSharedMedia: remote('getConversationSharedMedia'),
+    setDraft: remote('setDraft'),
+    setTyping: remote('setTyping'),
+    sendDraft: remote('sendDraft'),
+    sendAttachments: remote('sendAttachments'),
+    sendSticker: remote('sendSticker'),
+    forwardMessage: remote('forwardMessage'),
+    editMessage: remote('editMessage'),
+    deleteMessage: remote('deleteMessage'),
+    toggleReaction: remote('toggleReaction'),
+    retryPendingSend: remote('retryPendingSend'),
+    cancelPendingSend: remote('cancelPendingSend'),
+    retryOutbox: remote('retryOutbox'),
+    searchPeers: remote('searchPeers'),
+    addPeer: remote('addPeer'),
+    getUserDetails: remote('getUserDetails'),
+    getGroupMembers: remote('getGroupMembers'),
+    setMuted: remote('setMuted'),
+    setBlocked: remote('setBlocked'),
+    updateContact: remote('updateContact'),
+    deleteContact: remote('deleteContact'),
+    setPinnedDialog: remote('setPinnedDialog'),
+    setPinnedMessage: remote('setPinnedMessage'),
+    setArchived: remote('setArchived'),
+    deleteDialog: remote('deleteDialog'),
+    getWallpapers: remote('getWallpapers'),
+    getChatAppearance: remote('getChatAppearance'),
+    getRecentStickers: remote('getRecentStickers'),
+    getStickerPacks: remote('getStickerPacks'),
+    getSavedGifs: remote('getSavedGifs'),
+    searchGifs: remote('searchGifs'),
+    getBotCommands: remote('getBotCommands'),
+    startBot: remote('startBot'),
+    answerBotCallback: remote('answerBotCallback'),
+    requestUrlAuth: remote('requestUrlAuth'),
+    acceptUrlAuth: remote('acceptUrlAuth'),
+  } satisfies EffectMessagingClient;
+  const initialize = Effect.fn('TabCoordinator.initialize')(function* () {
+    if (broadcastChannel) return;
+    coordinationError = CHANNEL_ERROR;
+    yield* setSnapshot({
+      ...currentSnapshot(),
+      phase: 'error',
+      online: false,
+      error: CHANNEL_ERROR,
+    });
+  });
+  function handleInternalEvent(event: CoordinatorInternalEvent): Effect.Effect<void> {
+    switch (event._tag) {
+      case 'message':
+        return receive(event.input);
+      case 'snapshot':
+        return publishSnapshot(event.snapshot);
+      case 'resource':
+        return Effect.all(
+          [
+            engineState.invalidateResource(event.event),
+            Effect.sync(() =>
+              post({
+                type: 'resource',
+                version: PROTOCOL_VERSION,
+                from: thisClientId,
+                event: event.event,
+              }),
+            ),
+          ],
+          { discard: true },
+        );
+      case 'conversation':
+        return publishConversationEvent(event.event);
+      case 'pagehide':
+        return Effect.sync(() => announceClosing());
+    }
   }
-
-  private post(message: CoordinatorMessage) {
-    if (!this.stopped) this.channel?.postMessage(message);
+  function post(message: CoordinatorMessage) {
+    if (!stopped) broadcastChannel?.postMessage(message);
   }
-
-  private announceOwner() {
-    this.ownerSeenAt = Date.now();
-    this.post({
+  function announceOwner() {
+    ownerSeenAt = Date.now();
+    post({
       type: 'owner',
       version: PROTOCOL_VERSION,
-      from: this.clientId,
-      at: this.ownerSeenAt,
+      from: thisClientId,
+      at: ownerSeenAt,
     });
   }
-
-  private announceClosing() {
-    if (this.stopped) return;
-    this.post({
-      type: this.owner ? 'owner-gone' : 'client-gone',
+  function announceClosing() {
+    if (stopped) return;
+    post({
+      type: activeOwner ? 'owner-gone' : 'client-gone',
       version: PROTOCOL_VERSION,
-      from: this.clientId,
+      from: thisClientId,
     });
   }
-
-  private receive(message: CoordinatorMessage) {
-    if (!message || message.from === this.clientId || this.versionMismatch) return;
+  const receive = Effect.fn('TabCoordinator.receive')(function* (input: unknown) {
+    const message = yield* decodeCoordinatorMessage(input).pipe(
+      Effect.map((decoded) => decoded as CoordinatorMessage),
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          reportDiagnostic({
+            code: 'invalid-tab-message',
+            level: 'warn',
+            area: 'coordination',
+            message: 'Ignored an invalid cross-tab message.',
+            details: { error: errorMessage(error) },
+          });
+        }),
+      ),
+    );
+    if (!message) return;
+    if (message.from === thisClientId || versionMismatch) return;
     if (message.version !== PROTOCOL_VERSION) {
-      if (message.type === 'version-mismatch' && message.to === this.clientId) {
-        this.showVersionMismatch();
+      if (message.type === 'version-mismatch' && message.to === thisClientId) {
+        yield* showVersionMismatch();
       } else if ('from' in message) {
-        this.post({
+        post({
           type: 'version-mismatch',
           version: PROTOCOL_VERSION,
-          from: this.clientId,
+          from: thisClientId,
           to: message.from,
         });
       }
@@ -440,688 +1173,964 @@ export class TabCoordinator {
     }
     switch (message.type) {
       case 'hello':
-        if (this.owner) {
-          this.clientSeenAt.set(message.from, Date.now());
-          this.clientSnapshots.set(
+        if (activeOwner) {
+          clientRegistry.touch(message.from);
+          clientRegistry.setSnapshot(
             message.from,
-            sharedSnapshot(emptySnapshot(), this.owner.engine.snapshot()),
+            mergeAccountSnapshot(initialEngineSnapshot(), activeOwner.engine.snapshot()),
           );
-          this.announceOwner();
-          this.sendState(message.from);
+          announceOwner();
+          sendState(message.from);
         }
         break;
       case 'client-heartbeat':
-        if (this.owner) this.clientSeenAt.set(message.from, Date.now());
+        if (activeOwner) clientRegistry.touch(message.from);
         break;
       case 'owner':
-        if (!this.owner) {
-          const ownerChanged = this.ownerId !== message.from;
-          this.ownerId = message.from;
-          this.ownerSeenAt = Date.now();
+        if (!activeOwner) {
+          const previousOwnerId = activeOwnerId;
+          const ownerChanged = previousOwnerId !== message.from;
+          if (ownerChanged && previousOwnerId) {
+            yield* rejectPendingSentTo(
+              previousOwnerId,
+              new Error('The active TeleVecha tab changed during the command.'),
+            );
+          }
+          activeOwnerId = message.from;
+          ownerSeenAt = Date.now();
           if (ownerChanged) {
-            this.post({
+            post({
               type: 'hello',
               version: PROTOCOL_VERSION,
-              from: this.clientId,
+              from: thisClientId,
             });
-            const activePeerId = this.snapshotValue.activePeerId;
+            const activePeerId = currentSnapshot().activePeerId;
             if (activePeerId) {
-              void this.invokeCoalesced('openConversation', [activePeerId]).catch(() => undefined);
+              yield* fork(invokeCoalesced('openConversation', [activePeerId]).pipe(Effect.ignore));
             }
           }
+          yield* flushPendingRequests();
         }
         break;
       case 'owner-gone':
-        if (this.ownerId === message.from) {
-          this.stateRevision += 1;
-          this.ownerId = undefined;
-          this.rejectPending(new Error('The active TeleVecha tab closed during the command.'));
-          this.markReconnecting();
-          void this.electOwner();
+        if (activeOwnerId === message.from) {
+          stateRevision += 1;
+          activeOwnerId = undefined;
+          yield* rejectPending(new Error('The active TeleVecha tab closed during the command.'));
+          yield* markReconnecting();
+          yield* fork(electOwner());
         }
         break;
       case 'client-gone':
-        if (this.owner) this.removeClient(message.from);
+        if (activeOwner) yield* removeClient(message.from);
         break;
       case 'state':
-        if (message.to === this.clientId && message.from === this.ownerId) {
-          const revision = ++this.stateRevision;
-          const ownerId = this.ownerId;
+        if (message.to === thisClientId && message.from === activeOwnerId) {
+          const revision = ++stateRevision;
+          const respondingOwnerId = activeOwnerId;
+          const snapshot = engineSnapshot(message.account, message.conversation);
           const incoming =
-            !message.snapshot.activePeerId && this.snapshotValue.activePeerId
-              ? sharedSnapshot(this.snapshotValue, message.snapshot)
-              : message.snapshot;
-          const hydration = this.options.hydrateSnapshot?.(
+            !snapshot.activePeerId && currentSnapshot().activePeerId
+              ? mergeAccountSnapshot(currentSnapshot(), snapshot)
+              : snapshot;
+          const hydration = coordinatorOptions.hydrateSnapshot?.(
             incoming,
             message.pendingPayloadIds ?? [],
           );
+          yield* setSnapshot(incoming);
           if (hydration)
-            void hydration
-              .then((snapshot) => {
-                if (
-                  revision === this.stateRevision &&
-                  ownerId === this.ownerId &&
-                  !this.owner &&
-                  !this.versionMismatch
-                ) {
-                  this.setSnapshot(snapshot);
-                }
-              })
-              .catch(() => {
-                if (
-                  revision === this.stateRevision &&
-                  ownerId === this.ownerId &&
-                  !this.owner &&
-                  !this.versionMismatch
-                ) {
-                  this.setSnapshot(incoming);
-                }
-              });
-          else this.setSnapshot(incoming);
+            yield* fork(
+              hydration.pipe(
+                Effect.flatMap((snapshot) =>
+                  revision === stateRevision &&
+                  respondingOwnerId === activeOwnerId &&
+                  !activeOwner &&
+                  !versionMismatch
+                    ? setSnapshot(snapshot)
+                    : Effect.void,
+                ),
+                Effect.ignore,
+              ),
+            );
         }
         break;
       case 'resource':
-        if (message.from === this.ownerId) {
-          for (const listener of this.resourceListeners) listener(message.event);
+        if (message.from === activeOwnerId) {
+          yield* engineState.invalidateResource(message.event);
         }
         break;
       case 'request':
-        if (this.owner) {
-          this.clientSeenAt.set(message.from, Date.now());
-          if (message.method === 'openConversation') {
-            this.clientActivePeers.set(message.from, String(message.args[0]));
-          }
-          this.queueRequest(message);
+        if (activeOwner) {
+          clientRegistry.touch(message.from);
+          yield* queueRequest(message);
         }
         break;
       case 'response': {
-        if (message.to !== this.clientId || message.from !== this.ownerId) break;
-        const pending = this.pending.get(message.id);
+        if (message.to !== thisClientId || message.from !== activeOwnerId) break;
+        const pending = requestJournal.takePending(message.id);
         if (!pending) break;
-        this.pending.delete(message.id);
-        if (message.error) pending.reject(new Error(message.error));
-        else pending.resolve(message.result);
+        if (message.error)
+          yield* Deferred.fail(pending.result, messagingErrorFromPayload(message.error));
+        else yield* Deferred.succeed(pending.result, message.result);
         break;
       }
       case 'version-mismatch':
-        if (message.to === this.clientId) this.showVersionMismatch();
+        if (message.to === thisClientId) yield* showVersionMismatch();
         break;
     }
-  }
-
-  private showVersionMismatch() {
-    this.versionMismatch = true;
-    this.stateRevision += 1;
-    this.setSnapshot({
-      ...this.snapshotValue,
+  });
+  const showVersionMismatch = Effect.fn('TabCoordinator.showVersionMismatch')(function* () {
+    versionMismatch = true;
+    stateRevision += 1;
+    yield* setSnapshot({
+      ...currentSnapshot(),
       phase: 'error',
       sync: 'stale',
       online: false,
       error: 'Reload to finish updating TeleVecha.',
       requiresReload: true,
     });
+  });
+  function subscribe(listener: (snapshot: EngineSnapshot) => void) {
+    return engineState.subscribe(listener);
   }
-
-  private subscribe(listener: (snapshot: EngineSnapshot) => void) {
-    this.listeners.add(listener);
-    listener(this.snapshotValue);
-    return () => this.listeners.delete(listener);
+  function subscribeResources(listener: (event: TelegramResourceInvalidation) => void) {
+    return engineState.subscribeResources(listener);
   }
-
-  private subscribeResources(listener: (event: TelegramResourceInvalidation) => void) {
-    this.resourceListeners.add(listener);
-    return () => this.resourceListeners.delete(listener);
+  function setSnapshot(snapshot: EngineSnapshot) {
+    return engineState.set(snapshot);
   }
-
-  private setSnapshot(snapshot: EngineSnapshot) {
-    this.snapshotValue = snapshot;
-    for (const listener of this.listeners) listener(snapshot);
+  function currentSnapshot() {
+    return engineState.snapshotUnsafe();
   }
-
-  private markReconnecting() {
-    if (this.versionMismatch) return;
-    this.setSnapshot({
-      ...this.snapshotValue,
-      phase: this.snapshotValue.dialogs.length > 0 ? 'ready' : 'connecting',
+  const markReconnecting = Effect.fn('TabCoordinator.markReconnecting')(function* () {
+    if (versionMismatch) return;
+    yield* setSnapshot({
+      ...currentSnapshot(),
+      phase: currentSnapshot().dialogs.length > 0 ? 'ready' : 'connecting',
       sync: 'recovering',
       online: false,
       error: undefined,
     });
-  }
-
-  async start(credentials: TelegramCredentials) {
-    this.credentials = credentials;
-    if (!this.channel) return;
-    if (this.monitor) return;
-    this.stopped = false;
-    this.monitor = setInterval(() => {
-      if (this.owner) {
-        this.clientSeenAt.set(this.clientId, Date.now());
-        const cutoff = Date.now() - OWNER_TIMEOUT_MS;
-        for (const [clientId, seenAt] of this.clientSeenAt) {
-          if (clientId === this.clientId || seenAt >= cutoff) continue;
-          this.removeClient(clientId);
+  });
+  const start = Effect.fn('TabCoordinator.start')(function* (credentials: TelegramCredentials) {
+    activeCredentials = credentials;
+    if (!broadcastChannel) return;
+    if (yield* coordinatorTasks.has('monitor')) return;
+    stopped = false;
+    yield* coordinatorTasks.repeat(
+      'monitor',
+      OWNER_HEARTBEAT_MS,
+      Effect.gen(function* () {
+        if (activeOwner) {
+          clientRegistry.touch(thisClientId);
+          const cutoff = Date.now() - OWNER_TIMEOUT_MS;
+          for (const staleClientId of clientRegistry.staleClientIds(cutoff, thisClientId))
+            yield* removeClient(staleClientId);
+          return;
         }
+        yield* maintainPendingRequests();
+        if (activeOwnerId) {
+          post({
+            type: 'client-heartbeat',
+            version: PROTOCOL_VERSION,
+            from: thisClientId,
+          });
+        }
+        if (!activeOwnerId) {
+          activeOwnerId = undefined;
+          yield* markReconnecting();
+          yield* fork(electOwner());
+        } else if (Date.now() - ownerSeenAt > OWNER_TIMEOUT_MS) {
+          // A suspended tab delays both heartbeat timers. Ask Web Locks who owns
+          // the lease before changing visible connection state.
+          yield* fork(electOwner());
+        }
+      }),
+    );
+    yield* electOwner();
+    if (!activeOwner) {
+      post({
+        type: 'hello',
+        version: PROTOCOL_VERSION,
+        from: thisClientId,
+      });
+    }
+  });
+  const electOwner = Effect.fn('TabCoordinator.electOwner')(function* () {
+    const election = Effect.gen(function* () {
+      if (activeOwner || stopped) return;
+      if (!navigator.locks) {
+        coordinationError = LOCKS_ERROR;
+        yield* setSnapshot({
+          ...currentSnapshot(),
+          phase: 'error',
+          online: false,
+          error: LOCKS_ERROR,
+        });
+        yield* rejectPending(new Error(LOCKS_ERROR));
         return;
       }
-      if (this.ownerId) {
-        this.post({
-          type: 'client-heartbeat',
+      coordinationError = undefined;
+      const lease = yield* acquireAvailableTabLease(
+        `televecha-owner:${coordinatorOptions.key}`,
+      ).pipe(Effect.mapError(() => new Error(LOCK_ACCESS_ERROR)));
+      if (stopped) {
+        if (lease) yield* lease.release;
+        return;
+      }
+      if (lease) {
+        const acquiredOwnerScope = yield* Scope.fork(rootScope, 'parallel');
+        activeOwnerScope = acquiredOwnerScope;
+        yield* Scope.addFinalizer(acquiredOwnerScope, lease.release);
+        yield* Scope.provide(becomeOwner(), acquiredOwnerScope).pipe(
+          Effect.catch(abandonFailedOwnership),
+        );
+      } else {
+        post({
+          type: 'hello',
           version: PROTOCOL_VERSION,
-          from: this.clientId,
+          from: thisClientId,
         });
       }
-      if (this.electionPending) return;
-      if (!this.ownerId) {
-        this.ownerId = undefined;
-        this.markReconnecting();
-        void this.electOwner();
-      } else if (Date.now() - this.ownerSeenAt > OWNER_TIMEOUT_MS) {
-        // A suspended tab delays both heartbeat timers. Ask Web Locks who owns
-        // the lease before changing visible connection state.
-        void this.electOwner();
-      }
-    }, OWNER_HEARTBEAT_MS);
-    await this.electOwner();
-    if (!this.owner) {
-      this.post({
-        type: 'hello',
-        version: PROTOCOL_VERSION,
-        from: this.clientId,
-      });
-    }
-  }
-
-  private async electOwner() {
-    if (this.electionPending || this.owner || this.stopped) return;
-    if (!navigator.locks) {
-      this.coordinationError = LOCKS_ERROR;
-      this.setSnapshot({
-        ...this.snapshotValue,
-        phase: 'error',
-        online: false,
-        error: LOCKS_ERROR,
-      });
-      return;
-    }
-    this.coordinationError = undefined;
-    this.electionPending = true;
-    let settle!: (acquired: boolean | 'failed') => void;
-    const acquired = new Promise<boolean | 'failed'>((resolve) => {
-      settle = resolve;
     });
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    try {
-      void navigator.locks
-        .request(
-          `televecha-owner:${this.options.key}`,
-          { ifAvailable: true, mode: 'exclusive' },
-          async (lock) => {
-            if (!lock) {
-              settle(false);
-              return;
-            }
-            this.releaseOwnerLock = release;
-            settle(true);
-            await held;
-          },
-        )
-        .catch(() => settle('failed'));
-    } catch {
-      settle('failed');
-    }
-    const won = await acquired;
-    this.electionPending = false;
-    if (this.stopped) {
-      if (won === true) {
-        const releaseOwnerLock = this.releaseOwnerLock;
-        this.releaseOwnerLock = undefined;
-        releaseOwnerLock?.();
-      }
-      return;
-    }
-    if (won === 'failed') {
-      this.coordinationError = LOCK_ACCESS_ERROR;
-      this.setSnapshot({
-        ...this.snapshotValue,
-        phase: 'error',
-        online: false,
-        error: LOCK_ACCESS_ERROR,
-      });
-    } else if (won && !this.stopped) {
-      try {
-        await this.becomeOwner();
-      } catch (error) {
-        await this.abandonFailedOwnership(error);
-      }
-    } else if (!won) {
-      this.post({
-        type: 'hello',
-        version: PROTOCOL_VERSION,
-        from: this.clientId,
-      });
-    }
-  }
-
-  private async becomeOwner() {
-    const credentials = this.credentials;
+    yield* coordinatorTasks.runExclusive('election', election).pipe(
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          coordinationError = LOCK_ACCESS_ERROR;
+          yield* setSnapshot({
+            ...currentSnapshot(),
+            phase: 'error',
+            online: false,
+            error: LOCK_ACCESS_ERROR,
+          });
+          yield* rejectPending(error instanceof Error ? error : new Error(errorMessage(error)));
+        }),
+      ),
+    );
+  });
+  const becomeOwner = Effect.fn('TabCoordinator.becomeOwner')(function* () {
+    const credentials = activeCredentials;
     if (!credentials) return;
-    this.ownerId = this.clientId;
-    this.stateRevision += 1;
-    this.clientSeenAt.set(this.clientId, Date.now());
-    const owner = this.options.createOwner();
-    this.owner = owner;
-    this.options.ownerChanged?.(owner);
-    this.clientSnapshots.set(this.clientId, this.snapshotValue);
-    this.ownerUnsubscribe = owner.engine.subscribe((snapshot) => this.publishSnapshot(snapshot));
-    this.resourceUnsubscribe = owner.engine.subscribeResources((event) => {
-      for (const listener of this.resourceListeners) listener(event);
-      this.post({
-        type: 'resource',
-        version: PROTOCOL_VERSION,
-        from: this.clientId,
-        event,
-      });
-    });
-    const starting = owner.engine.start(credentials);
-    this.ownerStarting = starting;
-    this.heartbeat = setInterval(() => this.announceOwner(), OWNER_HEARTBEAT_MS);
-    this.announceOwner();
-    try {
-      await starting;
-    } finally {
-      if (this.ownerStarting === starting) this.ownerStarting = undefined;
-    }
-  }
+    if (activeOwnerId && activeOwnerId !== thisClientId) {
+      yield* rejectPendingSentTo(
+        activeOwnerId,
 
-  private async abandonFailedOwnership(error: unknown) {
-    if (this.heartbeat) clearInterval(this.heartbeat);
-    this.heartbeat = undefined;
-    this.ownerUnsubscribe?.();
-    this.resourceUnsubscribe?.();
-    this.ownerUnsubscribe = undefined;
-    this.resourceUnsubscribe = undefined;
-    const owner = this.owner;
-    this.owner = undefined;
-    this.ownerStarting = undefined;
-    this.ownerId = undefined;
-    try {
-      await owner?.engine.stop();
-    } catch {
-      // The startup error is the actionable failure; shutdown is best effort here.
+        new Error('The previous TeleVecha tab stopped before confirming the command.'),
+      );
     }
-    const releaseOwnerLock = this.releaseOwnerLock;
-    this.releaseOwnerLock = undefined;
-    releaseOwnerLock?.();
-    try {
-      if (owner) this.options.ownerChanged?.(undefined);
-    } catch {
-      // A view hook must not keep the cross-tab ownership lock alive.
+    activeOwnerId = thisClientId;
+    stateRevision += 1;
+    clientRegistry.touch(thisClientId);
+    const createdOwner = yield* coordinatorOptions.createOwner();
+    activeOwner = createdOwner;
+    if (coordinatorOptions.ownerChanged) yield* coordinatorOptions.ownerChanged(createdOwner);
+    clientRegistry.setSnapshot(thisClientId, currentSnapshot());
+    resourceUnsubscribe = yield* createdOwner.engine.subscribeResources((event) => {
+      Queue.offerUnsafe(eventQueue, { _tag: 'resource', event });
+    });
+    conversationUnsubscribe = yield* createdOwner.engine.subscribeConversationEvents((event) => {
+      Queue.offerUnsafe(eventQueue, { _tag: 'conversation', event });
+    });
+    const starting = yield* Deferred.make<void, unknown>();
+    ownerStarting = starting;
+    ownerUnsubscribe = yield* createdOwner.engine.subscribe((snapshot) => {
+      Queue.offerUnsafe(eventQueue, { _tag: 'snapshot', snapshot });
+    });
+    yield* coordinatorTasks.repeat(
+      'heartbeat',
+      OWNER_HEARTBEAT_MS,
+      Effect.sync(() => announceOwner()),
+    );
+    announceOwner();
+    yield* flushPendingRequests();
+    yield* createdOwner.engine.start(credentials).pipe(
+      Effect.tap(() => Deferred.succeed(starting, undefined)),
+      Effect.tapError((error) => Deferred.fail(starting, error)),
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (ownerStarting === starting) ownerStarting = undefined;
+        }),
+      ),
+    );
+  });
+  const abandonFailedOwnership = Effect.fn('TabCoordinator.abandonFailedOwnership')(function* (
+    error: unknown,
+  ) {
+    yield* coordinatorTasks.cancel('heartbeat');
+    if (ownerUnsubscribe) yield* ownerUnsubscribe;
+    if (resourceUnsubscribe) yield* resourceUnsubscribe;
+    if (conversationUnsubscribe) yield* conversationUnsubscribe;
+    ownerUnsubscribe = undefined;
+    resourceUnsubscribe = undefined;
+    conversationUnsubscribe = undefined;
+    const failedOwner = activeOwner;
+    activeOwner = undefined;
+    ownerStarting = undefined;
+    activeOwnerId = undefined;
+    if (failedOwner) yield* failedOwner.engine.stop().pipe(Effect.ignore);
+    const failedOwnerScope = activeOwnerScope;
+    activeOwnerScope = undefined;
+    if (failedOwnerScope) yield* Scope.close(failedOwnerScope, Exit.void);
+    if (failedOwner && coordinatorOptions.ownerChanged) {
+      yield* coordinatorOptions.ownerChanged(undefined).pipe(Effect.ignore);
     }
-    this.setSnapshot({
-      ...this.snapshotValue,
+    yield* setSnapshot({
+      ...currentSnapshot(),
       phase: 'error',
       sync: 'stale',
       online: false,
       error: `Could not start the active TeleVecha tab. ${errorMessage(error)}`,
     });
-  }
-
-  private publishSnapshot(snapshot: EngineSnapshot) {
-    if (!this.owner) return;
-    if (!this.clientSnapshots.has(this.clientId)) {
-      this.clientSnapshots.set(this.clientId, emptySnapshot());
+  });
+  const publishConversationEvent = Effect.fn('TabCoordinator.publishConversationEvent')(function* (
+    event: TelegramConversationEvent,
+  ) {
+    if (event.type === 'history-reset') {
+      yield* reloadClientConversationViews(event.peerId);
+      return;
     }
-    for (const [clientId, previous] of this.clientSnapshots) {
-      const activePeerId = previous.activePeerId;
-      const ownsActiveView = Boolean(activePeerId) && activePeerId === snapshot.activePeerId;
-      const next =
-        ownsActiveView || (clientId === this.clientId && previous.activePeerId === undefined)
-          ? snapshot
-          : inactiveConversationSnapshot(previous, snapshot);
+    for (const [clientId, previous] of clientRegistry.snapshots()) {
+      const peerId = previous.activePeerId;
+      if (!peerId) continue;
+      let messages = previous.messages;
+      let pinnedMessages = previous.pinnedMessages;
+      if (event.type === 'message-upsert') {
+        if (event.message.peerId !== peerId) continue;
+        const known = messages.some(({ id }) => id === event.message.id);
+        const newestId = messages.at(-1)?.id ?? 0;
+        if (known || event.insertIfMissing || event.message.id > newestId) {
+          messages = [...messages.filter(({ id }) => id !== event.message.id), event.message].sort(
+            (left, right) => left.id - right.id,
+          );
+        }
+        pinnedMessages = pinnedMessages.map((message) =>
+          message.id === event.message.id ? event.message : message,
+        );
+      } else if (event.type === 'messages-delete') {
+        if (event.peerId && event.peerId !== peerId) continue;
+        const deleted = new Set(event.messageIds);
+        messages = messages.filter(({ id }) => !deleted.has(id));
+        pinnedMessages = pinnedMessages.filter(({ id }) => !deleted.has(id));
+      } else {
+        if (event.peerId !== peerId) continue;
+        pinnedMessages = event.messages;
+      }
+      if (messages === previous.messages && pinnedMessages === previous.pinnedMessages) continue;
+      const next = shareEqualSnapshotFields(previous, { ...previous, messages, pinnedMessages });
       if (next === previous) continue;
-      this.clientSnapshots.set(clientId, next);
-      if (clientId === this.clientId) this.setSnapshot(next);
-      else this.queueState(clientId);
+      clientRegistry.setSnapshot(clientId, next);
+      if (clientId === thisClientId) yield* setSnapshot(next);
+      else yield* queueState(clientId);
     }
-    for (const { peerId } of this.visibility.values()) void this.applyVisibility(peerId);
-  }
-
-  private sendState(clientId: string) {
-    const snapshot = this.clientSnapshots.get(clientId);
+  });
+  const reloadClientConversationViews = Effect.fn('TabCoordinator.reloadClientConversationViews')(
+    function* (onlyPeerId?: string) {
+      const engine = activeOwner?.engine;
+      if (!engine) return;
+      for (const [clientId, previous] of clientRegistry.snapshots()) {
+        const peerId = previous.activePeerId;
+        if (!peerId || previous.loadingMessages || (onlyPeerId && peerId !== onlyPeerId)) {
+          continue;
+        }
+        if (previous.messages.length === 0) {
+          yield* publishClientSnapshot(clientId, {
+            ...previous,
+            loadingMessages: true,
+            loadingOlderMessages: false,
+          });
+        }
+        yield* fork(
+          Effect.all([
+            engine.loadConversationView(peerId),
+            engine.loadConversationPinnedMessages(peerId),
+            engine.loadConversationSharedMediaCounts(peerId),
+          ]).pipe(
+            Effect.matchEffect({
+              onSuccess: ([conversation, pinnedMessages, sharedMediaCounts]) =>
+                Effect.suspend(() => {
+                  const current = clientRegistry.snapshot(clientId);
+                  if (current?.activePeerId !== peerId) return Effect.void;
+                  return publishClientSnapshot(
+                    clientId,
+                    engineSnapshot(accountSnapshot(engine.snapshot()), {
+                      ...conversation,
+                      pinnedMessages,
+                      ...(sharedMediaCounts !== undefined
+                        ? { sharedMediaCounts }
+                        : current.sharedMediaCounts !== undefined
+                          ? { sharedMediaCounts: current.sharedMediaCounts }
+                          : {}),
+                    }),
+                  );
+                }),
+              onFailure: (error) =>
+                Effect.suspend(() => {
+                  const current = clientRegistry.snapshot(clientId);
+                  if (current?.activePeerId !== peerId) return Effect.void;
+                  return publishClientSnapshot(clientId, {
+                    ...current,
+                    loadingMessages: false,
+                    historyError: `Could not reload this conversation. ${errorMessage(error)}`,
+                  });
+                }),
+            }),
+          ),
+        );
+      }
+    },
+  );
+  const publishSnapshot = Effect.fn('TabCoordinator.publishSnapshot')(function* (
+    snapshot: AccountSnapshot,
+  ) {
+    if (!activeOwner) return;
+    if (!clientRegistry.hasSnapshot(thisClientId)) {
+      clientRegistry.setSnapshot(thisClientId, initialEngineSnapshot());
+    }
+    let reloadAfterReconnect = false;
+    for (const [clientId, previous] of clientRegistry.snapshots()) {
+      const source = ownerStarting ? retainWorkspaceWhileStarting(previous, snapshot) : snapshot;
+      const account = mergeAccountSnapshot(previous, source);
+      const activePeerId = previous.activePeerId;
+      const candidate =
+        activePeerId && !source.dialogs.some(({ peer }) => peer.id === activePeerId)
+          ? engineSnapshot(
+              accountSnapshot(account),
+              conversationViewSnapshot(initialEngineSnapshot()),
+            )
+          : account;
+      const next = shareEqualSnapshotFields(previous, candidate);
+      if (
+        activePeerId &&
+        source.online &&
+        source.sync === 'current' &&
+        (!previous.online || previous.sync !== 'current')
+      ) {
+        reloadAfterReconnect = true;
+      }
+      if (next === previous) continue;
+      clientRegistry.setSnapshot(clientId, next);
+      if (clientId === thisClientId) yield* setSnapshot(next);
+      else yield* queueState(clientId);
+    }
+    if (reloadAfterReconnect) yield* reloadClientConversationViews();
+    for (const peerId of clientRegistry.visiblePeerIds()) yield* fork(applyVisibility(peerId));
+  });
+  function sendState(clientId: string) {
+    const snapshot = clientRegistry.snapshot(clientId);
     if (!snapshot) return;
-    this.post({
+    post({
       type: 'state',
       version: PROTOCOL_VERSION,
-      from: this.clientId,
+      from: thisClientId,
       to: clientId,
-      snapshot: transferableSnapshot(snapshot),
+      account: accountSnapshot(transferableSnapshot(snapshot)),
+      conversation: conversationViewSnapshot(snapshot),
       pendingPayloadIds: pendingPayloadIds(snapshot),
     });
   }
-
-  private queueState(clientId: string) {
-    this.queuedStateClients.add(clientId);
-    if (this.stateFlushTimer) return;
-    this.stateFlushTimer = setTimeout(() => {
-      this.stateFlushTimer = undefined;
-      const clients = [...this.queuedStateClients];
-      this.queuedStateClients.clear();
-      for (const queuedClientId of clients) this.sendState(queuedClientId);
-    }, 16);
+  function queueState(clientId: string) {
+    clientRegistry.queueState(clientId);
+    return coordinatorTasks.delay(
+      'state',
+      16,
+      Effect.sync(() => {
+        for (const queuedClientId of clientRegistry.takeQueuedStateClients()) {
+          sendState(queuedClientId);
+        }
+      }),
+      { onlyIfMissing: true },
+    );
   }
-
-  private queueRequest(request: Extract<CoordinatorMessage, { type: 'request' }>) {
+  const queueRequest = Effect.fn('TabCoordinator.queueRequest')(function* (
+    request: Extract<CoordinatorMessage, { type: 'request' }>,
+  ) {
     const requestKey = `${request.from}:${request.id}`;
-    const completed = this.completedRequests.get(requestKey);
+    const completed = requestJournal.completed(requestKey);
     if (completed) {
-      this.post({
+      post({
         type: 'response',
         version: PROTOCOL_VERSION,
-        from: this.clientId,
+        from: thisClientId,
         to: request.from,
         id: request.id,
         ...completed,
       });
       return;
     }
-    if (this.activeRequests.has(requestKey)) return;
-    this.activeRequests.add(requestKey);
-    if (request.method === 'openConversation') {
-      const work = this.handleRequest(request, requestKey);
-      const tracked = work.finally(() => this.activeRequests.delete(requestKey));
-      this.trackConversationOpen(request.from, tracked);
+    if (!requestJournal.begin(requestKey)) return;
+    if (commandPolicies[request.method].concurrent) {
+      yield* fork(
+        handleRequest(request, requestKey).pipe(
+          Effect.ensuring(Effect.sync(() => requestJournal.finish(requestKey))),
+          Effect.ignore,
+        ),
+      );
       return;
     }
-    if (concurrentMethods.has(request.method)) {
-      const conversationOpen = concurrentAfterConversationOpenMethods.has(request.method)
-        ? (this.conversationOpens.get(request.from) ?? Promise.resolve())
-        : Promise.resolve();
-      void conversationOpen
-        .then(() => this.handleRequest(request, requestKey))
-        .finally(() => this.activeRequests.delete(requestKey));
-      return;
-    }
-    const conversationOpen = this.conversationOpens.get(request.from) ?? Promise.resolve();
-    const work = this.operationTail
-      .then(() => conversationOpen)
-      .then(() => this.handleRequest(request, requestKey));
-    const tracked = work.finally(() => this.activeRequests.delete(requestKey));
-    this.operationTail = tracked.then(
-      () => undefined,
-      () => undefined,
+    yield* fork(
+      coordinatorTasks
+        .serialize(handleRequest(request, requestKey))
+        .pipe(Effect.ensuring(Effect.sync(() => requestJournal.finish(requestKey))), Effect.ignore),
     );
-  }
-
-  private async handleRequest(
+  });
+  const handleRequest = Effect.fn('TabCoordinator.handleRequest')(function* (
     request: Extract<CoordinatorMessage, { type: 'request' }>,
     requestKey: string,
   ) {
-    try {
-      const result = await this.invokeOwner(
-        request.from,
-        request.method,
-        request.args,
-        request.activePeerId,
-      );
-      this.rememberCompletedRequest(requestKey, { result });
-      this.post({
+    yield* Effect.gen(function* () {
+      const result = yield* invokeOwner(request.from, request.method, request.args);
+      requestJournal.remember(requestKey, { result });
+      post({
         type: 'response',
         version: PROTOCOL_VERSION,
-        from: this.clientId,
+        from: thisClientId,
         to: request.from,
         id: request.id,
         result,
       });
-    } catch (error) {
-      const completed = { error: errorMessage(error) };
-      this.rememberCompletedRequest(requestKey, completed);
-      this.post({
-        type: 'response',
-        version: PROTOCOL_VERSION,
-        from: this.clientId,
-        to: request.from,
-        id: request.id,
-        ...completed,
-      });
-    }
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          const completed = { error: messagingErrorPayload(error, request.method) };
+          requestJournal.remember(requestKey, completed);
+          post({
+            type: 'response',
+            version: PROTOCOL_VERSION,
+            from: thisClientId,
+            to: request.from,
+            id: request.id,
+            ...completed,
+          });
+        }),
+      ),
+    );
+  });
+  function removeClient(clientId: string) {
+    const peerId = clientRegistry.remove(clientId);
+    return peerId ? applyVisibility(peerId) : Effect.void;
   }
-
-  private rememberCompletedRequest(id: string, result: { result?: unknown; error?: string }) {
-    this.completedRequests.set(id, result);
-    if (this.completedRequests.size <= MAX_COMPLETED_REQUESTS) return;
-    const oldest = this.completedRequests.keys().next().value;
-    if (oldest) this.completedRequests.delete(oldest);
+  function publishClientSnapshot(clientId: string, snapshot: EngineSnapshot) {
+    const previous = clientRegistry.snapshot(clientId);
+    const next = previous ? shareEqualSnapshotFields(previous, snapshot) : snapshot;
+    if (next === previous) return Effect.void;
+    clientRegistry.setSnapshot(clientId, next);
+    if (clientId === thisClientId) return setSnapshot(next);
+    sendState(clientId);
+    return Effect.void;
   }
-
-  private removeClient(clientId: string) {
-    const peerId = this.visibility.get(clientId)?.peerId;
-    this.clientSeenAt.delete(clientId);
-    this.visibility.delete(clientId);
-    this.clientSnapshots.delete(clientId);
-    this.clientActivePeers.delete(clientId);
-    if (peerId) void this.applyVisibility(peerId);
-  }
-
-  private async ensureOwnerPeer(clientId: string, peerId: string | undefined) {
-    const engine = this.owner?.engine;
-    if (!engine || !peerId) return false;
-    const desiredPeerId = this.clientActivePeers.get(clientId);
-    if (desiredPeerId && desiredPeerId !== peerId) {
-      return false;
-    }
-    if (engine.snapshot().activePeerId === peerId) return true;
-    await engine.openConversation(peerId, false);
-    await this.applyVisibility(peerId);
-    return true;
-  }
-
-  private async invokeOwner(
+  const updateClientConversation = Effect.fn('TabCoordinator.updateClientConversation')(function* (
     clientId: string,
-    method: string,
-    args: unknown[],
-    activePeerId?: string,
+    peerId: string,
+    loading: ConversationViewSnapshot,
+    load: () => Effect.Effect<ConversationViewSnapshot, unknown>,
   ) {
-    await this.ownerStarting;
-    const engine = this.owner?.engine;
-    if (!engine) throw new Error('TeleVecha is reconnecting in another tab.');
+    const engine = activeOwner?.engine;
+    if (!engine) {
+      return yield* Effect.fail(new Error('TeleVecha is reconnecting in another tab.'));
+    }
+    yield* publishClientSnapshot(
+      clientId,
+      engineSnapshot(accountSnapshot(engine.snapshot()), loading),
+    );
+    const conversation = yield* load();
+    const current = clientRegistry.snapshot(clientId);
+    if (current?.activePeerId === peerId) {
+      yield* publishClientSnapshot(
+        clientId,
+        engineSnapshot(
+          accountSnapshot(engine.snapshot()),
+          retainConversationMetadata(current, conversation),
+        ),
+      );
+    }
+    return conversation;
+  });
+  const invokeOwner = Effect.fn('TabCoordinator.invokeOwner')(function* (
+    clientId: string,
+    method: RemoteMethod,
+    args: unknown[],
+  ) {
+    const owner = activeOwner;
+    if (!owner) {
+      return yield* Effect.fail(new Error('TeleVecha is reconnecting in another tab.'));
+    }
+    const engine = owner.engine;
+    if (commandPolicies[method].readiness === 'workspace') {
+      yield* engine.whenCommandReady();
+    } else if (commandPolicies[method].readiness === 'startup') {
+      if (ownerStarting) yield* Deferred.await(ownerStarting);
+    } else {
+      yield* engine.whenAccountReady();
+    }
+    if (activeOwner !== owner) {
+      return yield* Effect.fail(new Error('The active TeleVecha tab changed during the command.'));
+    }
     if (method === 'openConversation') {
       const peerId = String(args[0]);
-      this.clientActivePeers.set(clientId, peerId);
-      await engine.openConversation(peerId, false);
-      this.clientSnapshots.set(clientId, engine.snapshot());
-      this.sendState(clientId);
-      if (clientId === this.clientId) this.setSnapshot(engine.snapshot());
-      await this.applyVisibility(peerId);
+      const previous = clientRegistry.snapshot(clientId);
+      yield* updateClientConversation(
+        clientId,
+        peerId,
+        conversationLoadingSnapshot(previous, peerId),
+        () => engine.loadConversationView(peerId),
+      );
+      yield* fork(
+        Effect.all([
+          engine.loadConversationPinnedMessages(peerId),
+          engine.loadConversationSharedMediaCounts(peerId),
+        ]).pipe(
+          Effect.flatMap(([pinnedMessages, sharedMediaCounts]) => {
+            const current = clientRegistry.snapshot(clientId);
+            if (current?.activePeerId !== peerId) return Effect.void;
+            return publishClientSnapshot(clientId, {
+              ...current,
+              pinnedMessages,
+              ...(sharedMediaCounts !== undefined ? { sharedMediaCounts } : {}),
+            });
+          }),
+          Effect.ignore,
+        ),
+      );
+      yield* fork(applyVisibility(peerId).pipe(Effect.ignore));
       return true;
     }
     if (method === 'setActiveConversationVisibility') {
       const peerId = String(args[0]);
       const state = args[1] as { visible: boolean; atBottom: boolean };
-      this.clientSeenAt.set(clientId, Date.now());
-      this.visibility.set(clientId, { peerId, ...state });
-      await this.applyVisibility(peerId);
+      clientRegistry.setVisibility(clientId, { peerId, ...state });
+      yield* applyVisibility(peerId);
       return;
     }
-    if (chatScopedMethods.has(method) || viewMutationMethods.has(method)) {
-      if (!(await this.ensureOwnerPeer(clientId, activePeerId))) return;
-    }
-    const member = (engine as unknown as Record<string, unknown>)[method];
-    if (typeof member !== 'function') throw new Error(`Unknown messaging command: ${method}`);
-    const result = await (member as (...parameters: unknown[]) => unknown).apply(engine, args);
-    const next = engine.snapshot();
-    const previous = this.clientSnapshots.get(clientId) ?? emptySnapshot();
-    this.clientSnapshots.set(
-      clientId,
-      next.activePeerId === activePeerId ? next : sharedSnapshot(previous, next),
-    );
-    if (clientId === this.clientId) this.setSnapshot(this.clientSnapshots.get(clientId)!);
-    else this.sendState(clientId);
-    return result;
-  }
-
-  private async applyVisibility(peerId: string) {
-    const engine = this.owner?.engine;
-    if (!engine) return;
-    const cutoff = Date.now() - OWNER_TIMEOUT_MS;
-    const reports = [...this.visibility.entries()]
-      .filter(([clientId]) => (this.clientSeenAt.get(clientId) ?? 0) >= cutoff)
-      .map(([, report]) => report)
-      .filter((report) => report.peerId === peerId);
-    const visible = reports.some((report) => report.visible);
-    const atBottom = reports.some((report) => report.visible && report.atBottom);
-    if (engine.snapshot().activePeerId === peerId) {
-      await engine.setActiveConversationVisibility(peerId, { visible, atBottom });
-    } else if (visible && atBottom) {
-      await engine.markConversationRead(peerId);
-    }
-  }
-
-  private invoke(method: string, args: unknown[]) {
-    if (this.stopped) return Promise.reject(new Error('This tab is no longer connected.'));
-    if (this.versionMismatch) {
-      return Promise.reject(new Error('Reload to finish updating TeleVecha.'));
-    }
-    if (this.coordinationError) return Promise.reject(new Error(this.coordinationError));
-    if (method === 'openConversation') {
-      this.clientActivePeers.set(this.clientId, String(args[0]));
-    }
-    const activePeerId = this.snapshotValue.activePeerId;
-    if (this.owner) {
-      if (method === 'openConversation') {
-        const operation = this.invokeOwner(this.clientId, method, args, activePeerId);
-        this.trackConversationOpen(this.clientId, operation);
-        return operation;
-      }
-      if (concurrentMethods.has(method)) {
-        const conversationOpen = concurrentAfterConversationOpenMethods.has(method)
-          ? (this.conversationOpens.get(this.clientId) ?? Promise.resolve())
-          : Promise.resolve();
-        return conversationOpen.then(() =>
-          this.invokeOwner(this.clientId, method, args, activePeerId),
+    if (method === 'openMessageInConversationView') {
+      const message = args[0] as TelegramMessage;
+      const peerId = message.peerId;
+      const previous = clientRegistry.snapshot(clientId) ?? initialEngineSnapshot();
+      if (previous.activePeerId !== peerId) {
+        return yield* Effect.fail(
+          new Error('This conversation view was superseded by a newer selection.'),
         );
       }
-      const conversationOpen = this.conversationOpens.get(this.clientId) ?? Promise.resolve();
-      const operation = this.operationTail
-        .then(() => conversationOpen)
-        .then(() => this.invokeOwner(this.clientId, method, args, activePeerId));
-      this.operationTail = operation.then(
-        () => undefined,
-        () => undefined,
+      let found = false;
+      const conversation = yield* updateClientConversation(
+        clientId,
+        peerId,
+        conversationViewSnapshot(previous),
+        () =>
+          Effect.gen(function* () {
+            const result = yield* engine.openMessageInConversationView(
+              message,
+              conversationViewSnapshot(previous),
+            );
+            found = result.found;
+            return result.conversation;
+          }),
       );
-      return operation;
+      return { conversation, found };
     }
-    if (!this.ownerId) {
-      this.markReconnecting();
-      void this.electOwner();
-    } else if (Date.now() - this.ownerSeenAt > OWNER_TIMEOUT_MS) {
-      void this.electOwner();
+    if (method === 'loadConversationSharedMediaCounts') {
+      const peerId = String(args[0]);
+      const previous = clientRegistry.snapshot(clientId) ?? initialEngineSnapshot();
+      if (previous.activePeerId !== peerId) return undefined;
+      const counts = yield* engine.loadConversationSharedMediaCounts(peerId);
+      const current = clientRegistry.snapshot(clientId);
+      if (counts && current?.activePeerId === peerId) {
+        yield* publishClientSnapshot(clientId, { ...current, sharedMediaCounts: counts });
+      }
+      return counts;
+    }
+    if (
+      method === 'loadOlderConversationView' ||
+      method === 'loadHistoryGapConversationView' ||
+      method === 'retryConversationView'
+    ) {
+      const peerId = String(args[0]);
+      const previous = clientRegistry.snapshot(clientId) ?? initialEngineSnapshot();
+      if (previous.activePeerId !== peerId) {
+        return yield* Effect.fail(
+          new Error('This conversation view was superseded by a newer selection.'),
+        );
+      }
+      return yield* updateClientConversation(
+        clientId,
+        peerId,
+        {
+          ...conversationViewSnapshot(previous),
+          ...(method === 'retryConversationView' && previous.messages.length === 0
+            ? { loadingMessages: true }
+            : { loadingOlderMessages: true }),
+        },
+        () =>
+          method === 'loadOlderConversationView'
+            ? engine.loadOlderConversationView(peerId, conversationViewSnapshot(previous))
+            : method === 'loadHistoryGapConversationView'
+              ? engine.loadHistoryGapConversationView(
+                  peerId,
+                  args[1] as TelegramHistoryGap,
+                  conversationViewSnapshot(previous),
+                )
+              : engine.retryConversationView(peerId, conversationViewSnapshot(previous)),
+      );
+    }
+    const result = yield* invokeEngineCommand(engine, method, args);
+    const next = engine.snapshot();
+    const previous = clientRegistry.snapshot(clientId) ?? initialEngineSnapshot();
+    const merged = mergeAccountSnapshot(previous, next);
+    clientRegistry.setSnapshot(clientId, merged);
+    if (clientId === thisClientId) yield* setSnapshot(merged);
+    else sendState(clientId);
+    return result;
+  });
+  const applyVisibility = Effect.fn('TabCoordinator.applyVisibility')(function* (peerId: string) {
+    const engine = activeOwner?.engine;
+    if (!engine) return;
+    const cutoff = Date.now() - OWNER_TIMEOUT_MS;
+    const reports = clientRegistry.visibilityReports(peerId, cutoff);
+    const visible = reports.some((report) => report.visible);
+    const atBottom = reports.some((report) => report.visible && report.atBottom);
+    yield* engine.setActiveConversationVisibility(peerId, { visible, atBottom });
+  });
+  const invoke = Effect.fn('TabCoordinator.invoke')(function* (
+    method: RemoteMethod,
+    args: unknown[],
+  ) {
+    if (stopped) return yield* Effect.fail(new Error('This tab is no longer connected.'));
+    if (versionMismatch) {
+      return yield* Effect.fail(new Error('Reload to finish updating TeleVecha.'));
+    }
+    if (coordinationError) return yield* Effect.fail(new Error(coordinationError));
+    if (activeOwner) return yield* callOwner(method, args);
+    if (!activeOwnerId) {
+      yield* markReconnecting();
+      yield* fork(electOwner());
+    } else if (Date.now() - ownerSeenAt > OWNER_TIMEOUT_MS) {
+      yield* fork(electOwner());
     }
     const id = crypto.randomUUID();
-    return new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.post({
+    const result = yield* Deferred.make<unknown, Error>();
+    const request = { id, method, args, createdAt: Date.now(), result };
+    requestJournal.add(request);
+    yield* dispatchPendingRequest(request);
+    return yield* Deferred.await(result);
+  });
+  function callOwner(method: RemoteMethod, args: unknown[]) {
+    if (commandPolicies[method].concurrent) return invokeOwner(thisClientId, method, args);
+    return coordinatorTasks.serialize(invokeOwner(thisClientId, method, args));
+  }
+  const dispatchPendingRequest = Effect.fn('TabCoordinator.dispatchPendingRequest')(function* (
+    request: PendingRequest<RemoteMethod>,
+    retry = false,
+  ) {
+    if (!requestJournal.hasPending(request.id) || (request.sentTo && !retry)) return;
+    if (activeOwner) {
+      request.sentTo = thisClientId;
+      yield* callOwner(request.method, request.args).pipe(
+        Effect.matchEffect({
+          onSuccess: (value) =>
+            requestJournal.takePending(request.id)
+              ? Deferred.succeed(request.result, value).pipe(Effect.asVoid)
+              : Effect.void,
+          onFailure: (error) =>
+            requestJournal.takePending(request.id)
+              ? Deferred.fail(
+                  request.result,
+                  error instanceof Error ? error : new Error(String(error)),
+                ).pipe(Effect.asVoid)
+              : Effect.void,
+        }),
+      );
+      return;
+    }
+    if (!activeOwnerId) return;
+    request.sentTo = activeOwnerId;
+    request.sentAt = Date.now();
+    yield* Effect.sync(() => {
+      post({
         type: 'request',
         version: PROTOCOL_VERSION,
-        from: this.clientId,
-        id,
-        method,
-        args,
-        activePeerId,
+        from: thisClientId,
+        id: request.id,
+        method: request.method,
+        args: request.args,
       });
-    });
-  }
-
-  private trackConversationOpen(clientId: string, operation: Promise<unknown>) {
-    const settled = operation.then(
-      () => undefined,
-      () => undefined,
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          if (requestJournal.takePending(request.id)) {
+            yield* Deferred.fail(request.result, new Error(errorMessage(error)));
+          }
+        }),
+      ),
     );
-    this.conversationOpens.set(clientId, settled);
-    void settled.finally(() => {
-      if (this.conversationOpens.get(clientId) === settled) {
-        this.conversationOpens.delete(clientId);
-      }
-    });
+  });
+  function flushPendingRequests() {
+    return Effect.forEach(
+      [...requestJournal.pendingValues()],
+      (request) => dispatchPendingRequest(request),
+      { discard: true },
+    );
   }
-
-  private invokeCoalesced(method: string, args: unknown[]) {
-    const key = `${method}:${JSON.stringify(args)}`;
-    const current = this.coalescedOperations.get(key);
-    if (current) return current;
-    const operation = this.invoke(method, args).finally(() => {
-      if (this.coalescedOperations.get(key) === operation) this.coalescedOperations.delete(key);
-    });
-    this.coalescedOperations.set(key, operation);
-    return operation;
-  }
-
-  private rejectPending(error: Error) {
-    for (const request of this.pending.values()) {
-      request.reject(error);
-    }
-    this.pending.clear();
-  }
-
-  private async openConversation(peerId: string) {
-    await this.invokeCoalesced('openConversation', [peerId]);
-    return new Conversation(this.client, peerId);
-  }
-
-  private mediaAssetKey(message: TelegramMessage) {
-    const media = message.media;
-    const identity =
-      media?.cacheKey ??
-      [
-        message.editedAt ?? 0,
-        media?.kind ?? 'preview',
-        media?.name ?? message.linkPreview?.url ?? '',
-        media?.mimeType ?? '',
-        media?.size ?? '',
-        media?.width ?? '',
-        media?.height ?? '',
-        media?.duration ?? '',
-      ].join(':');
-    return `media:${message.peerId}:${message.id}:${identity}`;
-  }
-
-  async stop() {
-    if (this.stopped) return;
-    this.announceClosing();
-    this.stopped = true;
-    window.removeEventListener('pagehide', this.handlePageHide);
-    if (this.monitor) clearInterval(this.monitor);
-    if (this.heartbeat) clearInterval(this.heartbeat);
-    if (this.stateFlushTimer) clearTimeout(this.stateFlushTimer);
-    this.monitor = undefined;
-    this.heartbeat = undefined;
-    this.stateFlushTimer = undefined;
-    this.queuedStateClients.clear();
-    this.clientActivePeers.clear();
-    this.rejectPending(new Error('This tab closed before the command completed.'));
-    this.coalescedOperations.clear();
-    this.activeRequests.clear();
-    this.completedRequests.clear();
-    try {
-      if (this.owner) {
-        this.ownerUnsubscribe?.();
-        this.resourceUnsubscribe?.();
-        try {
-          await this.owner.engine.stop();
-        } finally {
-          this.owner = undefined;
-          this.ownerStarting = undefined;
-          const releaseOwnerLock = this.releaseOwnerLock;
-          this.releaseOwnerLock = undefined;
-          releaseOwnerLock?.();
-          this.options.ownerChanged?.(undefined);
+  const maintainPendingRequests = Effect.fn('TabCoordinator.maintainPendingRequests')(function* (
+    now = Date.now(),
+  ) {
+    for (const [id, request] of requestJournal.pendingEntries()) {
+      if (now - request.createdAt >= REQUEST_TIMEOUT_MS) {
+        if (requestJournal.takePending(id)) {
+          yield* Deferred.fail(
+            request.result,
+            new Error('The active TeleVecha tab did not confirm the command in time.'),
+          );
         }
+        continue;
       }
-    } finally {
-      this.channel?.close();
+      if (!request.sentTo) {
+        yield* dispatchPendingRequest(request);
+        continue;
+      }
+      if (
+        request.sentTo === activeOwnerId &&
+        request.sentAt !== undefined &&
+        now - request.sentAt >= REQUEST_RETRY_MS
+      ) {
+        yield* dispatchPendingRequest(request, true);
+      }
     }
+  });
+  function invokeCoalesced(method: RemoteMethod, args: unknown[]) {
+    const key = `${method}:${JSON.stringify(args)}`;
+    return coalescedRequests.load(key, () => invoke(method, args));
   }
+  function surfaceCommandFailure<Value, Error, Requirements>(
+    operation: Effect.Effect<Value, Error, Requirements>,
+  ) {
+    return operation.pipe(
+      Effect.tapError((error) =>
+        !stopped
+          ? setSnapshot({
+              ...currentSnapshot(),
+              operationError: errorMessage(error),
+            })
+          : Effect.void,
+      ),
+    );
+  }
+  function rejectPending(error: Error) {
+    return requestJournal.rejectAll(error);
+  }
+  function rejectPendingSentTo(ownerId: string, error: Error) {
+    return requestJournal.rejectPending((request) => request.sentTo === ownerId, error);
+  }
+  const openConversation = Effect.fn('TabCoordinator.openConversation')(function* (peerId: string) {
+    yield* invokeCoalesced('openConversation', [peerId]);
+    const selectedConversation = conversation(peerId);
+    if (!selectedConversation) {
+      return yield* Effect.fail(new Error('The requested conversation is no longer available.'));
+    }
+    return selectedConversation;
+  });
+  function conversation(peerId: string) {
+    const dialog = currentSnapshot().dialogs.find(({ peer }) => peer.id === peerId);
+    return dialog ? makeConversation(client, dialog.peer) : undefined;
+  }
+  function mediaAssetKey(message: TelegramMessage) {
+    return telegramMediaAssetKey(message);
+  }
+  const stop = Effect.fn('TabCoordinator.stop')(function* () {
+    if (stopped) return;
+    announceClosing();
+    stopped = true;
+    yield* coordinatorTasks.clear;
+    yield* rejectPending(new Error('This tab closed before the command completed.'));
+    yield* coalescedRequests.clear;
+    requestJournal.clearOwnerRecords();
+    clientRegistry.clear();
+    yield* Effect.gen(function* () {
+      const stoppingOwner = activeOwner;
+      if (stoppingOwner) {
+        if (ownerUnsubscribe) yield* ownerUnsubscribe;
+        if (resourceUnsubscribe) yield* resourceUnsubscribe;
+        if (conversationUnsubscribe) yield* conversationUnsubscribe;
+        ownerUnsubscribe = undefined;
+        resourceUnsubscribe = undefined;
+        conversationUnsubscribe = undefined;
+        yield* stoppingOwner.engine.stop().pipe(
+          Effect.ensuring(
+            Effect.gen(function* () {
+              activeOwner = undefined;
+              ownerStarting = undefined;
+              const stoppingOwnerScope = activeOwnerScope;
+              activeOwnerScope = undefined;
+              if (stoppingOwnerScope) yield* Scope.close(stoppingOwnerScope, Exit.void);
+              if (coordinatorOptions.ownerChanged)
+                yield* coordinatorOptions.ownerChanged(undefined);
+            }),
+          ),
+        );
+      }
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          broadcastChannel?.close();
+        }),
+      ),
+    );
+  });
+  return {
+    client: client,
+    initialize: initialize,
+    handleInternalEvent: handleInternalEvent,
+    receive: receive,
+    start: start,
+    stop: stop,
+  };
 }
+export type TabCoordinator = ReturnType<typeof makeTabCoordinatorModule>;
+
+export const makeTabCoordinator = Effect.fn('TabCoordinator.make')(function* (
+  options: TabCoordinatorOptions,
+) {
+  const state = yield* EngineState;
+  const tasks = yield* CoordinatorTasks;
+  const rootScope = yield* Scope.Scope;
+  const coalescedOperations = yield* makeResourceCache();
+  const fork = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.forkIn(effect, rootScope);
+  const events = yield* Queue.unbounded<CoordinatorInternalEvent>();
+  const channel = yield* Effect.try({
+    try: () =>
+      typeof BroadcastChannel === 'undefined'
+        ? undefined
+        : new BroadcastChannel(`televecha:${options.key}`),
+    catch: () => undefined,
+  }).pipe(Effect.orElseSucceed(() => undefined));
+  const coordinator = makeTabCoordinatorModule(
+    options,
+    state,
+    tasks,
+    events,
+    channel,
+    rootScope,
+    coalescedOperations,
+  );
+  const onMessage = (event: MessageEvent<unknown>) => {
+    Queue.offerUnsafe(events, { _tag: 'message', input: event.data });
+  };
+  const onPageHide = () => {
+    Queue.offerUnsafe(events, { _tag: 'pagehide' });
+  };
+  channel?.addEventListener('message', onMessage);
+  window.addEventListener('pagehide', onPageHide);
+  yield* Effect.addFinalizer(() =>
+    Effect.gen(function* () {
+      channel?.removeEventListener('message', onMessage);
+      window.removeEventListener('pagehide', onPageHide);
+      yield* coordinator.stop().pipe(Effect.ignore);
+    }),
+  );
+  yield* fork(
+    Stream.fromQueue(events).pipe(
+      Stream.runForEach((event) => coordinator.handleInternalEvent(event).pipe(Effect.ignore)),
+    ),
+  );
+  yield* coordinator.initialize();
+  return coordinator;
+});

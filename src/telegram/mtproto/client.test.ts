@@ -1,48 +1,48 @@
-import { describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { BrowserCrypto, BrowserSocket } from '@effect/platform-browser';
+import { Effect } from 'effect';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { Api, type Tl } from './tl';
-import { createMtprotoClient, telegramRpcErrorMessage } from './client';
-import type { CryptoAdapter } from './crypto';
+import { createMtprotoClient, telegramRpcErrorMessage, type MtprotoClient } from './client';
 import { createMtprotoError } from './errors';
+import type { MtprotoError } from './errors';
+import { Api, type Tl } from './tl';
 
-function cryptoDouble(): CryptoAdapter {
-  return {
-    randomBytes: (length) => new Uint8Array(length),
-    sha1: async () => new Uint8Array(20),
-    sha256: async () => new Uint8Array(32),
-    pbkdf2Sha512: async (_password, _salt, _iterations, bits) => new Uint8Array(bits / 8),
-  };
-}
+const session = {
+  load: Effect.succeed(undefined),
+  save: () => Effect.void,
+  clear: Effect.void,
+};
 
 describe('MTProto client seam', () => {
-  it('invalidates a connection attempt that finishes loading after disconnect', async () => {
-    let finishLoad!: (value: unknown) => void;
-    const load = new Promise<unknown>((resolve) => {
-      finishLoad = resolve;
-    });
-    const connectionFactory = vi.fn();
-    const client = createMtprotoClient({
-      apiId: 1,
-      apiHash: 'hash',
-      session: {
-        load: () => load,
-        save: async () => undefined,
-        clear: async () => undefined,
-      },
-      crypto: cryptoDouble(),
-      connectionFactory,
-    });
+  it.each([
+    { apiId: 0, apiHash: 'hash' },
+    { apiId: 1, apiHash: '   ' },
+    { apiId: 1, apiHash: 'hash', requestRetries: Number.NaN },
+    { apiId: 1, apiHash: 'hash', requestRetries: 1.5 },
+    { apiId: 1, apiHash: 'hash', connectionRetries: -1 },
+    { apiId: 1, apiHash: 'hash', floodSleepLimitSeconds: Number.POSITIVE_INFINITY },
+  ])('rejects invalid client configuration in the error channel', (configuration) =>
+    Effect.runPromise(
+      Effect.scoped(
+        createMtprotoClient({
+          ...configuration,
+          session,
+        }).pipe(
+          Effect.provide(BrowserCrypto.layer),
+          Effect.provide(BrowserSocket.layerWebSocketConstructor),
+          Effect.result,
+          Effect.map((result) => {
+            expect(result).toMatchObject({
+              _tag: 'Failure',
+              failure: { _tag: 'MtprotoError', kind: 'configuration' },
+            });
+          }),
+        ),
+      ),
+    ),
+  );
 
-    const connecting = client.connect();
-    client.disconnect();
-    finishLoad(undefined);
-
-    await expect(connecting).rejects.toThrow('superseded');
-    expect(connectionFactory).not.toHaveBeenCalled();
-    expect(client.isConnected()).toBe(false);
-  });
-
-  it('exposes stable RPC error symbols without requiring an error class', () => {
+  it('exposes stable RPC error symbols without an error class', () => {
     const error = createMtprotoError('rpc', 'password required', {
       code: 401,
       details: { errorMessage: 'SESSION_PASSWORD_NEEDED' },
@@ -51,21 +51,12 @@ describe('MTProto client seam', () => {
     expect(telegramRpcErrorMessage(new Error('other'))).toBeUndefined();
   });
 
-  it('maps generated requests to their generated result types', () => {
-    const client = createMtprotoClient({
-      apiId: 1,
-      apiHash: 'hash',
-      session: {
-        load: async () => undefined,
-        save: async () => undefined,
-        clear: async () => undefined,
-      },
-      crypto: cryptoDouble(),
-    });
+  it('maps generated requests to generated result Effects', () => {
     const request = Api.updates.GetState({});
     type Result = Tl.ResultOf<typeof request>;
-    const result = () => client.invoke(request);
+    const invoke = (client: MtprotoClient) => client.invoke(request);
+    type Invocation = ReturnType<typeof invoke>;
     expectTypeOf<Result>().toEqualTypeOf<Tl.updates.State>();
-    expectTypeOf<ReturnType<typeof result>>().toEqualTypeOf<Promise<Tl.updates.State>>();
+    expectTypeOf<Invocation>().toEqualTypeOf<Effect.Effect<Tl.updates.State, MtprotoError>>();
   });
 });

@@ -1,40 +1,42 @@
+import type { Effect } from 'effect';
+
+import type { MtprotoError } from '../errors';
 import type { TlObject } from '../sender';
 
-export type TransferProgress = ((progress: number) => void) & { isCanceled?: boolean | undefined };
+export type TransferProgress = (progress: number) => Effect.Effect<void>;
 
 export interface FileRpc {
-  readonly currentDcId: number;
-  randomBytes(length: number): Uint8Array;
-  invokeOnDc<Result = unknown>(
+  readonly currentDcId: Effect.Effect<number>;
+  readonly randomBytes: (length: number) => Effect.Effect<Uint8Array, MtprotoError>;
+  readonly invokeOnDc: <Result = unknown>(
     dcId: number,
     request: TlObject,
-    options?: { signal?: AbortSignal },
-  ): Promise<Result>;
-  recoverDc?(dcId: number): Promise<void>;
+  ) => Effect.Effect<Result, MtprotoError>;
+  readonly recoverDc: (dcId: number) => Effect.Effect<void, MtprotoError>;
 }
 
 export interface UploadFileOptions {
-  file: Blob & { name?: string | undefined };
-  workers?: number | undefined;
-  onProgress?: TransferProgress | undefined;
+  readonly file: Blob & { readonly name?: string | undefined };
+  readonly workers?: number | undefined;
+  readonly onProgress?: TransferProgress | undefined;
 }
 
 export interface DownloadFileOptions {
-  dcId: number;
-  fileSize?: number | undefined;
-  workers?: number | undefined;
-  partSizeKb?: number | undefined;
-  start?: number | undefined;
-  end?: number | undefined;
-  progressCallback?: TransferProgress | undefined;
-  isPriority?: boolean | undefined;
-  requestTimeoutMs?: number | undefined;
+  readonly dcId: number;
+  readonly fileSize?: number | undefined;
+  readonly workers?: number | undefined;
+  readonly partSizeKb?: number | undefined;
+  readonly start?: number | undefined;
+  readonly end?: number | undefined;
+  readonly progress?: TransferProgress | undefined;
+  readonly isPriority?: boolean | undefined;
+  readonly requestTimeoutMs?: number | undefined;
 }
 
 export interface DownloadMediaOptions {
-  sizeType?: string | undefined;
-  workers?: number | undefined;
-  start?: number | undefined;
-  end?: number | undefined;
-  progressCallback?: TransferProgress | undefined;
+  readonly sizeType?: string | undefined;
+  readonly workers?: number | undefined;
+  readonly start?: number | undefined;
+  readonly end?: number | undefined;
+  readonly progress?: TransferProgress | undefined;
 }

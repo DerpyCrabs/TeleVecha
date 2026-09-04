@@ -46,10 +46,13 @@ test('marks a visible conversation read when another tab owns a different chat',
     await openReady(second, '/?chat=c%3A202');
     await page.evaluate(async () => {
       const runtime = window.__televechaRuntimes?.get('fixture:default');
-      await runtime?.engine.setActiveConversationVisibility('u:101', {
-        visible: true,
-        atBottom: true,
-      });
+      if (runtime)
+        await runtime.runEffect(
+          runtime.engine.setActiveConversationVisibility('u:101', {
+            visible: true,
+            atBottom: true,
+          }),
+        );
     });
     const readsBefore = (await fixtureStats(page))?.readHistory ?? 0;
     await page.evaluate(() =>
@@ -197,6 +200,10 @@ test('retries a failed read receipt while the conversation remains visible', asy
   await openReady(page, '/?scenario=read-receipt-fails');
   await selectAlice(page);
 
+  await page.waitForTimeout(250);
+  const attemptsDuringBackoff = (await fixtureStats(page))?.readHistoryPeers ?? [];
+  expect(attemptsDuringBackoff.filter((peerId) => peerId === 'u:101')).toHaveLength(1);
+
   await expect
     .poll(
       async () =>
@@ -205,6 +212,51 @@ test('retries a failed read receipt while the conversation remains visible', asy
       { timeout: 2_000 },
     )
     .toBeGreaterThanOrEqual(2);
+});
+
+test('keeps the address bar synchronized when history points to a missing chat', async ({
+  page,
+}) => {
+  await openReady(page, '/?chat=u%3A101');
+  await expect(page.getByTestId('conversation-header')).toContainText('Alice Fixture');
+  await expect(page.getByTestId('message-scroller')).toContainText('Newest message from fixture');
+  await expect
+    .poll(() => page.evaluate(() => new URL(window.location.href).searchParams.get('chat')))
+    .toBe('u:101');
+  await page.waitForTimeout(100);
+
+  await page.evaluate(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('chat', 'u:missing');
+    window.history.pushState({}, '', url);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+
+  await expect(page.getByTestId('conversation-header')).toContainText('Alice Fixture');
+  await expect
+    .poll(() => page.evaluate(() => new URL(window.location.href).searchParams.get('chat')))
+    .toBe('u:101');
+});
+
+test('reports a rejected clipboard write instead of silently closing the menu', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Clipboard.prototype, 'writeText', {
+      configurable: true,
+      value: () =>
+        Promise.reject(new DOMException('Clipboard permission denied', 'NotAllowedError')),
+    });
+  });
+  await openReady(page);
+  await selectAlice(page);
+
+  await page.locator('article[data-message-id="80"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy text' }).click();
+
+  await expect(page.getByRole('alert').filter({ hasText: /copy|clipboard/iu })).toBeVisible({
+    timeout: 1_000,
+  });
 });
 
 test('offers a read-specific retry action after a read receipt failure', async ({ page }) => {
@@ -236,6 +288,7 @@ test('activates Reply with Enter', async ({ page }) => {
 
 test('gives chat rows link semantics instead of a button that ignores Space', async ({ page }) => {
   await openReady(page, '/?chat=u%3A101');
+  await expect(page.getByTestId('message-scroller')).toContainText('Newest message from fixture');
   const release = chatButton(page, /Release Channel/);
   await release.focus();
   await release.press('Space');

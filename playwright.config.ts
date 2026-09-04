@@ -8,6 +8,9 @@ const baseURL = `http://127.0.0.1:${port}`;
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
+  // Fixture scenarios intentionally share their IndexedDB and tab-coordination
+  // namespace, so running them in parallel makes independent tests interfere.
+  workers: 1,
   retries: 0,
   reporter: 'line',
   use: {

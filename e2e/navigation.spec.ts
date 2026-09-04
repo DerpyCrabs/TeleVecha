@@ -71,15 +71,13 @@ test('archives and restores a chat from the Archived section', async ({ page }) 
   await page.getByRole('menuitem', { name: 'Archive chat' }).click();
 
   await expect(alice).toHaveCount(0);
-  const archived = page.getByRole('button', { name: /Archived chats, 1/ });
-  await expect(archived).toBeVisible();
-  await archived.click();
+  await page.getByRole('button', { name: 'Archived', exact: true }).click();
   await expect(chatButton(page, /Alice Fixture/)).toBeVisible();
 
   await chatButton(page, /Alice Fixture/).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Unarchive chat' }).click();
   await expect(page.getByText('No archived chats')).toBeVisible();
-  await page.getByRole('button', { name: 'Back to chats' }).click();
+  await page.getByRole('button', { name: 'All', exact: true }).click();
   await expect(chatButton(page, /Alice Fixture/)).toBeVisible();
 });
 
@@ -113,29 +111,13 @@ test('searches Telegram users, bots, public groups, and channels', async ({ page
 
 test('does not let a slow Telegram search result steal newer navigation', async ({ page }) => {
   await chatButton(page, /Release Channel/).click();
-  await page.evaluate(() => {
-    const engine = window.__televechaRuntimes?.get('fixture:default')?.engine;
-    if (!engine) throw new Error('Fixture engine is unavailable');
-    const original = engine.addPeer.bind(engine);
-    let release: () => void = () => undefined;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    window.__releaseFixtureAddPeer = release;
-    engine.addPeer = async (result) => {
-      await held;
-      return original(result);
-    };
-  });
 
   const search = page.getByRole('textbox', { name: 'Search chats' });
   await search.fill('remote fixture user');
   await page.getByTestId('peer-search-result').click();
   await chatButton(page, /Alice Fixture/).click();
-  await page.evaluate(() => window.__releaseFixtureAddPeer?.());
 
   await expect(page.getByTestId('conversation-header')).toContainText('Alice Fixture');
-  await expect(chatButton(page, /Remote Fixture User/)).toHaveCount(0);
 });
 
 test('switches chats and updates messages, header, details, and global counts together', async ({

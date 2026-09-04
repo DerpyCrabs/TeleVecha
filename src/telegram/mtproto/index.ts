@@ -1,10 +1,11 @@
 export {
   createMtprotoClient,
+  mtprotoClientLayer,
+  MtprotoClientService,
   telegramRpcErrorMessage,
   type CreateMtprotoClientOptions,
   type MtprotoClient,
   type MtprotoClientIdentity,
-  type MtprotoSessionInput,
 } from './client';
 export {
   connectionStateEvent,
@@ -12,7 +13,6 @@ export {
   updateEvent,
   type ConnectionStateEvent,
   type MtprotoClientEvent,
-  type MtprotoEventListener,
   type SessionGapEvent,
   type UpdateEvent,
 } from './events';

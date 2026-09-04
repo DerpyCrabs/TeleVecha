@@ -18,7 +18,6 @@ const $BaseThemeTinted = createTlFactory<Tl.BaseThemeTinted, Tl.BaseThemeTintedF
   'baseThemeTinted',
 );
 const $Birthday = createTlFactory<Tl.Birthday, Tl.BirthdayFields>('birthday');
-const $BotCommand = createTlFactory<Tl.BotCommand, Tl.BotCommandFields>('botCommand');
 const $BotInfo = createTlFactory<Tl.BotInfo, Tl.BotInfoFields>('botInfo');
 const $BotInlineMediaResult = createTlFactory<
   Tl.BotInlineMediaResult,
@@ -50,10 +49,6 @@ const $ChannelParticipantsRecent = createTlFactory<
   Tl.ChannelParticipantsRecentFields
 >('channelParticipantsRecent');
 const $Chat = createTlFactory<Tl.Chat, Tl.ChatFields>('chat');
-const $ChatAdminRights = createTlFactory<Tl.ChatAdminRights, Tl.ChatAdminRightsFields>(
-  'chatAdminRights',
-);
-const $ChatForbidden = createTlFactory<Tl.ChatForbidden, Tl.ChatForbiddenFields>('chatForbidden');
 const $ChatFull = createTlFactory<Tl.ChatFull, Tl.ChatFullFields>('chatFull');
 const $ChatParticipantAdmin = createTlFactory<
   Tl.ChatParticipantAdmin,
@@ -66,14 +61,7 @@ const $ChatParticipantCreator = createTlFactory<
 const $ChatParticipants = createTlFactory<Tl.ChatParticipants, Tl.ChatParticipantsFields>(
   'chatParticipants',
 );
-const $ChatParticipantsForbidden = createTlFactory<
-  Tl.ChatParticipantsForbidden,
-  Tl.ChatParticipantsForbiddenFields
->('chatParticipantsForbidden');
 const $ChatPhoto = createTlFactory<Tl.ChatPhoto, Tl.ChatPhotoFields>('chatPhoto');
-const $ChatPhotoEmpty = createTlFactory<Tl.ChatPhotoEmpty, Tl.ChatPhotoEmptyFields>(
-  'chatPhotoEmpty',
-);
 const $ChatTheme = createTlFactory<Tl.ChatTheme, Tl.ChatThemeFields>('chatTheme');
 const $ChatThemeUniqueGift = createTlFactory<Tl.ChatThemeUniqueGift, Tl.ChatThemeUniqueGiftFields>(
   'chatThemeUniqueGift',
@@ -86,7 +74,6 @@ const $DhGenFail = createTlFactory<Tl.DhGenFail, Tl.DhGenFailFields>('dh_gen_fai
 const $DhGenOk = createTlFactory<Tl.DhGenOk, Tl.DhGenOkFields>('dh_gen_ok');
 const $DhGenRetry = createTlFactory<Tl.DhGenRetry, Tl.DhGenRetryFields>('dh_gen_retry');
 const $Dialog = createTlFactory<Tl.Dialog, Tl.DialogFields>('dialog');
-const $DialogPeer = createTlFactory<Tl.DialogPeer, Tl.DialogPeerFields>('dialogPeer');
 const $Document = createTlFactory<Tl.Document, Tl.DocumentFields>('document');
 const $DocumentAttributeAnimated = createTlFactory<
   Tl.DocumentAttributeAnimated,
@@ -112,7 +99,6 @@ const $DocumentAttributeVideo = createTlFactory<
   Tl.DocumentAttributeVideo,
   Tl.DocumentAttributeVideoFields
 >('documentAttributeVideo');
-const $FolderPeer = createTlFactory<Tl.FolderPeer, Tl.FolderPeerFields>('folderPeer');
 const $GeoPoint = createTlFactory<Tl.GeoPoint, Tl.GeoPointFields>('geoPoint');
 const $GzipPacked = createTlFactory<Tl.GzipPacked, Tl.GzipPackedFields>('gzip_packed');
 const $HttpWait = createTlFactory<Tl.HttpWait, Tl.HttpWaitFields>('http_wait');
@@ -246,13 +232,6 @@ const $KeyboardButtonCallback = createTlFactory<
 >('keyboardButtonCallback');
 const $KeyboardButtonCopy = createTlFactory<Tl.KeyboardButtonCopy, Tl.KeyboardButtonCopyFields>(
   'keyboardButtonCopy',
-);
-const $KeyboardButtonRequestGeoLocation = createTlFactory<
-  Tl.KeyboardButtonRequestGeoLocation,
-  Tl.KeyboardButtonRequestGeoLocationFields
->('keyboardButtonRequestGeoLocation');
-const $KeyboardButtonRow = createTlFactory<Tl.KeyboardButtonRow, Tl.KeyboardButtonRowFields>(
-  'keyboardButtonRow',
 );
 const $KeyboardButtonSwitchInline = createTlFactory<
   Tl.KeyboardButtonSwitchInline,
@@ -424,9 +403,6 @@ const $MessageEntityUnderline = createTlFactory<
 const $MessageEntityUrl = createTlFactory<Tl.MessageEntityUrl, Tl.MessageEntityUrlFields>(
   'messageEntityUrl',
 );
-const $MessageFwdHeader = createTlFactory<Tl.MessageFwdHeader, Tl.MessageFwdHeaderFields>(
-  'messageFwdHeader',
-);
 const $MessageMediaDocument = createTlFactory<
   Tl.MessageMediaDocument,
   Tl.MessageMediaDocumentFields
@@ -578,11 +554,6 @@ const $PageBlockTitle = createTlFactory<Tl.PageBlockTitle, Tl.PageBlockTitleFiel
 const $PageBlockVideo = createTlFactory<Tl.PageBlockVideo, Tl.PageBlockVideoFields>(
   'pageBlockVideo',
 );
-const $PageListItemText = createTlFactory<Tl.PageListItemText, Tl.PageListItemTextFields>(
-  'pageListItemText',
-);
-const $PageTableCell = createTlFactory<Tl.PageTableCell, Tl.PageTableCellFields>('pageTableCell');
-const $PageTableRow = createTlFactory<Tl.PageTableRow, Tl.PageTableRowFields>('pageTableRow');
 const $PasswordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPow = createTlFactory<
   Tl.PasswordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPow,
   Tl.PasswordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPowFields
@@ -601,14 +572,12 @@ const $PeerColorCollectible = createTlFactory<
 const $PeerNotifySettings = createTlFactory<Tl.PeerNotifySettings, Tl.PeerNotifySettingsFields>(
   'peerNotifySettings',
 );
-const $PeerSettings = createTlFactory<Tl.PeerSettings, Tl.PeerSettingsFields>('peerSettings');
 const $PeerUser = createTlFactory<Tl.PeerUser, Tl.PeerUserFields>('peerUser');
 const $Photo = createTlFactory<Tl.Photo, Tl.PhotoFields>('photo');
 const $PingDelayDisconnect = createTlFactory<Tl.PingDelayDisconnect, Tl.PingDelayDisconnectFields>(
   'ping_delay_disconnect',
 );
 const $Pong = createTlFactory<Tl.Pong, Tl.PongFields>('pong');
-const $ReactionCount = createTlFactory<Tl.ReactionCount, Tl.ReactionCountFields>('reactionCount');
 const $ReactionCustomEmoji = createTlFactory<Tl.ReactionCustomEmoji, Tl.ReactionCustomEmojiFields>(
   'reactionCustomEmoji',
 );
@@ -733,6 +702,10 @@ const $UpdateChannelUserTyping = createTlFactory<
   Tl.UpdateChannelUserTyping,
   Tl.UpdateChannelUserTypingFields
 >('updateChannelUserTyping');
+const $UpdateChannelWebPage = createTlFactory<
+  Tl.UpdateChannelWebPage,
+  Tl.UpdateChannelWebPageFields
+>('updateChannelWebPage');
 const $UpdateChatUserTyping = createTlFactory<
   Tl.UpdateChatUserTyping,
   Tl.UpdateChatUserTypingFields
@@ -786,6 +759,9 @@ const $UpdateNotifySettings = createTlFactory<
   Tl.UpdateNotifySettings,
   Tl.UpdateNotifySettingsFields
 >('updateNotifySettings');
+const $UpdatePeerBlocked = createTlFactory<Tl.UpdatePeerBlocked, Tl.UpdatePeerBlockedFields>(
+  'updatePeerBlocked',
+);
 const $UpdatePinnedChannelMessages = createTlFactory<
   Tl.UpdatePinnedChannelMessages,
   Tl.UpdatePinnedChannelMessagesFields
@@ -842,12 +818,16 @@ const $UpdateStickerSetsOrder = createTlFactory<
   Tl.UpdateStickerSetsOrder,
   Tl.UpdateStickerSetsOrderFields
 >('updateStickerSetsOrder');
+const $UpdateUserName = createTlFactory<Tl.UpdateUserName, Tl.UpdateUserNameFields>(
+  'updateUserName',
+);
 const $UpdateUserStatus = createTlFactory<Tl.UpdateUserStatus, Tl.UpdateUserStatusFields>(
   'updateUserStatus',
 );
 const $UpdateUserTyping = createTlFactory<Tl.UpdateUserTyping, Tl.UpdateUserTypingFields>(
   'updateUserTyping',
 );
+const $UpdateWebPage = createTlFactory<Tl.UpdateWebPage, Tl.UpdateWebPageFields>('updateWebPage');
 const $Updates = createTlFactory<Tl.Updates, Tl.UpdatesFields>('updates');
 const $UpdatesCombined = createTlFactory<Tl.UpdatesCombined, Tl.UpdatesCombinedFields>(
   'updatesCombined',
@@ -863,10 +843,6 @@ const $UrlAuthResultDefault = createTlFactory<
   Tl.UrlAuthResultDefault,
   Tl.UrlAuthResultDefaultFields
 >('urlAuthResultDefault');
-const $UrlAuthResultRequest = createTlFactory<
-  Tl.UrlAuthResultRequest,
-  Tl.UrlAuthResultRequestFields
->('urlAuthResultRequest');
 const $User = createTlFactory<Tl.User, Tl.UserFields>('user');
 const $UserFull = createTlFactory<Tl.UserFull, Tl.UserFullFields>('userFull');
 const $UserProfilePhoto = createTlFactory<Tl.UserProfilePhoto, Tl.UserProfilePhotoFields>(
@@ -889,10 +865,6 @@ const $WallPaperSettings = createTlFactory<Tl.WallPaperSettings, Tl.WallPaperSet
   'wallPaperSettings',
 );
 const $WebPage = createTlFactory<Tl.WebPage, Tl.WebPageFields>('webPage');
-const $WebPageEmpty = createTlFactory<Tl.WebPageEmpty, Tl.WebPageEmptyFields>('webPageEmpty');
-const $WebPagePending = createTlFactory<Tl.WebPagePending, Tl.WebPagePendingFields>(
-  'webPagePending',
-);
 const $account_GetChatThemes = createTlFactory<
   Tl.account.GetChatThemes,
   Tl.account.GetChatThemesFields
@@ -955,6 +927,10 @@ const $channels_ChannelParticipants = createTlFactory<
   Tl.channels.ChannelParticipants,
   Tl.channels.ChannelParticipantsFields
 >('channels.channelParticipants');
+const $channels_DeleteChannel = createTlFactory<
+  Tl.channels.DeleteChannel,
+  Tl.channels.DeleteChannelFields
+>('channels.deleteChannel');
 const $channels_DeleteMessages = createTlFactory<
   Tl.channels.DeleteMessages,
   Tl.channels.DeleteMessagesFields
@@ -997,9 +973,6 @@ const $contacts_DeleteContacts = createTlFactory<
   Tl.contacts.DeleteContacts,
   Tl.contacts.DeleteContactsFields
 >('contacts.deleteContacts');
-const $contacts_Found = createTlFactory<Tl.contacts.Found, Tl.contacts.FoundFields>(
-  'contacts.found',
-);
 const $contacts_ResolveUsername = createTlFactory<
   Tl.contacts.ResolveUsername,
   Tl.contacts.ResolveUsernameFields
@@ -1021,10 +994,6 @@ const $messages_AcceptUrlAuth = createTlFactory<
   Tl.messages.AcceptUrlAuth,
   Tl.messages.AcceptUrlAuthFields
 >('messages.acceptUrlAuth');
-const $messages_AffectedHistory = createTlFactory<
-  Tl.messages.AffectedHistory,
-  Tl.messages.AffectedHistoryFields
->('messages.affectedHistory');
 const $messages_AffectedMessages = createTlFactory<
   Tl.messages.AffectedMessages,
   Tl.messages.AffectedMessagesFields
@@ -1033,10 +1002,6 @@ const $messages_AllStickers = createTlFactory<
   Tl.messages.AllStickers,
   Tl.messages.AllStickersFields
 >('messages.allStickers');
-const $messages_BotCallbackAnswer = createTlFactory<
-  Tl.messages.BotCallbackAnswer,
-  Tl.messages.BotCallbackAnswerFields
->('messages.botCallbackAnswer');
 const $messages_BotResults = createTlFactory<Tl.messages.BotResults, Tl.messages.BotResultsFields>(
   'messages.botResults',
 );
@@ -1044,8 +1009,8 @@ const $messages_ChannelMessages = createTlFactory<
   Tl.messages.ChannelMessages,
   Tl.messages.ChannelMessagesFields
 >('messages.channelMessages');
-const $messages_ChatFull = createTlFactory<Tl.messages.ChatFull, Tl.messages.ChatFullFields>(
-  'messages.chatFull',
+const $messages_DeleteChat = createTlFactory<Tl.messages.DeleteChat, Tl.messages.DeleteChatFields>(
+  'messages.deleteChat',
 );
 const $messages_DeleteChatUser = createTlFactory<
   Tl.messages.DeleteChatUser,
@@ -1059,13 +1024,14 @@ const $messages_DeleteMessages = createTlFactory<
   Tl.messages.DeleteMessages,
   Tl.messages.DeleteMessagesFields
 >('messages.deleteMessages');
-const $messages_Dialogs = createTlFactory<Tl.messages.Dialogs, Tl.messages.DialogsFields>(
-  'messages.dialogs',
-);
 const $messages_DialogsNotModified = createTlFactory<
   Tl.messages.DialogsNotModified,
   Tl.messages.DialogsNotModifiedFields
 >('messages.dialogsNotModified');
+const $messages_DialogsSlice = createTlFactory<
+  Tl.messages.DialogsSlice,
+  Tl.messages.DialogsSliceFields
+>('messages.dialogsSlice');
 const $messages_EditMessage = createTlFactory<
   Tl.messages.EditMessage,
   Tl.messages.EditMessageFields
@@ -1111,6 +1077,10 @@ const $messages_GetPeerDialogs = createTlFactory<
   Tl.messages.GetPeerDialogs,
   Tl.messages.GetPeerDialogsFields
 >('messages.getPeerDialogs');
+const $messages_GetPinnedDialogs = createTlFactory<
+  Tl.messages.GetPinnedDialogs,
+  Tl.messages.GetPinnedDialogsFields
+>('messages.getPinnedDialogs');
 const $messages_GetRecentStickers = createTlFactory<
   Tl.messages.GetRecentStickers,
   Tl.messages.GetRecentStickersFields
@@ -1160,10 +1130,6 @@ const $messages_SavedGifs = createTlFactory<Tl.messages.SavedGifs, Tl.messages.S
 const $messages_Search = createTlFactory<Tl.messages.Search, Tl.messages.SearchFields>(
   'messages.search',
 );
-const $messages_SearchCounter = createTlFactory<
-  Tl.messages.SearchCounter,
-  Tl.messages.SearchCounterFields
->('messages.searchCounter');
 const $messages_SearchGlobal = createTlFactory<
   Tl.messages.SearchGlobal,
   Tl.messages.SearchGlobalFields
@@ -1208,10 +1174,6 @@ const $messages_UploadMedia = createTlFactory<
   Tl.messages.UploadMedia,
   Tl.messages.UploadMediaFields
 >('messages.uploadMedia');
-const $updates_ChannelDifference = createTlFactory<
-  Tl.updates.ChannelDifference,
-  Tl.updates.ChannelDifferenceFields
->('updates.channelDifference');
 const $updates_ChannelDifferenceEmpty = createTlFactory<
   Tl.updates.ChannelDifferenceEmpty,
   Tl.updates.ChannelDifferenceEmptyFields
@@ -1220,9 +1182,6 @@ const $updates_ChannelDifferenceTooLong = createTlFactory<
   Tl.updates.ChannelDifferenceTooLong,
   Tl.updates.ChannelDifferenceTooLongFields
 >('updates.channelDifferenceTooLong');
-const $updates_Difference = createTlFactory<Tl.updates.Difference, Tl.updates.DifferenceFields>(
-  'updates.difference',
-);
 const $updates_DifferenceEmpty = createTlFactory<
   Tl.updates.DifferenceEmpty,
   Tl.updates.DifferenceEmptyFields
@@ -1263,9 +1222,6 @@ const $users_GetFullUser = createTlFactory<Tl.users.GetFullUser, Tl.users.GetFul
 const $users_GetUsers = createTlFactory<Tl.users.GetUsers, Tl.users.GetUsersFields>(
   'users.getUsers',
 );
-const $users_UserFull = createTlFactory<Tl.users.UserFull, Tl.users.UserFullFields>(
-  'users.userFull',
-);
 
 export const Api = Object.freeze({
   BadMsgNotification: $BadMsgNotification,
@@ -1275,7 +1231,6 @@ export const Api = Object.freeze({
   BaseThemeNight: $BaseThemeNight,
   BaseThemeTinted: $BaseThemeTinted,
   Birthday: $Birthday,
-  BotCommand: $BotCommand,
   BotInfo: $BotInfo,
   BotInlineMediaResult: $BotInlineMediaResult,
   Channel: $Channel,
@@ -1287,15 +1242,11 @@ export const Api = Object.freeze({
   ChannelParticipantsAdmins: $ChannelParticipantsAdmins,
   ChannelParticipantsRecent: $ChannelParticipantsRecent,
   Chat: $Chat,
-  ChatAdminRights: $ChatAdminRights,
-  ChatForbidden: $ChatForbidden,
   ChatFull: $ChatFull,
   ChatParticipantAdmin: $ChatParticipantAdmin,
   ChatParticipantCreator: $ChatParticipantCreator,
   ChatParticipants: $ChatParticipants,
-  ChatParticipantsForbidden: $ChatParticipantsForbidden,
   ChatPhoto: $ChatPhoto,
-  ChatPhotoEmpty: $ChatPhotoEmpty,
   ChatTheme: $ChatTheme,
   ChatThemeUniqueGift: $ChatThemeUniqueGift,
   ClientDHInnerData: $ClientDHInnerData,
@@ -1304,7 +1255,6 @@ export const Api = Object.freeze({
   DhGenOk: $DhGenOk,
   DhGenRetry: $DhGenRetry,
   Dialog: $Dialog,
-  DialogPeer: $DialogPeer,
   Document: $Document,
   DocumentAttributeAnimated: $DocumentAttributeAnimated,
   DocumentAttributeAudio: $DocumentAttributeAudio,
@@ -1312,7 +1262,6 @@ export const Api = Object.freeze({
   DocumentAttributeImageSize: $DocumentAttributeImageSize,
   DocumentAttributeSticker: $DocumentAttributeSticker,
   DocumentAttributeVideo: $DocumentAttributeVideo,
-  FolderPeer: $FolderPeer,
   GeoPoint: $GeoPoint,
   GzipPacked: $GzipPacked,
   HttpWait: $HttpWait,
@@ -1360,8 +1309,6 @@ export const Api = Object.freeze({
   KeyboardButton: $KeyboardButton,
   KeyboardButtonCallback: $KeyboardButtonCallback,
   KeyboardButtonCopy: $KeyboardButtonCopy,
-  KeyboardButtonRequestGeoLocation: $KeyboardButtonRequestGeoLocation,
-  KeyboardButtonRow: $KeyboardButtonRow,
   KeyboardButtonSwitchInline: $KeyboardButtonSwitchInline,
   KeyboardButtonUrl: $KeyboardButtonUrl,
   KeyboardButtonUrlAuth: $KeyboardButtonUrlAuth,
@@ -1407,7 +1354,6 @@ export const Api = Object.freeze({
   MessageEntityTextUrl: $MessageEntityTextUrl,
   MessageEntityUnderline: $MessageEntityUnderline,
   MessageEntityUrl: $MessageEntityUrl,
-  MessageFwdHeader: $MessageFwdHeader,
   MessageMediaDocument: $MessageMediaDocument,
   MessageMediaPhoto: $MessageMediaPhoto,
   MessageMediaWebPage: $MessageMediaWebPage,
@@ -1463,9 +1409,6 @@ export const Api = Object.freeze({
   PageBlockThinking: $PageBlockThinking,
   PageBlockTitle: $PageBlockTitle,
   PageBlockVideo: $PageBlockVideo,
-  PageListItemText: $PageListItemText,
-  PageTableCell: $PageTableCell,
-  PageTableRow: $PageTableRow,
   PasswordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPow:
     $PasswordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPow,
   PasswordKdfAlgoUnknown: $PasswordKdfAlgoUnknown,
@@ -1474,13 +1417,11 @@ export const Api = Object.freeze({
   PeerColor: $PeerColor,
   PeerColorCollectible: $PeerColorCollectible,
   PeerNotifySettings: $PeerNotifySettings,
-  PeerSettings: $PeerSettings,
   PeerUser: $PeerUser,
   Photo: $Photo,
   PingDelayDisconnect: $PingDelayDisconnect,
   Pong: $Pong,
   PQInnerDataDc: $PQInnerDataDc,
-  ReactionCount: $ReactionCount,
   ReactionCustomEmoji: $ReactionCustomEmoji,
   ReactionEmoji: $ReactionEmoji,
   ReplyInlineMarkup: $ReplyInlineMarkup,
@@ -1539,6 +1480,7 @@ export const Api = Object.freeze({
   UpdateBotCommands: $UpdateBotCommands,
   UpdateChannelTooLong: $UpdateChannelTooLong,
   UpdateChannelUserTyping: $UpdateChannelUserTyping,
+  UpdateChannelWebPage: $UpdateChannelWebPage,
   UpdateChatUserTyping: $UpdateChatUserTyping,
   UpdateDeleteChannelMessages: $UpdateDeleteChannelMessages,
   UpdateDeleteMessages: $UpdateDeleteMessages,
@@ -1554,6 +1496,7 @@ export const Api = Object.freeze({
   UpdateNewMessage: $UpdateNewMessage,
   UpdateNewStickerSet: $UpdateNewStickerSet,
   UpdateNotifySettings: $UpdateNotifySettings,
+  UpdatePeerBlocked: $UpdatePeerBlocked,
   UpdatePinnedChannelMessages: $UpdatePinnedChannelMessages,
   UpdatePinnedDialogs: $UpdatePinnedDialogs,
   UpdatePinnedMessages: $UpdatePinnedMessages,
@@ -1573,11 +1516,12 @@ export const Api = Object.freeze({
   UpdateStickerSets: $UpdateStickerSets,
   UpdateStickerSetsOrder: $UpdateStickerSetsOrder,
   UpdatesTooLong: $UpdatesTooLong,
+  UpdateUserName: $UpdateUserName,
   UpdateUserStatus: $UpdateUserStatus,
   UpdateUserTyping: $UpdateUserTyping,
+  UpdateWebPage: $UpdateWebPage,
   UrlAuthResultAccepted: $UrlAuthResultAccepted,
   UrlAuthResultDefault: $UrlAuthResultDefault,
-  UrlAuthResultRequest: $UrlAuthResultRequest,
   User: $User,
   UserFull: $UserFull,
   UserProfilePhoto: $UserProfilePhoto,
@@ -1588,8 +1532,6 @@ export const Api = Object.freeze({
   WallPaperNoFile: $WallPaperNoFile,
   WallPaperSettings: $WallPaperSettings,
   WebPage: $WebPage,
-  WebPageEmpty: $WebPageEmpty,
-  WebPagePending: $WebPagePending,
   account: Object.freeze({
     GetChatThemes: $account_GetChatThemes,
     GetNotifySettings: $account_GetNotifySettings,
@@ -1615,6 +1557,7 @@ export const Api = Object.freeze({
   channels: Object.freeze({
     ChannelParticipant: $channels_ChannelParticipant,
     ChannelParticipants: $channels_ChannelParticipants,
+    DeleteChannel: $channels_DeleteChannel,
     DeleteMessages: $channels_DeleteMessages,
     GetChannels: $channels_GetChannels,
     GetFullChannel: $channels_GetFullChannel,
@@ -1628,7 +1571,6 @@ export const Api = Object.freeze({
     AddContact: $contacts_AddContact,
     Block: $contacts_Block,
     DeleteContacts: $contacts_DeleteContacts,
-    Found: $contacts_Found,
     ResolveUsername: $contacts_ResolveUsername,
     Search: $contacts_Search,
     Unblock: $contacts_Unblock,
@@ -1641,18 +1583,16 @@ export const Api = Object.freeze({
   }),
   messages: Object.freeze({
     AcceptUrlAuth: $messages_AcceptUrlAuth,
-    AffectedHistory: $messages_AffectedHistory,
     AffectedMessages: $messages_AffectedMessages,
     AllStickers: $messages_AllStickers,
-    BotCallbackAnswer: $messages_BotCallbackAnswer,
     BotResults: $messages_BotResults,
     ChannelMessages: $messages_ChannelMessages,
-    ChatFull: $messages_ChatFull,
+    DeleteChat: $messages_DeleteChat,
     DeleteChatUser: $messages_DeleteChatUser,
     DeleteHistory: $messages_DeleteHistory,
     DeleteMessages: $messages_DeleteMessages,
-    Dialogs: $messages_Dialogs,
     DialogsNotModified: $messages_DialogsNotModified,
+    DialogsSlice: $messages_DialogsSlice,
     EditMessage: $messages_EditMessage,
     ForwardMessages: $messages_ForwardMessages,
     GetAllStickers: $messages_GetAllStickers,
@@ -1665,6 +1605,7 @@ export const Api = Object.freeze({
     GetInlineBotResults: $messages_GetInlineBotResults,
     GetMessages: $messages_GetMessages,
     GetPeerDialogs: $messages_GetPeerDialogs,
+    GetPinnedDialogs: $messages_GetPinnedDialogs,
     GetRecentStickers: $messages_GetRecentStickers,
     GetSavedGifs: $messages_GetSavedGifs,
     GetSearchCounters: $messages_GetSearchCounters,
@@ -1678,7 +1619,6 @@ export const Api = Object.freeze({
     RequestUrlAuth: $messages_RequestUrlAuth,
     SavedGifs: $messages_SavedGifs,
     Search: $messages_Search,
-    SearchCounter: $messages_SearchCounter,
     SearchGlobal: $messages_SearchGlobal,
     SendInlineBotResult: $messages_SendInlineBotResult,
     SendMedia: $messages_SendMedia,
@@ -1693,10 +1633,8 @@ export const Api = Object.freeze({
     UploadMedia: $messages_UploadMedia,
   }),
   updates: Object.freeze({
-    ChannelDifference: $updates_ChannelDifference,
     ChannelDifferenceEmpty: $updates_ChannelDifferenceEmpty,
     ChannelDifferenceTooLong: $updates_ChannelDifferenceTooLong,
-    Difference: $updates_Difference,
     DifferenceEmpty: $updates_DifferenceEmpty,
     DifferenceSlice: $updates_DifferenceSlice,
     DifferenceTooLong: $updates_DifferenceTooLong,
@@ -1713,6 +1651,5 @@ export const Api = Object.freeze({
   users: Object.freeze({
     GetFullUser: $users_GetFullUser,
     GetUsers: $users_GetUsers,
-    UserFull: $users_UserFull,
   }),
 });

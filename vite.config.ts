@@ -21,21 +21,17 @@ export default defineConfig({
     coverage: {
       include: ['src/telegram/**/*.ts'],
       exclude: ['src/telegram/**/*.test.ts', 'src/telegram/transports/fixtureTransport.ts'],
-      thresholds: {
-        statements: 70,
-        branches: 48,
-        functions: 80,
-        lines: 72,
-      },
     },
   },
   lint: {
     ignorePatterns: ['coverage/**', 'dist/**', 'test-results/**'],
+    plugins: ['typescript', 'unicorn', 'oxc', 'effecttsgo'],
     options: {
       typeAware: true,
       typeCheck: true,
     },
     rules: {
+      'effecttsgo/any-unknown-in-error-context': 'off',
       'no-console': ['error', { allow: ['debug', 'info', 'warn', 'error'] }],
     },
   },

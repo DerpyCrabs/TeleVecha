@@ -3,7 +3,7 @@ export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
 export interface DiagnosticEvent {
   code?: string;
   level: DiagnosticLevel;
-  area: 'auth' | 'sync' | 'transport' | 'cache' | 'outbox';
+  area: 'auth' | 'sync' | 'transport' | 'cache' | 'outbox' | 'coordination';
   message: string;
   details?: Record<string, unknown>;
 }

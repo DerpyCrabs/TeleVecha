@@ -1,4 +1,6 @@
 import type { RichMessage } from '../domain/richMessage';
+import type { Effect, Stream } from 'effect';
+import type { MtprotoError } from './mtproto/errors';
 
 export interface SyncCursor {
   pts: number;
@@ -12,6 +14,29 @@ export interface TelegramPeer {
   accessHash?: string | undefined;
   kind: 'user' | 'group' | 'channel';
 }
+
+export interface TelegramChatPermissions {
+  canSendMessages: boolean;
+  canSendMedia: boolean;
+  canSendStickers: boolean;
+  canSendGifs: boolean;
+  canPinMessages: boolean;
+  canEditMessages: boolean;
+  canDeleteMessages: boolean;
+  canDeleteForEveryone: boolean;
+  canDeleteChat: boolean;
+  canDeleteChannel: boolean;
+  canLeave: boolean;
+  canViewMembers: boolean;
+  memberCount?: number | undefined;
+}
+
+export type TelegramDeleteDialogAction =
+  | 'clear-for-me'
+  | 'delete-for-everyone'
+  | 'leave'
+  | 'delete-chat'
+  | 'delete-channel';
 
 export interface TelegramDialog {
   peer: TelegramPeer;
@@ -29,6 +54,8 @@ export interface TelegramDialog {
   readOutboxMaxId: number;
   muted: boolean;
   pinned: boolean;
+  pinnedOrder?: number | undefined;
+  permissions?: TelegramChatPermissions | undefined;
   bot?: boolean | undefined;
   hasAvatar: boolean;
   avatarId?: string | undefined;
@@ -48,6 +75,7 @@ export interface TelegramPeerSearchResult {
   isContact: boolean;
   hasAvatar: boolean;
   avatarId?: string | undefined;
+  permissions?: TelegramChatPermissions | undefined;
 }
 
 export interface TelegramUserDetails {
@@ -80,9 +108,19 @@ export interface TelegramGroupMember {
   presence?: 'online' | 'recently' | 'offline' | undefined;
 }
 
+export interface TelegramGroupMemberPage {
+  members: TelegramGroupMember[];
+  totalCount: number;
+  hasMore: boolean;
+  nextOffset?: number | undefined;
+}
+
 export interface TelegramMessage {
   id: number;
   peerId: string;
+  peer?: TelegramPeer | undefined;
+  peerTitle?: string | undefined;
+  permissions?: TelegramChatPermissions | undefined;
   senderId: string;
   senderName?: string | undefined;
   senderHasAvatar?: boolean | undefined;
@@ -228,11 +266,15 @@ export interface TelegramLink {
 
 export interface TelegramLinkPreview {
   url: string;
+  webPageId?: string | undefined;
+  type?: string | undefined;
+  hasEmbed?: boolean | undefined;
   siteName?: string | undefined;
   title?: string | undefined;
   description?: string | undefined;
   hasPhoto?: boolean | undefined;
   photoSize?: 'small' | 'large' | undefined;
+  media?: (TelegramMedia & { kind: 'video' | 'animation' }) | undefined;
 }
 
 export interface TelegramTextFormat {
@@ -264,6 +306,7 @@ export interface TelegramSearchPage {
   messages: TelegramMessage[];
   hasMore: boolean;
   nextOffset?: TelegramSearchOffset | undefined;
+  channelPts?: number | undefined;
 }
 
 export interface TelegramSearchOffset {
@@ -282,6 +325,11 @@ export interface TelegramResourceInvalidation {
   kind: TelegramResourceKind;
   peerId?: string | undefined;
 }
+export type TelegramConversationEvent =
+  | { type: 'message-upsert'; message: TelegramMessage; insertIfMissing?: boolean }
+  | { type: 'messages-delete'; peerId?: string | undefined; messageIds: number[] }
+  | { type: 'pinned-messages'; peerId: string; messages: TelegramMessage[] }
+  | { type: 'history-reset'; peerId?: string | undefined };
 export type TelegramActivityKind = 'typing' | 'uploading' | 'recording' | 'choosing-sticker';
 
 export interface TelegramActivity {
@@ -293,6 +341,11 @@ export interface TelegramActivity {
 export interface TelegramReplyTarget {
   messageId: number;
   quoteText?: string | undefined;
+}
+
+export interface TelegramDraftDetails {
+  formats: TelegramTextFormat[];
+  reply?: TelegramReplyTarget & { preview: string };
 }
 
 export interface TelegramReaction {
@@ -334,8 +387,10 @@ export interface TelegramMedia {
 }
 
 export type TelegramTransferProgress = ((progress: number) => void) & {
-  isCanceled?: boolean | undefined;
+  isCanceled?: boolean;
 };
+
+export type TelegramTransportProgress = (progress: number) => Effect.Effect<void>;
 
 export interface TelegramDownloadOptions {
   progress?: TelegramTransferProgress | undefined;
@@ -343,6 +398,11 @@ export interface TelegramDownloadOptions {
 }
 
 export type TransportUpdate =
+  | {
+      type: 'message-id-assigned';
+      messageId: number;
+      randomId: string;
+    }
   | {
       type: 'new-message';
       pts: number;
@@ -356,6 +416,15 @@ export type TransportUpdate =
       ptsCount: number;
       channelScoped?: boolean | undefined;
       message: TelegramMessage;
+    }
+  | {
+      type: 'web-page-updated';
+      pts: number;
+      ptsCount: number;
+      channelScoped?: boolean | undefined;
+      peerId?: string | undefined;
+      webPageId: string;
+      linkPreview: TelegramLinkPreview;
     }
   | {
       type: 'delete-messages';
@@ -497,6 +566,12 @@ export interface HistoryPage {
   messages: TelegramMessage[];
   hasOlder: boolean;
   nextBeforeMessageId?: number | undefined;
+  channelPts?: number | undefined;
+}
+
+export interface HistoryAroundPage {
+  messages: TelegramMessage[];
+  channelPts?: number | undefined;
 }
 
 export interface SharedMediaCounts {
@@ -574,140 +649,164 @@ export interface TelegramChatAppearance {
   wallpaper?: TelegramWallpaper | undefined;
 }
 
+export type TelegramTransportError = MtprotoError;
+type TransportEffect<Value> = Effect.Effect<Value, TelegramTransportError>;
+
 export interface TelegramTransport {
-  connect(credentials: TelegramCredentials): Promise<void>;
-  disconnect(): Promise<void>;
-  logOut(): Promise<void>;
-  isAuthorized(): Promise<boolean>;
-  getAuthorizedAccountId(): Promise<string>;
-  requestCode(phoneNumber: string): Promise<{ isCodeViaApp: boolean }>;
-  submitCode(code: string): Promise<'authorized' | 'password-required' | 'sign-up-required'>;
-  submitPassword(password: string): Promise<void>;
-  getCurrentState(): Promise<SyncCursor>;
-  getDifference(cursor: SyncCursor, totalLimit: number): Promise<DifferenceResult>;
+  connect(credentials: TelegramCredentials): TransportEffect<void>;
+  disconnect(): TransportEffect<void>;
+  logOut(): TransportEffect<void>;
+  isAuthorized(): TransportEffect<boolean>;
+  getAuthorizedAccountId(): TransportEffect<string>;
+  requestCode(phoneNumber: string): TransportEffect<{ isCodeViaApp: boolean }>;
+  submitCode(
+    code: string,
+  ): TransportEffect<'authorized' | 'password-required' | 'sign-up-required'>;
+  submitPassword(password: string): TransportEffect<void>;
+  getCurrentState(): TransportEffect<SyncCursor>;
+  getDifference(cursor: SyncCursor, totalLimit: number): TransportEffect<DifferenceResult>;
   getChannelDifference(
     peer: TelegramPeer,
     pts: number,
     totalLimit: number,
-  ): Promise<ChannelDifferenceResult>;
-  getDialogs(limit: number): Promise<DialogPage>;
-  getDialog?(peer: TelegramPeer): Promise<TelegramDialog | undefined>;
-  searchPeers(query: string, limit?: number): Promise<TelegramPeerSearchResult[]>;
-  getHistory(peer: TelegramPeer, limit: number, beforeMessageId?: number): Promise<HistoryPage>;
+  ): TransportEffect<ChannelDifferenceResult>;
+  getDialogs(limit: number): TransportEffect<DialogPage>;
+  getDialog?(peer: TelegramPeer): TransportEffect<TelegramDialog | undefined>;
+  searchPeers(query: string, limit?: number): TransportEffect<TelegramPeerSearchResult[]>;
+  getHistory(
+    peer: TelegramPeer,
+    limit: number,
+    beforeMessageId?: number,
+  ): TransportEffect<HistoryPage>;
   getHistoryAround?(
     peer: TelegramPeer,
     messageId: number,
     limit: number,
-  ): Promise<TelegramMessage[]>;
-  readHistory(peer: TelegramPeer, maxMessageId: number): Promise<TransportMutationResult>;
-  getReadOutboxMaxId?(peer: TelegramPeer): Promise<number>;
-  getSharedMediaCounts(peer: TelegramPeer): Promise<SharedMediaCounts>;
+  ): TransportEffect<HistoryAroundPage>;
+  readHistory(peer: TelegramPeer, maxMessageId: number): TransportEffect<TransportMutationResult>;
+  getReadOutboxMaxId?(peer: TelegramPeer): TransportEffect<number>;
+  getSharedMediaCounts(peer: TelegramPeer): TransportEffect<SharedMediaCounts>;
   getSharedMedia(
     peer: TelegramPeer,
     kind: SharedMediaKind,
     limit: number,
     offset?: TelegramSearchOffset,
-  ): Promise<TelegramSearchPage>;
+  ): TransportEffect<TelegramSearchPage>;
   searchMessages(
     query: string,
     peer?: TelegramPeer,
     limit?: number,
     offset?: TelegramSearchOffset,
-  ): Promise<TelegramSearchPage>;
-  getPinnedMessages(peer: TelegramPeer): Promise<TelegramMessage[]>;
-  getUserDetails(peer: TelegramPeer): Promise<TelegramUserDetails>;
+  ): TransportEffect<TelegramSearchPage>;
+  getPinnedMessages(peer: TelegramPeer): TransportEffect<TelegramMessage[]>;
+  getUserDetails(peer: TelegramPeer): TransportEffect<TelegramUserDetails>;
   updateContact?(
     peer: TelegramPeer,
     firstName: string,
     lastName: string,
     phone: string,
-  ): Promise<void>;
-  deleteContact?(peer: TelegramPeer): Promise<void>;
-  getGroupMembers?(peer: TelegramPeer, limit?: number): Promise<TelegramGroupMember[]>;
-  setMuted(peer: TelegramPeer, muted: boolean): Promise<void>;
-  setBlocked(peer: TelegramPeer, blocked: boolean): Promise<void>;
-  setPinnedDialog(peer: TelegramPeer, pinned: boolean): Promise<void>;
-  setArchived(peer: TelegramPeer, archived: boolean): Promise<TransportMutationResult>;
-  deleteDialog(peer: TelegramPeer): Promise<TransportMutationResult>;
+  ): TransportEffect<void>;
+  deleteContact?(peer: TelegramPeer): TransportEffect<void>;
+  getGroupMembers?(
+    peer: TelegramPeer,
+    limit?: number,
+    offset?: number,
+  ): TransportEffect<TelegramGroupMemberPage>;
+  setMuted(peer: TelegramPeer, muted: boolean): TransportEffect<void>;
+  setBlocked(peer: TelegramPeer, blocked: boolean): TransportEffect<void>;
+  setPinnedDialog(peer: TelegramPeer, pinned: boolean): TransportEffect<void>;
+  setArchived(peer: TelegramPeer, archived: boolean): TransportEffect<TransportMutationResult>;
+  deleteDialog(
+    peer: TelegramPeer,
+    action?: TelegramDeleteDialogAction,
+  ): TransportEffect<TransportMutationResult>;
   setPinnedMessage(
     peer: TelegramPeer,
     messageId: number,
     pinned: boolean,
-  ): Promise<TransportMutationResult>;
-  setTyping(peer: TelegramPeer, kind?: TelegramActivityKind): Promise<void>;
+  ): TransportEffect<TransportMutationResult>;
+  setTyping(peer: TelegramPeer, kind?: TelegramActivityKind): TransportEffect<void>;
   sendText(
     peer: TelegramPeer,
     text: string,
     randomId: string,
     reply?: TelegramReplyTarget,
     formats?: TelegramTextFormat[],
-  ): Promise<SendTextResult>;
-  sendFile(peer: TelegramPeer, file: File, options: SendFileOptions): Promise<SendTextResult>;
+  ): TransportEffect<SendTextResult>;
+  sendFile(
+    peer: TelegramPeer,
+    file: File,
+    options: SendFileOptions,
+  ): TransportEffect<SendTextResult>;
   sendAlbum(
     peer: TelegramPeer,
     attachments: SendAlbumAttachment[],
     options: SendAlbumOptions,
-  ): Promise<SendAlbumResult>;
-  downloadMedia(message: TelegramMessage, options?: TelegramDownloadOptions): Promise<Blob>;
-  downloadAvatar(peer: TelegramPeer): Promise<Blob | undefined>;
-  getThemes?(): Promise<TelegramTheme[]>;
-  getWallpapers?(): Promise<TelegramWallpaper[]>;
-  getChatAppearance?(peer: TelegramPeer): Promise<TelegramChatAppearance | undefined>;
-  downloadWallpaper?(wallpaperId: string): Promise<Blob>;
-  getRecentStickers(): Promise<TelegramSticker[]>;
-  getStickerPacks(): Promise<TelegramStickerPack[]>;
-  getSavedGifs(): Promise<TelegramSticker[]>;
-  searchGifs?(peer: TelegramPeer, query: string): Promise<TelegramSticker[]>;
-  downloadSticker(sticker: TelegramSticker): Promise<Blob>;
-  downloadCustomEmoji?(documentId: string): Promise<Blob>;
-  getBotCommands?(peer: TelegramPeer): Promise<TelegramBotCommand[]>;
-  startBot?(peer: TelegramPeer, startParam: string, randomId: string): Promise<SendTextResult>;
+  ): TransportEffect<SendAlbumResult>;
+  downloadMedia(message: TelegramMessage, options?: TelegramDownloadOptions): TransportEffect<Blob>;
+  downloadAvatar(peer: TelegramPeer): TransportEffect<Blob | undefined>;
+  getThemes?(): TransportEffect<TelegramTheme[]>;
+  getWallpapers?(): TransportEffect<TelegramWallpaper[]>;
+  getChatAppearance?(peer: TelegramPeer): TransportEffect<TelegramChatAppearance | undefined>;
+  downloadWallpaper?(wallpaperId: string): TransportEffect<Blob>;
+  getRecentStickers(): TransportEffect<TelegramSticker[]>;
+  getStickerPacks(): TransportEffect<TelegramStickerPack[]>;
+  getSavedGifs(): TransportEffect<TelegramSticker[]>;
+  searchGifs?(peer: TelegramPeer, query: string): TransportEffect<TelegramSticker[]>;
+  downloadSticker(sticker: TelegramSticker): TransportEffect<Blob>;
+  downloadCustomEmoji?(documentId: string): TransportEffect<Blob>;
+  getBotCommands?(peer: TelegramPeer): TransportEffect<TelegramBotCommand[]>;
+  startBot?(
+    peer: TelegramPeer,
+    startParam: string,
+    randomId: string,
+  ): TransportEffect<SendTextResult>;
   answerBotCallback?(
     peer: TelegramPeer,
     messageId: number,
     data: number[],
-  ): Promise<TelegramBotCallbackResult>;
+  ): TransportEffect<TelegramBotCallbackResult>;
   requestUrlAuth?(
     peer: TelegramPeer,
     messageId: number,
     buttonId: number,
-  ): Promise<TelegramUrlAuthResult>;
+  ): TransportEffect<TelegramUrlAuthResult>;
   acceptUrlAuth?(
     peer: TelegramPeer,
     messageId: number,
     buttonId: number,
-    options?: TelegramUrlAuthAcceptOptions,
-  ): Promise<TelegramUrlAuthResult>;
+    acceptOptions?: TelegramUrlAuthAcceptOptions,
+  ): TransportEffect<TelegramUrlAuthResult>;
   sendSticker(
     peer: TelegramPeer,
     sticker: TelegramSticker,
     randomId: string,
     reply?: TelegramReplyTarget,
-  ): Promise<SendTextResult>;
+  ): TransportEffect<SendTextResult>;
   setReaction(
     peer: TelegramPeer,
     messageId: number,
     emoji?: string,
-  ): Promise<TransportMutationResult>;
+  ): TransportEffect<TransportMutationResult>;
   deleteMessages(
     peer: TelegramPeer,
     messageIds: number[],
     revoke: boolean,
-  ): Promise<TransportMutationResult>;
+  ): TransportEffect<TransportMutationResult>;
   editMessage(
     peer: TelegramPeer,
     messageId: number,
     text: string,
     formats?: TelegramTextFormat[],
     replacement?: EditMediaOptions,
-  ): Promise<EditMessageResult>;
+  ): TransportEffect<EditMessageResult>;
   forwardMessage(
     fromPeer: TelegramPeer,
     toPeer: TelegramPeer,
     messageId: number,
     randomId: string,
-  ): Promise<SendTextResult>;
-  subscribe(listener: (batch: TransportUpdateBatch) => void): () => void;
+  ): TransportEffect<SendTextResult>;
+  readonly updates: Stream.Stream<TransportUpdateBatch, TelegramTransportError>;
 }
 
 export type OutgoingAttachmentMode = 'media' | 'file';
@@ -719,7 +818,7 @@ export interface SendFileOptions {
   sendAs: OutgoingAttachmentMode;
   reply?: TelegramReplyTarget | undefined;
   formats?: TelegramTextFormat[] | undefined;
-  onProgress?: ((progress: number) => void) | undefined;
+  onProgress?: TelegramTransportProgress | undefined;
 }
 
 export interface SendAlbumAttachment {
@@ -732,7 +831,7 @@ export interface SendAlbumOptions {
   caption: string;
   reply?: TelegramReplyTarget | undefined;
   formats?: TelegramTextFormat[] | undefined;
-  onProgress?: ((progress: number) => void) | undefined;
+  onProgress?: TelegramTransportProgress | undefined;
 }
 
 export interface EditMediaOptions {
@@ -771,6 +870,7 @@ export interface PendingSend {
     | {
         fromPeer: TelegramPeer;
         messageId: number;
+        mediaKind?: TelegramMedia['kind'] | undefined;
       }
     | undefined;
   botStart?:
@@ -799,27 +899,33 @@ export interface TelegramHistoryGap {
   newerMinMessageId: number;
 }
 
-export interface EngineSnapshot {
+export interface AccountSnapshot {
   phase: 'idle' | 'connecting' | 'unauthorized' | 'syncing' | 'ready' | 'error';
   sync: 'current' | 'recovering' | 'stale';
   online: boolean;
   dialogs: TelegramDialog[];
+  drafts: Record<string, string>;
+  draftDetails: Record<string, TelegramDraftDetails>;
+  pending: PendingSend[];
+  activities: TelegramActivity[];
+  authStep?: 'phone' | 'code' | 'password' | undefined;
+  codeViaApp?: boolean | undefined;
+  operationError?: string | undefined;
+  error?: string | undefined;
+  requiresReload?: boolean | undefined;
+}
+
+export interface ConversationViewSnapshot {
   activePeerId?: string | undefined;
   messages: TelegramMessage[];
-  drafts: Record<string, string>;
-  pending: PendingSend[];
   loadingMessages: boolean;
   hasOlderMessages: boolean;
   loadingOlderMessages: boolean;
   sharedMediaCounts?: SharedMediaCounts | undefined;
   pinnedMessages: TelegramMessage[];
   historyGaps: TelegramHistoryGap[];
-  activities: TelegramActivity[];
-  authStep?: 'phone' | 'code' | 'password' | undefined;
-  codeViaApp?: boolean | undefined;
   historyError?: string | undefined;
   historyRetryAt?: number | undefined;
-  operationError?: string | undefined;
-  error?: string | undefined;
-  requiresReload?: boolean | undefined;
 }
+
+export interface EngineSnapshot extends AccountSnapshot, ConversationViewSnapshot {}

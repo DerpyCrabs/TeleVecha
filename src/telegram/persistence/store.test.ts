@@ -1,8 +1,9 @@
 import 'fake-indexeddb/auto';
 
-import { describe, expect, it } from 'vitest';
+import { Effect, Exit, Scope } from 'effect';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { IndexedDbCacheStore } from './store';
+import { createIndexedDbCacheStore } from './store';
 import type { CachedDialog, CachedMessage, PendingSend, TelegramPeer } from '../types';
 
 const peer: TelegramPeer = { id: 'peer-1', kind: 'user' };
@@ -11,6 +12,18 @@ const secondPeer: TelegramPeer = { id: 'peer-2', kind: 'group' };
 function databaseName() {
   return `televecha-test-${crypto.randomUUID()}`;
 }
+
+const scopes: Scope.Closeable[] = [];
+const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
+async function openStore(name: string) {
+  const scope = await run(Scope.make());
+  scopes.push(scope);
+  return run(createIndexedDbCacheStore(name).pipe(Scope.provide(scope)));
+}
+
+afterEach(async () => {
+  await Promise.all(scopes.splice(0).map((scope) => run(Scope.close(scope, Exit.void))));
+});
 
 function cachedDialog(target: TelegramPeer, title: string): CachedDialog {
   return {
@@ -54,18 +67,18 @@ function pending(id: string, createdAt: number): PendingSend {
 
 describe('IndexedDbCacheStore', () => {
   it('captures an atomic logical checkpoint without session or file bytes', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.saveTransportSession({ authKey: 'must-not-leave-the-browser' });
-    await store.claimAccount('account-secret');
-    await store.saveCursor({ pts: 4, qts: 3, date: 2, seq: 1 });
-    await store.beginNewEpoch();
-    await store.replaceDialogs([cachedDialog(peer, 'Private title')]);
-    await store.putMessage({ ...cachedMessage(peer, 7), text: 'Private message' });
-    await store.saveDraft(peer.id, 'Private draft', 3);
-    await store.commitOutbox(pending('private pending', 10));
-    await store.saveBlob('media:secret', new Blob(['private bytes']));
+    const store = await openStore(databaseName());
+    await run(store.saveTransportSession({ authKey: 'must-not-leave-the-browser' }));
+    await run(store.claimAccount('account-secret'));
+    await run(store.saveCursor({ pts: 4, qts: 3, date: 2, seq: 1 }));
+    await run(store.beginNewEpoch());
+    await run(store.replaceDialogs([cachedDialog(peer, 'Private title')]));
+    await run(store.putMessage({ ...cachedMessage(peer, 7), text: 'Private message' }));
+    await run(store.saveDraft(peer.id, 'Private draft', 3));
+    await run(store.commitOutbox(pending('private pending', 10)));
+    await run(store.saveBlob('media:secret', new Blob(['private bytes'])));
 
-    const checkpoint = await store.captureCheckpoint();
+    const checkpoint = await run(store.captureCheckpoint());
 
     expect(checkpoint).toMatchObject({
       cursor: { pts: 4, qts: 3, date: 2, seq: 1 },
@@ -81,159 +94,163 @@ describe('IndexedDbCacheStore', () => {
     expect(JSON.stringify(checkpoint)).not.toContain('private bytes');
   });
 
-  it('round-trips transport session, cursor, epoch, and the last peer', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
+  it('round-trips transport session, cursor, and epoch', async () => {
+    const store = await openStore(databaseName());
     const cursor = { pts: 4, qts: 3, date: 2, seq: 1 };
 
-    expect(await store.loadTransportSession()).toBeUndefined();
-    await store.saveTransportSession({ dcId: 2 });
-    await store.saveCursor(cursor);
-    await store.saveLastPeerId(peer.id);
-    expect(await store.beginNewEpoch()).toBe(1);
-    expect(await store.beginNewEpoch()).toBe(2);
+    expect(await run(store.loadTransportSession)).toBeUndefined();
+    await run(store.saveTransportSession({ dcId: 2 }));
+    await run(store.saveCursor(cursor));
+    expect(await run(store.beginNewEpoch())).toBe(1);
+    expect(await run(store.beginNewEpoch())).toBe(2);
 
-    expect(await store.loadTransportSession()).toEqual({ dcId: 2 });
-    expect(await store.loadCursor()).toEqual(cursor);
-    expect(await store.loadLastPeerId()).toBe(peer.id);
-    expect(await store.loadEpoch()).toBe(2);
-    await store.saveTransportSession(undefined);
-    expect(await store.loadTransportSession()).toBeUndefined();
+    expect(await run(store.loadTransportSession)).toEqual({ dcId: 2 });
+    expect(await run(store.loadCursor())).toEqual(cursor);
+    expect(await run(store.loadEpoch())).toBe(2);
+    await run(store.saveTransportSession(undefined));
+    expect(await run(store.loadTransportSession)).toBeUndefined();
   });
 
   it('atomically commits a latest-state snapshot without clearing durable local data', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
+    const store = await openStore(databaseName());
     const oldCursor = { pts: 1, qts: 1, date: 1, seq: 1 };
     const nextCursor = { pts: 20, qts: 3, date: 30, seq: 4 };
-    await store.saveCursor(oldCursor);
-    await store.beginNewEpoch();
-    await store.replaceDialogs([
-      cachedDialog(peer, 'Old first'),
-      cachedDialog(secondPeer, 'Old second'),
-    ]);
-    await store.replaceMessages(peer.id, [cachedMessage(peer, 1)]);
-    await store.replaceMessages(secondPeer.id, [cachedMessage(secondPeer, 2)]);
-    await store.saveDraft(peer.id, 'Keep this draft', 5);
-    await store.commitOutbox(pending('keep-this-send', 10));
-    await store.saveBlob('sticker-index:packs:v2', new Blob(['discard']));
-    await store.saveBlob('media:peer-1:7', new Blob(['preserve']));
+    await run(store.saveCursor(oldCursor));
+    await run(store.beginNewEpoch());
+    await run(
+      store.replaceDialogs([
+        cachedDialog(peer, 'Old first'),
+        cachedDialog(secondPeer, 'Old second'),
+      ]),
+    );
+    await run(store.replaceMessages(peer.id, [cachedMessage(peer, 1)]));
+    await run(store.replaceMessages(secondPeer.id, [cachedMessage(secondPeer, 2)]));
+    await run(store.saveDraft(peer.id, 'Keep this draft', 5));
+    await run(store.commitOutbox(pending('keep-this-send', 10)));
+    await run(store.saveBlob('sticker-index:packs:v2', new Blob(['discard'])));
+    await run(store.saveBlob('media:peer-1:7', new Blob(['preserve'])));
 
-    const epoch = await store.commitLatestState({
-      cursor: nextCursor,
-      dialogs: [cachedDialog(secondPeer, 'Current second')],
-      activeHistory: {
-        peerId: secondPeer.id,
-        messages: [{ ...cachedMessage(secondPeer, 9), text: 'Current message' }],
-      },
-      discardBlobKeys: ['sticker-index:packs:v2'],
-    });
+    const epoch = await run(
+      store.commitLatestState({
+        cursor: nextCursor,
+        dialogs: [cachedDialog(secondPeer, 'Current second')],
+        discardBlobKeys: ['sticker-index:packs:v2'],
+      }),
+    );
 
     expect(epoch).toBe(2);
-    expect(await store.loadEpoch()).toBe(2);
-    expect(await store.loadCursor()).toEqual(nextCursor);
-    expect(await store.loadDialogs()).toEqual([
+    expect(await run(store.loadEpoch())).toBe(2);
+    expect(await run(store.loadCursor())).toEqual(nextCursor);
+    expect(await run(store.loadDialogs())).toEqual([
       expect.objectContaining({
         peer: secondPeer,
         title: 'Current second',
         cacheEpoch: 2,
       }),
     ]);
-    expect(await store.loadMessages(peer.id)).toEqual([]);
-    expect(await store.loadMessages(secondPeer.id)).toEqual([
-      expect.objectContaining({ id: 9, text: 'Current message', cacheEpoch: 2 }),
+    expect(await run(store.loadMessages(peer.id))).toEqual([]);
+    expect(await run(store.loadMessages(secondPeer.id))).toEqual([]);
+    expect(await run(store.loadDrafts())).toEqual({ [peer.id]: 'Keep this draft' });
+    expect(await run(store.loadOutbox())).toEqual([
+      expect.objectContaining({ id: 'keep-this-send' }),
     ]);
-    expect(await store.loadDrafts()).toEqual({ [peer.id]: 'Keep this draft' });
-    expect(await store.loadOutbox()).toEqual([expect.objectContaining({ id: 'keep-this-send' })]);
-    expect(await store.loadBlob('sticker-index:packs:v2')).toBeUndefined();
-    expect(await (await store.loadBlob('media:peer-1:7'))?.text()).toBe('preserve');
+    expect(await run(store.loadBlob('sticker-index:packs:v2'))).toBeUndefined();
+    expect(await (await run(store.loadBlob('media:peer-1:7')))?.text()).toBe('preserve');
   });
 
   it('rolls back every latest-state change when a snapshot record cannot be cloned', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
+    const store = await openStore(databaseName());
     const cursor = { pts: 1, qts: 1, date: 1, seq: 1 };
-    await store.saveCursor(cursor);
-    await store.beginNewEpoch();
-    await store.replaceDialogs([cachedDialog(peer, 'Existing')]);
-    await store.replaceMessages(peer.id, [cachedMessage(peer, 1)]);
-    await store.saveBlob('sticker-index:packs:v2', new Blob(['existing']));
+    await run(store.saveCursor(cursor));
+    await run(store.beginNewEpoch());
+    await run(store.replaceDialogs([cachedDialog(peer, 'Existing')]));
+    await run(store.replaceMessages(peer.id, [cachedMessage(peer, 1)]));
+    await run(store.saveBlob('sticker-index:packs:v2', new Blob(['existing'])));
     const invalidDialog = {
       ...cachedDialog(secondPeer, 'Invalid'),
       invalidValue: () => undefined,
     } as unknown as CachedDialog;
 
     await expect(
-      store.commitLatestState({
-        cursor: { pts: 20, qts: 2, date: 20, seq: 2 },
-        dialogs: [invalidDialog],
-        discardBlobKeys: ['sticker-index:packs:v2'],
-      }),
+      run(
+        store.commitLatestState({
+          cursor: { pts: 20, qts: 2, date: 20, seq: 2 },
+          dialogs: [invalidDialog],
+          discardBlobKeys: ['sticker-index:packs:v2'],
+        }),
+      ),
     ).rejects.toBeDefined();
 
-    expect(await store.loadEpoch()).toBe(1);
-    expect(await store.loadCursor()).toEqual(cursor);
-    expect(await store.loadDialogs()).toEqual([
+    expect(await run(store.loadEpoch())).toBe(1);
+    expect(await run(store.loadCursor())).toEqual(cursor);
+    expect(await run(store.loadDialogs())).toEqual([
       expect.objectContaining({ peer, title: 'Existing' }),
     ]);
-    expect(await store.loadMessages(peer.id)).toEqual([
+    expect(await run(store.loadMessages(peer.id))).toEqual([
       expect.objectContaining({ id: 1, peerId: peer.id }),
     ]);
-    expect(await (await store.loadBlob('sticker-index:packs:v2'))?.text()).toBe('existing');
+    expect(await (await run(store.loadBlob('sticker-index:packs:v2')))?.text()).toBe('existing');
   });
 
   it('replaces the dialog list and upserts a single dialog by peer id', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.replaceDialogs([cachedDialog(peer, 'First'), cachedDialog(secondPeer, 'Second')]);
-    await store.putDialog(cachedDialog(peer, 'First renamed'));
+    const store = await openStore(databaseName());
+    await run(
+      store.replaceDialogs([cachedDialog(peer, 'First'), cachedDialog(secondPeer, 'Second')]),
+    );
+    await run(store.putDialog(cachedDialog(peer, 'First renamed')));
 
-    const dialogs = await store.loadDialogs();
+    const dialogs = await run(store.loadDialogs());
     expect(dialogs).toHaveLength(2);
     expect(dialogs.find(({ peer: target }) => target.id === peer.id)?.title).toBe('First renamed');
-    await store.replaceDialogs([cachedDialog(secondPeer, 'Only')]);
-    expect((await store.loadDialogs()).map(({ title }) => title)).toEqual(['Only']);
+    await run(store.replaceDialogs([cachedDialog(secondPeer, 'Only')]));
+    expect((await run(store.loadDialogs())).map(({ title }) => title)).toEqual(['Only']);
   });
 
   it('replaces messages only for the requested peer and upserts by composite key', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.replaceMessages(peer.id, [cachedMessage(peer, 1), cachedMessage(peer, 2)]);
-    await store.replaceMessages(secondPeer.id, [cachedMessage(secondPeer, 1)]);
-    await store.replaceMessages(peer.id, [cachedMessage(peer, 3)]);
-    await store.putMessage({ ...cachedMessage(peer, 3), text: 'updated' });
+    const store = await openStore(databaseName());
+    await run(store.replaceMessages(peer.id, [cachedMessage(peer, 1), cachedMessage(peer, 2)]));
+    await run(store.replaceMessages(secondPeer.id, [cachedMessage(secondPeer, 1)]));
+    await run(store.replaceMessages(peer.id, [cachedMessage(peer, 3)]));
+    await run(store.putMessage({ ...cachedMessage(peer, 3), text: 'updated' }));
 
-    expect(await store.loadMessages(peer.id)).toEqual([
+    expect(await run(store.loadMessages(peer.id))).toEqual([
       expect.objectContaining({ id: 3, text: 'updated' }),
     ]);
-    expect(await store.loadMessages(secondPeer.id)).toEqual([
+    expect(await run(store.loadMessages(secondPeer.id))).toEqual([
       expect.objectContaining({ id: 1, peerId: secondPeer.id }),
     ]);
 
-    await store.putMessages([cachedMessage(peer, 4), cachedMessage(peer, 5)]);
-    expect((await store.loadMessages(peer.id)).map(({ id }) => id)).toEqual([3, 4, 5]);
+    await run(store.putMessages([cachedMessage(peer, 4), cachedMessage(peer, 5)]));
+    expect((await run(store.loadMessages(peer.id))).map(({ id }) => id)).toEqual([3, 4, 5]);
   });
 
   it('preserves album, service-event, and inline media metadata in cached history', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.putMessages([
-      {
-        ...cachedMessage(peer, 1),
-        groupedId: 'album-1',
-        media: {
-          kind: 'voice',
-          name: 'voice.ogg',
-          mimeType: 'audio/ogg',
-          duration: 9,
+    const store = await openStore(databaseName());
+    await run(
+      store.putMessages([
+        {
+          ...cachedMessage(peer, 1),
+          groupedId: 'album-1',
+          media: {
+            kind: 'voice',
+            name: 'voice.ogg',
+            mimeType: 'audio/ogg',
+            duration: 9,
+          },
         },
-      },
-      {
-        ...cachedMessage(peer, 2),
-        text: 'Alice pinned a message',
-        service: {
-          kind: 'message-pinned',
+        {
+          ...cachedMessage(peer, 2),
           text: 'Alice pinned a message',
-          actorId: 'u:1',
+          service: {
+            kind: 'message-pinned',
+            text: 'Alice pinned a message',
+            actorId: 'u:1',
+          },
         },
-      },
-    ]);
+      ]),
+    );
 
-    expect(await store.loadMessages(peer.id)).toEqual([
+    expect(await run(store.loadMessages(peer.id))).toEqual([
       expect.objectContaining({
         groupedId: 'album-1',
         media: expect.objectContaining({ kind: 'voice', duration: 9 }),
@@ -245,101 +262,97 @@ describe('IndexedDbCacheStore', () => {
   });
 
   it('bounds peer history reads and can fetch one older cached message exactly', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.putMessages(
-      Array.from({ length: 520 }, (_, index) => cachedMessage(peer, index + 1)),
+    const store = await openStore(databaseName());
+    await run(
+      store.putMessages(Array.from({ length: 520 }, (_, index) => cachedMessage(peer, index + 1))),
     );
 
-    const defaultWindow = await store.loadMessages(peer.id);
+    const defaultWindow = await run(store.loadMessages(peer.id));
     expect(defaultWindow).toHaveLength(500);
     expect(defaultWindow[0]?.id).toBe(21);
     expect(defaultWindow.at(-1)?.id).toBe(520);
-    expect((await store.loadMessages(peer.id, 10)).map(({ id }) => id)).toEqual([
+    expect((await run(store.loadMessages(peer.id, 10))).map(({ id }) => id)).toEqual([
       511, 512, 513, 514, 515, 516, 517, 518, 519, 520,
     ]);
-    expect((await store.loadMessagesBefore(peer.id, 511, 10)).map(({ id }) => id)).toEqual([
+    expect((await run(store.loadMessagesBefore(peer.id, 511, 10))).map(({ id }) => id)).toEqual([
       501, 502, 503, 504, 505, 506, 507, 508, 509, 510,
     ]);
-    await expect(store.loadMessage(peer.id, 1)).resolves.toEqual(
+    await expect(run(store.loadMessage(peer.id, 1))).resolves.toEqual(
       expect.objectContaining({ id: 1, peerId: peer.id }),
     );
   });
 
   it('claims legacy data for an existing authorized account without clearing it', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.replaceDialogs([cachedDialog(peer, 'Existing')]);
-    await store.saveDraft(peer.id, 'keep me');
-    await store.commitOutbox(pending('legacy', 1));
+    const store = await openStore(databaseName());
+    await run(store.replaceDialogs([cachedDialog(peer, 'Existing')]));
+    await run(store.saveDraft(peer.id, 'keep me'));
+    await run(store.commitOutbox(pending('legacy', 1)));
 
-    await store.claimAccount('account-a');
+    await run(store.claimAccount('account-a'));
 
-    expect(await store.loadAccountId()).toBe('account-a');
-    expect(await store.loadDialogs()).toHaveLength(1);
-    expect(await store.loadDrafts()).toEqual({ [peer.id]: 'keep me' });
-    expect(await store.loadOutbox()).toEqual([
+    expect(await run(store.loadAccountId())).toBe('account-a');
+    expect(await run(store.loadDialogs())).toHaveLength(1);
+    expect(await run(store.loadDrafts())).toEqual({ [peer.id]: 'keep me' });
+    expect(await run(store.loadOutbox())).toEqual([
       expect.objectContaining({ id: 'legacy', accountId: 'account-a' }),
     ]);
   });
 
   it('clears account-scoped cache while quarantining another account outbox', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.claimAccount('account-a');
-    await store.saveTransportSession({ dcId: 2 });
-    await store.replaceDialogs([cachedDialog(peer, 'Old account')]);
-    await store.replaceMessages(peer.id, [cachedMessage(peer, 1)]);
-    await store.saveDraft(peer.id, 'old draft');
-    await store.commitOutbox({ ...pending('old-send', 1), accountId: 'account-a' });
-    await store.saveCursor({ pts: 1, qts: 0, date: 1, seq: 1 });
-    await store.beginNewEpoch();
-    await store.saveLastPeerId(peer.id);
-    await store.saveBlob('old-file', new Blob(['old']));
+    const store = await openStore(databaseName());
+    await run(store.claimAccount('account-a'));
+    await run(store.saveTransportSession({ dcId: 2 }));
+    await run(store.replaceDialogs([cachedDialog(peer, 'Old account')]));
+    await run(store.replaceMessages(peer.id, [cachedMessage(peer, 1)]));
+    await run(store.saveDraft(peer.id, 'old draft'));
+    await run(store.commitOutbox({ ...pending('old-send', 1), accountId: 'account-a' }));
+    await run(store.saveCursor({ pts: 1, qts: 0, date: 1, seq: 1 }));
+    await run(store.beginNewEpoch());
+    await run(store.saveBlob('old-file', new Blob(['old'])));
 
-    await store.resetForAccount('account-b');
+    await run(store.resetForAccount('account-b'));
 
-    expect(await store.loadAccountId()).toBe('account-b');
-    expect(await store.loadTransportSession()).toEqual({ dcId: 2 });
-    expect(await store.loadDialogs()).toEqual([]);
-    expect(await store.loadMessages(peer.id)).toEqual([]);
-    expect(await store.loadDrafts()).toEqual({});
-    expect(await store.loadCursor()).toBeUndefined();
-    expect(await store.loadEpoch()).toBe(0);
-    expect(await store.loadLastPeerId()).toBeUndefined();
-    expect(await store.loadBlob('old-file')).toBeUndefined();
-    expect(await store.loadOutbox()).toEqual([
+    expect(await run(store.loadAccountId())).toBe('account-b');
+    expect(await run(store.loadTransportSession)).toEqual({ dcId: 2 });
+    expect(await run(store.loadDialogs())).toEqual([]);
+    expect(await run(store.loadMessages(peer.id))).toEqual([]);
+    expect(await run(store.loadDrafts())).toEqual({});
+    expect(await run(store.loadCursor())).toBeUndefined();
+    expect(await run(store.loadEpoch())).toBe(0);
+    expect(await run(store.loadBlob('old-file'))).toBeUndefined();
+    expect(await run(store.loadOutbox())).toEqual([
       expect.objectContaining({ id: 'old-send', accountId: 'account-a' }),
     ]);
   });
 
   it('clears disposable cache without removing the session, drafts, or queued sends', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.claimAccount('account-a');
-    await store.saveTransportSession({ dcId: 2 });
-    await store.replaceDialogs([cachedDialog(peer, 'Cached')]);
-    await store.replaceMessages(peer.id, [cachedMessage(peer, 1)]);
-    await store.saveDraft(peer.id, 'keep draft');
-    await store.commitOutbox({ ...pending('keep-send', 1), accountId: 'account-a' });
-    await store.saveCursor({ pts: 1, qts: 0, date: 1, seq: 1 });
-    await store.saveLastPeerId(peer.id);
-    await store.saveBlob('avatar:u:1:1', new Blob(['cached avatar']));
+    const store = await openStore(databaseName());
+    await run(store.claimAccount('account-a'));
+    await run(store.saveTransportSession({ dcId: 2 }));
+    await run(store.replaceDialogs([cachedDialog(peer, 'Cached')]));
+    await run(store.replaceMessages(peer.id, [cachedMessage(peer, 1)]));
+    await run(store.saveDraft(peer.id, 'keep draft'));
+    await run(store.commitOutbox({ ...pending('keep-send', 1), accountId: 'account-a' }));
+    await run(store.saveCursor({ pts: 1, qts: 0, date: 1, seq: 1 }));
+    await run(store.saveBlob('avatar:u:1:1', new Blob(['cached avatar'])));
 
-    await store.clearCacheData();
+    await run(store.clearCacheData());
 
-    expect(await store.loadTransportSession()).toEqual({ dcId: 2 });
-    expect(await store.loadAccountId()).toBe('account-a');
-    expect(await store.loadDrafts()).toEqual({ [peer.id]: 'keep draft' });
-    expect(await store.loadOutbox()).toEqual([
+    expect(await run(store.loadTransportSession)).toEqual({ dcId: 2 });
+    expect(await run(store.loadAccountId())).toBe('account-a');
+    expect(await run(store.loadDrafts())).toEqual({ [peer.id]: 'keep draft' });
+    expect(await run(store.loadOutbox())).toEqual([
       expect.objectContaining({ id: 'keep-send', accountId: 'account-a' }),
     ]);
-    expect(await store.loadDialogs()).toEqual([]);
-    expect(await store.loadMessages(peer.id)).toEqual([]);
-    expect(await store.loadCursor()).toBeUndefined();
-    expect(await store.loadLastPeerId()).toBeUndefined();
-    expect(await store.loadBlob('avatar:u:1:1')).toBeUndefined();
+    expect(await run(store.loadDialogs())).toEqual([]);
+    expect(await run(store.loadMessages(peer.id))).toEqual([]);
+    expect(await run(store.loadCursor())).toBeUndefined();
+    expect(await run(store.loadBlob('avatar:u:1:1'))).toBeUndefined();
   });
 
   it('persists peer metadata and removes it with the disposable cache', async () => {
     const name = databaseName();
-    const store = new IndexedDbCacheStore(name);
+    const store = await openStore(name);
     const pinned = [{ ...cachedMessage(peer, 7), pinned: true }];
     const members = [
       {
@@ -350,190 +363,240 @@ describe('IndexedDbCacheStore', () => {
         hasAvatar: false,
       },
     ];
-    await store.savePinnedMessages(peer.id, pinned);
-    await store.saveGroupMembers(peer.id, members);
+    await run(store.savePinnedMessages(peer.id, pinned));
+    await run(store.saveGroupMembers(peer.id, members));
 
-    const reopened = new IndexedDbCacheStore(name);
-    await expect(reopened.loadPinnedMessages(peer.id)).resolves.toMatchObject({ value: pinned });
-    await expect(reopened.loadGroupMembers(peer.id)).resolves.toMatchObject({ value: members });
+    const reopened = await openStore(name);
+    await expect(run(reopened.loadPinnedMessages(peer.id))).resolves.toMatchObject({
+      value: pinned,
+    });
+    await expect(run(reopened.loadGroupMembers(peer.id))).resolves.toMatchObject({
+      value: members,
+    });
 
-    await reopened.clearCacheData();
-    await expect(reopened.loadPinnedMessages(peer.id)).resolves.toBeUndefined();
-    await expect(reopened.loadGroupMembers(peer.id)).resolves.toBeUndefined();
+    await run(reopened.clearCacheData());
+    await expect(run(reopened.loadPinnedMessages(peer.id))).resolves.toBeUndefined();
+    await expect(run(reopened.loadGroupMembers(peer.id))).resolves.toBeUndefined();
   });
 
   it('supports peer-scoped and global message deletion', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.replaceMessages(peer.id, [cachedMessage(peer, 1), cachedMessage(peer, 2)]);
-    await store.replaceMessages(secondPeer.id, [
-      cachedMessage(secondPeer, 1),
-      cachedMessage(secondPeer, 2),
-    ]);
+    const store = await openStore(databaseName());
+    await run(store.replaceMessages(peer.id, [cachedMessage(peer, 1), cachedMessage(peer, 2)]));
+    await run(
+      store.replaceMessages(secondPeer.id, [
+        cachedMessage(secondPeer, 1),
+        cachedMessage(secondPeer, 2),
+      ]),
+    );
 
-    await store.deleteMessages(peer.id, [1]);
-    expect((await store.loadMessages(peer.id)).map(({ id }) => id)).toEqual([2]);
-    expect((await store.loadMessages(secondPeer.id)).map(({ id }) => id)).toEqual([1, 2]);
-    await store.deleteMessages(undefined, [2]);
-    expect(await store.loadMessages(peer.id)).toEqual([]);
-    expect((await store.loadMessages(secondPeer.id)).map(({ id }) => id)).toEqual([1]);
+    await run(store.deleteMessages(peer.id, [1]));
+    expect((await run(store.loadMessages(peer.id))).map(({ id }) => id)).toEqual([2]);
+    expect((await run(store.loadMessages(secondPeer.id))).map(({ id }) => id)).toEqual([1, 2]);
+    await run(store.deleteMessages(secondPeer.id, [2]));
+    expect((await run(store.loadMessages(peer.id))).map(({ id }) => id)).toEqual([2]);
+    expect((await run(store.loadMessages(secondPeer.id))).map(({ id }) => id)).toEqual([1]);
   });
 
   it('persists independent drafts and deletes empty drafts', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.saveDraft(peer.id, 'First draft', 7);
-    await store.saveDraft(secondPeer.id, 'Second draft');
-    expect(await store.loadDrafts()).toEqual({
+    const store = await openStore(databaseName());
+    await run(
+      store.saveDraft(peer.id, 'First draft', 7, {
+        formats: [{ offset: 0, length: 5, kind: 'bold' }],
+        reply: { messageId: 42, preview: 'Original message' },
+      }),
+    );
+    await run(store.saveDraft(secondPeer.id, 'Second draft'));
+    expect(await run(store.loadDrafts())).toEqual({
       [peer.id]: 'First draft',
       [secondPeer.id]: 'Second draft',
     });
-    expect(await store.loadDraftRevisions()).toEqual({
+    expect(await run(store.loadDraftRevisions())).toEqual({
       [peer.id]: 7,
       [secondPeer.id]: 0,
     });
-    await store.saveDraft(peer.id, '');
-    expect(await store.loadDrafts()).toEqual({ [secondPeer.id]: 'Second draft' });
-    expect(await store.loadDraftRevisions()).toEqual({ [secondPeer.id]: 0 });
+    expect((await run(store.loadWorkspace())).draftDetails).toEqual({
+      [peer.id]: {
+        formats: [{ offset: 0, length: 5, kind: 'bold' }],
+        reply: { messageId: 42, preview: 'Original message' },
+      },
+    });
+    await run(store.saveDraft(peer.id, ''));
+    expect(await run(store.loadDrafts())).toEqual({ [secondPeer.id]: 'Second draft' });
+    expect(await run(store.loadDraftRevisions())).toEqual({ [secondPeer.id]: 0 });
+  });
+
+  it('stores non-media resource metadata separately from binary blobs', async () => {
+    const name = databaseName();
+    const store = await openStore(name);
+    await run(store.saveMetadata('shared-media-counts:u:1', { photos: 12 }));
+    await run(store.saveBlob('media:u:1:12', new Blob(['binary'])));
+
+    const reopened = await openStore(name);
+    await expect(run(reopened.loadMetadata('shared-media-counts:u:1'))).resolves.toMatchObject({
+      value: { photos: 12 },
+    });
+    expect(await (await run(reopened.loadBlob('media:u:1:12')))?.text()).toBe('binary');
+
+    await run(reopened.deleteMetadata('shared-media-counts:u:1'));
+    await expect(run(reopened.loadMetadata('shared-media-counts:u:1'))).resolves.toBeUndefined();
+    expect(await (await run(reopened.loadBlob('media:u:1:12')))?.text()).toBe('binary');
   });
 
   it('stores a pending send and clears only its matching draft in one transaction', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.saveDraft(peer.id, 'Captured text', 1);
-    await store.commitOutbox(pending('captured-send', 1), {
-      peerId: peer.id,
-      text: 'Captured text',
-      revision: 1,
-    });
+    const store = await openStore(databaseName());
+    await run(store.saveDraft(peer.id, 'Captured text', 1));
+    await run(
+      store.commitOutbox(pending('captured-send', 1), {
+        peerId: peer.id,
+        text: 'Captured text',
+        revision: 1,
+      }),
+    );
 
-    expect(await store.loadDrafts()).toEqual({});
-    expect(await store.loadOutbox()).toEqual([
+    expect(await run(store.loadDrafts())).toEqual({});
+    expect(await run(store.loadOutbox())).toEqual([
       expect.objectContaining({ id: 'captured-send', text: 'captured-send' }),
     ]);
 
-    await store.saveDraft(peer.id, 'Captured text', 2);
-    await store.commitOutbox(pending('older-identical-send', 2), {
-      peerId: peer.id,
-      text: 'Captured text',
-      revision: 1,
-    });
-    expect(await store.loadDrafts()).toEqual({ [peer.id]: 'Captured text' });
+    await run(store.saveDraft(peer.id, 'Captured text', 2));
+    await run(
+      store.commitOutbox(pending('older-identical-send', 2), {
+        peerId: peer.id,
+        text: 'Captured text',
+        revision: 1,
+      }),
+    );
+    expect(await run(store.loadDrafts())).toEqual({ [peer.id]: 'Captured text' });
 
-    await store.saveDraft(peer.id, 'Newer text', 3);
-    await store.commitOutbox(pending('older-send', 3), {
-      peerId: peer.id,
-      text: 'Captured text',
-      revision: 2,
-    });
-    expect(await store.loadDrafts()).toEqual({ [peer.id]: 'Newer text' });
+    await run(store.saveDraft(peer.id, 'Newer text', 3));
+    await run(
+      store.commitOutbox(pending('older-send', 3), {
+        peerId: peer.id,
+        text: 'Captured text',
+        revision: 2,
+      }),
+    );
+    expect(await run(store.loadDrafts())).toEqual({ [peer.id]: 'Newer text' });
   });
 
   it('rolls back the draft clear when the pending record cannot be cloned', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.saveDraft(peer.id, 'Keep this draft');
+    const store = await openStore(databaseName());
+    await run(store.saveDraft(peer.id, 'Keep this draft'));
     const invalid = {
       ...pending('invalid', 1),
       peer: { ...peer, invalidValue: () => undefined },
     } as unknown as PendingSend;
 
     await expect(
-      store.commitOutbox(invalid, { peerId: peer.id, text: 'Keep this draft' }),
+      run(store.commitOutbox(invalid, { peerId: peer.id, text: 'Keep this draft' })),
     ).rejects.toBeDefined();
-    expect(await store.loadDrafts()).toEqual({ [peer.id]: 'Keep this draft' });
-    expect(await store.loadOutbox()).toEqual([]);
+    expect(await run(store.loadDrafts())).toEqual({ [peer.id]: 'Keep this draft' });
+    expect(await run(store.loadOutbox())).toEqual([]);
   });
 
   it('atomically stores an attachment batch and clears only the captured draft revision', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.saveDraft(peer.id, 'Album caption', 4);
-    await store.commitOutbox(
-      [
-        { ...pending('album', 10), queueOrder: 1 },
-        { ...pending('file', 10), queueOrder: 2 },
-      ],
-      { peerId: peer.id, text: 'Album caption', revision: 4 },
+    const store = await openStore(databaseName());
+    await run(store.saveDraft(peer.id, 'Album caption', 4));
+    await run(
+      store.commitOutbox(
+        [
+          { ...pending('album', 10), queueOrder: 1 },
+          { ...pending('file', 10), queueOrder: 2 },
+        ],
+        { peerId: peer.id, text: 'Album caption', revision: 4 },
+      ),
     );
 
-    expect(await store.loadDrafts()).toEqual({});
-    expect((await store.loadOutbox()).map(({ id }) => id)).toEqual(['album', 'file']);
+    expect(await run(store.loadDrafts())).toEqual({});
+    expect((await run(store.loadOutbox())).map(({ id }) => id)).toEqual(['album', 'file']);
 
-    await store.saveDraft(peer.id, 'Newer caption', 5);
-    await store.commitOutbox([{ ...pending('older-caption', 11), queueOrder: 3 }], {
-      peerId: peer.id,
-      text: 'Album caption',
-      revision: 4,
-    });
-    expect(await store.loadDrafts()).toEqual({ [peer.id]: 'Newer caption' });
+    await run(store.saveDraft(peer.id, 'Newer caption', 5));
+    await run(
+      store.commitOutbox([{ ...pending('older-caption', 11), queueOrder: 3 }], {
+        peerId: peer.id,
+        text: 'Album caption',
+        revision: 4,
+      }),
+    );
+    expect(await run(store.loadDrafts())).toEqual({ [peer.id]: 'Newer caption' });
   });
 
   it('rolls back an attachment batch and matching draft clear together', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.saveDraft(peer.id, 'Keep this caption', 1);
+    const store = await openStore(databaseName());
+    await run(store.saveDraft(peer.id, 'Keep this caption', 1));
     const invalid = {
       ...pending('invalid-batch-item', 12),
       peer: { ...peer, invalidValue: () => undefined },
     } as unknown as PendingSend;
 
     await expect(
-      store.commitOutbox([pending('rolled-back-batch-item', 12), invalid], {
-        peerId: peer.id,
-        text: 'Keep this caption',
-        revision: 1,
-      }),
+      run(
+        store.commitOutbox([pending('rolled-back-batch-item', 12), invalid], {
+          peerId: peer.id,
+          text: 'Keep this caption',
+          revision: 1,
+        }),
+      ),
     ).rejects.toBeDefined();
-    expect(await store.loadDrafts()).toEqual({ [peer.id]: 'Keep this caption' });
-    expect(await store.loadOutbox()).toEqual([]);
+    expect(await run(store.loadDrafts())).toEqual({ [peer.id]: 'Keep this caption' });
+    expect(await run(store.loadOutbox())).toEqual([]);
   });
 
   it('orders the durable outbox by creation time and deletes delivered entries', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.commitOutbox(pending('later', 20));
-    await store.commitOutbox(pending('earlier', 10));
-    await store.commitOutbox({ ...pending('later', 20), attempts: 2 });
+    const store = await openStore(databaseName());
+    await run(store.commitOutbox(pending('later', 20)));
+    await run(store.commitOutbox(pending('earlier', 10)));
+    await run(store.commitOutbox({ ...pending('later', 20), attempts: 2 }));
 
-    expect((await store.loadOutbox()).map(({ id }) => id)).toEqual(['earlier', 'later']);
-    expect((await store.loadOutbox())[1]?.attempts).toBe(2);
-    await store.deletePending('earlier');
-    expect((await store.loadOutbox()).map(({ id }) => id)).toEqual(['later']);
+    expect((await run(store.loadOutbox())).map(({ id }) => id)).toEqual(['earlier', 'later']);
+    expect((await run(store.loadOutbox()))[1]?.attempts).toBe(2);
+    await run(store.deletePending('earlier'));
+    expect((await run(store.loadOutbox())).map(({ id }) => id)).toEqual(['later']);
   });
 
   it('uses per-peer queue order when timestamps collide or move backwards', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.commitOutbox({ ...pending('second', 10), queueOrder: 2 });
-    await store.commitOutbox({ ...pending('first', 20), queueOrder: 1 });
+    const store = await openStore(databaseName());
+    await run(store.commitOutbox({ ...pending('second', 10), queueOrder: 2 }));
+    await run(store.commitOutbox({ ...pending('first', 20), queueOrder: 1 }));
 
-    expect((await store.loadOutbox()).map(({ id }) => id)).toEqual(['first', 'second']);
+    expect((await run(store.loadOutbox())).map(({ id }) => id)).toEqual(['first', 'second']);
   });
 
   it('writes an attachment plan in one outbox transaction', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.commitOutbox([pending('album', 10), pending('file', 11)]);
-    expect((await store.loadOutbox()).map(({ id }) => id)).toEqual(['album', 'file']);
+    const store = await openStore(databaseName());
+    await run(store.commitOutbox([pending('album', 10), pending('file', 11)]));
+    expect((await run(store.loadOutbox())).map(({ id }) => id)).toEqual(['album', 'file']);
 
     const invalid = {
       ...pending('invalid', 12),
       peer: { ...peer, invalidValue: () => undefined },
     } as unknown as PendingSend;
-    await expect(store.commitOutbox([pending('rolled-back', 12), invalid])).rejects.toBeDefined();
-    expect((await store.loadOutbox()).map(({ id }) => id)).toEqual(['album', 'file']);
+    await expect(
+      run(store.commitOutbox([pending('rolled-back', 12), invalid])),
+    ).rejects.toBeDefined();
+    expect((await run(store.loadOutbox())).map(({ id }) => id)).toEqual(['album', 'file']);
   });
 
   it('evicts the oldest messages after a peer exceeds the persistent history cap', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
-    await store.putMessages(
-      Array.from({ length: 1_005 }, (_, index) => cachedMessage(peer, index + 1)),
+    const store = await openStore(databaseName());
+    await run(
+      store.putMessages(
+        Array.from({ length: 1_005 }, (_, index) => cachedMessage(peer, index + 1)),
+      ),
     );
 
-    const retained = await store.loadMessages(peer.id, 2_000);
+    const retained = await run(store.loadMessages(peer.id, 2_000));
     expect(retained).toHaveLength(1_000);
     expect(retained[0]?.id).toBe(6);
-    await expect(store.loadMessage(peer.id, 1)).resolves.toBeUndefined();
+    await expect(run(store.loadMessage(peer.id, 1))).resolves.toBeUndefined();
   });
 
   it('round-trips binary blobs by cache key', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
+    const store = await openStore(databaseName());
     const blob = new Blob(['payload'], { type: 'text/plain' });
-    expect(await store.loadBlob('missing')).toBeUndefined();
-    await store.saveBlob('media:peer-1:7', blob);
-    const cached = await store.loadBlob('media:peer-1:7');
+    expect(await run(store.loadBlob('missing'))).toBeUndefined();
+    await run(store.saveBlob('media:peer-1:7', blob));
+    const cached = await run(store.loadBlob('media:peer-1:7'));
     expect(cached?.type).toBe('text/plain');
     expect(await cached?.text()).toBe('payload');
   });
@@ -561,9 +624,9 @@ describe('IndexedDbCacheStore', () => {
       request.onerror = () => reject(request.error);
     });
 
-    const store = new IndexedDbCacheStore(name);
-    await store.saveBlob('avatar:peer-1', new Blob(['avatar']));
-    expect(await (await store.loadBlob('avatar:peer-1'))?.text()).toBe('avatar');
+    const store = await openStore(name);
+    await run(store.saveBlob('avatar:peer-1', new Blob(['avatar'])));
+    expect(await (await run(store.loadBlob('avatar:peer-1')))?.text()).toBe('avatar');
   });
 
   it('recreates the disposable version-two raw-blob store during migration', async () => {
@@ -590,10 +653,10 @@ describe('IndexedDbCacheStore', () => {
       request.onerror = () => reject(request.error);
     });
 
-    const store = new IndexedDbCacheStore(name);
-    expect(await store.loadBlob('legacy-file')).toBeUndefined();
-    await store.saveBlob('new-file', new Blob(['new']));
-    expect(await (await store.loadBlob('new-file'))?.text()).toBe('new');
+    const store = await openStore(name);
+    expect(await run(store.loadBlob('legacy-file'))).toBeUndefined();
+    await run(store.saveBlob('new-file', new Blob(['new'])));
+    expect(await (await run(store.loadBlob('new-file')))?.text()).toBe('new');
   });
 
   it('adds message lookup indexes to a version-three database without losing records', async () => {
@@ -622,11 +685,13 @@ describe('IndexedDbCacheStore', () => {
       request.onerror = () => reject(request.error);
     });
 
-    const store = new IndexedDbCacheStore(name);
-    expect(await store.loadMessage(peer.id, 7)).toEqual(expect.objectContaining({ id: 7 }));
-    await store.deleteMessages(undefined, [7]);
-    expect(await store.loadMessages(peer.id)).toEqual([]);
-    expect(await store.loadMessages(secondPeer.id)).toEqual([]);
+    const store = await openStore(name);
+    expect(await run(store.loadMessage(peer.id, 7))).toEqual(expect.objectContaining({ id: 7 }));
+    await run(store.deleteMessages(peer.id, [7]));
+    expect(await run(store.loadMessages(peer.id))).toEqual([]);
+    expect(await run(store.loadMessages(secondPeer.id))).toEqual([
+      expect.objectContaining({ id: 7, peerId: secondPeer.id }),
+    ]);
   });
 
   it('preserves version-five messages during the version-six migration', async () => {
@@ -656,8 +721,8 @@ describe('IndexedDbCacheStore', () => {
       request.onerror = () => reject(request.error);
     });
 
-    const store = new IndexedDbCacheStore(name);
-    expect(await store.loadMessages(peer.id)).toEqual([
+    const store = await openStore(name);
+    expect(await run(store.loadMessages(peer.id))).toEqual([
       expect.objectContaining({ id: 7, peerId: peer.id }),
     ]);
   });
@@ -669,12 +734,11 @@ describe('IndexedDbCacheStore', () => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const store = new IndexedDbCacheStore(name);
     let outcome: 'settled' | 'blocked';
 
     try {
       outcome = await Promise.race([
-        store.loadWorkspace().then(
+        run(Effect.scoped(createIndexedDbCacheStore(name).pipe(Effect.result))).then(
           () => 'settled' as const,
           () => 'settled' as const,
         ),
@@ -688,14 +752,14 @@ describe('IndexedDbCacheStore', () => {
   });
 
   it('bounds the binary cache by entry count', async () => {
-    const store = new IndexedDbCacheStore(databaseName());
+    const store = await openStore(databaseName());
     for (let index = 0; index < 257; index += 1) {
-      await store.saveBlob(`blob-${index.toString().padStart(3, '0')}`, new Blob(['x']));
+      await run(store.saveBlob(`blob-${index.toString().padStart(3, '0')}`, new Blob(['x'])));
     }
 
     let retained = 0;
     for (let index = 0; index < 257; index += 1) {
-      if (await store.loadBlob(`blob-${index.toString().padStart(3, '0')}`)) retained += 1;
+      if (await run(store.loadBlob(`blob-${index.toString().padStart(3, '0')}`))) retained += 1;
     }
     expect(retained).toBe(256);
   });

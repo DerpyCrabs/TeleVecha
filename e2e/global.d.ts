@@ -8,16 +8,11 @@ interface Window {
   __televechaRuntimes?: Map<
     string,
     {
-      engine: import('../src/telegram/core/engine').MessagingEngine;
+      engine: import('../src/telegram/core/client').EffectMessagingClient;
+      runEffect: import('../src/ui/app/appRuntime').UiEffectRunner;
       transport: import('../src/telegram/types').TelegramTransport;
     }
   >;
-  __releaseFixtureEdit?: () => void;
-  __releaseFixtureCallback?: () => void;
-  __releaseFixtureAddPeer?: () => void;
-  __releaseFixtureOpenConversation?: () => void;
-  __releaseFixtureBotStartOne?: () => void;
-  __releaseFixtureBotStartTwo?: () => void;
   __openedBotUrl?: string;
   __acceptedUrlAuthOptions?: import('../src/telegram/types').TelegramUrlAuthAcceptOptions;
   __intersectionObserverConstructions?: number;
@@ -34,6 +29,7 @@ interface Window {
       getHistoryAround: number;
       getSharedMediaCounts: number;
       sendText: number;
+      lastSendRandomId?: string;
       sendFile: number;
       sendAlbum: number;
       readHistory: number;
@@ -68,6 +64,8 @@ interface Window {
       setMuted: number;
       getUserDetails: number;
       setBlocked: number;
+      updateContact: number;
+      deleteContact: number;
       setPinnedDialog: number;
       setArchived: number;
       deleteDialog: number;
@@ -78,8 +76,24 @@ interface Window {
     releaseConnect(): void;
     releaseSend(): void;
     releaseUpload(): void;
+    holdNextUpload(): void;
     changeAndHoldReleaseAvatar(): void;
     failPendingAvatar(): void;
+    failNextHistory(peerId: string, message: string): void;
+    setBotCommands(
+      peerId: string,
+      commands: import('../src/telegram/types').TelegramBotCommand[],
+    ): void;
+    holdNextBotCallback(): void;
+    releaseBotCallback(): void;
+    holdNextBotStart(): void;
+    releaseBotStart(): void;
+    useExtendedUrlAuth(): void;
+    readonly acceptedUrlAuthOptions:
+      | import('../src/telegram/types').TelegramUrlAuthAcceptOptions
+      | undefined;
+    holdNextEdit(): void;
+    releaseEdit(): void;
     releaseHistory(): void;
     releaseHistoryAround(): void;
     releaseSharedMediaCounts(): void;

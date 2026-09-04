@@ -31,7 +31,7 @@ function uint32Le(value: number) {
 describe('functional Telegram TL catalog', () => {
   it('keeps complete decode coverage behind a selected frozen request surface', () => {
     expect(tlDescriptors.filter(({ kind }) => kind === 'constructor')).toHaveLength(1_683);
-    expect(tlDescriptors.filter(({ kind }) => kind === 'method')).toHaveLength(77);
+    expect(tlDescriptors.filter(({ kind }) => kind === 'method')).toHaveLength(80);
     expect(tlDescriptors.filter(({ kind }) => kind === 'bare')).toHaveLength(1);
     expect(descriptorFor('users.getUsers')?.kind).toBe('method');
     expect(descriptorFor('payments.sendPaymentForm')).toBeUndefined();

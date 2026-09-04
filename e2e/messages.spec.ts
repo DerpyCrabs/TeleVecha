@@ -39,6 +39,7 @@ test('places a text message time beside its final line without overlapping the t
       articleHeight: element.getBoundingClientRect().height,
       bodyDisplay: getComputedStyle(body).display,
       footerPosition: getComputedStyle(footer).position,
+      footerPaddingTop: getComputedStyle(footer).paddingTop,
       footerFloat: getComputedStyle(footer).float,
       horizontalGap: time.left - text.right,
       verticalOverlap: Math.min(text.bottom, time.bottom) - Math.max(text.top, time.top),
@@ -46,6 +47,7 @@ test('places a text message time beside its final line without overlapping the t
   });
   expect(geometry.bodyDisplay).toBe('inline');
   expect(geometry.footerPosition).toBe('static');
+  expect(geometry.footerPaddingTop).toBe('8px');
   expect(geometry.footerFloat).toBe('right');
   expect(geometry.horizontalGap).toBeGreaterThan(4);
   expect(geometry.verticalOverlap).toBeGreaterThan(0);
@@ -114,7 +116,7 @@ test('sends with Enter but keeps a newline with Shift+Enter', async ({ page }) =
   await composer.press('Enter');
 
   await expect(page.locator('article.message', { hasText: 'first\nsecond' })).toBeVisible();
-  expect((await fixtureStats(page))?.sendText).toBe(1);
+  await expect.poll(() => fixtureStats(page).then((stats) => stats?.sendText)).toBe(1);
 });
 
 test('does not send blank text and disables the send button', async ({ page }) => {

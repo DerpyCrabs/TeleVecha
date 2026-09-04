@@ -1,16 +1,21 @@
 import { createSignal, onCleanup, type Accessor } from 'solid-js';
+import { Deferred, Effect } from 'effect';
 
 import type { ChatMessage } from '../../domain/models';
-import type { Conversation } from '../../telegram/core/conversation';
+import type { EffectConversation } from '../../telegram/core/conversation';
 import type {
   EngineSnapshot,
   TelegramDialog,
+  TelegramDraftDetails,
   TelegramReplyTarget,
   TelegramTextFormat,
 } from '../../telegram/types';
 import { stageAttachment, type StagedAttachment } from './outgoingAttachments';
+import type { UiEffectRunner, UiLatestEffectRunner } from '../app/appRuntime';
 
 const DRAFT_WRITE_DELAY_MS = 120;
+const DRAFT_WRITE_TASK = 'composer:draft-write';
+const TYPING_TASK = 'composer:typing';
 
 interface ReplyTarget {
   messageId: number;
@@ -28,15 +33,19 @@ interface EditRestore {
 interface PendingDraftWrite {
   peerId: string;
   value: string;
-  conversation: Conversation;
+  details?: TelegramDraftDetails;
+  conversation: EffectConversation;
 }
 
 interface ComposerSessionOptions {
-  conversation: Accessor<Conversation | undefined>;
+  conversation: Accessor<EffectConversation | undefined>;
+  runEffect: UiEffectRunner;
+  runLatestEffect: UiLatestEffectRunner;
   snapshot: Accessor<EngineSnapshot>;
   activePeerId: Accessor<string>;
   activeDialog: Accessor<TelegramDialog | undefined>;
   canSend: Accessor<boolean>;
+  canSendMedia: Accessor<boolean>;
   beforeUiChange: () => void;
   beforeSend: () => void;
   focus: () => void;
@@ -60,11 +69,10 @@ export function createComposerSession(options: ComposerSessionOptions) {
   let draftAuthorityVersion = 0;
   let draftAuthorityPeerId = '';
   let pendingDraftWrite: PendingDraftWrite | undefined;
-  let draftWriteTimer: ReturnType<typeof setTimeout> | undefined;
-  let draftWriteTail = Promise.resolve();
-  let typingTimer: ReturnType<typeof setTimeout> | undefined;
+  let draftBurst = false;
+  const draftWrites = new Set<Deferred.Deferred<void>>();
   let typingPeerId = '';
-  let typingConversation: Conversation | undefined;
+  let typingConversation: EffectConversation | undefined;
   let focusFrame: number | undefined;
 
   const focusComposer = () => {
@@ -84,46 +92,80 @@ export function createComposerSession(options: ComposerSessionOptions) {
     else attachmentDrafts.set(peerId, cloneAttachments(next));
   };
   const stopTyping = () => {
-    if (typingTimer) clearTimeout(typingTimer);
-    typingTimer = undefined;
     const conversation = typingConversation;
     typingPeerId = '';
     typingConversation = undefined;
-    if (conversation) void conversation.setTyping();
+    void options
+      .runLatestEffect(TYPING_TASK, conversation ? conversation.setTyping() : Effect.void)
+      .catch(() => undefined);
   };
-  const enqueueDraftWrite = (write: PendingDraftWrite) => {
-    const persistence = draftWriteTail
-      .catch(() => undefined)
-      .then(() => write.conversation.setDraft(write.value));
-    draftWriteTail = persistence.then(
-      () => undefined,
-      () => undefined,
+  const trackDraftWrite = <Value, Error>(write: Effect.Effect<Value, Error>) => {
+    const completed = Deferred.makeUnsafe<void>();
+    draftWrites.add(completed);
+    return write.pipe(
+      Effect.ensuring(
+        Deferred.succeed(completed, undefined).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              draftWrites.delete(completed);
+            }),
+          ),
+        ),
+      ),
     );
-    return persistence;
+  };
+  const awaitDraftWrites = Effect.suspend(() =>
+    Effect.forEach([...draftWrites], Deferred.await, { discard: true }),
+  );
+  const enqueueDraftWrite = (write: PendingDraftWrite) => {
+    return options.runEffect(
+      trackDraftWrite(write.conversation.setDraft(write.value, write.details)),
+    );
   };
   const flushDraftWrite = (peerId?: string) => {
     const pending = pendingDraftWrite;
-    if (peerId && pending && pending.peerId !== peerId) return Promise.resolve();
+    if (peerId && pending && pending.peerId !== peerId) {
+      return options.runEffect(awaitDraftWrites);
+    }
     pendingDraftWrite = undefined;
-    if (draftWriteTimer) clearTimeout(draftWriteTimer);
-    draftWriteTimer = undefined;
-    if (!pending) return draftWriteTail;
-    return enqueueDraftWrite(pending);
+    draftBurst = false;
+    if (!pending) return options.runEffect(awaitDraftWrites);
+    return options.runLatestEffect(
+      DRAFT_WRITE_TASK,
+      trackDraftWrite(pending.conversation.setDraft(pending.value)),
+    );
   };
   const scheduleDraftWrite = (write: PendingDraftWrite) => {
-    const startsBurst = draftWriteTimer === undefined;
     pendingDraftWrite = write;
-    if (draftWriteTimer) clearTimeout(draftWriteTimer);
-    if (startsBurst) {
+    if (!draftBurst) {
+      draftBurst = true;
       pendingDraftWrite = undefined;
       void enqueueDraftWrite(write);
     }
-    draftWriteTimer = setTimeout(() => void flushDraftWrite(), DRAFT_WRITE_DELAY_MS);
+    void options
+      .runLatestEffect(
+        DRAFT_WRITE_TASK,
+        trackDraftWrite(
+          Effect.sleep(DRAFT_WRITE_DELAY_MS).pipe(
+            Effect.andThen(
+              Effect.suspend(() => {
+                const pending = pendingDraftWrite;
+                pendingDraftWrite = undefined;
+                draftBurst = false;
+                return pending
+                  ? pending.conversation.setDraft(pending.value, pending.details)
+                  : Effect.void;
+              }),
+            ),
+          ),
+        ),
+      )
+      .catch(() => undefined);
   };
   const cancelDraftWrite = () => {
-    if (draftWriteTimer) clearTimeout(draftWriteTimer);
-    draftWriteTimer = undefined;
     pendingDraftWrite = undefined;
+    draftBurst = false;
+    void options.runLatestEffect(DRAFT_WRITE_TASK, Effect.void).catch(() => undefined);
   };
   const takeDraftAuthority = (peerId = options.activePeerId()) => {
     draftAuthorityVersion += 1;
@@ -145,10 +187,12 @@ export function createComposerSession(options: ComposerSessionOptions) {
     takeDraftAuthority();
     setDraft(value);
   };
-  const syncDraft = (value: string) => {
+  const syncDraft = (value: string, details?: TelegramDraftDetails) => {
     if (draftAuthorityPeerId === options.activePeerId()) return;
     editVersion += 1;
     setDraft(value);
+    setFormats(details?.formats ? [...details.formats] : []);
+    setReply(details?.reply ? { ...details.reply } : undefined);
   };
   const changeDraft = (value: string) => {
     options.beforeUiChange();
@@ -160,27 +204,62 @@ export function createComposerSession(options: ComposerSessionOptions) {
     if (peerId === 'empty') return;
     const conversation = options.conversation();
     if (!conversation || conversation.peerId !== peerId) return;
-    scheduleDraftWrite({ peerId, value, conversation });
+    const details = currentDraftDetails();
+    scheduleDraftWrite({ peerId, value, ...(details ? { details } : {}), conversation });
     const dialog = options.activeDialog();
     if (!dialog || !options.snapshot().online) return;
-    if (typingTimer) clearTimeout(typingTimer);
     if (value && typingPeerId !== dialog.peer.id) {
       typingPeerId = dialog.peer.id;
       typingConversation = conversation;
-      void conversation.setTyping('typing');
+      void options.runEffect(conversation.setTyping('typing')).catch(() => undefined);
     }
     if (!value && typingPeerId === dialog.peer.id) {
-      typingPeerId = '';
-      typingConversation = undefined;
-      void conversation.setTyping();
+      stopTyping();
+      return;
     }
-    typingTimer = setTimeout(() => {
-      if (typingPeerId === dialog.peer.id) {
-        typingPeerId = '';
-        typingConversation = undefined;
-        void conversation.setTyping();
-      }
-    }, 4_500);
+    if (value) {
+      void options
+        .runLatestEffect(
+          TYPING_TASK,
+          Effect.sleep(4_500).pipe(
+            Effect.andThen(
+              Effect.suspend(() => {
+                if (typingPeerId !== dialog.peer.id) return Effect.void;
+                typingPeerId = '';
+                typingConversation = undefined;
+                return conversation.setTyping();
+              }),
+            ),
+          ),
+        )
+        .catch(() => undefined);
+    }
+  };
+
+  const currentDraftDetails = (): TelegramDraftDetails | undefined => {
+    const currentFormats = formats().map((format) => ({ ...format }));
+    const currentReply = reply();
+    if (currentFormats.length === 0 && !currentReply) return undefined;
+    return {
+      formats: currentFormats,
+      ...(currentReply ? { reply: { ...currentReply } } : {}),
+    };
+  };
+  const persistDraftDetails = () => {
+    const peerId = options.activePeerId();
+    const conversation = options.conversation();
+    if (peerId === 'empty' || !conversation || conversation.peerId !== peerId || editing()) return;
+    const details = currentDraftDetails();
+    void enqueueDraftWrite({
+      peerId,
+      value: draft(),
+      ...(details ? { details } : {}),
+      conversation,
+    }).catch(() => undefined);
+  };
+  const changeFormats = (next: TelegramTextFormat[]) => {
+    setFormats(next);
+    persistDraftDetails();
   };
 
   const switchPeer = (previousPeerId: string, peerId: string, changing: boolean) => {
@@ -195,7 +274,9 @@ export function createComposerSession(options: ComposerSessionOptions) {
       setReply(undefined);
       setAttachments(cloneAttachments(attachmentDrafts.get(peerId) ?? []));
       setEditing(undefined);
-      setFormats([]);
+      const details = options.snapshot().draftDetails[peerId];
+      setFormats(details?.formats ? [...details.formats] : []);
+      setReply(details?.reply ? { ...details.reply } : undefined);
       draftAuthorityVersion += 1;
       draftAuthorityPeerId = '';
       setDraft(options.snapshot().drafts[peerId] ?? '');
@@ -211,7 +292,13 @@ export function createComposerSession(options: ComposerSessionOptions) {
     if (!body.trim() && capturedAttachments.length === 0 && !capturedEditing?.media) return;
     const dialog = options.activeDialog();
     const conversation = options.conversation();
-    if (!dialog || !conversation || conversation.peerId !== dialog.peer.id || !options.canSend()) {
+    if (
+      !dialog ||
+      !conversation ||
+      conversation.peerId !== dialog.peer.id ||
+      !options.canSend() ||
+      (capturedAttachments.length > 0 && !options.canSendMedia())
+    ) {
       return;
     }
     const peerId = dialog.peer.id;
@@ -241,11 +328,13 @@ export function createComposerSession(options: ComposerSessionOptions) {
       await pendingDraft;
       if (capturedEditing) {
         const replacement = capturedAttachments[0];
-        await conversation.editMessage(
-          Number(capturedEditing.id),
-          body,
-          capturedFormats,
-          replacement ? { file: replacement.file, sendAs: replacement.sendAs } : undefined,
+        await options.runEffect(
+          conversation.editMessage(
+            Number(capturedEditing.id),
+            body,
+            capturedFormats,
+            replacement ? { file: replacement.file, sendAs: replacement.sendAs } : undefined,
+          ),
         );
         const restore =
           capturedRestore?.peerId === peerId
@@ -264,16 +353,18 @@ export function createComposerSession(options: ComposerSessionOptions) {
         return;
       }
       if (capturedAttachments.length > 0) {
-        void conversation.setTyping('uploading');
-        await conversation.sendAttachments(
-          capturedAttachments.map(({ file, sendAs }) => ({ file, sendAs })),
-          body,
-          telegramReply,
-          capturedFormats,
+        void options.runEffect(conversation.setTyping('uploading')).catch(() => undefined);
+        await options.runEffect(
+          conversation.sendAttachments(
+            capturedAttachments.map(({ file, sendAs }) => ({ file, sendAs })),
+            body,
+            telegramReply,
+            capturedFormats,
+          ),
         );
-        void conversation.setTyping();
+        void options.runEffect(conversation.setTyping()).catch(() => undefined);
       } else {
-        await conversation.sendDraft(body, telegramReply, capturedFormats);
+        await options.runEffect(conversation.sendDraft(body, telegramReply, capturedFormats));
       }
       releaseDraftAuthority(peerId, clearedAuthorityVersion, '');
     } catch {
@@ -294,7 +385,9 @@ export function createComposerSession(options: ComposerSessionOptions) {
         setFormats(capturedFormats);
         if (!capturedEditing) {
           rememberAttachments(peerId, capturedAttachments);
-          await conversation.setDraft(body).catch(() => undefined);
+          await options
+            .runEffect(conversation.setDraft(body, currentDraftDetails()))
+            .catch(() => undefined);
         }
       } else if (!capturedEditing && options.activePeerId() !== peerId) {
         rememberAttachments(peerId, capturedAttachments);
@@ -350,6 +443,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
       preview: selectionInside ? selected : message.body || message.media?.name || 'Message',
       ...(selectionInside ? { quoteText: selected } : {}),
     });
+    persistDraftDetails();
     selection?.removeAllRanges();
     focusComposer();
   };
@@ -406,7 +500,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     attachments,
     reply,
     editing,
-    setFormats,
+    setFormats: changeFormats,
     changeDraft,
     replaceDraft,
     syncDraft,
@@ -418,12 +512,17 @@ export function createComposerSession(options: ComposerSessionOptions) {
     beginReply,
     forceReply: (messageId: number, preview: string) => {
       setReply({ messageId, preview });
+      persistDraftDetails();
       focusComposer();
     },
     focus: focusComposer,
     beginEdit,
     cancelEdit,
-    clearReply: () => setReply(undefined),
+    clearReply: () => {
+      if (!reply()) return;
+      setReply(undefined);
+      persistDraftDetails();
+    },
     reset,
   };
 }

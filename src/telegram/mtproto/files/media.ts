@@ -1,3 +1,5 @@
+import { Effect } from 'effect';
+
 import { concatBytes, hexToBytes } from '../bytes';
 import type { TlObject } from '../sender';
 import { downloadFile } from './download';
@@ -78,7 +80,7 @@ function inlinePhotoBytes(size: TlObject) {
   return size._ === 'photoStrippedSize' ? strippedPhotoToJpeg(size.bytes) : size.bytes;
 }
 
-export async function downloadMedia(
+export const downloadMedia = Effect.fn('mtproto.files.downloadMedia')(function* (
   rpc: FileRpc,
   value: unknown,
   options: DownloadMediaOptions = {},
@@ -110,7 +112,7 @@ export async function downloadMedia(
     ) {
       return inlinePhotoBytes(selected);
     }
-    return downloadFile(
+    return yield* downloadFile(
       rpc,
       {
         _: 'inputPhotoFileLocation',
@@ -123,7 +125,7 @@ export async function downloadMedia(
         dcId: numberValue(photo.dcId) ?? 0,
         fileSize: photoFileSize(selected),
         ...(options.workers === undefined ? {} : { workers: options.workers }),
-        ...(options.progressCallback ? { progressCallback: options.progressCallback } : {}),
+        ...(options.progress ? { progress: options.progress } : {}),
       },
     );
   }
@@ -149,7 +151,7 @@ export async function downloadMedia(
     return inlinePhotoBytes(selected);
   }
   const fileSize = selected ? numberValue(selected.size) : numberValue(document.size);
-  return downloadFile(
+  return yield* downloadFile(
     rpc,
     {
       _: 'inputDocumentFileLocation',
@@ -164,10 +166,10 @@ export async function downloadMedia(
       ...(options.workers === undefined ? {} : { workers: options.workers }),
       ...(options.start === undefined ? {} : { start: options.start }),
       ...(options.end === undefined ? {} : { end: options.end }),
-      ...(options.progressCallback ? { progressCallback: options.progressCallback } : {}),
+      ...(options.progress ? { progress: options.progress } : {}),
     },
   );
-}
+});
 
 function inputPeer(entity: TlObject): TlObject {
   if (entity._ === 'user') {
@@ -180,11 +182,15 @@ function inputPeer(entity: TlObject): TlObject {
   return { _: 'inputPeerChat', chatId: entity.id };
 }
 
-export function downloadProfilePhoto(rpc: FileRpc, entity: unknown, big = false) {
-  if (!tagged(entity) || !tagged(entity.photo)) return Promise.resolve(undefined);
+export const downloadProfilePhoto = Effect.fn('mtproto.files.downloadProfilePhoto')(function* (
+  rpc: FileRpc,
+  entity: unknown,
+  big = false,
+) {
+  if (!tagged(entity) || !tagged(entity.photo)) return undefined;
   const photo = entity.photo;
-  if (photo._ !== 'userProfilePhoto' && photo._ !== 'chatPhoto') return Promise.resolve(undefined);
-  return downloadFile(
+  if (photo._ !== 'userProfilePhoto' && photo._ !== 'chatPhoto') return undefined;
+  return yield* downloadFile(
     rpc,
     {
       _: 'inputPeerPhotoFileLocation',
@@ -194,4 +200,4 @@ export function downloadProfilePhoto(rpc: FileRpc, entity: unknown, big = false)
     },
     { dcId: numberValue(photo.dcId) ?? 0 },
   );
-}
+});

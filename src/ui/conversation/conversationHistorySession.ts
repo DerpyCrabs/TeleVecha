@@ -1,14 +1,16 @@
 import { createEffect, onCleanup, untrack, type Accessor } from 'solid-js';
 
 import type { ChatMessage } from '../../domain/models';
-import type { Conversation } from '../../telegram/core/conversation';
+import type { EffectConversation } from '../../telegram/core/conversation';
 import type { EngineSnapshot, TelegramHistoryGap } from '../../telegram/types';
+import type { UiEffectRunner } from '../app/appRuntime';
 import type { ConversationViewport } from './conversationViewport';
 
 interface ConversationHistoryOptions {
   snapshot: Accessor<EngineSnapshot>;
   activePeerId: Accessor<string>;
-  conversation: Accessor<Conversation | undefined>;
+  conversation: Accessor<EffectConversation | undefined>;
+  runEffect: UiEffectRunner;
   loaded: Accessor<boolean>;
   openingMessage: Accessor<boolean>;
   unreadAfterId: Accessor<number | undefined>;
@@ -42,7 +44,8 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
     const generation = ++loadGeneration;
     loadRunning = true;
     try {
-      await options.conversation()?.loadOlder();
+      const conversation = options.conversation();
+      if (conversation) await options.runEffect(conversation.loadOlder());
     } finally {
       if (generation === loadGeneration) {
         loadRunning = false;
@@ -61,7 +64,8 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
     const peerId = options.activePeerId();
     loadRunning = true;
     try {
-      await options.conversation()?.loadGap(gap);
+      const conversation = options.conversation();
+      if (conversation) await options.runEffect(conversation.loadGap(gap));
       if (generation !== loadGeneration || options.activePeerId() !== peerId) return;
       viewport.updateJump(scroller);
     } finally {
@@ -116,7 +120,7 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
       ) {
         return;
       }
-      void loadOlder(scroller, true);
+      void loadOlder(scroller, true).catch(() => undefined);
     });
   });
 

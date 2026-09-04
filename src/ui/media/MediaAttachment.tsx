@@ -2,7 +2,16 @@ import Download from 'lucide-solid/icons/download';
 import FileText from 'lucide-solid/icons/file-text';
 import LoaderCircle from 'lucide-solid/icons/loader-circle';
 import X from 'lucide-solid/icons/x';
-import { Show, createEffect, createSignal, onCleanup, onMount, untrack } from 'solid-js';
+import {
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  on,
+  onCleanup,
+  onMount,
+  untrack,
+} from 'solid-js';
 
 import type { ChatMessage } from '../../domain/models';
 import type { TelegramTransferProgress } from '../../telegram/types';
@@ -40,17 +49,18 @@ export function MediaAttachment(props: MediaAttachmentProps) {
   const usesLightweightPreview = () =>
     Boolean(props.loadPreview) && presentation().display !== 'image';
   const cachedDisplayUrl = () =>
-    props.cachedUrl?.() ??
-    (usesLightweightPreview() ? props.cachedPreviewUrl?.() : undefined) ??
-    '';
+    (usesLightweightPreview() ? props.cachedPreviewUrl?.() : props.cachedUrl?.()) ?? '';
   const [url, setUrl] = createSignal(cachedDisplayUrl());
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
-  const [previewOpen, setPreviewOpen] = createSignal(false);
+  const [standalonePreview, setStandalonePreview] = createSignal<MediaPreview>();
+  const [inlineVideoUrl, setInlineVideoUrl] = createSignal('');
+  const [inlineVideoPlaying, setInlineVideoPlaying] = createSignal(false);
   const [nearViewport, setNearViewport] = createSignal(false);
   const [spoilerRevealed, setSpoilerRevealed] = createSignal(false);
   const [downloadProgress, setDownloadProgress] = createSignal<number>();
   let root: HTMLDivElement | undefined;
+  let inlineVideo: HTMLVideoElement | undefined;
   let generation = 0;
   let activeProgress: TelegramTransferProgress | undefined;
 
@@ -72,7 +82,9 @@ export function MediaAttachment(props: MediaAttachmentProps) {
     onCleanup(() => observer.disconnect());
   });
 
-  const isImage = () => presentation().display === 'image';
+  const isImage = () =>
+    presentation().display === 'image' ||
+    Boolean(props.compact && presentation().preview === 'image');
   const isVideo = () => presentation().display === 'video';
   const isRoundVideo = () => presentation().display === 'round-video';
   const isVoice = () => presentation().display === 'voice';
@@ -96,7 +108,7 @@ export function MediaAttachment(props: MediaAttachmentProps) {
     if (props.onOpenPreview) {
       if (props.onOpenPreview(preview) !== false) return;
     }
-    setPreviewOpen(true);
+    setStandalonePreview(preview);
   };
 
   const load = async () => {
@@ -156,25 +168,42 @@ export function MediaAttachment(props: MediaAttachmentProps) {
     anchor.click();
   };
 
-  createEffect(() => {
-    const identity = `${props.revision ?? ''}:${props.media.cacheKey ?? ''}:${props.media.kind}:${props.media.name}:${props.media.mimeType}`;
-    const cached = untrack(cachedDisplayUrl);
-    const shouldLoad = presentation().preload;
-    void identity;
-    generation += 1;
-    setUrl(cached);
-    setError('');
-    setLoading(false);
-    setDownloadProgress(undefined);
-    setSpoilerRevealed(false);
-    if (shouldLoad && nearViewport() && !cached) untrack(() => void load());
-  });
+  const automaticLoadState = createMemo(
+    () =>
+      `${props.revision ?? ''}:${props.media.cacheKey ?? ''}:${props.media.kind}:${props.media.name}:${props.media.mimeType}:${presentation().preload}:${nearViewport()}`,
+  );
+  createEffect(
+    on(automaticLoadState, () => {
+      const cached = untrack(cachedDisplayUrl);
+      const shouldLoad = untrack(() => presentation().preload && nearViewport());
+      generation += 1;
+      setUrl(cached);
+      setError('');
+      setLoading(false);
+      setDownloadProgress(undefined);
+      setSpoilerRevealed(false);
+      if (shouldLoad && !cached) untrack(() => void load());
+    }),
+  );
   const pause = (video: HTMLVideoElement) => {
     video.pause();
     video.currentTime = 0;
   };
   const play = (video: HTMLVideoElement) => {
     void video.play().catch(() => undefined);
+  };
+  const startVideoPreview = async () => {
+    const loaded = inlineVideoUrl() || (await loadOriginal());
+    if (!loaded) return;
+    setInlineVideoUrl(loaded);
+    setInlineVideoPlaying(true);
+    queueMicrotask(() => {
+      if (inlineVideo) play(inlineVideo);
+    });
+  };
+  const stopVideoPreview = () => {
+    setInlineVideoPlaying(false);
+    if (inlineVideo) pause(inlineVideo);
   };
   const loadFallback = (kind: string) => (
     <>
@@ -251,6 +280,10 @@ export function MediaAttachment(props: MediaAttachmentProps) {
           role={previewEnabled() ? 'button' : undefined}
           tabIndex={previewEnabled() ? 0 : undefined}
           aria-label={previewEnabled() ? `Open ${props.media.name} fullscreen preview` : undefined}
+          onPointerEnter={() => void startVideoPreview()}
+          onPointerLeave={stopVideoPreview}
+          onFocus={() => void startVideoPreview()}
+          onBlur={stopVideoPreview}
           onClick={(event) => void openPreview(event.currentTarget)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -284,9 +317,24 @@ export function MediaAttachment(props: MediaAttachmentProps) {
               />
             }
           >
-            <img src={url() || undefined} alt={props.media.name} loading="lazy" hidden={!url()} />
+            <img
+              src={url() || undefined}
+              alt={props.media.name}
+              loading="lazy"
+              hidden={!url() || Boolean(inlineVideoUrl())}
+            />
+            <video
+              ref={(element) => (inlineVideo = element)}
+              src={inlineVideoUrl() || undefined}
+              muted
+              loop
+              playsinline
+              preload="metadata"
+              aria-label={`${props.media.name}. Hover to play.`}
+              hidden={!inlineVideoUrl()}
+            />
           </Show>
-          <Show when={props.media.kind === 'video'}>
+          <Show when={props.media.kind === 'video' && !inlineVideoPlaying()}>
             <span class="media-video-play" aria-hidden="true">
               <span />
             </span>
@@ -346,35 +394,56 @@ export function MediaAttachment(props: MediaAttachmentProps) {
         </div>
       </Show>
       <Show when={!isImage() && !isVideo() && !isInlinePlayer() && !isTgs()}>
-        <button
-          class="media-file"
-          classList={{ 'media-file-previewable': Boolean(previewKind()) }}
-          onClick={(event) =>
-            previewKind() ? void openPreview(event.currentTarget) : void download()
-          }
-          disabled={loading() && !previewKind()}
-          aria-busy={loading()}
-          aria-label={
-            previewKind()
-              ? `Open ${props.media.name} fullscreen preview`
-              : `Download ${props.media.name}`
+        <Show
+          when={previewKind()}
+          fallback={
+            <button
+              class="media-file"
+              onClick={() => void download()}
+              disabled={loading()}
+              aria-busy={loading()}
+              aria-label={`Download ${props.media.name}`}
+            >
+              <span class="media-file-thumbnail" aria-hidden="true">
+                <Show when={loading()} fallback={<FileText size={20} />}>
+                  <LoaderCircle class="animate-spin" size={20} />
+                </Show>
+              </span>
+              <span>
+                <strong>{props.media.name}</strong>
+                <small>{error() || describeMedia(props.media)}</small>
+              </span>
+              <Show when={!props.protected}>
+                <Download size={17} />
+              </Show>
+            </button>
           }
         >
-          <Show when={loading()} fallback={<FileText size={20} />}>
-            <LoaderCircle class="animate-spin" size={20} />
-          </Show>
-          <span>
+          <span class="media-file-thumbnail media-file-image-thumbnail" aria-hidden="true">
+            <Show
+              when={url()}
+              fallback={
+                <Show when={loading()} fallback={<FileText size={20} />}>
+                  <LoaderCircle class="animate-spin" size={20} />
+                </Show>
+              }
+            >
+              <img src={url()} alt="" />
+            </Show>
+          </span>
+          <button
+            class="media-file-copy"
+            onClick={(event) => void openPreview(event.currentTarget)}
+            aria-label={`Open ${props.media.name} fullscreen preview`}
+          >
             <strong>{props.media.name}</strong>
             <small>
               {loading() && downloadProgress() !== undefined
                 ? `${Math.round(downloadProgress()! * 100)}% downloaded`
                 : error() || describeMedia(props.media)}
             </small>
-          </span>
-          <Show when={!previewKind() && !props.protected}>
-            <Download size={17} />
-          </Show>
-        </button>
+          </button>
+        </Show>
         <Show when={!loading() && previewKind() && !props.protected}>
           <button
             class="media-file-download"
@@ -385,7 +454,8 @@ export function MediaAttachment(props: MediaAttachmentProps) {
             disabled={loading()}
             aria-label={`Download ${props.media.name}`}
           >
-            <Download size={17} />
+            <Download size={15} />
+            <span>Download</span>
           </button>
         </Show>
         <Show when={loading()}>
@@ -413,14 +483,16 @@ export function MediaAttachment(props: MediaAttachmentProps) {
           Reveal spoiler
         </button>
       </Show>
-      <Show when={previewOpen() && url() && previewKind()}>
-        <MediaViewer
-          kind={previewKind()!}
-          name={props.media.name}
-          url={url()}
-          protected={props.protected}
-          close={() => setPreviewOpen(false)}
-        />
+      <Show when={standalonePreview()}>
+        {(preview) => (
+          <MediaViewer
+            kind={preview().kind}
+            name={preview().name}
+            url={preview().url}
+            protected={props.protected}
+            close={() => setStandalonePreview(undefined)}
+          />
+        )}
       </Show>
     </div>
   );

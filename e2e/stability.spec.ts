@@ -60,6 +60,55 @@ test('keeps cached messages readable through a live disconnect and reconnect', a
   await expect.poll(async () => (await fixtureStats(page))?.connect ?? 0).toBeGreaterThanOrEqual(2);
 });
 
+test('waits for a live reconnect before loading newly revealed media', async ({ page }) => {
+  await page.goto('/?scenario=held-connect');
+  await expect(page.getByText('Connecting to Telegram')).toBeVisible();
+  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+  await selectAlice(page);
+
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({ type: 'connection-state', connected: false }),
+  );
+  await expect(
+    page.getByRole('button', { name: /Offline.*Retry Telegram connection/i }),
+  ).toBeVisible();
+  const downloadsBefore = (await fixtureStats(page))?.downloadMedia ?? 0;
+  await page.evaluate(() => {
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 91,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: '',
+        date: 1_700_005_000,
+        outgoing: false,
+        media: {
+          kind: 'photo',
+          name: 'reconnect-photo.jpg',
+          mimeType: 'image/jpeg',
+          width: 640,
+          height: 360,
+        },
+      },
+    });
+  });
+  await expect(page.locator('article[data-message-id="91"]')).toBeVisible();
+
+  await expect
+    .poll(async () => (await fixtureStats(page))?.connect ?? 0, { timeout: 5_000 })
+    .toBeGreaterThanOrEqual(2);
+  await expect(page.getByRole('img', { name: 'reconnect-photo.jpg', exact: true })).toHaveCount(0);
+  await expect(page.getByText(/media requested before connection was ready/i)).toHaveCount(0);
+
+  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+  await expect(page.getByRole('img', { name: 'reconnect-photo.jpg', exact: true })).toBeVisible();
+  await expect(page.getByText(/media requested before connection was ready/i)).toHaveCount(0);
+  expect((await fixtureStats(page))?.downloadMedia).toBeGreaterThan(downloadsBefore);
+});
+
 test('reconnects automatically when focus returns after a background disconnect', async ({
   page,
 }) => {

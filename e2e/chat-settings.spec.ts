@@ -139,7 +139,7 @@ test('confirms chat deletion and removes the deleted chat', async ({ page }) => 
   await page.getByRole('menuitem', { name: 'Delete chat' }).click();
   const dialog = page.getByRole('dialog', { name: 'Delete chat' });
   await expect(dialog).toContainText('Alice Fixture');
-  await dialog.getByRole('button', { name: 'Delete chat' }).click();
+  await dialog.getByRole('button', { name: 'Delete for everyone' }).click();
 
   await expect(chat).toHaveCount(0);
   await expect(page.getByText('Release Channel', { exact: true }).first()).toBeVisible();

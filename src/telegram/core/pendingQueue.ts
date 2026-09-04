@@ -1,21 +1,61 @@
+import { Effect, Fiber, FiberMap, Option } from 'effect';
+
 import type { CacheStore } from '../persistence/store';
 import type { PendingSend } from '../types';
+import type { EngineTasks } from './engineTasks';
 
 type OutboxStore = Pick<CacheStore, 'commitOutbox'>;
 
-export class PendingSendQueue {
-  private readonly nextOrders = new Map<string, number>();
-  private readonly activeAttempts = new Set<string>();
-  private readonly deliveries = new Map<string, Promise<void>>();
-  private readonly peerDeliveryTails = new Map<string, Promise<void>>();
-  private readonly peerBlocks = new Map<string, string>();
-  private readonly writeTails = new Map<string, Promise<void>>();
-  private readonly cancellations = new Set<string>();
+export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function* (
+  store: OutboxStore,
+  tasks: EngineTasks,
+) {
+  const nextOrders = new Map<string, number>();
+  const activeAttempts = new Set<string>();
+  const peerBlocks = new Map<string, string>();
+  const cancellations = new Set<string>();
+  const deliveries = yield* FiberMap.make<string, void, unknown>();
 
-  constructor(private readonly store: OutboxStore) {}
+  const capture = (pending: PendingSend): PendingSend => {
+    const formats = pending.formats?.map((format) => Object.freeze({ ...format }));
+    if (formats) Object.freeze(formats);
+    const albumAttachments = pending.album?.attachments.map((attachment) =>
+      Object.freeze({ ...attachment, sendAs: 'media' as const }),
+    );
+    if (albumAttachments) Object.freeze(albumAttachments);
+    return Object.freeze({
+      ...pending,
+      peer: Object.freeze({ ...pending.peer }),
+      reply: pending.reply ? Object.freeze({ ...pending.reply }) : undefined,
+      formats,
+      sticker: pending.sticker
+        ? Object.freeze({
+            ...pending.sticker,
+            fileReference: new Uint8Array(pending.sticker.fileReference),
+          })
+        : undefined,
+      forward: pending.forward
+        ? Object.freeze({
+            fromPeer: Object.freeze({ ...pending.forward.fromPeer }),
+            messageId: pending.forward.messageId,
+            ...(pending.forward.mediaKind === undefined
+              ? {}
+              : { mediaKind: pending.forward.mediaKind }),
+          })
+        : undefined,
+      botStart: pending.botStart ? Object.freeze({ ...pending.botStart }) : undefined,
+      attachment: pending.attachment
+        ? Object.freeze({
+            ...pending.attachment,
+            sendAs: pending.attachment.sendAs ?? 'media',
+          })
+        : undefined,
+      album: albumAttachments ? Object.freeze({ attachments: albumAttachments }) : undefined,
+    });
+  };
 
-  async restore(pending: PendingSend[]) {
-    this.nextOrders.clear();
+  const restore = Effect.fn('PendingSendQueue.restore')(function* (pending: PendingSend[]) {
+    nextOrders.clear();
     const byPeer = new Map<string, PendingSend[]>();
     for (const send of pending) {
       const sends = byPeer.get(send.peer.id) ?? [];
@@ -41,16 +81,17 @@ export class PendingSendQueue {
           send.queueOrder !== undefined && send.queueOrder > lastOrder
             ? send.queueOrder
             : lastOrder + 1;
-        const captured = this.capture(
-          send.queueOrder === queueOrder ? send : { ...send, queueOrder },
-        );
+        const captured = capture(send.queueOrder === queueOrder ? send : { ...send, queueOrder });
         restored.push(captured);
         if (send.queueOrder !== queueOrder) migrations.push(captured);
         lastOrder = queueOrder;
       }
-      this.nextOrders.set(peerId, lastOrder);
+      nextOrders.set(peerId, lastOrder);
     }
-    await Promise.all(migrations.map((send) => this.store.commitOutbox(send)));
+    yield* Effect.forEach(migrations, (send) => store.commitOutbox(send), {
+      concurrency: 'unbounded',
+      discard: true,
+    });
     return restored.sort((left, right) => {
       if (left.peer.id === right.peer.id) {
         const queueDifference = (left.queueOrder ?? 0) - (right.queueOrder ?? 0);
@@ -58,148 +99,95 @@ export class PendingSendQueue {
       }
       return left.createdAt - right.createdAt || left.id.localeCompare(right.id);
     });
-  }
+  });
 
-  create(pending: PendingSend) {
-    const queueOrder = (this.nextOrders.get(pending.peer.id) ?? 0) + 1;
-    this.nextOrders.set(pending.peer.id, queueOrder);
-    return this.capture({ ...pending, queueOrder });
-  }
+  const create = (pending: PendingSend) => {
+    const queueOrder = (nextOrders.get(pending.peer.id) ?? 0) + 1;
+    nextOrders.set(pending.peer.id, queueOrder);
+    return capture({ ...pending, queueOrder });
+  };
 
-  capture(pending: PendingSend): PendingSend {
-    const formats = pending.formats?.map((format) => Object.freeze({ ...format }));
-    if (formats) Object.freeze(formats);
-    const albumAttachments = pending.album?.attachments.map((attachment) =>
-      Object.freeze({ ...attachment, sendAs: 'media' as const }),
-    );
-    if (albumAttachments) Object.freeze(albumAttachments);
-    return Object.freeze({
-      ...pending,
-      peer: Object.freeze({ ...pending.peer }),
-      reply: pending.reply ? Object.freeze({ ...pending.reply }) : undefined,
-      formats,
-      sticker: pending.sticker
-        ? Object.freeze({
-            ...pending.sticker,
-            fileReference: new Uint8Array(pending.sticker.fileReference),
-          })
-        : undefined,
-      forward: pending.forward
-        ? Object.freeze({
-            fromPeer: Object.freeze({ ...pending.forward.fromPeer }),
-            messageId: pending.forward.messageId,
-          })
-        : undefined,
-      botStart: pending.botStart ? Object.freeze({ ...pending.botStart }) : undefined,
-      attachment: pending.attachment
-        ? Object.freeze({
-            ...pending.attachment,
-            sendAs: pending.attachment.sendAs ?? 'media',
-          })
-        : undefined,
-      album: albumAttachments ? Object.freeze({ attachments: albumAttachments }) : undefined,
+  const blobBytes = (pending: PendingSend) =>
+    pending.attachment
+      ? pending.attachment.blob.size
+      : (pending.album?.attachments.reduce(
+          (total, attachment) => total + attachment.blob.size,
+          0,
+        ) ?? 0);
+
+  const queueWrite = <Value, Error, Requirements>(
+    peerId: string,
+    work: Effect.Effect<Value, Error, Requirements>,
+  ) => tasks.serialize('outboxWrite', peerId, work);
+
+  const scheduleDelivery = <Error, Requirements>(
+    pending: PendingSend,
+    work: Effect.Effect<void, Error, Requirements>,
+  ) =>
+    Effect.gen(function* () {
+      const current = yield* FiberMap.get(deliveries, pending.id);
+      if (Option.isSome(current)) return yield* Fiber.join(current.value);
+      const fiber = yield* FiberMap.run(
+        deliveries,
+        pending.id,
+        tasks
+          .serialize('outboxDelivery', pending.peer.id, work)
+          .pipe(Effect.ensuring(Effect.sync(() => cancellations.delete(pending.id)))),
+      );
+      return yield* Fiber.join(fiber);
     });
-  }
 
-  blobBytes(pending: PendingSend) {
-    if (pending.attachment) return pending.attachment.blob.size;
-    return (
-      pending.album?.attachments.reduce((total, attachment) => total + attachment.blob.size, 0) ?? 0
+  const delivery = (id: string) =>
+    FiberMap.get(deliveries, id).pipe(
+      Effect.map((current) => (Option.isSome(current) ? Fiber.join(current.value) : undefined)),
     );
-  }
 
-  queueWrite<T>(peerId: string, work: () => Promise<T>) {
-    const previous = this.writeTails.get(peerId) ?? Promise.resolve();
-    const operation = previous.catch(() => undefined).then(work);
-    const tail = operation.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.writeTails.set(peerId, tail);
-    void tail.then(() => {
-      if (this.writeTails.get(peerId) === tail) this.writeTails.delete(peerId);
-    });
-    return operation;
-  }
+  const clearRuntime = Effect.all(
+    [
+      FiberMap.clear(deliveries),
+      Effect.sync(() => {
+        activeAttempts.clear();
+        peerBlocks.clear();
+        cancellations.clear();
+      }),
+    ],
+    { discard: true },
+  );
 
-  pendingWrites() {
-    return this.writeTails.values();
-  }
+  return {
+    restore,
+    create,
+    capture,
+    blobBytes,
+    queueWrite,
+    scheduleDelivery,
+    delivery,
+    cancel: (id: string) => Effect.sync(() => cancellations.add(id)).pipe(Effect.asVoid),
+    finishCancellation: (id: string) =>
+      FiberMap.has(deliveries, id).pipe(
+        Effect.flatMap((active) =>
+          active ? Effect.void : Effect.sync(() => cancellations.delete(id)).pipe(Effect.asVoid),
+        ),
+      ),
+    isCancelled: (id: string) => cancellations.has(id),
+    beginAttempt: (id: string) => {
+      if (activeAttempts.has(id)) return false;
+      activeAttempts.add(id);
+      return true;
+    },
+    endAttempt: (id: string) => activeAttempts.delete(id),
+    blockedBy: (peerId: string) => peerBlocks.get(peerId),
+    block: (peerId: string, pendingId: string) => peerBlocks.set(peerId, pendingId),
+    releaseBlock: (peerId: string, pendingId?: string) => {
+      if (pendingId !== undefined && peerBlocks.get(peerId) !== pendingId) return false;
+      return peerBlocks.delete(peerId);
+    },
+    clearRuntime,
+    clear: Effect.andThen(
+      Effect.sync(() => nextOrders.clear()),
+      clearRuntime,
+    ),
+  };
+});
 
-  scheduleDelivery(pending: PendingSend, work: () => Promise<void>) {
-    const existing = this.deliveries.get(pending.id);
-    if (existing) return existing;
-    const previous = this.peerDeliveryTails.get(pending.peer.id) ?? Promise.resolve();
-    const running = previous.catch(() => undefined).then(work);
-    let delivery!: Promise<void>;
-    delivery = running.finally(() => {
-      if (this.deliveries.get(pending.id) === delivery) this.deliveries.delete(pending.id);
-      this.cancellations.delete(pending.id);
-    });
-    const tail = delivery.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.deliveries.set(pending.id, delivery);
-    this.peerDeliveryTails.set(pending.peer.id, tail);
-    void tail.then(() => {
-      if (this.peerDeliveryTails.get(pending.peer.id) === tail) {
-        this.peerDeliveryTails.delete(pending.peer.id);
-      }
-    });
-    return delivery;
-  }
-
-  delivery(id: string) {
-    return this.deliveries.get(id);
-  }
-
-  cancel(id: string) {
-    this.cancellations.add(id);
-  }
-
-  finishCancellation(id: string) {
-    if (!this.deliveries.has(id)) this.cancellations.delete(id);
-  }
-
-  isCancelled(id: string) {
-    return this.cancellations.has(id);
-  }
-
-  beginAttempt(id: string) {
-    if (this.activeAttempts.has(id)) return false;
-    this.activeAttempts.add(id);
-    return true;
-  }
-
-  endAttempt(id: string) {
-    this.activeAttempts.delete(id);
-  }
-
-  blockedBy(peerId: string) {
-    return this.peerBlocks.get(peerId);
-  }
-
-  block(peerId: string, pendingId: string) {
-    this.peerBlocks.set(peerId, pendingId);
-  }
-
-  releaseBlock(peerId: string, pendingId?: string) {
-    if (pendingId !== undefined && this.peerBlocks.get(peerId) !== pendingId) return false;
-    return this.peerBlocks.delete(peerId);
-  }
-
-  clearRuntime() {
-    this.activeAttempts.clear();
-    this.deliveries.clear();
-    this.peerDeliveryTails.clear();
-    this.peerBlocks.clear();
-    this.writeTails.clear();
-    this.cancellations.clear();
-  }
-
-  clear() {
-    this.nextOrders.clear();
-    this.clearRuntime();
-  }
-}
+export type PendingSendQueue = Effect.Success<ReturnType<typeof makePendingSendQueue>>;

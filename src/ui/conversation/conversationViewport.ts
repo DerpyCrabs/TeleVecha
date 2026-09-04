@@ -257,6 +257,19 @@ export function createConversationViewport(options: ConversationViewportOptions)
         scroller.scrollTop +=
           currentTarget.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
       };
+      const unreadTailFits = () => {
+        const currentTarget = scroller.querySelector<HTMLElement>(selector!);
+        const present = scroller.querySelector<HTMLElement>('.present-scroll-anchor');
+        if (!currentTarget || !present) return false;
+        return (
+          present.getBoundingClientRect().bottom - currentTarget.getBoundingClientRect().top <=
+          scroller.clientHeight + 2
+        );
+      };
+      if (unreadTailFits()) {
+        dispatch({ type: 'peer-positioned' }, scroller);
+        return;
+      }
       alignUnread();
       dispatch({ type: 'history-target-opened' }, scroller);
       requestAnimationFrame(() => {
@@ -265,6 +278,10 @@ export function createConversationViewport(options: ConversationViewportOptions)
         requestAnimationFrame(() => {
           if (options.activePeerId() !== peerId || !stillCurrent()) return;
           readingAnchors = [];
+          if (unreadTailFits()) {
+            dispatch({ type: 'peer-positioned' }, scroller);
+            return;
+          }
           alignUnread();
           dispatch({ type: 'reading-anchor-requested' }, scroller);
         });

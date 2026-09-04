@@ -37,7 +37,18 @@ test('opens image documents from a file card and keeps download separate', async
   const card = message.getByRole('button', { name: 'Open diagram.png fullscreen preview' });
   await expect(card).toBeVisible();
   await expect(card).toContainText('41 KB · image/png');
-  await expect(message.getByRole('img', { name: 'diagram.png' })).toHaveCount(0);
+  await expect(message.locator('.media-file-thumbnail img')).toBeVisible();
+  const fileRows = await message.evaluate((element) => {
+    const status = element.querySelector<HTMLElement>('.media-file-copy small')!;
+    const action = element.querySelector<HTMLElement>('.media-file-download')!;
+    return {
+      statusBottom: status.getBoundingClientRect().bottom,
+      actionTop: action.getBoundingClientRect().top,
+      actionPosition: getComputedStyle(action).position,
+    };
+  });
+  expect(fileRows.actionPosition).toBe('static');
+  expect(fileRows.actionTop).toBeGreaterThanOrEqual(fileRows.statusBottom);
 
   const downloadsBefore = (await fixtureStats(page))?.downloadMedia ?? 0;
   await card.click();
@@ -184,7 +195,7 @@ test('reports and cancels an attachment download', async ({ page }) => {
 
 test('loads original photos and stores the full blob in IndexedDB', async ({ page }) => {
   await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
-  expect((await fixtureStats(page))?.downloadMedia).toBe(2);
+  // Other visible attachments download too; inspect this photo's durable cache entry.
 
   await expect
     .poll(() =>
@@ -534,10 +545,20 @@ test('opens photo and video attachments in a fullscreen viewer', async ({ page }
   await expect(videoMessage.getByText('16.6 MB')).toBeVisible();
   await expect(videoMessage.getByText('0:45')).toBeVisible();
   await expect(videoMessage.locator('.media-video-play')).toBeVisible();
+  const thumbnailUrl = await videoMessage.locator('.media-visual > img').getAttribute('src');
+  await videoMessage.locator('.media-visual').hover();
+  const inlineVideo = videoMessage.locator('video[aria-label="fixture.mp4. Hover to play."]');
+  await expect(inlineVideo).toBeVisible();
+  await expect(inlineVideo).not.toHaveAttribute('src', thumbnailUrl!);
+  await expect(videoMessage.locator('.media-video-play')).toBeHidden();
+  await page.reload();
+  await selectAlice(page);
+  await expect(page.locator('article[data-message-id="81"] .media-visual > img')).toBeVisible();
   await page.getByRole('button', { name: 'Open fixture.mp4 fullscreen preview' }).click();
   const videoViewer = page.getByRole('dialog', { name: 'Media preview: fixture.mp4' });
   const video = videoViewer.locator('video[controls]');
   await expect(video).toBeVisible();
+  await expect(video).not.toHaveAttribute('src', thumbnailUrl!);
   await expect(videoViewer.getByRole('button', { name: 'Close media preview' })).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(video).toBeFocused();
@@ -561,7 +582,9 @@ test('uses cached avatars and media after reload instead of downloading again', 
   expect(stats?.downloadAvatar).toBe(0);
 });
 
-test('reveals cached avatars only after startup verifies the account', async ({ page }) => {
+test('keeps cached chats usable while reconnecting without redownloading avatars', async ({
+  page,
+}) => {
   await page.goto('/?scenario=held-connect');
   await expect(page.getByText('Connecting to Telegram')).toBeVisible();
   await page.evaluate(() => window.__televechaFixture?.releaseConnect());
@@ -569,14 +592,18 @@ test('reveals cached avatars only after startup verifies the account', async ({ 
 
   await page.reload();
 
-  await expect(page.locator('[data-testid="chat-list"] img')).toHaveCount(0);
-  await expect(page.getByText('Connecting to Telegram')).toBeVisible();
+  await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Reconnecting… Retry Telegram connection' }),
+  ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
 
   await page.evaluate(() => window.__televechaFixture?.releaseConnect());
 
   await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
-  await expect(page.getByText('Connecting to Telegram. Showing cached data.')).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Reconnecting… Retry Telegram connection' }),
+  ).toHaveCount(0);
   expect((await fixtureStats(page))?.downloadAvatar).toBe(0);
 });
 
@@ -605,6 +632,39 @@ test('loads cached-dialog avatars after a delayed Telegram connection becomes re
   await expect(page.getByText('Connecting to Telegram')).toHaveCount(0);
   await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
   expect((await fixtureStats(page))?.downloadAvatar).toBeGreaterThan(0);
+});
+
+test('waits for Telegram to reconnect before loading uncached message media', async ({ page }) => {
+  await page.goto('/?scenario=held-connect&chat=u%3A101');
+  await expect(page.getByText('Connecting to Telegram')).toBeVisible();
+  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+  await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
+  await page.evaluate(async () => {
+    const request = indexedDB.open('televecha-e2e-held-connect');
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const clear = database.transaction('files', 'readwrite').objectStore('files').clear();
+      clear.onsuccess = () => resolve();
+      clear.onerror = () => reject(clear.error);
+    });
+    database.close();
+  });
+
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Reconnecting… Retry Telegram connection' }),
+  ).toBeVisible();
+  await expect(page.getByText(/media requested before connection was ready/i)).toHaveCount(0);
+  expect((await fixtureStats(page))?.downloadMedia).toBe(0);
+
+  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+
+  await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
+  await expect(page.getByText(/media requested before connection was ready/i)).toHaveCount(0);
+  expect((await fixtureStats(page))?.downloadMedia).toBeGreaterThan(0);
 });
 
 test('shows upload progress, preserves the caption, and completes a file upload', async ({

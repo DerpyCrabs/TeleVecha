@@ -26,7 +26,6 @@ export function createConversationHeaderSession(options: {
   chat: Accessor<ChatSummary>;
   activePeerId: Accessor<string>;
   activePeerMatches: Accessor<boolean>;
-  online: Accessor<boolean>;
 }) {
   const [pinnedSelection, setPinnedSelection] = createSignal({
     peerId: '',
@@ -38,11 +37,7 @@ export function createConversationHeaderSession(options: {
   );
   const status = createMemo(() => {
     const chat = options.chat();
-    const snapshot = options.snapshot();
     if (chat.id === 'empty') return 'Choose a chat';
-    if (snapshot.phase === 'connecting') return 'connecting…';
-    if (snapshot.phase === 'syncing') return 'syncing…';
-    if (!options.online()) return 'offline · cached conversation';
     const currentActivity = activity();
     if (currentActivity?.kind === 'typing') return 'typing…';
     if (currentActivity?.kind === 'uploading') return 'uploading…';

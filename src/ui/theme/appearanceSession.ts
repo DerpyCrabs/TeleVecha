@@ -1,7 +1,10 @@
 import { createSignal, onCleanup, onMount } from 'solid-js';
+import type { Effect } from 'effect';
 
 import type { TelegramWallpaper } from '../../telegram/types';
+import type { MessagingError } from '../../telegram/core/messagingError';
 import { loadCustomWallpaper, saveCustomWallpaper } from './customWallpaperStore';
+import type { UiEffectRunner } from '../app/appRuntime';
 import {
   applyThemePreferences,
   normalizeThemePreferences,
@@ -12,12 +15,12 @@ import {
 } from './themePreferences';
 
 interface AppearanceSource {
-  getWallpapers(): Promise<TelegramWallpaper[]>;
-  downloadWallpaper(wallpaperId: string): Promise<Blob>;
+  getWallpapers(): Effect.Effect<TelegramWallpaper[], MessagingError>;
+  downloadWallpaper(wallpaperId: string): Effect.Effect<Blob, MessagingError>;
 }
 
 /** Owns application-wide appearance persistence and wallpaper object URLs. */
-export function createAppearanceSession(source: AppearanceSource) {
+export function createAppearanceSession(source: AppearanceSource, runEffect: UiEffectRunner) {
   const [appearance, setAppearance] = createSignal(readThemePreferences());
   const [telegramWallpapers, setTelegramWallpapers] = createSignal<TelegramWallpaper[]>([]);
   const [catalogLoading, setCatalogLoading] = createSignal(false);
@@ -41,9 +44,9 @@ export function createAppearanceSession(source: AppearanceSource) {
     try {
       const blob =
         preferences.wallpaper === 'custom'
-          ? await loadCustomWallpaper()
+          ? await runEffect(loadCustomWallpaper)
           : preferences.wallpaper === 'telegram' && preferences.telegramWallpaper?.hasFile
-            ? await source.downloadWallpaper(preferences.telegramWallpaper.id)
+            ? await runEffect(source.downloadWallpaper(preferences.telegramWallpaper.id))
             : undefined;
       if (generation === loadGeneration) showWallpaper(blob);
     } catch (cause) {
@@ -74,7 +77,7 @@ export function createAppearanceSession(source: AppearanceSource) {
     if (catalogLoading()) return;
     setCatalogLoading(true);
     try {
-      setTelegramWallpapers(await source.getWallpapers());
+      setTelegramWallpapers(await runEffect(source.getWallpapers()));
     } catch {
       setTelegramWallpapers([]);
     } finally {
@@ -93,7 +96,9 @@ export function createAppearanceSession(source: AppearanceSource) {
     setWallpaperBusy(true);
     setWallpaperError('');
     try {
-      const blob = wallpaper.hasFile ? await source.downloadWallpaper(wallpaper.id) : undefined;
+      const blob = wallpaper.hasFile
+        ? await runEffect(source.downloadWallpaper(wallpaper.id))
+        : undefined;
       const next: ThemePreferences = {
         ...appearance(),
         wallpaper: 'telegram',
@@ -125,7 +130,7 @@ export function createAppearanceSession(source: AppearanceSource) {
     setWallpaperBusy(true);
     setWallpaperError('');
     try {
-      await saveCustomWallpaper(file);
+      await runEffect(saveCustomWallpaper(file));
       commit({ ...appearance(), wallpaper: 'custom' });
       showWallpaper(file);
     } catch (cause) {

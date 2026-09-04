@@ -1,16 +1,42 @@
-import { MessagingEngine } from '../../telegram/core/engine';
-import type { MessagingClient } from '../../telegram/core/client';
-import { BrowserDebugReportRecorder } from '../../debug/tvbugReports';
+import { BrowserCrypto, BrowserSocket } from '@effect/platform-browser';
+import { Crypto, Effect, Exit, FiberMap, FiberSet, Layer } from 'effect';
+import * as Socket from 'effect/unstable/socket/Socket';
+
+import { createBrowserDebugReportRecorder } from '../../debug/tvbugReports';
 import { createTvBugSnapshotClient, injectedTvBugBundle } from '../../debug/tvbugRuntime';
-import { IndexedDbCacheStore } from '../../telegram/persistence/store';
-import { TabCoordinator, type TabCoordinatorOwner } from '../../telegram/session/tabCoordinator';
-import { FixtureTelegramTransport } from '../../telegram/transports/fixtureTransport';
-import type { PendingSend, TelegramCredentials, TelegramTransport } from '../../telegram/types';
+import type { EffectMessagingClient } from '../../telegram/core/client';
+import { makeMessagingEngine, MessagingEngineLayer } from '../../telegram/core/engine';
+import { makeResourceCache } from '../../telegram/core/resourceCache';
+import { AccountState, EngineStateLayer } from '../../telegram/core/engineState';
+import { EngineTasks } from '../../telegram/core/engineTasks';
+import {
+  createIndexedDbCacheStore,
+  type IndexedDbCacheStore,
+} from '../../telegram/persistence/store';
+import {
+  makeTabCoordinator,
+  type TabCoordinatorOwner,
+} from '../../telegram/session/tabCoordinator';
+import { CoordinatorTasksLayer } from '../../telegram/session/coordinatorTasks';
 import { createWebTelegramTransport } from '../../telegram/transports/webTelegramTransport';
+import type { PendingSend, TelegramCredentials, TelegramTransport } from '../../telegram/types';
 
 export interface AppRuntime {
-  engine: MessagingClient;
+  engine: EffectMessagingClient;
+  runEffect: UiEffectRunner;
+  runLatestEffect: UiLatestEffectRunner;
+  runSharedEffect: UiSharedEffectRunner;
   debugReports?: DebugReportModule | undefined;
+}
+
+export type UiEffectRunner = <Value, Error>(effect: Effect.Effect<Value, Error>) => Promise<Value>;
+export type UiLatestEffectRunner = <Value, Error>(
+  key: string,
+  effect: Effect.Effect<Value, Error>,
+) => Promise<Value>;
+export interface UiSharedEffectRunner {
+  <Value, Error>(key: string, effect: Effect.Effect<Value, Error>): Promise<Value>;
+  cancel(key: string): Promise<void>;
 }
 
 export interface PreparedDebugReport {
@@ -25,7 +51,8 @@ export interface PreparedDebugReport {
 }
 
 export interface DebugReportModule {
-  prepare(): Promise<PreparedDebugReport>;
+  dispose(): void;
+  prepare(): Effect.Effect<PreparedDebugReport, unknown>;
   recordPeerSelection?(peerId: string): void;
   recordComposerReply?(peerId: string, messageId: number): void;
   recordComposerSend?(peerId: string, text: string): void;
@@ -49,6 +76,26 @@ export interface AppEnvironment {
   tvbug?: boolean | undefined;
 }
 
+export const subscribeAtUi = <Error>(
+  runEffect: UiEffectRunner,
+  acquire: Effect.Effect<Effect.Effect<void>, Error>,
+) => {
+  let release: Effect.Effect<void> | undefined;
+  let disposed = false;
+  const finalize = (finalizer: Effect.Effect<void>) =>
+    runEffect(Effect.exit(finalizer)).then(() => undefined);
+  void runEffect(Effect.exit(acquire)).then((result) => {
+    if (Exit.isFailure(result)) return;
+    const nextRelease = result.value;
+    if (disposed) void finalize(nextRelease);
+    else release = nextRelease;
+  });
+  return () => {
+    disposed = true;
+    if (release) void finalize(release);
+  };
+};
+
 function environmentCredentials(): TelegramCredentials | undefined {
   const envId = Number(import.meta.env.VITE_TELEGRAM_API_ID);
   const envHash = String(import.meta.env.VITE_TELEGRAM_API_HASH ?? '').trim();
@@ -56,89 +103,144 @@ function environmentCredentials(): TelegramCredentials | undefined {
   return undefined;
 }
 
-function runtime(fixtureMode: boolean, fixtureScenario: string | null): ControlledRuntime {
-  const root = globalThis as typeof globalThis & {
-    __televechaRuntimes?: Map<string, ControlledRuntime>;
-  };
-  const key = fixtureMode ? `fixture:${fixtureScenario ?? 'default'}` : 'production';
-  const runtimes = (root.__televechaRuntimes ??= new Map());
-  const existing = runtimes.get(key);
-  if (existing) return existing;
-
+const makeRuntime = Effect.fn('AppRuntime.make')(function* (
+  fixtureMode: boolean,
+  fixtureScenario: string | null,
+  runEffect: UiEffectRunner,
+  runLatestEffect: UiLatestEffectRunner,
+) {
+  const crypto = yield* Crypto.Crypto;
+  const webSocket = yield* Socket.WebSocketConstructor;
+  const accountState = yield* AccountState;
+  const engineTasks = yield* EngineTasks;
   const databaseName = fixtureMode
     ? `televecha-e2e${fixtureScenario ? `-${fixtureScenario}` : ''}`
     : 'televecha';
-  const created: ControlledRuntime = { engine: undefined as unknown as MessagingClient };
-  const reader = new IndexedDbCacheStore(databaseName);
-  const debugReports = new BrowserDebugReportRecorder(reader);
-  created.debugReports = debugReports;
+  const store = yield* createIndexedDbCacheStore(databaseName);
+  const sharedEffects = yield* makeResourceCache();
+  const runSharedEffect: UiSharedEffectRunner = Object.assign(
+    <Value, Error>(key: string, effect: Effect.Effect<Value, Error>) =>
+      runEffect(sharedEffects.load(key, () => effect)),
+    { cancel: (key: string) => runEffect(sharedEffects.forget(key)) },
+  );
   const pendingPayloads = new Map<string, PendingSend>();
-  const coordinator = new TabCoordinator({
-    key,
-    loadBlob: (blobKey) => reader.loadBlob(blobKey),
-    hydrateSnapshot: async (snapshot, pendingPayloadIds) => {
-      const payloadIds = new Set(pendingPayloadIds);
-      for (const id of pendingPayloads.keys()) {
-        if (!payloadIds.has(id)) pendingPayloads.delete(id);
-      }
-      const missing = pendingPayloadIds.filter((id) => !pendingPayloads.has(id));
-      if (missing.length > 0) {
-        const missingIds = new Set(missing);
-        for (const pending of (await reader.loadWorkspace()).pending) {
-          if (missingIds.has(pending.id)) pendingPayloads.set(pending.id, pending);
+  let controlled: ControlledRuntime | undefined;
+  const coordinator = yield* makeTabCoordinator({
+    key: fixtureMode ? `fixture:${fixtureScenario ?? 'default'}` : 'production',
+    loadBlob: (blobKey) => store.loadBlob(blobKey),
+    hydrateSnapshot: (snapshot, pendingPayloadIds) =>
+      Effect.gen(function* () {
+        const payloadIds = new Set(pendingPayloadIds);
+        for (const id of pendingPayloads.keys()) {
+          if (!payloadIds.has(id)) pendingPayloads.delete(id);
         }
-      }
-      if (pendingPayloads.size === 0) return snapshot;
-      return {
-        ...snapshot,
-        pending: snapshot.pending.map((pending) =>
-          payloadIds.has(pending.id) ? (pendingPayloads.get(pending.id) ?? pending) : pending,
-        ),
-      };
-    },
-    createOwner(): TabCoordinatorOwner {
-      const store = new IndexedDbCacheStore(databaseName);
-      const sourceTransport: TelegramTransport = fixtureMode
-        ? new FixtureTelegramTransport()
-        : createWebTelegramTransport(store);
-      const engine = new MessagingEngine(sourceTransport, store, { manageTabLease: false });
-      debugReports.attachEngine(engine);
-      return {
-        engine,
-        // Keep the controllable live transport available to fixture tooling. Exposing the
-        // recording proxy here would make a test override call back into its own wrapper.
-        transport: sourceTransport,
-      };
-    },
-    ownerChanged(owner) {
-      created.transport = owner?.transport as TelegramTransport | undefined;
-    },
+        const missing = pendingPayloadIds.filter((id) => !pendingPayloads.has(id));
+        if (missing.length > 0) {
+          const missingIds = new Set(missing);
+          for (const pending of (yield* store.loadWorkspace()).pending) {
+            if (missingIds.has(pending.id)) pendingPayloads.set(pending.id, pending);
+          }
+        }
+        if (pendingPayloads.size === 0) return snapshot;
+        return {
+          ...snapshot,
+          pending: snapshot.pending.map((pending) =>
+            payloadIds.has(pending.id) ? (pendingPayloads.get(pending.id) ?? pending) : pending,
+          ),
+        };
+      }),
+    createOwner: () =>
+      Effect.gen(function* () {
+        const transport =
+          import.meta.env.VITE_TELEVECHA_E2E === '1'
+            ? yield* Effect.tryPromise({
+                try: () => import('../../telegram/transports/fixtureTransport'),
+                catch: (cause) => new Error('Could not load the fixture transport.', { cause }),
+              }).pipe(
+                Effect.flatMap(({ createFixtureTelegramTransport }) =>
+                  createFixtureTelegramTransport(),
+                ),
+              )
+            : yield* createWebTelegramTransport(store).pipe(
+                Effect.provideService(Crypto.Crypto, crypto),
+                Effect.provideService(Socket.WebSocketConstructor, webSocket),
+              );
+        const engine = yield* makeMessagingEngine(transport, store, { manageTabLease: false }).pipe(
+          Effect.provideService(AccountState, accountState),
+          Effect.provideService(EngineTasks, engineTasks),
+          Effect.provideService(Crypto.Crypto, crypto),
+        );
+        return import.meta.env.VITE_TELEVECHA_E2E === '1'
+          ? ({ engine, transport } satisfies TabCoordinatorOwner)
+          : ({ engine } satisfies TabCoordinatorOwner);
+      }),
+    ...(import.meta.env.VITE_TELEVECHA_E2E === '1'
+      ? {
+          ownerChanged: (owner: TabCoordinatorOwner | undefined) =>
+            Effect.sync(() => {
+              if (controlled)
+                controlled.transport = owner?.transport as TelegramTransport | undefined;
+            }),
+        }
+      : {}),
   });
-  created.engine = coordinator.client;
-  runtimes.set(key, created);
-  return created;
-}
+  const engine = coordinator.client;
+  const recorder = createBrowserDebugReportRecorder(store as IndexedDbCacheStore);
+  yield* Effect.addFinalizer(() => Effect.sync(() => recorder.dispose()));
+  recorder.attachEngine(engine);
+  const debugReports: DebugReportModule = {
+    ...recorder,
+  };
+  controlled = { engine, runEffect, runLatestEffect, runSharedEffect, debugReports };
+  if (import.meta.env.VITE_TELEVECHA_E2E === '1') {
+    const root = globalThis as typeof globalThis & {
+      __televechaRuntimes?: Map<string, ControlledRuntime>;
+    };
+    const key = `fixture:${fixtureScenario ?? 'default'}`;
+    (root.__televechaRuntimes ??= new Map()).set(key, controlled);
+  }
+  return controlled;
+});
 
-export function defaultAppEnvironment(search = window.location.search): AppEnvironment {
+export const appRuntimeLayer = Layer.mergeAll(
+  MessagingEngineLayer,
+  EngineStateLayer,
+  CoordinatorTasksLayer,
+  BrowserCrypto.layer,
+  BrowserSocket.layerWebSocketConstructor,
+);
+
+export const makeDefaultAppEnvironment = Effect.fn('AppEnvironment.make')(function* (
+  search = window.location.search,
+) {
+  const runEffect = yield* FiberSet.makeRuntimePromise();
+  const runLatestEffect = yield* FiberMap.makeRuntimePromise<never, string>();
   const tvbugBundle = injectedTvBugBundle();
   if (tvbugBundle) {
-    const root = globalThis as typeof globalThis & { __televechaTvBugRuntime?: AppRuntime };
-    const tvbugRuntime = (root.__televechaTvBugRuntime ??= {
-      engine: createTvBugSnapshotClient(tvbugBundle),
-    });
+    const sharedEffects = yield* makeResourceCache();
+    const runSharedEffect: UiSharedEffectRunner = Object.assign(
+      <Value, Error>(key: string, effect: Effect.Effect<Value, Error>) =>
+        runEffect(sharedEffects.load(key, () => effect)),
+      { cancel: (key: string) => runEffect(sharedEffects.forget(key)) },
+    );
     return {
-      runtime: tvbugRuntime,
+      runtime: {
+        engine: createTvBugSnapshotClient(tvbugBundle),
+        runEffect,
+        runLatestEffect,
+        runSharedEffect,
+      },
       tvbug: true,
-    };
+    } satisfies AppEnvironment;
   }
   const fixtureMode = import.meta.env.VITE_TELEVECHA_E2E === '1';
   const credentials = fixtureMode ? { apiId: 1, apiHash: 'fixture' } : environmentCredentials();
   const fixtureScenario = new URLSearchParams(search).get('scenario');
   return {
-    runtime: runtime(fixtureMode, fixtureScenario),
+    runtime: yield* makeRuntime(fixtureMode, fixtureScenario, runEffect, runLatestEffect),
     credentials,
     configurationError: credentials
       ? undefined
       : 'TeleVecha could not find VITE_TELEGRAM_API_ID and VITE_TELEGRAM_API_HASH.',
-  };
-}
+  } satisfies AppEnvironment;
+});

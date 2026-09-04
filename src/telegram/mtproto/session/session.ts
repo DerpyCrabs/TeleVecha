@@ -1,7 +1,31 @@
-import { bytesToHex, hexToBytes } from '../bytes';
-import { createMtprotoError, errorMessage } from '../errors';
+import { Effect, Schema, SynchronizedRef } from 'effect';
 
-const AUTH_KEY_HEX_LENGTH = 512;
+import { bytesToHex, hexToBytes } from '../bytes';
+import { createMtprotoError, errorMessage, type MtprotoError } from '../errors';
+
+const DataCenterId = Schema.Int.check(
+  Schema.isBetween(
+    { minimum: 1, maximum: 10_000 },
+    { message: 'Session has an invalid main data-center ID.' },
+  ),
+);
+const isDataCenterId = Schema.is(DataCenterId);
+const AuthKey = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{512}$/iu, { message: 'Session auth key is invalid.' }),
+);
+const AuthKeys = Schema.Record(Schema.String, AuthKey).pipe(
+  Schema.refine(
+    (keys): keys is Readonly<Record<string, string>> =>
+      Object.keys(keys).every((dcId) => isDataCenterId(Number(dcId))),
+    { message: 'Session has an invalid auth-key data center.' },
+  ),
+);
+const StoredSession = Schema.Struct({
+  mainDcId: DataCenterId,
+  keys: AuthKeys,
+  isTest: Schema.optional(Schema.Boolean),
+});
+const decodeStoredSession = Schema.decodeUnknownSync(StoredSession);
 
 export interface StoredMtprotoSession {
   readonly mainDcId: number;
@@ -10,170 +34,127 @@ export interface StoredMtprotoSession {
 }
 
 export interface SessionPersistence {
-  load(): Promise<unknown>;
-  save(value: StoredMtprotoSession): Promise<void>;
-  clear(): Promise<void>;
-}
-
-export interface SessionSaveQueue {
-  schedule(value: StoredMtprotoSession | undefined): void;
-  flush(): Promise<void>;
-  error(): unknown;
+  readonly load: Effect.Effect<unknown, MtprotoError>;
+  readonly save: (value: StoredMtprotoSession) => Effect.Effect<void, MtprotoError>;
+  readonly clear: Effect.Effect<void, MtprotoError>;
 }
 
 export interface MtprotoSessionModel {
-  snapshot(): StoredMtprotoSession;
-  authKey(dcId?: number): Uint8Array | undefined;
-  setMainDc(dcId: number, isTest?: boolean): void;
-  setAuthKey(dcId: number, key: Uint8Array | undefined): void;
-  delete(): void;
-  flush(): Promise<void>;
+  readonly snapshot: Effect.Effect<StoredMtprotoSession>;
+  readonly authKey: (dcId?: number) => Effect.Effect<Uint8Array | undefined>;
+  readonly setMainDc: (dcId: number, isTest?: boolean) => Effect.Effect<void, MtprotoError>;
+  readonly setAuthKey: (
+    dcId: number,
+    key: Uint8Array | undefined,
+  ) => Effect.Effect<void, MtprotoError>;
+  readonly delete: Effect.Effect<void, MtprotoError>;
 }
 
-export function createCacheSessionPersistence(store: {
-  loadTransportSession(): Promise<unknown>;
-  saveTransportSession(value: unknown): Promise<void>;
-}): SessionPersistence {
-  return Object.freeze({
-    load: () => store.loadTransportSession(),
-    save: (value: StoredMtprotoSession) => store.saveTransportSession(value),
-    clear: () => store.saveTransportSession(undefined),
-  });
+interface SessionState {
+  readonly mainDcId: number;
+  readonly isTest: boolean;
+  readonly keys: ReadonlyMap<number, Uint8Array>;
 }
 
-export function parseStoredSession(value: unknown): StoredMtprotoSession | undefined {
+export const parseStoredSession = Effect.fn('mtproto.session.parse')(function* (value: unknown) {
   if (value === undefined || value === null) return undefined;
-  if (!isRecord(value)) throw invalidSession('Session must be an object.');
-  if (!isDcId(value.mainDcId)) throw invalidSession('Session has an invalid main data-center ID.');
-  if (!isRecord(value.keys)) throw invalidSession('Session auth keys must be an object.');
-  if (value.isTest !== undefined && value.isTest !== true) {
-    throw invalidSession('Session test-network marker must be true or absent.');
-  }
-
-  const keys: Record<number, string> = {};
-  for (const [dcIdText, encoded] of Object.entries(value.keys)) {
-    const dcId = Number(dcIdText);
-    if (!isDcId(dcId))
-      throw invalidSession(`Session has an invalid auth-key data center: ${dcIdText}.`);
-    if (
-      typeof encoded !== 'string' ||
-      encoded.length !== AUTH_KEY_HEX_LENGTH ||
-      !/^[0-9a-f]+$/iu.test(encoded)
-    ) {
-      throw invalidSession(`Session auth key for data center ${dcId} is invalid.`);
-    }
-    keys[dcId] = encoded.toLowerCase();
-  }
-
+  const decoded = yield* Effect.try({
+    try: () => decodeStoredSession(value),
+    catch: (cause) =>
+      createMtprotoError('session', `Invalid Telegram session. ${errorMessage(cause)}`, { cause }),
+  });
   return freezeSession({
-    mainDcId: value.mainDcId,
-    keys,
-    ...(value.isTest ? { isTest: true as const } : {}),
+    mainDcId: decoded.mainDcId,
+    keys: Object.fromEntries(
+      Object.entries(decoded.keys).map(([dcId, encoded]) => [dcId, encoded.toLowerCase()]),
+    ),
+    ...(decoded.isTest ? { isTest: true as const } : {}),
   });
-}
+});
 
-export function createSessionSaveQueue(
-  persistence: SessionPersistence,
-  onError: (error: unknown) => void = () => undefined,
-): SessionSaveQueue {
-  let tail = Promise.resolve();
-  let lastError: unknown;
-
-  return Object.freeze({
-    schedule(value: StoredMtprotoSession | undefined) {
-      const snapshot = value ? cloneSession(value) : undefined;
-      tail = tail.then(async () => {
-        try {
-          if (snapshot) await persistence.save(snapshot);
-          else await persistence.clear();
-          lastError = undefined;
-        } catch (error) {
-          lastError = error;
-          try {
-            onError(error);
-          } catch {
-            // Persistence ordering must not depend on an observational callback.
-          }
-        }
-      });
-    },
-    async flush() {
-      await tail;
-      if (lastError === undefined) return;
-      throw createMtprotoError(
-        'session',
-        `Could not persist the Telegram authorization session. ${errorMessage(lastError)}`,
-        { cause: lastError },
-      );
-    },
-    error() {
-      return lastError;
-    },
-  });
-}
-
-export function createMtprotoSession(
+export const createMtprotoSession = Effect.fn('mtproto.session.make')(function* (
   initial: StoredMtprotoSession | undefined,
-  saves: SessionSaveQueue,
+  persistence: SessionPersistence,
   defaultDcId = 2,
-): MtprotoSessionModel {
-  if (!isDcId(defaultDcId)) throw new RangeError('Default data-center ID must be positive.');
-  let mainDcId = initial?.mainDcId ?? defaultDcId;
-  let isTest = initial?.isTest === true;
-  const keys = new Map<number, Uint8Array>();
-  for (const [dcId, encoded] of Object.entries(initial?.keys ?? {})) {
-    keys.set(Number(dcId), hexToBytes(encoded));
+) {
+  if (!isDataCenterId(defaultDcId)) {
+    return yield* Effect.fail(
+      createMtprotoError('configuration', 'Data-center ID must be positive.'),
+    );
   }
-
-  const snapshot = () =>
+  const state = yield* SynchronizedRef.make<SessionState>({
+    mainDcId: initial?.mainDcId ?? defaultDcId,
+    isTest: initial?.isTest === true,
+    keys: new Map(
+      Object.entries(initial?.keys ?? {}).map(([dcId, encoded]) => [
+        Number(dcId),
+        hexToBytes(encoded),
+      ]),
+    ),
+  });
+  const encode = (value: SessionState) =>
     freezeSession({
-      mainDcId,
+      mainDcId: value.mainDcId,
       keys: Object.fromEntries(
-        [...keys.entries()]
+        [...value.keys.entries()]
           .sort(([left], [right]) => left - right)
           .map(([dcId, key]) => [dcId, bytesToHex(key)]),
       ),
-      ...(isTest ? { isTest: true as const } : {}),
+      ...(value.isTest ? { isTest: true as const } : {}),
     });
-  const changed = () => saves.schedule(snapshot());
+  const update = (
+    change: (current: SessionState) => SessionState,
+  ): Effect.Effect<void, MtprotoError> =>
+    SynchronizedRef.updateEffect(state, (current) => {
+      const next = change(current);
+      return next === current
+        ? Effect.succeed(current)
+        : persistence.save(encode(next)).pipe(Effect.as(next));
+    });
 
-  return Object.freeze({
-    snapshot,
-    authKey(dcId = mainDcId) {
-      const key = keys.get(dcId);
-      return key ? new Uint8Array(key) : undefined;
+  return {
+    snapshot: SynchronizedRef.get(state).pipe(Effect.map(encode)),
+    authKey: (dcId?: number) =>
+      SynchronizedRef.get(state).pipe(
+        Effect.map((current) => {
+          const key = current.keys.get(dcId ?? current.mainDcId);
+          return key === undefined ? undefined : new Uint8Array(key);
+        }),
+      ),
+    setMainDc: (dcId: number, isTest = false) => {
+      if (!isDataCenterId(dcId)) {
+        return Effect.fail(createMtprotoError('configuration', 'Data-center ID must be positive.'));
+      }
+      return update((current) => {
+        if (current.mainDcId === dcId && current.isTest === isTest) return current;
+        return {
+          mainDcId: dcId,
+          isTest,
+          keys: current.isTest === isTest ? current.keys : new Map(),
+        };
+      });
     },
-    setMainDc(dcId: number, nextIsTest = false) {
-      if (!isDcId(dcId)) throw new RangeError('Data-center ID must be positive.');
-      if (dcId === mainDcId && nextIsTest === isTest) return;
-      if (nextIsTest !== isTest) keys.clear();
-      mainDcId = dcId;
-      isTest = nextIsTest;
-      changed();
+    setAuthKey: (dcId: number, key: Uint8Array | undefined) => {
+      if (!isDataCenterId(dcId)) {
+        return Effect.fail(createMtprotoError('configuration', 'Data-center ID must be positive.'));
+      }
+      if (key !== undefined && key.byteLength !== 256) {
+        return Effect.fail(
+          createMtprotoError('configuration', 'An MTProto auth key must contain 256 bytes.'),
+        );
+      }
+      return update((current) => {
+        const keys = new Map(current.keys);
+        if (key === undefined) keys.delete(dcId);
+        else keys.set(dcId, new Uint8Array(key));
+        return { ...current, keys };
+      });
     },
-    setAuthKey(dcId: number, key: Uint8Array | undefined) {
-      if (!isDcId(dcId)) throw new RangeError('Data-center ID must be positive.');
-      if (key && key.byteLength !== 256)
-        throw new RangeError('An MTProto auth key must contain 256 bytes.');
-      if (key) keys.set(dcId, new Uint8Array(key));
-      else keys.delete(dcId);
-      changed();
-    },
-    delete() {
-      keys.clear();
-      saves.schedule(undefined);
-    },
-    flush: () => saves.flush(),
-  });
-}
-
-function cloneSession(value: StoredMtprotoSession) {
-  return freezeSession({
-    mainDcId: value.mainDcId,
-    keys: { ...value.keys },
-    ...(value.isTest ? { isTest: true as const } : {}),
-  });
-}
+    delete: SynchronizedRef.updateEffect(state, (current) =>
+      persistence.clear.pipe(Effect.as({ ...current, keys: new Map() })),
+    ),
+  } satisfies MtprotoSessionModel;
+});
 
 function freezeSession(value: StoredMtprotoSession): StoredMtprotoSession {
   return Object.freeze({
@@ -181,16 +162,4 @@ function freezeSession(value: StoredMtprotoSession): StoredMtprotoSession {
     keys: Object.freeze({ ...value.keys }),
     ...(value.isTest ? { isTest: true as const } : {}),
   });
-}
-
-function isDcId(value: unknown): value is number {
-  return Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 10_000;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function invalidSession(message: string) {
-  return createMtprotoError('session', message);
 }

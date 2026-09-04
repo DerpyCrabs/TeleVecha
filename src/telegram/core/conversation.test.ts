@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Effect } from 'effect';
 
 import type { EngineSnapshot, TelegramDialog } from '../types';
-import { Conversation } from './conversation';
+import { makeConversation } from './conversation';
 
 const peer = { id: 'u:1', kind: 'user' as const };
 const dialog: TelegramDialog = {
@@ -28,6 +29,7 @@ function snapshot(activePeerId: string | undefined): EngineSnapshot {
     activePeerId,
     messages: [],
     drafts: {},
+    draftDetails: {},
     pending: [],
     loadingMessages: false,
     hasOlderMessages: false,
@@ -39,41 +41,87 @@ function snapshot(activePeerId: string | undefined): EngineSnapshot {
 }
 
 describe('Conversation', () => {
-  it('binds peer identity and rejects commands after selection changes', async () => {
+  it('keeps commands bound to their peer after selection changes', async () => {
     let current = snapshot(peer.id);
-    const sendDraft = vi.fn(async () => undefined);
+    const succeed = <A>(value: A) => vi.fn(() => Effect.succeed(value));
+    const sendDraft = succeed(undefined);
     const host = {
       snapshot: () => current,
-      setDraft: vi.fn(async () => undefined),
-      setTyping: vi.fn(async () => undefined),
+      setDraft: succeed(undefined),
+      setTyping: succeed(undefined),
       sendDraft,
-      sendAttachments: vi.fn(async () => undefined),
-      editMessage: vi.fn(async () => undefined),
-      getBotCommands: vi.fn(async () => []),
-      startBot: vi.fn(async () => undefined),
-      answerBotCallback: vi.fn(async () => undefined),
-      requestUrlAuth: vi.fn(async () => undefined),
-      acceptUrlAuth: vi.fn(async () => undefined),
-      sendSticker: vi.fn(async () => undefined),
-      toggleReaction: vi.fn(async () => undefined),
-      deleteMessage: vi.fn(async () => undefined),
-      openMessage: vi.fn(async () => true),
-      loadOlderMessages: vi.fn(async () => undefined),
-      retryHistory: vi.fn(async () => undefined),
-      loadHistoryGap: vi.fn(async () => undefined),
-      searchMessages: vi.fn(async () => ({ messages: [], hasMore: false })),
-      getSharedMedia: vi.fn(async () => ({ messages: [], hasMore: false })),
-      forwardMessage: vi.fn(async () => undefined),
-      getUserDetails: vi.fn(async () => ({ blocked: false, contact: false })),
-      setBlocked: vi.fn(async () => undefined),
-      setPinnedMessage: vi.fn(async () => undefined),
+      sendAttachments: succeed(undefined),
+      editMessage: succeed(undefined),
+      getBotCommands: succeed([]),
+      searchGifs: succeed([]),
+      startBot: succeed(undefined),
+      answerBotCallback: succeed(undefined),
+      requestUrlAuth: succeed(undefined),
+      acceptUrlAuth: succeed(undefined),
+      sendSticker: succeed(undefined),
+      toggleReaction: succeed(undefined),
+      deleteMessage: succeed(undefined),
+      openMessageInConversationView: succeed({
+        conversation: {
+          activePeerId: peer.id,
+          messages: [],
+          loadingMessages: false,
+          hasOlderMessages: false,
+          loadingOlderMessages: false,
+          pinnedMessages: [],
+          historyGaps: [],
+        },
+        found: true,
+      }),
+      loadOlderConversationView: succeed({
+        activePeerId: peer.id,
+        messages: [],
+        loadingMessages: false,
+        hasOlderMessages: false,
+        loadingOlderMessages: false,
+        pinnedMessages: [],
+        historyGaps: [],
+      }),
+      retryConversationView: succeed({
+        activePeerId: peer.id,
+        messages: [],
+        loadingMessages: false,
+        hasOlderMessages: false,
+        loadingOlderMessages: false,
+        pinnedMessages: [],
+        historyGaps: [],
+      }),
+      loadHistoryGapConversationView: succeed({
+        activePeerId: peer.id,
+        messages: [],
+        loadingMessages: false,
+        hasOlderMessages: false,
+        loadingOlderMessages: false,
+        pinnedMessages: [],
+        historyGaps: [],
+      }),
+      searchConversationMessages: succeed({ messages: [], hasMore: false }),
+      getConversationSharedMedia: succeed({ messages: [], hasMore: false }),
+      forwardMessage: succeed(undefined),
+      getUserDetails: succeed({ blocked: false, contact: false }),
+      setBlocked: succeed(undefined),
+      setPinnedMessage: succeed(undefined),
     };
-    const conversation = new Conversation(host, peer.id);
+    const conversation = makeConversation(host, peer);
 
-    await conversation.sendDraft('hello');
+    await Effect.runPromise(conversation.sendDraft('hello'));
     expect(sendDraft).toHaveBeenCalledWith(peer, 'hello', undefined, undefined);
+    await Effect.runPromise(conversation.searchGifs('cat'));
+    expect(host.searchGifs).toHaveBeenCalledWith(peer, 'cat');
 
     current = snapshot('u:2');
-    expect(() => conversation.sendDraft('stale')).toThrow('no longer selected');
+    await Effect.runPromise(conversation.sendDraft('still addressed to Mira'));
+    expect(sendDraft).toHaveBeenLastCalledWith(
+      peer,
+      'still addressed to Mira',
+      undefined,
+      undefined,
+    );
+    await expect(Effect.runPromise(conversation.loadOlder())).rejects.toThrow('no longer selected');
   });
 });

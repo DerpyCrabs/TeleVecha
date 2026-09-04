@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
+    "prepare": "effect-tsgo patch --no-typescript --oxlint",
     "dev": "vp dev",
     "dev:e2e": "VITE_TELEVECHA_E2E=1 node scripts/playwright-server.mjs",
     "build": "vp build",
@@ -22,7 +23,9 @@
     "test:all": "npm run check:telegram-tl && npm run check && npm run check:e2e && npm test && npm run test:e2e && npm run build"
   },
   "dependencies": {
+    "@effect/platform-browser": "4.0.0-rc.112",
     "@noble/ciphers": "^2.4.0",
+    "effect": "4.0.0-rc.112",
     "fflate": "^0.8.3",
     "idb": "8.0.3",
     "lottie-web": "^5.13.0",
@@ -30,6 +33,7 @@
     "solid-js": "1.9.15"
   },
   "devDependencies": {
+    "@effect/tsgo": "0.32.1",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "^26.2.0",

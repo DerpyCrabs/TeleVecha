@@ -32,6 +32,7 @@ function snapshot(messages: TelegramMessage[] = [], pending: PendingSend[] = [])
     activePeerId: peer.id,
     messages,
     drafts: {},
+    draftDetails: {},
     pending,
     loadingMessages: false,
     hasOlderMessages: false,

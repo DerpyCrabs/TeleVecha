@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Crypto, Effect } from 'effect';
 
 import { bigIntToBytes, bytesToBigInt, concatBytes, writeInt32Le } from '../bytes';
 import type { AuthKey } from '../auth';
@@ -11,7 +12,7 @@ function authKey(): AuthKey {
     hash: new Uint8Array(20),
     auxHash: 0n,
     id: 0xfedc_ba98_7654_3210n,
-    calculateNewNonceHash: async () => 0n,
+    calculateNewNonceHash: () => Effect.succeed(0n),
   };
 }
 
@@ -72,10 +73,25 @@ async function incomingPacket(options: {
 }
 
 describe('encrypted MTProto message state', () => {
-  it('generates monotonic IDs and content-related sequence numbers', () => {
-    const state = createEncryptedMessageState({
+  const makeState = (
+    options: Parameters<typeof createEncryptedMessageState>[0],
+    crypto = cryptoDouble(),
+  ) =>
+    Effect.runPromise(
+      createEncryptedMessageState(options).pipe(
+        Effect.provideService(
+          Crypto.Crypto,
+          Crypto.make({
+            randomBytes: (length) => crypto.randomBytes(length),
+            digest: (_algorithm, bytes) => Effect.promise(() => crypto.sha256(bytes)),
+          }),
+        ),
+      ),
+    );
+
+  it('generates monotonic IDs and content-related sequence numbers', async () => {
+    const state = await makeState({
       authKey: authKey(),
-      crypto: cryptoDouble(),
       now: () => 1_700_000_000_000,
     });
     const { prepare } = state;
@@ -90,14 +106,13 @@ describe('encrypted MTProto message state', () => {
   });
 
   it('keeps methods destructurable and serializes unsigned auth-key IDs', async () => {
-    const state = createEncryptedMessageState({
+    const state = await makeState({
       authKey: authKey(),
-      crypto: cryptoDouble(),
       now: () => 1_700_000_000_123,
       serverSalt: -2n,
     });
     const { encrypt } = state;
-    const result = await encrypt(Uint8Array.of(1, 2, 3, 4), true);
+    const result = await Effect.runPromise(encrypt(Uint8Array.of(1, 2, 3, 4), true));
 
     expect(bytesToBigInt(result.packet.slice(0, 8), { littleEndian: true })).toBe(
       0xfedc_ba98_7654_3210n,
@@ -113,21 +128,25 @@ describe('encrypted MTProto message state', () => {
       littleEndian: true,
       signed: true,
     });
-    const state = createEncryptedMessageState({
-      authKey: key,
-      crypto,
-      now: () => now,
-      serverSalt: 5n,
-    });
-    const firstMessageId = (1_700_000_000n << 32n) | 1n;
-    const known = await state.decrypt(
-      await incomingPacket({
+    const state = await makeState(
+      {
         authKey: key,
-        crypto,
+        now: () => now,
         serverSalt: 5n,
-        sessionId: session,
-        messageId: firstMessageId,
-      }),
+      },
+      crypto,
+    );
+    const firstMessageId = (1_700_000_000n << 32n) | 1n;
+    const known = await Effect.runPromise(
+      state.decrypt(
+        await incomingPacket({
+          authKey: key,
+          crypto,
+          serverSalt: 5n,
+          sessionId: session,
+          messageId: firstMessageId,
+        }),
+      ),
     );
     expect(known.saltInvalid).toBe(false);
 
@@ -137,36 +156,42 @@ describe('encrypted MTProto message state', () => {
     ]);
     expect(state.getServerSalt()).toBe(6n);
     now += 40_000;
-    const oldCurrent = await state.decrypt(
-      await incomingPacket({
-        authKey: key,
-        crypto,
-        serverSalt: 5n,
-        sessionId: session,
-        messageId: (1_700_000_040n << 32n) | 1n,
-      }),
+    const oldCurrent = await Effect.runPromise(
+      state.decrypt(
+        await incomingPacket({
+          authKey: key,
+          crypto,
+          serverSalt: 5n,
+          sessionId: session,
+          messageId: (1_700_000_040n << 32n) | 1n,
+        }),
+      ),
     );
-    const expiredFuture = await state.decrypt(
-      await incomingPacket({
-        authKey: key,
-        crypto,
-        serverSalt: 7n,
-        sessionId: session,
-        messageId: (1_700_000_040n << 32n) | 5n,
-      }),
+    const expiredFuture = await Effect.runPromise(
+      state.decrypt(
+        await incomingPacket({
+          authKey: key,
+          crypto,
+          serverSalt: 7n,
+          sessionId: session,
+          messageId: (1_700_000_040n << 32n) | 5n,
+        }),
+      ),
     );
     expect(oldCurrent.saltInvalid).toBe(false);
     expect(expiredFuture.saltInvalid).toBe(true);
 
     now += 1_801_000;
-    const graceExpired = await state.decrypt(
-      await incomingPacket({
-        authKey: key,
-        crypto,
-        serverSalt: 5n,
-        sessionId: session,
-        messageId: (1_700_001_841n << 32n) | 1n,
-      }),
+    const graceExpired = await Effect.runPromise(
+      state.decrypt(
+        await incomingPacket({
+          authKey: key,
+          crypto,
+          serverSalt: 5n,
+          sessionId: session,
+          messageId: (1_700_001_841n << 32n) | 1n,
+        }),
+      ),
     );
     expect(graceExpired.saltInvalid).toBe(true);
   });
@@ -178,12 +203,14 @@ describe('encrypted MTProto message state', () => {
       littleEndian: true,
       signed: true,
     });
-    const state = createEncryptedMessageState({
-      authKey: key,
+    const state = await makeState(
+      {
+        authKey: key,
+        now: () => 1_700_000_000_000,
+        serverSalt: 5n,
+      },
       crypto,
-      now: () => 1_700_000_000_000,
-      serverSalt: 5n,
-    });
+    );
     const first = await incomingPacket({
       authKey: key,
       crypto,
@@ -191,19 +218,21 @@ describe('encrypted MTProto message state', () => {
       sessionId: session,
       messageId: (1_700_000_000n << 32n) | 1n,
     });
-    await state.decrypt(first);
+    await Effect.runPromise(state.decrypt(first));
     for (let index = 1; index <= 1_000; index += 1) {
-      await state.decrypt(
-        await incomingPacket({
-          authKey: key,
-          crypto,
-          serverSalt: 5n,
-          sessionId: session,
-          messageId: (1_700_000_000n << 32n) | (BigInt(index) * 4n + 1n),
-        }),
+      await Effect.runPromise(
+        state.decrypt(
+          await incomingPacket({
+            authKey: key,
+            crypto,
+            serverSalt: 5n,
+            sessionId: session,
+            messageId: (1_700_000_000n << 32n) | (BigInt(index) * 4n + 1n),
+          }),
+        ),
       );
     }
 
-    await expect(state.decrypt(first)).rejects.toThrow('replayed');
+    await expect(Effect.runPromise(state.decrypt(first))).rejects.toThrow('replayed');
   });
 });

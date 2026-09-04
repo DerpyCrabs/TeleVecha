@@ -5,7 +5,8 @@ import { panelCloseButtonClass, panelHeaderClass } from '../shared/panelStyles';
 import { useModalDialog } from '../shared/useModalDialog';
 
 export function DeleteMessageDialog(props: {
-  outgoing: boolean;
+  canDeleteForMe: boolean;
+  canDeleteForEveryone: boolean;
   close: () => void;
   confirm: (revoke: boolean) => void;
 }) {
@@ -37,18 +38,22 @@ export function DeleteMessageDialog(props: {
             </button>
           </header>
           <p class="m-0 px-4 py-[0.8rem] text-[0.8rem] text-muted">This cannot be undone.</p>
-          <button
-            class="mx-[0.7rem] my-[0.2rem] rounded-[0.6rem] border-0 bg-[#20232a] p-[0.7rem] text-ink"
-            onClick={() => props.confirm(false)}
-          >
-            Delete for me
-          </button>
-          <button
-            class="danger mx-[0.7rem] my-[0.2rem] rounded-[0.6rem] border-0 bg-[#20232a] p-[0.7rem] text-red-300"
-            onClick={() => props.confirm(true)}
-          >
-            {props.outgoing ? 'Delete for everyone' : 'Delete for both sides'}
-          </button>
+          {props.canDeleteForMe ? (
+            <button
+              class="mx-[0.7rem] my-[0.2rem] rounded-[0.6rem] border-0 bg-[#20232a] p-[0.7rem] text-ink"
+              onClick={() => props.confirm(false)}
+            >
+              Delete for me
+            </button>
+          ) : null}
+          {props.canDeleteForEveryone ? (
+            <button
+              class="danger mx-[0.7rem] my-[0.2rem] rounded-[0.6rem] border-0 bg-[#20232a] p-[0.7rem] text-red-300"
+              onClick={() => props.confirm(true)}
+            >
+              Delete for everyone
+            </button>
+          ) : null}
         </section>
       </div>
     </Portal>

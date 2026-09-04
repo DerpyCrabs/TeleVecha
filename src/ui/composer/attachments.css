@@ -53,6 +53,63 @@
   scrollbar-color: #414752 transparent;
   scrollbar-width: thin;
 }
+.composer-attachment-batch-bar {
+  display: flex;
+  grid-column: 1 / -1;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35rem;
+}
+.composer-attachment-batch-bar > strong {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-attachment-batch-bar > button,
+.composer-attachment-batch-mode button {
+  min-height: 1.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: #191c22;
+  padding: 0 0.55rem;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 650;
+}
+.composer-attachment-batch-bar > button:hover,
+.composer-attachment-batch-bar > button:focus-visible,
+.composer-attachment-batch-mode button:hover,
+.composer-attachment-batch-mode button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--text);
+}
+.composer-attachment-batch-bar > button:focus-visible,
+.composer-attachment-batch-mode button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.composer-attachment-batch-mode {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.15rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: #111318;
+  padding: 0.12rem;
+}
+.composer-attachment-batch-mode button {
+  min-height: 1.45rem;
+  border: 0;
+  padding: 0 0.45rem;
+}
+.composer-attachment-batch-mode button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: #c4b5fd;
+}
 .composer-attachment {
   display: grid;
   grid-template-columns: 3rem minmax(0, 1fr) auto auto auto;
@@ -64,10 +121,17 @@
   padding: 0.45rem;
   color: var(--muted);
 }
-.composer-attachment img {
+.composer-attachment-preview {
+  display: grid;
   width: 3rem;
   height: 3rem;
+  place-items: center;
+  overflow: hidden;
   border-radius: 0.45rem;
+}
+.composer-attachment-preview img {
+  width: 3rem;
+  height: 3rem;
   object-fit: cover;
 }
 .composer-attachment span,
@@ -129,6 +193,85 @@
 }
 .composer-attachment-edit {
   color: #c4b5fd !important;
+}
+
+.composer-image-batch {
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  max-height: min(12.75rem, 34dvh);
+  gap: 0.4rem;
+  padding-right: 0.2rem;
+}
+.composer-image-batch .composer-attachment {
+  position: relative;
+  display: block;
+  min-width: 0;
+  aspect-ratio: 5 / 4;
+  overflow: hidden;
+  padding: 0;
+  isolation: isolate;
+}
+.composer-image-batch .composer-attachment-preview {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: #101217;
+}
+.composer-image-batch .composer-attachment-preview img {
+  width: 100%;
+  height: 100%;
+}
+.composer-image-batch .composer-attachment > span {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 1.2rem 0.45rem 0.4rem;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.82));
+  pointer-events: none;
+}
+.composer-image-batch .composer-attachment strong {
+  color: #fff;
+  font-size: 0.68rem;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.75);
+}
+.composer-image-batch .composer-attachment small {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+.composer-image-batch .composer-attachment .composer-attachment-mode {
+  position: absolute;
+  top: 0.35rem;
+  left: 0.35rem;
+  border-color: rgb(255 255 255 / 0.16);
+  background: rgb(12 14 18 / 0.86);
+  box-shadow: 0 1px 5px rgb(0 0 0 / 0.25);
+  backdrop-filter: blur(6px);
+}
+.composer-image-batch .composer-attachment .composer-attachment-mode button {
+  height: 1.4rem;
+  padding: 0 0.35rem;
+  font-size: 0.58rem;
+}
+.composer-image-batch .composer-attachment > .composer-attachment-edit,
+.composer-image-batch .composer-attachment > .composer-attachment-remove {
+  position: absolute;
+  right: 0.35rem;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  background: rgb(12 14 18 / 0.86);
+  box-shadow: 0 1px 5px rgb(0 0 0 / 0.25);
+  backdrop-filter: blur(6px);
+}
+.composer-image-batch .composer-attachment > .composer-attachment-remove {
+  top: 0.35rem;
+}
+.composer-image-batch .composer-attachment > .composer-attachment-edit {
+  top: 2.45rem;
 }
 
 .image-editor-overlay {

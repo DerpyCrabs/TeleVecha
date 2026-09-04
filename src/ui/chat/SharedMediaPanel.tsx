@@ -37,7 +37,9 @@ interface SharedMediaPanelProps {
   cachedMediaPreview: (message: TelegramMessage) => string | undefined;
   openMessage: (message: TelegramMessage) => void;
   forwardMessage?: ((message: TelegramMessage) => void) | undefined;
+  canForwardMessage?: ((message: TelegramMessage) => boolean) | undefined;
   deleteMessage?: ((message: TelegramMessage) => void) | undefined;
+  canDeleteMessage?: ((message: TelegramMessage) => boolean) | undefined;
   close: () => void;
 }
 
@@ -365,7 +367,9 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
                       : () => saveMediaUrl(current().preview.url, current().preview.name)
                   }
                   forward={
-                    message().protected || !props.forwardMessage
+                    message().protected ||
+                    !props.forwardMessage ||
+                    (props.canForwardMessage && !props.canForwardMessage(message()))
                       ? undefined
                       : () => {
                           const target = message();
@@ -374,7 +378,8 @@ export function SharedMediaPanel(props: SharedMediaPanelProps) {
                         }
                   }
                   delete={
-                    props.deleteMessage
+                    props.deleteMessage &&
+                    (!props.canDeleteMessage || props.canDeleteMessage(message()))
                       ? () => {
                           const target = message();
                           setViewer(undefined);

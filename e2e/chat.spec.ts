@@ -1,15 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+import { openReady, selectAlice } from './helpers';
+
 test.beforeEach(async ({ page }) => {
-  await page.goto('/');
-  const alice = page.locator('[data-testid="chat-list"]').getByRole('button', {
-    name: /Alice Fixture/,
-  });
-  await expect(alice).toBeVisible();
-  await alice.click();
-  await expect(
-    page.getByTestId('message-scroller').getByText('Newest message from fixture'),
-  ).toBeVisible();
+  await openReady(page);
+  await selectAlice(page);
 });
 
 test('renders real previews, avatars, a contained layout, and a visible composer', async ({
@@ -260,6 +255,16 @@ test('updates shared-media totals in the mounted details pane', async ({ page })
   await page.evaluate(() => window.__televechaFixture?.releaseSharedMediaCounts());
 
   await expect(details.getByRole('button', { name: 'Photos 128' })).toBeVisible();
+});
+
+test('keeps a shared-media count failure out of the page error banner', async ({ page }) => {
+  await openReady(page, '/?scenario=shared-media-counts-fail');
+  await selectAlice(page);
+
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture?.stats.getSharedMediaCounts))
+    .toBeGreaterThanOrEqual(2);
+  await expect(page.locator('.operation-state-banner')).toHaveCount(0);
 });
 
 test('loads shared-media totals for the restored dialog without switching dialogs', async ({

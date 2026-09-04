@@ -2,7 +2,7 @@
 
 A local-first Telegram web client built with SolidJS, Vite+, Tailwind CSS, and a project-owned browser MTProto implementation.
 
-The current client handles production-account login and logout, complete main and archived dialog lists, Telegram-wide peer search, paginated history and message search, focus-aware read receipts, live updates, formatted text, replies, reactions, forwarding, pinning, bot controls, multi-file/photo uploads with progress, media albums, and Telegram sticker formats. IndexedDB stores a bounded disposable cache, local-only drafts, the Telegram session, and an account-bound durable send queue. Installed builds cache their application shell for offline startup and publish the total unread count through the browser application-badge API when it is available.
+The current client handles production-account login and logout, complete main and archived dialog lists, Telegram-wide peer search, paginated history and message search, focus-aware read receipts, live updates, formatted text, replies, reactions, forwarding, pinning, bot controls, multi-file/photo uploads with progress, media albums, and Telegram sticker formats. IndexedDB stores a bounded disposable cache, local-only drafts, the Telegram session, and an account-bound durable send queue. Offline caching covers Telegram and user data, including drafts and queued sends. HTML, CSS, and other application assets are not cached by a service worker. The client publishes the total unread count through the browser application-badge API when it is available.
 
 ## Run it
 
@@ -14,6 +14,8 @@ npm run dev
 ```
 
 Open the URL printed by Vite+. Multiple tabs share one elected Telegram sync owner. Each tab keeps independent navigation while commands, drafts, updates, and owner failover travel through a versioned browser channel. The Web Locks and Broadcast Channel APIs are required so TeleVecha can prevent competing update consumers from corrupting the shared cursor.
+
+The owner has no selected conversation. It owns only account-scoped transport, persistence, synchronization, and durable delivery. A tab binds commands to a peer immediately and owns its own conversation projection. Lost cross-tab responses are retried with the same request ID, so the owner can return its recorded result without executing the command again; an unconfirmed command fails explicitly instead of waiting forever.
 
 ## Register a Telegram application
 
@@ -42,9 +44,10 @@ TeleVecha does not replay every update since the last time it ran.
 - On first login, it records Telegram's current update cursor and fetches current dialog heads.
 - On later starts, it atomically reconciles a bounded global difference of at most 100 PTS events and reconciles channels with their own PTS cursors.
 - If Telegram reports a larger gap, TeleVecha starts a new cache epoch, records the current cursor, and fetches current dialogs plus the newest page when you open a chat. Channel gaps invalidate only that channel's cached history.
-- If the connection drops after startup, cached chats remain readable and the UI offers an explicit reconnect. Sending stays disabled until Telegram is online.
+- If the connection drops after startup, cached chats remain readable and new messages enter the durable outbox immediately for delivery after reconnect.
 - While the app remains open, failed reconnects retry with exponential backoff up to 30 seconds.
 - Incoming messages are marked read only when their conversation is active, the window is focused and visible, no modal or mobile drawer obscures it, and the user is at the present edge.
+- Confirmed dialog and message mutations update the local projection immediately. Their Telegram update envelopes remain ordered behind any active synchronization, so a long catch-up cannot make a successful interaction appear ignored.
 - Drafts never use Telegram cloud drafts.
 - Every outgoing item enters IndexedDB before network delivery. Retries reuse the same Telegram `random_id`; failed entries can be retried or cancelled and are never delivered under a different account.
 
@@ -89,14 +92,22 @@ TeleVecha generates tagged TypeScript objects and binary codec descriptors from 
 
 ## Module design
 
-`src/telegram/core/engine.ts` is the application messaging module. UI code observes its snapshot and enters a selected chat through `openConversation`. The returned conversation binds the peer identity and owns chat-scoped commands, so callers do not repeat peer parameters or rely on an undocumented selection order.
+`src/telegram/core/engine.ts` composes the account runtime. It does not persist a selected conversation; `TabCoordinator` combines the account snapshot with a separate conversation projection for each tab, and the tab URL owns navigation persistence. UI code enters a selected chat through `openConversation`, which returns a handle that binds peer identity once. Drafts, sends, and explicit-peer mutations remain addressed to that peer even when history is loading or another tab changes its view. Only pagination and message-jump operations require that tab's projection to remain selected.
 
 The engine's external dependencies live at two seams:
 
 - `TelegramTransport` has production, deterministic fixture, and test adapters. The production adapter hides the project-owned MTProto client and translates tagged TL records into TeleVecha's domain types.
 - `CacheStore` has IndexedDB and in-memory test adapters. Atomic latest-state and outbox operations keep persistence rules out of callers.
 
-Engine implementation details remain internal. `PendingSendQueue` owns durable per-peer ordering, `RetryScheduler` owns reconnect timing, and `ResourceCache` owns request coalescing, cached metadata, and stale-media versioning. UI workflow modules under `src/ui` own composer and expression state, bot and reply-keyboard behavior, contact details, conversation headers, responsive drawers, viewport layout, and global or chat-specific appearance. `App.tsx` composes those modules and renders the application shell. Tests should exercise the modules through their interfaces rather than their internal maps or timers.
+Engine implementation details remain internal. Effect Layers and scopes own runtime state and finalizers; `Deferred` separates local-command readiness from account readiness; `FiberSet`, `FiberMap`, `RcMap`, `Semaphore`, and `Schedule` own supervised work, keyed delays, serialization, and retry. IndexedDB write transactions use `acquireUseRelease`, deadlines, and abort cleanup. Effect Schema validates cached metadata, stored sessions, errors, and the multi-tab protocol envelope at their boundaries.
+
+Start and retry join one connection operation. Stop interrupts that operation, closes the session's single update subscription, and drains accepted mutations before resetting state. `EngineTasks.runNetwork` follows caller cancellation. `runSession` and serialized writes finish accepted work even if the initiating UI request goes away; speculative reads should not acquire that lifetime. Metadata generations reject stale results without pretending to own their fibers. The coordinator owns the browser lease and declares each remote command's readiness, concurrency, and coalescing policy in one typed table.
+
+Snapshot streams retain the newest complete value. Delta streams apply backpressure. The socket reader must remain available to dispatch RPC replies, so its bounded event backlog instead emits a session-gap event when it drops updates, preserving connection state for recovery. Do not add silently sliding buffers to update or invalidation streams.
+
+Functional modules own peer histories, message revisions, dialog reconciliation, persisted peer metadata, coalesced read work, resource requests, version tokens, durable per-peer outbox ordering, tab presence, and request replay without exposing their mutable storage. They stay as plain functions where an Effect service would add ceremony without improving lifetime or failure semantics. In particular, Effect `LayerMap` is reserved for keyed scoped resources and Effect `Cache` for stable lookup functions with TTL or capacity; the app's race-versioned, caller-supplied loaders need different semantics and remain small dedicated modules.
+
+UI workflow modules under `src/ui` own composer and expression state, bot and reply-keyboard behavior, contact details, conversation headers, responsive drawers, viewport layout, and global or chat-specific appearance. `App.tsx` composes those modules and renders the application shell. Solid signals hold immediate interaction state; the Effect runtime does not sit in the keystroke or render path. Tests exercise module interfaces and persistence seams rather than private engine maps or timers.
 
 Solid state follows ownership. Signals hold writable interaction state, memos and derived accessors calculate values, and resources own reactive async reads. Effects are reserved for browser side effects, subscriptions, cleanup, and explicit invalidation workflows; `on` names the intended dependency when the effect also reads incidental state.
 

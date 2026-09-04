@@ -46,7 +46,7 @@ export function BotControls(props: BotControlsProps) {
         <div class="bot-command-bar">
           <button
             type="button"
-            disabled={!props.enabled || props.starting}
+            disabled={props.starting}
             aria-expanded={props.menuOpen}
             aria-haspopup="menu"
             onClick={props.onToggleMenu}

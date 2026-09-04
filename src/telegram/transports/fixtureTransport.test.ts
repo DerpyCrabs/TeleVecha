@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Effect } from 'effect';
 
-import { FixtureTelegramTransport } from './fixtureTransport';
+import { createFixtureTelegramTransport } from './fixtureTransport';
 
 beforeEach(() => {
   vi.stubGlobal('window', { location: { search: '' } });
@@ -11,60 +12,65 @@ afterEach(() => {
 });
 
 describe('FixtureTelegramTransport contracts', () => {
+  const make = () => Effect.runPromise(Effect.scoped(createFixtureTelegramTransport()));
+  const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
+
   it('provides a stable account identity and per-channel cursor', async () => {
-    const target = new FixtureTelegramTransport();
-    const dialogs = await target.getDialogs();
+    const target = await make();
+    const dialogs = await run(target.getDialogs());
     const channel = dialogs.dialogs.find(({ peer }) => peer.kind === 'channel');
     if (!channel) throw new Error('Expected a fixture channel.');
     if (channel.channelPts === undefined) throw new Error('Expected a fixture channel cursor.');
 
-    await expect(target.getAuthorizedAccountId()).resolves.toBe('900000001');
+    await expect(run(target.getAuthorizedAccountId())).resolves.toBe('900000001');
     expect(channel.channelPts).toBe(10);
     await expect(
-      target.getChannelDifference(channel.peer, channel.channelPts, 100),
+      run(target.getChannelDifference(channel.peer, channel.channelPts, 100)),
     ).resolves.toEqual({ type: 'complete', pts: 10, updates: [] });
     expect(window.__televechaFixture?.stats.getAuthorizedAccountId).toBe(1);
     expect(window.__televechaFixture?.stats.getChannelDifference).toBe(1);
   });
 
   it('paginates peer search and shared media with deterministic continuation tokens', async () => {
-    const target = new FixtureTelegramTransport();
-    const alice = (await target.getDialogs()).dialogs.find(({ peer }) => peer.id === 'u:101')?.peer;
+    const target = await make();
+    const alice = (await run(target.getDialogs())).dialogs.find(
+      ({ peer }) => peer.id === 'u:101',
+    )?.peer;
     if (!alice) throw new Error('Expected the Alice fixture peer.');
 
-    const firstSearch = await target.searchMessages('Fixture message', alice, 2);
+    const firstSearch = await run(target.searchMessages('Fixture message', alice, 2));
     expect(firstSearch).toMatchObject({
       messages: [{ id: 79 }, { id: 78 }],
       hasMore: true,
       nextOffset: { messageId: 78 },
     });
     await expect(
-      target.searchMessages('Fixture message', alice, 2, firstSearch.nextOffset),
+      run(target.searchMessages('Fixture message', alice, 2, firstSearch.nextOffset)),
     ).resolves.toMatchObject({
       messages: [{ id: 77 }, { id: 75 }],
       hasMore: true,
     });
 
-    const firstMedia = await target.getSharedMedia(alice, 'photos', 1);
+    const firstMedia = await run(target.getSharedMedia(alice, 'photos', 1));
     expect(firstMedia).toMatchObject({
       messages: [{ id: 78 }],
       hasMore: true,
       nextOffset: { messageId: 78 },
     });
-    await expect(target.getSharedMedia(alice, 'photos', 1, firstMedia.nextOffset)).resolves.toEqual(
-      {
-        messages: [expect.objectContaining({ id: 5 })],
-        hasMore: false,
-      },
-    );
+    await expect(
+      run(target.getSharedMedia(alice, 'photos', 1, firstMedia.nextOffset)),
+    ).resolves.toEqual({
+      messages: [expect.objectContaining({ id: 5 })],
+      hasMore: false,
+    });
     expect(window.__televechaFixture?.stats.searchMessages).toBe(2);
     expect(window.__televechaFixture?.stats.getSharedMedia).toBe(2);
   });
 
   it('uses peer and rate data to continue global search across duplicate message ids', async () => {
-    const target = new FixtureTelegramTransport();
+    const target = await make();
 
-    const first = await target.searchMessages('message', undefined, 1);
+    const first = await run(target.searchMessages('message', undefined, 1));
     expect(first).toMatchObject({
       messages: [{ peerId: 'g:303', id: 12 }],
       hasMore: true,
@@ -75,10 +81,33 @@ describe('FixtureTelegramTransport contracts', () => {
       },
     });
     await expect(
-      target.searchMessages('message', undefined, 1, first.nextOffset),
+      run(target.searchMessages('message', undefined, 1, first.nextOffset)),
     ).resolves.toMatchObject({
       messages: [{ peerId: 'u:101', id: 80 }],
       hasMore: true,
+    });
+  });
+
+  it('returns group members in pages with a stable continuation offset', async () => {
+    const target = await make();
+    const group = (await run(target.getDialogs())).dialogs.find(
+      ({ peer }) => peer.kind === 'group',
+    );
+    if (!group || !target.getGroupMembers) throw new Error('Expected a fixture group.');
+
+    const first = await run(target.getGroupMembers(group.peer, 1));
+    expect(first).toMatchObject({
+      members: [{ peer: { id: 'u:404' } }],
+      totalCount: 2,
+      hasMore: true,
+      nextOffset: 1,
+    });
+    await expect(
+      run(target.getGroupMembers(group.peer, 1, first.nextOffset)),
+    ).resolves.toMatchObject({
+      members: [{ peer: { id: 'u:405' } }],
+      totalCount: 2,
+      hasMore: false,
     });
   });
 });

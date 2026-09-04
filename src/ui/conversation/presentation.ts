@@ -113,6 +113,7 @@ export function presentMessage(
   const senderName = (message as TelegramMessage & { senderName?: string }).senderName;
   return {
     id: String(message.id),
+    peerId: message.peerId,
     author: message.outgoing ? 'You' : senderName || message.senderId,
     senderId: message.senderId,
     senderHasAvatar: message.senderHasAvatar,

@@ -1,3 +1,4 @@
+import { Data } from 'effect';
 import { Inflate, strToU8, zipSync } from 'fflate';
 
 import type { RichBlock, RichMessage, RichText } from '../domain/richMessage';
@@ -47,7 +48,7 @@ const ZIP_MTIME = new Date('2020-01-01T00:00:00.000Z');
 const SAFE_THEME_IDS = new Set(['classic', 'day', 'night', 'tinted']);
 const CRC32_TABLE = createCrc32Table();
 const SAFE_SEMANTIC_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
-  area: new Set(['auth', 'sync', 'transport', 'cache', 'outbox']),
+  area: new Set(['auth', 'sync', 'transport', 'cache', 'outbox', 'coordination']),
   align: new Set(['left', 'center', 'right']),
   basetheme: new Set(['classic', 'day', 'night', 'tinted', 'arctic']),
   category: new Set(['user', 'bot', 'group', 'channel']),
@@ -473,11 +474,14 @@ export interface TvBugLinkV2 {
 
 export interface TvBugLinkPreviewV2 {
   url: string;
+  type?: string | undefined;
+  hasEmbed?: boolean | undefined;
   siteName?: TvBugTextV2 | undefined;
   title?: TvBugTextV2 | undefined;
   description?: TvBugTextV2 | undefined;
   hasPhoto?: boolean | undefined;
   photoSize?: 'small' | 'large' | undefined;
+  media?: (TvBugMediaV2 & { kind: 'video' | 'animation' }) | undefined;
 }
 
 export interface TvBugServiceMessageV2 {
@@ -752,10 +756,11 @@ export interface HydratedTvBugStateV2 {
   ui?: TvBugStateV2['ui'];
 }
 
-export class TvBugFormatError extends Error {
+export class TvBugFormatError extends Data.TaggedError('TvBugFormatError')<{
+  readonly message: string;
+}> {
   constructor(message: string) {
-    super(message);
-    this.name = 'TvBugFormatError';
+    super({ message });
   }
 }
 
@@ -796,56 +801,39 @@ export function measureText(value: string): TvBugTextMetricsV2 {
 }
 
 export function createTvBugSanitizer(options: TvBugSanitizerOptionsV2 = {}): TvBugSanitizerV2 {
-  return new TvBugSanitizer(options);
-}
-
-export function sanitizeTvBugState(source: TvBugStateSourceV2): TvBugStateV2 {
-  return createTvBugSanitizer().sanitizeState(source);
-}
-
-class TvBugSanitizer implements TvBugSanitizerV2 {
-  private readonly aliases = new AliasBook();
-  private time: TimeShifter | undefined;
-
-  constructor(private readonly options: TvBugSanitizerOptionsV2) {
-    if (options.sourceEpochMs !== undefined) {
-      this.time = new TimeShifter([], options.sourceEpochMs);
-    }
-  }
-
-  sanitizeState(source: TvBugStateSourceV2): TvBugStateV2 {
-    const sanitizer = new StateSanitizer(source, this.aliases, this.time);
-    this.time = sanitizer.timeShifter;
-    return sanitizer.sanitize();
-  }
-
-  sanitizeValue(value: unknown, context = 'value'): TvBugJsonValue | undefined {
-    return sanitizeJsonValue(value, context, this.aliases, this.time, 0);
-  }
-
-  alias(category: string, value: string | number): string {
-    if (!/^[a-z][a-z0-9-]{0,31}$/u.test(category)) {
-      throw new TvBugFormatError('Alias categories must be short lowercase names.');
-    }
-    return this.aliases.get(category, String(value));
-  }
-
-  shiftSeconds(value: number): number {
-    return this.requireTime().shiftSeconds(value);
-  }
-
-  shiftMilliseconds(value: number): number {
-    return this.requireTime().shiftMilliseconds(value);
-  }
-
-  private requireTime(): TimeShifter {
-    if (!this.time) {
+  const aliases = createAliasBook();
+  let time =
+    options.sourceEpochMs === undefined ? undefined : createTimeShifter([], options.sourceEpochMs);
+  const requireTime = () => {
+    if (!time) {
       throw new TvBugFormatError(
         'Timestamp shifting needs sourceEpochMs or a sanitized initial state first.',
       );
     }
-    return this.time;
-  }
+    return time;
+  };
+
+  return {
+    sanitizeState(source) {
+      const sanitizer = new StateSanitizer(source, aliases, time);
+      time = sanitizer.timeShifter;
+      return sanitizer.sanitize();
+    },
+    sanitizeValue: (value, context = 'value') =>
+      sanitizeJsonValue(value, context, aliases, time, 0),
+    alias(category, value) {
+      if (!/^[a-z][a-z0-9-]{0,31}$/u.test(category)) {
+        throw new TvBugFormatError('Alias categories must be short lowercase names.');
+      }
+      return aliases.get(category, String(value));
+    },
+    shiftSeconds: (value) => requireTime().shiftSeconds(value),
+    shiftMilliseconds: (value) => requireTime().shiftMilliseconds(value),
+  };
+}
+
+export function sanitizeTvBugState(source: TvBugStateSourceV2): TvBugStateV2 {
+  return createTvBugSanitizer().sanitizeState(source);
 }
 
 export function createTvBugBundle(bundle: CreateTvBugBundleInputV2): Uint8Array {
@@ -1353,6 +1341,8 @@ function hydrateMessage(message: TvBugMessageV2, epoch: number): CachedMessage {
       ? {
           linkPreview: {
             url: message.linkPreview.url,
+            ...(message.linkPreview.type ? { type: message.linkPreview.type } : {}),
+            ...(message.linkPreview.hasEmbed ? { hasEmbed: true } : {}),
             ...(message.linkPreview.siteName
               ? { siteName: message.linkPreview.siteName.value }
               : {}),
@@ -1364,6 +1354,30 @@ function hydrateMessage(message: TvBugMessageV2, epoch: number): CachedMessage {
               ? { hasPhoto: message.linkPreview.hasPhoto }
               : {}),
             ...(message.linkPreview.photoSize ? { photoSize: message.linkPreview.photoSize } : {}),
+            ...(message.linkPreview.media
+              ? {
+                  media: {
+                    kind: message.linkPreview.media.kind,
+                    name: message.linkPreview.media.name.value,
+                    mimeType: message.linkPreview.media.mimeType,
+                    ...(message.linkPreview.media.byteSize !== undefined
+                      ? { size: message.linkPreview.media.byteSize }
+                      : {}),
+                    ...(message.linkPreview.media.width !== undefined
+                      ? { width: message.linkPreview.media.width }
+                      : {}),
+                    ...(message.linkPreview.media.height !== undefined
+                      ? { height: message.linkPreview.media.height }
+                      : {}),
+                    ...(message.linkPreview.media.duration !== undefined
+                      ? { duration: message.linkPreview.media.duration }
+                      : {}),
+                    ...(message.linkPreview.media.cacheKey
+                      ? { cacheKey: message.linkPreview.media.cacheKey }
+                      : {}),
+                  },
+                }
+              : {}),
           },
         }
       : {}),
@@ -1657,7 +1671,7 @@ class StateSanitizer {
 
   constructor(
     private readonly source: TvBugStateSourceV2,
-    private readonly aliases = new AliasBook(),
+    private readonly aliases = createAliasBook(),
     time?: TimeShifter,
   ) {
     const workspace = source.workspace;
@@ -1675,7 +1689,8 @@ class StateSanitizer {
     assertCollectionSize(Object.keys(this.groupMembers).length, 'group member caches');
     this.discoverPeers();
     this.timeShifter =
-      time ?? new TimeShifter(collectTimestamps(source, this.dialogs, this.messages, this.pending));
+      time ??
+      createTimeShifter(collectTimestamps(source, this.dialogs, this.messages, this.pending));
   }
 
   sanitize(): TvBugStateV2 {
@@ -2006,11 +2021,27 @@ class StateSanitizer {
   private sanitizeLinkPreview(preview: TelegramLinkPreview): TvBugLinkPreviewV2 {
     return {
       url: this.safeUrl(preview.url),
+      ...(preview.type ? { type: preview.type.slice(0, 32) } : {}),
+      ...(preview.hasEmbed ? { hasEmbed: true } : {}),
       ...(preview.siteName ? { siteName: sanitizeTvBugText(preview.siteName) } : {}),
       ...(preview.title ? { title: sanitizeTvBugText(preview.title) } : {}),
       ...(preview.description ? { description: sanitizeTvBugText(preview.description) } : {}),
       ...(preview.hasPhoto !== undefined ? { hasPhoto: preview.hasPhoto } : {}),
       ...(preview.photoSize ? { photoSize: preview.photoSize } : {}),
+      ...(preview.media
+        ? {
+            media: {
+              kind: preview.media.kind,
+              name: sanitizeTvBugText(preview.media.name),
+              mimeType: sanitizeMimeType(preview.media.mimeType),
+              ...(preview.media.size !== undefined ? { byteSize: preview.media.size } : {}),
+              ...(preview.media.width !== undefined ? { width: preview.media.width } : {}),
+              ...(preview.media.height !== undefined ? { height: preview.media.height } : {}),
+              ...(preview.media.duration !== undefined ? { duration: preview.media.duration } : {}),
+              ...(preview.media.cacheKey ? { cacheKey: preview.media.cacheKey } : {}),
+            },
+          }
+        : {}),
     };
   }
 
@@ -2414,59 +2445,59 @@ class StateSanitizer {
   }
 }
 
-class AliasBook {
-  private readonly maps = new Map<string, Map<string, string>>();
-  private readonly peerKinds = new Map<string, TelegramPeer['kind']>();
-
-  registerPeer(rawId: string, kind?: TelegramPeer['kind']) {
+function createAliasBook() {
+  const maps = new Map<string, Map<string, string>>();
+  const peerKinds = new Map<string, TelegramPeer['kind']>();
+  const registerPeer = (rawId: string, kind?: TelegramPeer['kind']) => {
     const inferred =
       kind ?? (rawId.startsWith('g:') ? 'group' : rawId.startsWith('c:') ? 'channel' : undefined);
-    if (inferred && !this.peerKinds.has(rawId)) this.peerKinds.set(rawId, inferred);
-  }
-
-  peer(rawId: string, kind?: TelegramPeer['kind']): string {
-    this.registerPeer(rawId, kind);
-    const resolvedKind = this.peerKinds.get(rawId) ?? 'user';
-    return this.get(resolvedKind === 'user' ? 'u' : resolvedKind === 'group' ? 'g' : 'c', rawId);
-  }
-
-  get(category: string, rawId: string): string {
-    let aliases = this.maps.get(category);
+    if (inferred && !peerKinds.has(rawId)) peerKinds.set(rawId, inferred);
+  };
+  const get = (category: string, rawId: string) => {
+    let aliases = maps.get(category);
     if (!aliases) {
       aliases = new Map();
-      this.maps.set(category, aliases);
+      maps.set(category, aliases);
     }
     const existing = aliases.get(rawId);
     if (existing) return existing;
     const alias = `${category}:${aliases.size + 1}`;
     aliases.set(rawId, alias);
     return alias;
-  }
+  };
+  return {
+    registerPeer,
+    peer(rawId: string, kind?: TelegramPeer['kind']) {
+      registerPeer(rawId, kind);
+      const resolvedKind = peerKinds.get(rawId) ?? 'user';
+      return get(resolvedKind === 'user' ? 'u' : resolvedKind === 'group' ? 'g' : 'c', rawId);
+    },
+    get,
+  };
 }
 
-class TimeShifter {
-  private readonly sourceEpochMs: number;
+type AliasBook = ReturnType<typeof createAliasBook>;
 
-  constructor(values: readonly number[], sourceEpochMs?: number) {
-    if (sourceEpochMs !== undefined) {
-      this.sourceEpochMs = finiteNumber(sourceEpochMs, 'sourceEpochMs');
-    } else {
-      this.sourceEpochMs = values.length
+function createTimeShifter(values: readonly number[], sourceEpochMs?: number) {
+  const epoch =
+    sourceEpochMs !== undefined
+      ? finiteNumber(sourceEpochMs, 'sourceEpochMs')
+      : values.length
         ? Math.floor(Math.min(...values.map(timestampToMilliseconds)) / 1_000) * 1_000
         : 0;
-    }
-  }
-
-  shiftSeconds(value: number): number {
-    finiteNumber(value, 'timestamp');
-    return TVBUG_FIXED_EPOCH_SECONDS + (value * 1_000 - this.sourceEpochMs) / 1_000;
-  }
-
-  shiftMilliseconds(value: number): number {
-    finiteNumber(value, 'timestamp');
-    return TVBUG_FIXED_EPOCH_SECONDS * 1_000 + (value - this.sourceEpochMs);
-  }
+  return {
+    shiftSeconds(value: number) {
+      finiteNumber(value, 'timestamp');
+      return TVBUG_FIXED_EPOCH_SECONDS + (value * 1_000 - epoch) / 1_000;
+    },
+    shiftMilliseconds(value: number) {
+      finiteNumber(value, 'timestamp');
+      return TVBUG_FIXED_EPOCH_SECONDS * 1_000 + (value - epoch);
+    },
+  };
 }
+
+type TimeShifter = ReturnType<typeof createTimeShifter>;
 
 function mergeMessages(
   flat: readonly (TelegramMessage | CachedMessage)[],

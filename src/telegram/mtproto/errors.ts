@@ -1,18 +1,24 @@
-export type MtprotoErrorKind =
-  | 'cancelled'
-  | 'configuration'
-  | 'crypto'
-  | 'protocol'
-  | 'rpc'
-  | 'session'
-  | 'transport';
+import { Schema } from 'effect';
 
-export type MtprotoError = Error & {
-  readonly name: 'MtprotoError';
-  readonly kind: MtprotoErrorKind;
-  readonly code?: number | undefined;
-  readonly details?: Readonly<Record<string, unknown>> | undefined;
-};
+export const MtprotoErrorKind = Schema.Literals([
+  'cancelled',
+  'configuration',
+  'crypto',
+  'protocol',
+  'rpc',
+  'session',
+  'transport',
+]);
+
+export type MtprotoErrorKind = typeof MtprotoErrorKind.Type;
+
+export class MtprotoError extends Schema.TaggedError<MtprotoError>()('MtprotoError', {
+  kind: MtprotoErrorKind,
+  message: Schema.String,
+  code: Schema.optionalKey(Schema.Number),
+  details: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+  cause: Schema.optionalKey(Schema.Defect()),
+}) {}
 
 export function createMtprotoError(
   kind: MtprotoErrorKind,
@@ -23,27 +29,19 @@ export function createMtprotoError(
     cause?: unknown;
   } = {},
 ): MtprotoError {
-  const error = new Error(
+  const error = new MtprotoError({
+    kind,
     message,
-    options.cause === undefined ? undefined : { cause: options.cause },
-  );
-  Object.defineProperties(error, {
-    name: { value: 'MtprotoError', enumerable: true },
-    kind: { value: kind, enumerable: true },
-    ...(options.code === undefined ? {} : { code: { value: options.code, enumerable: true } }),
-    ...(options.details === undefined
-      ? {}
-      : { details: { value: Object.freeze({ ...options.details }), enumerable: true } }),
+    ...(options.code === undefined ? {} : { code: options.code }),
+    ...(options.details === undefined ? {} : { details: { ...options.details } }),
+    ...(options.cause === undefined ? {} : { cause: options.cause }),
   });
-  return error as MtprotoError;
+  if (error.details) Object.freeze(error.details);
+  return error;
 }
 
 export function isMtprotoError(error: unknown): error is MtprotoError {
-  return (
-    error instanceof Error &&
-    error.name === 'MtprotoError' &&
-    typeof (error as Partial<MtprotoError>).kind === 'string'
-  );
+  return Schema.is(MtprotoError)(error);
 }
 
 export function errorMessage(error: unknown) {

@@ -37,13 +37,7 @@ test('does not show bot commands in an ordinary group without published commands
 }) => {
   await openReady(page);
   await page.evaluate(() => {
-    const transport = window.__televechaRuntimes?.get('fixture:default')?.transport;
-    if (!transport) throw new Error('Fixture transport is unavailable');
-    const original = transport.getBotCommands?.bind(transport);
-    transport.getBotCommands = async (peer) => {
-      const commands = (await original?.(peer)) ?? [];
-      return peer.id === 'g:303' ? [] : commands;
-    };
+    window.__televechaFixture?.setBotCommands('g:303', []);
   });
   await page
     .getByTestId('chat-list')
@@ -281,21 +275,15 @@ test('loads chat-scoped bot commands and addresses the selected bot in a group',
 }) => {
   await openReady(page);
   await page.evaluate(() => {
-    const transport = window.__televechaRuntimes?.get('fixture:default')?.transport;
-    if (!transport) throw new Error('Fixture transport is unavailable');
-    const original = transport.getBotCommands?.bind(transport);
-    transport.getBotCommands = async (peer) =>
-      peer.id === 'g:303'
-        ? [
-            {
-              command: 'status',
-              description: 'Show group status',
-              botId: 'u:606',
-              botUsername: 'fixture_helper_bot',
-              botName: 'Fixture Helper Bot',
-            },
-          ]
-        : ((await original?.(peer)) ?? []);
+    window.__televechaFixture?.setBotCommands('g:303', [
+      {
+        command: 'status',
+        description: 'Show group status',
+        botId: 'u:606',
+        botUsername: 'fixture_helper_bot',
+        botName: 'Fixture Helper Bot',
+      },
+    ]);
   });
   await page
     .getByTestId('chat-list')
@@ -419,19 +407,7 @@ test('does not show a delayed callback answer in a different chat', async ({ pag
   await page.getByTestId('peer-search-result').filter({ hasText: 'Fixture Helper Bot' }).click();
   await page.getByRole('button', { name: 'Start bot' }).click();
   await page.evaluate(() => {
-    const transport = window.__televechaRuntimes?.get('fixture:default')?.transport;
-    if (!transport) throw new Error('Fixture transport is unavailable');
-    const original = transport.answerBotCallback?.bind(transport);
-    if (!original) throw new Error('Fixture callback support is unavailable');
-    let release: () => void = () => undefined;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    window.__releaseFixtureCallback = release;
-    transport.answerBotCallback = async (peer, messageId, data) => {
-      await held;
-      return original(peer, messageId, data);
-    };
+    window.__televechaFixture?.holdNextBotCallback();
   });
 
   await page.getByTestId('inline-bot-keyboard').getByRole('button', { name: 'Refresh' }).click();
@@ -439,32 +415,14 @@ test('does not show a delayed callback answer in a different chat', async ({ pag
     .getByTestId('chat-list')
     .getByRole('button', { name: /Alice Fixture/ })
     .click();
-  await page.evaluate(() => window.__releaseFixtureCallback?.());
+  await page.evaluate(() => window.__televechaFixture?.releaseBotCallback());
   await expect(page.locator('.bot-callback-notice')).toHaveCount(0);
 });
 
 test('asks for explicit consent before opening a URL-auth button', async ({ page }) => {
   await openReady(page);
   await page.evaluate(() => {
-    const transport = window.__televechaRuntimes?.get('fixture:default')?.transport;
-    if (!transport) throw new Error('Fixture transport is unavailable');
-    const accept = transport.acceptUrlAuth?.bind(transport);
-    if (!accept) throw new Error('Fixture URL authorization is unavailable');
-    transport.requestUrlAuth = async () => ({
-      kind: 'request',
-      botTitle: 'Fixture Helper Bot',
-      domain: 'example.com',
-      requestWriteAccess: true,
-      requestPhoneNumber: false,
-      matchCodesFirst: true,
-      isApp: true,
-      matchCodes: ['F7Q2', 'L9M4'],
-      verifiedAppName: 'Fixture Web App',
-    });
-    transport.acceptUrlAuth = async (peer, messageId, buttonId, options) => {
-      window.__acceptedUrlAuthOptions = options ?? {};
-      return accept(peer, messageId, buttonId, options);
-    };
+    window.__televechaFixture?.useExtendedUrlAuth();
     window.open = ((url?: string | URL) => {
       window.__openedBotUrl = String(url ?? '');
       return window;
@@ -500,7 +458,7 @@ test('asks for explicit consent before opening a URL-auth button', async ({ page
   await expect
     .poll(() => page.evaluate(() => window.__openedBotUrl))
     .toBe('https://example.com/authenticated');
-  expect(await page.evaluate(() => window.__acceptedUrlAuthOptions)).toEqual({
+  expect(await page.evaluate(() => window.__televechaFixture?.acceptedUrlAuthOptions)).toEqual({
     writeAllowed: true,
     matchCode: 'L9M4',
   });

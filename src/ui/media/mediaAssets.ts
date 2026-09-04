@@ -1,4 +1,7 @@
-import type { MessagingClient } from '../../telegram/core/client';
+import { Effect } from 'effect';
+
+import type { EffectMessagingClient } from '../../telegram/core/client';
+import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
   TelegramDialog,
   TelegramMessage,
@@ -7,6 +10,7 @@ import type {
   TelegramTransferProgress,
 } from '../../telegram/types';
 import { cachedAssetUrl, clearAssetUrls, loadAssetUrl, rememberAssetUrl } from './assetUrls';
+import type { UiEffectRunner, UiSharedEffectRunner } from '../app/appRuntime';
 
 const MAX_AVATAR_URLS = 256;
 
@@ -17,7 +21,7 @@ export interface MediaAsset {
 }
 
 type MediaSource = Pick<
-  MessagingClient,
+  EffectMessagingClient,
   | 'loadCachedAvatar'
   | 'downloadAvatar'
   | 'mediaAssetKey'
@@ -26,124 +30,145 @@ type MediaSource = Pick<
   | 'downloadCustomEmoji'
 >;
 
-export class MediaAssets {
-  private readonly avatarLoads = new Map<string, Promise<string | undefined>>();
-  private readonly customEmojiLoads = new Map<string, Promise<{ url: string; mimeType: string }>>();
-  private readonly avatarUrls = new Map<string, string>();
+export function createMediaAssets(
+  engine: MediaSource,
+  runEffect: UiEffectRunner,
+  runSharedEffect: UiSharedEffectRunner,
+  dialogs: () => TelegramDialog[],
+) {
+  const customEmojiAssets = new Map<string, { url: string; mimeType: string }>();
+  const avatarUrls = new Map<string, string>();
+  const activeLoadKeys = new Set<string>();
 
-  constructor(
-    private readonly engine: MediaSource,
-    private readonly dialogs: () => TelegramDialog[],
-  ) {}
-
-  loadPeerAvatar(
+  const loadPeerAvatar = (
     peer: TelegramPeer,
     hasAvatar: boolean,
     avatarId: string | undefined,
     cachedOnly = false,
-  ) {
-    if (!hasAvatar) return Promise.resolve(undefined);
+  ) => {
+    if (!hasAvatar) return runEffect(Effect.succeed(undefined));
     const key = `${peer.id}:${avatarId ?? 'unknown'}`;
-    const current = this.avatarLoads.get(key);
-    if (current) return current;
-    const blob = cachedOnly
-      ? this.engine.loadCachedAvatar(peer, avatarId)
-      : this.engine.downloadAvatar(peer, avatarId);
-    const loading = blob.then((value) => {
-      if (!value) return undefined;
-      const url = URL.createObjectURL(value);
-      this.avatarUrls.set(key, url);
-      while (this.avatarUrls.size > MAX_AVATAR_URLS) {
-        const oldest = this.avatarUrls.entries().next().value as [string, string] | undefined;
-        if (!oldest) break;
-        this.avatarUrls.delete(oldest[0]);
-        this.avatarLoads.delete(oldest[0]);
-        URL.revokeObjectURL(oldest[1]);
-      }
-      return url;
-    });
-    this.avatarLoads.set(key, loading);
-    void loading.then(
-      (url) => {
-        if (!url) this.avatarLoads.delete(key);
-      },
-      () => this.avatarLoads.delete(key),
+    const cached = avatarUrls.get(key);
+    if (cached) {
+      avatarUrls.delete(key);
+      avatarUrls.set(key, cached);
+      return runEffect(Effect.succeed(cached));
+    }
+    const loadKey = `media:avatar:${key}`;
+    activeLoadKeys.add(loadKey);
+    return runSharedEffect(
+      loadKey,
+      (cachedOnly
+        ? engine.loadCachedAvatar(peer, avatarId)
+        : engine.downloadAvatar(peer, avatarId)
+      ).pipe(
+        Effect.map((value) => {
+          if (!value) return undefined;
+          const url = URL.createObjectURL(value);
+          avatarUrls.set(key, url);
+          while (avatarUrls.size > MAX_AVATAR_URLS) {
+            const oldest = avatarUrls.entries().next().value as [string, string] | undefined;
+            if (!oldest) break;
+            avatarUrls.delete(oldest[0]);
+            URL.revokeObjectURL(oldest[1]);
+          }
+          return url;
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            activeLoadKeys.delete(loadKey);
+          }),
+        ),
+      ),
     );
-    return loading;
-  }
+  };
 
-  loadAvatar(peerId: string, cachedOnly = false) {
-    const dialog = this.dialogs().find(({ peer }) => peer.id === peerId);
-    return dialog
-      ? this.loadPeerAvatar(dialog.peer, dialog.hasAvatar, dialog.avatarId, cachedOnly)
-      : Promise.resolve(undefined);
-  }
-
-  avatarIdentity(peerId: string) {
-    const dialog = this.dialogs().find(({ peer }) => peer.id === peerId);
-    return `${peerId}:${dialog?.avatarId ?? 'none'}`;
-  }
-
-  private asset(
+  const asset = (
     revision: string,
-    load: (progress?: TelegramTransferProgress) => Promise<Blob>,
-  ): MediaAsset {
+    load: (progress?: TelegramTransferProgress) => Effect.Effect<Blob, MessagingError>,
+  ): MediaAsset => {
     return {
       revision,
       cached: () => cachedAssetUrl(revision),
-      load: (progress) => loadAssetUrl(revision, () => load(progress)),
+      load: (progress) => {
+        const loadKey = `media:asset:${revision}`;
+        activeLoadKeys.add(loadKey);
+        return runSharedEffect(
+          loadKey,
+          loadAssetUrl(revision, () => load(progress)).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                activeLoadKeys.delete(loadKey);
+              }),
+            ),
+          ),
+        );
+      },
     };
-  }
+  };
 
-  message(message: TelegramMessage) {
-    return this.asset(this.engine.mediaAssetKey(message), (progress) =>
-      progress
-        ? this.engine.downloadMedia(message, { progress })
-        : this.engine.downloadMedia(message),
+  const message = (value: TelegramMessage) =>
+    asset(engine.mediaAssetKey(value), (progress) =>
+      progress ? engine.downloadMedia(value, { progress }) : engine.downloadMedia(value),
     );
-  }
+  const sticker = (value: TelegramSticker) =>
+    asset(`sticker:${value.id}`, () => engine.downloadSticker(value));
 
-  messagePreview(message: TelegramMessage) {
-    const revision = `preview:${this.engine.mediaAssetKey(message)}`;
-    return this.asset(revision, () => this.engine.downloadMedia(message, { preview: true }));
-  }
-
-  pending(peerId: string, messageId: string, blob: Blob) {
-    const revision = `pending-media:${peerId}:${messageId}`;
-    return this.asset(revision, () => Promise.resolve(blob));
-  }
-
-  sticker(sticker: TelegramSticker) {
-    return this.asset(`sticker:${sticker.id}`, () => this.engine.downloadSticker(sticker));
-  }
-
-  loadMedia(message: TelegramMessage, progress?: TelegramTransferProgress) {
-    return this.message(message).load(progress);
-  }
-
-  loadSticker(sticker: TelegramSticker) {
-    return this.sticker(sticker).load();
-  }
-
-  loadCustomEmoji(documentId: string) {
-    const assetKey = `custom-emoji:${documentId}`;
-    const current = this.customEmojiLoads.get(documentId);
-    if (current && cachedAssetUrl(assetKey)) return current;
-    if (current) this.customEmojiLoads.delete(documentId);
-    const loading = this.engine.downloadCustomEmoji(documentId).then((blob) => ({
-      url: rememberAssetUrl(assetKey, blob),
-      mimeType: blob.type,
-    }));
-    this.customEmojiLoads.set(documentId, loading);
-    void loading.catch(() => this.customEmojiLoads.delete(documentId));
-    return loading;
-  }
-
-  dispose() {
-    for (const url of this.avatarUrls.values()) URL.revokeObjectURL(url);
-    this.avatarUrls.clear();
-    this.avatarLoads.clear();
-    this.customEmojiLoads.clear();
-    clearAssetUrls();
-  }
+  return {
+    loadPeerAvatar,
+    loadAvatar(peerId: string, cachedOnly = false) {
+      const dialog = dialogs().find(({ peer }) => peer.id === peerId);
+      return dialog
+        ? loadPeerAvatar(dialog.peer, dialog.hasAvatar, dialog.avatarId, cachedOnly)
+        : runEffect(Effect.succeed(undefined));
+    },
+    avatarIdentity(peerId: string) {
+      const dialog = dialogs().find(({ peer }) => peer.id === peerId);
+      return `${peerId}:${dialog?.avatarId ?? 'none'}`;
+    },
+    message,
+    messagePreview(value: TelegramMessage) {
+      const revision = `preview:${engine.mediaAssetKey(value)}`;
+      return asset(revision, () => engine.downloadMedia(value, { preview: true }));
+    },
+    pending: (peerId: string, messageId: string, blob: Blob) =>
+      asset(`pending-media:${peerId}:${messageId}`, () => Effect.succeed(blob)),
+    sticker,
+    loadMedia: (value: TelegramMessage, progress?: TelegramTransferProgress) =>
+      message(value).load(progress),
+    loadSticker: (value: TelegramSticker) => sticker(value).load(),
+    loadCustomEmoji(documentId: string) {
+      const assetKey = `custom-emoji:${documentId}`;
+      const current = customEmojiAssets.get(documentId);
+      if (current && cachedAssetUrl(assetKey)) return runEffect(Effect.succeed(current));
+      customEmojiAssets.delete(documentId);
+      const loadKey = `media:emoji:${documentId}`;
+      activeLoadKeys.add(loadKey);
+      return runSharedEffect(
+        loadKey,
+        engine.downloadCustomEmoji(documentId).pipe(
+          Effect.map((blob) => {
+            const loaded = { url: rememberAssetUrl(assetKey, blob), mimeType: blob.type };
+            customEmojiAssets.set(documentId, loaded);
+            return loaded;
+          }),
+          Effect.ensuring(
+            Effect.sync(() => {
+              activeLoadKeys.delete(loadKey);
+            }),
+          ),
+        ),
+      );
+    },
+    dispose() {
+      for (const url of avatarUrls.values()) URL.revokeObjectURL(url);
+      avatarUrls.clear();
+      for (const key of activeLoadKeys) void runSharedEffect.cancel(key);
+      activeLoadKeys.clear();
+      customEmojiAssets.clear();
+      clearAssetUrls();
+    },
+  };
 }
+
+export type MediaAssets = ReturnType<typeof createMediaAssets>;

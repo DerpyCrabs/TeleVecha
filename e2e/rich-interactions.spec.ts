@@ -185,6 +185,100 @@ test('confirms a text send atomically without removing or replacing its bubble',
   await expect(pending.locator('footer')).toHaveAttribute('aria-label', /Message status: sent$/u);
 });
 
+test('never renders a server echo beside its optimistic message', async ({ page }) => {
+  await page.goto('/?scenario=held-send');
+  await selectAlice(page);
+  await page.getByRole('textbox', { name: 'Message' }).fill('One stable bubble');
+  await page.getByRole('button', { name: 'Send message' }).click();
+
+  const bubble = page.locator('article.message', { hasText: 'One stable bubble' });
+  await expect(bubble).toHaveCount(1);
+  await bubble.evaluate((element) => {
+    element.dataset.pendingNode = 'server-echo';
+  });
+  await expect.poll(async () => (await fixtureStats(page))?.lastSendRandomId).not.toBeUndefined();
+
+  await page.evaluate(() => {
+    const fixture = window.__televechaFixture;
+    const randomId = fixture?.stats.lastSendRandomId;
+    if (!fixture || !randomId) throw new Error('Held send correlation is unavailable');
+    const samples: Array<{ count: number; bottomGap: number }> = [];
+    let sampling = true;
+    const sample = () => {
+      if (!sampling) return;
+      const scroller = document.querySelector<HTMLElement>('[data-testid="message-scroller"]');
+      const matches = [...document.querySelectorAll<HTMLElement>('article.message')].filter(
+        (element) => element.textContent?.includes('One stable bubble'),
+      );
+      if (scroller && matches[0]) {
+        samples.push({
+          count: matches.length,
+          bottomGap:
+            scroller.getBoundingClientRect().bottom - matches[0].getBoundingClientRect().bottom,
+        });
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+    Object.assign(window, {
+      __serverEchoSamples: samples,
+      __stopServerEchoSamples: () => {
+        sampling = false;
+      },
+    });
+    fixture.emit({ type: 'message-id-assigned', messageId: 81, randomId });
+    fixture.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 81,
+        peerId: 'u:101',
+        senderId: 'self',
+        text: 'One stable bubble',
+        date: Math.floor(Date.now() / 1_000),
+        outgoing: true,
+      },
+    });
+  });
+
+  await page.waitForTimeout(100);
+  await page.evaluate(() => window.__televechaFixture?.releaseSend());
+  await expect(bubble.locator('footer')).toHaveAttribute('aria-label', /Message status: sent$/u);
+  await page.evaluate(() => {
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 12,
+      ptsCount: 1,
+      message: {
+        id: 81,
+        peerId: 'u:101',
+        senderId: 'self',
+        text: 'One stable bubble',
+        date: Math.floor(Date.now() / 1_000),
+        outgoing: true,
+      },
+    });
+  });
+  await page.waitForTimeout(50);
+  const samples = await page.evaluate(() => {
+    const state = window as unknown as {
+      __serverEchoSamples: Array<{ count: number; bottomGap: number }>;
+      __stopServerEchoSamples: () => void;
+    };
+    state.__stopServerEchoSamples();
+    return state.__serverEchoSamples;
+  });
+
+  expect(samples.length).toBeGreaterThan(2);
+  expect(Math.max(...samples.map(({ count }) => count))).toBe(1);
+  expect(
+    Math.max(...samples.map(({ bottomGap }) => bottomGap)) -
+      Math.min(...samples.map(({ bottomGap }) => bottomGap)),
+  ).toBeLessThan(3);
+  await expect(bubble).toHaveAttribute('data-pending-node', 'server-echo');
+});
+
 test('sends a whole-message reply and renders its reply preview', async ({ page }) => {
   const source = page.locator('article[data-message-id="79"]');
   await source.hover();
@@ -346,12 +440,15 @@ test('renders mentions, links, previews, wrapping, formatting, and spoilers', as
     const preview = element.querySelector<HTMLElement>('.link-preview')!;
     const photo = element.querySelector<HTMLElement>('.link-preview-photo')!;
     const bodyLink = element.querySelector<HTMLElement>('.message-body a')!;
+    const messageBounds = element.getBoundingClientRect();
+    const footerBounds = element.querySelector<HTMLElement>('footer')!.getBoundingClientRect();
     return {
       previewHeight: preview.getBoundingClientRect().height,
       photoWidth: photo.getBoundingClientRect().width,
       photoHeight: photo.getBoundingClientRect().height,
       messageColor: getComputedStyle(element).color,
       linkColor: getComputedStyle(bodyLink).color,
+      footerInsideBubble: footerBounds.bottom <= messageBounds.bottom,
     };
   });
   expect(previewLayout).toMatchObject({
@@ -360,6 +457,7 @@ test('renders mentions, links, previews, wrapping, formatting, and spoilers', as
     messageColor: previewLayout.linkColor,
   });
   expect(previewLayout.previewHeight).toBeLessThanOrEqual(96);
+  expect(previewLayout.footerInsideBubble).toBe(true);
   await expect(page.locator('article[data-message-id="77"] .message-reply')).not.toHaveCSS(
     'color',
     'rgb(139, 144, 154)',
@@ -380,6 +478,94 @@ test('renders mentions, links, previews, wrapping, formatting, and spoilers', as
   expect(
     await message.locator('.message-body').evaluate((body) => body.scrollWidth <= body.clientWidth),
   ).toBe(true);
+});
+
+test('renders Telegram webpage videos without overflowing or rounding the accent edge', async ({
+  page,
+}) => {
+  const message = page.locator('article[data-message-id="72"]');
+  const preview = message.locator('.link-preview-media');
+  const video = preview.locator('video');
+
+  await expect(preview).toBeVisible();
+  await expect(video).toBeVisible();
+  await expect(video).toHaveAttribute('controls', '');
+  await expect
+    .poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentSrc))
+    .toMatch(/^blob:/u);
+  await expect.poll(() => video.getAttribute('poster')).toMatch(/^blob:/u);
+  await expect
+    .poll(() =>
+      video.evaluate((element) => {
+        const videoElement = element as HTMLVideoElement;
+        return (
+          Number.isFinite(videoElement.duration) &&
+          videoElement.duration > 0 &&
+          videoElement.readyState >= 1
+        );
+      }),
+    )
+    .toBe(true);
+
+  const layout = await preview.evaluate((element) => {
+    const title = element.querySelector<HTMLElement>('strong')!;
+    const previewBounds = element.getBoundingClientRect();
+    const titleBounds = title.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const accentStyle = getComputedStyle(element, '::before');
+    return {
+      previewDoesNotScroll: element.scrollWidth <= element.clientWidth,
+      titleInsidePreview: titleBounds.right <= previewBounds.right,
+      titleOverflow: getComputedStyle(title).overflow,
+      borderLeftWidth: style.borderLeftWidth,
+      borderTopLeftRadius: style.borderTopLeftRadius,
+      borderBottomLeftRadius: style.borderBottomLeftRadius,
+      accentWidth: accentStyle.width,
+      accentRadius: accentStyle.borderRadius,
+    };
+  });
+  expect(layout).toEqual({
+    previewDoesNotScroll: true,
+    titleInsidePreview: true,
+    titleOverflow: 'hidden',
+    borderLeftWidth: '0px',
+    borderTopLeftRadius: '0px',
+    borderBottomLeftRadius: '0px',
+    accentWidth: '3px',
+    accentRadius: '0px',
+  });
+});
+
+test('clips long link-preview titles before the small thumbnail', async ({ page }) => {
+  const preview = page.locator('article[data-message-id="71"] .link-preview');
+  await expect(preview).toBeVisible();
+
+  const layout = await preview.evaluate((element) => {
+    const copy = element.querySelector<HTMLElement>('.link-preview-copy')!;
+    const title = element.querySelector<HTMLElement>('strong')!;
+    const photo = element.querySelector<HTMLElement>('.link-preview-photo')!;
+    const previewBounds = element.getBoundingClientRect();
+    const copyBounds = copy.getBoundingClientRect();
+    const titleBounds = title.getBoundingClientRect();
+    const photoBounds = photo.getBoundingClientRect();
+    return {
+      previewDoesNotScroll: element.scrollWidth <= element.clientWidth,
+      copyEndsBeforePhoto: copyBounds.right <= photoBounds.left,
+      titleEndsBeforePhoto: titleBounds.right <= photoBounds.left,
+      photoInsidePreview: photoBounds.right <= previewBounds.right,
+      titleOverflow: getComputedStyle(title).overflow,
+      titleWhiteSpace: getComputedStyle(title).whiteSpace,
+    };
+  });
+
+  expect(layout).toEqual({
+    previewDoesNotScroll: true,
+    copyEndsBeforePhoto: true,
+    titleEndsBeforePhoto: true,
+    photoInsidePreview: true,
+    titleOverflow: 'hidden',
+    titleWhiteSpace: 'nowrap',
+  });
 });
 
 test('renders bot Rich Markdown blocks and nested formatting', async ({ page }) => {
