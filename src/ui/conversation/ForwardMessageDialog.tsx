@@ -1,128 +1,137 @@
-import X from 'lucide-solid/icons/x';
-import Search from 'lucide-solid/icons/search';
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
-import { Portal } from 'solid-js/web';
-
+import { effectCommand } from 'effectweb/program';
+import { Effect } from 'effect';
 import type { ChatSummary } from '../../domain/models';
 import type { TelegramPeerSearchResult } from '../../telegram/types';
-import { useModalDialog } from '../shared/useModalDialog';
-
-export function ForwardMessageDialog(props: {
+import { idRows, remotePeerRows } from '../collections';
+import Search from '@effectweb/lucide/icons/search';
+import X from '@effectweb/lucide/icons/x';
+import { component, Portal, view } from 'effectweb';
+import type { Transition } from 'effectweb/program';
+import { loadEffect } from 'effectweb/cache';
+import { modalMount } from '../shared/modalMount';
+interface ForwardMessageDialogProps {
   chats: ChatSummary[];
   close: () => void;
   forward: (peerId: string, result?: TelegramPeerSearchResult) => void;
-  search?: ((query: string) => Promise<TelegramPeerSearchResult[]>) | undefined;
+  search?: ((query: string) => Effect.Effect<TelegramPeerSearchResult[], unknown>) | undefined;
   title?: string | undefined;
   label?: string | undefined;
   cancelLabel?: string | undefined;
-}) {
-  let overlay: HTMLDivElement | undefined;
-  useModalDialog(() => overlay, props.close);
-  const [query, setQuery] = createSignal('');
-  const [remoteResults, setRemoteResults] = createSignal<TelegramPeerSearchResult[]>([]);
-  const [searching, setSearching] = createSignal(false);
-  let searchVersion = 0;
+}
+type ForwardMessageDialogModel = {
+  props: ForwardMessageDialogProps;
+  query: string;
+  remoteResults: TelegramPeerSearchResult[];
+  searching: boolean;
+};
+type ForwardMessageDialogMessage =
+  | { type: 'Query'; value: string }
+  | { type: 'RemoteResults'; value: TelegramPeerSearchResult[] };
+function requestSearch(
+  model: ForwardMessageDialogModel,
+): Transition<ForwardMessageDialogModel, ForwardMessageDialogMessage> {
+  const term = model.query.trim();
+  if (!term || !model.props.search)
+    return { model: { ...model, remoteResults: [], searching: false }, cancel: ['search'] };
+  return {
+    model: { ...model, remoteResults: [], searching: true },
+    commands: [
+      effectCommand(
+        'search',
+        () => Effect.sleep(180).pipe(Effect.andThen(loadEffect(() => model.props.search!(term)))),
+        {
+          onSuccess: (value) => ({ type: 'RemoteResults', value }) as const,
+          onFailure: () => ({ type: 'RemoteResults', value: [] }) as const,
+        },
+      ),
+    ],
+  };
+}
+export const ForwardMessageDialog = component<
+  ForwardMessageDialogProps,
+  ForwardMessageDialogModel,
+  ForwardMessageDialogMessage
+>({
+  init: (props) => ({ props, query: '', remoteResults: [], searching: false }),
 
-  createEffect(() => {
-    const term = query().trim();
-    const version = ++searchVersion;
-    if (!term || !props.search) {
-      setRemoteResults([]);
-      setSearching(false);
-      return;
+  update: (model, message) => {
+    switch (message.type) {
+      case 'Query':
+        return requestSearch({ ...model, query: message.value });
+      case 'RemoteResults':
+        return { model: { ...model, remoteResults: message.value, searching: false } };
     }
-    setSearching(true);
-    const timer = window.setTimeout(() => {
-      void props.search!(term)
-        .then((results) => {
-          if (version === searchVersion) setRemoteResults(results);
-        })
-        .catch(() => {
-          if (version === searchVersion) setRemoteResults([]);
-        })
-        .finally(() => {
-          if (version === searchVersion) setSearching(false);
-        });
-    }, 180);
-    onCleanup(() => window.clearTimeout(timer));
-  });
-
-  const localChats = createMemo(() => {
-    const term = query().trim().toLocaleLowerCase();
-    return term
-      ? props.chats.filter((chat) =>
-          `${chat.title} ${chat.username ?? ''}`.toLocaleLowerCase().includes(term),
-        )
-      : props.chats;
-  });
-  const newRemoteResults = createMemo(() => {
-    const localIds = new Set(props.chats.map(({ id }) => id));
-    return remoteResults().filter(({ peer }) => !localIds.has(peer.id));
-  });
-
-  return (
-    <Portal>
-      <div
-        ref={(element) => (overlay = element)}
-        class="forward-overlay"
-        role="presentation"
-        tabIndex={-1}
-        onPointerDown={(event) => event.target === event.currentTarget && props.close()}
-      >
+  },
+  view: view((model, send) => {
+    const props = model.props;
+    const localChats = (() => {
+      const term = model.query.trim().toLocaleLowerCase();
+      return term
+        ? props.chats.filter((chat) =>
+            `${chat.title} ${chat.username ?? ''}`.toLocaleLowerCase().includes(term),
+          )
+        : props.chats;
+    })();
+    const newRemoteResults = (() => {
+      const localIds = new Set(props.chats.map(({ id }) => id));
+      return model.remoteResults.filter(({ peer }) => !localIds.has(peer.id));
+    })();
+    return (
+      <Portal>
         <div
-          class="forward-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-label={props.label ?? 'Forward message'}
+          use={modalMount(props.close)}
+          class="forward-overlay"
+          role="presentation"
+          tabIndex={-1}
+          onPointerDown={(event) => event.target === event.currentTarget && props.close()}
         >
-          <header>
-            <strong>{props.title ?? 'Forward to'}</strong>
-            <button onClick={props.close} aria-label={props.cancelLabel ?? 'Cancel forward'}>
-              <X size={17} />
-            </button>
-          </header>
-          <Show when={props.search}>
-            <label class="mx-3 my-2 flex items-center gap-2 rounded-lg border border-line bg-black/10 px-3 py-2 text-muted">
-              <Search size={16} />
-              <input
-                class="min-w-0 flex-1 border-0 bg-transparent text-ink outline-none"
-                value={query()}
-                onInput={(event) => setQuery(event.currentTarget.value)}
-                placeholder="Search chats"
-                aria-label="Search chats to forward"
-              />
-            </label>
-          </Show>
-          <div>
-            <For each={localChats()}>
-              {(chat) => <button onClick={() => props.forward(chat.id)}>{chat.title}</button>}
-            </For>
-            <For each={newRemoteResults()}>
-              {(result) => (
+          <div
+            class="forward-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={props.label ?? 'Forward message'}
+          >
+            <header>
+              <strong>{props.title ?? 'Forward to'}</strong>
+              <button onClick={props.close} aria-label={props.cancelLabel ?? 'Cancel forward'}>
+                <X size={17} />
+              </button>
+            </header>
+            {props.search ? (
+              <label class="mx-3 my-2 flex items-center gap-2 rounded-lg border border-line bg-black/10 px-3 py-2 text-muted">
+                <Search size={16} />
+                <input
+                  class="min-w-0 flex-1 border-0 bg-transparent text-ink outline-none"
+                  value={model.query}
+                  onInput={(event) => send({ type: 'Query', value: event.currentTarget.value })}
+                  placeholder="Search chats"
+                  aria-label="Search chats to forward"
+                />
+              </label>
+            ) : null}
+            <div>
+              {idRows(localChats).map((chat) => (
+                <button onClick={() => props.forward(chat.id)}>{chat.title}</button>
+              ))}
+              {remotePeerRows(newRemoteResults).map((result) => (
                 <button onClick={() => props.forward(result.peer.id, result)}>
                   {result.title}
-                  <Show when={result.username}>
-                    <small>@{result.username}</small>
-                  </Show>
+                  {result.username ? <small>@{result.username}</small> : null}
                 </button>
-              )}
-            </For>
-            <Show when={Boolean(query().trim()) && searching()}>
-              <p class="px-3 py-2 text-xs text-muted">Searching chats…</p>
-            </Show>
-            <Show
-              when={
-                !searching() &&
-                Boolean(query().trim()) &&
-                localChats().length === 0 &&
-                newRemoteResults().length === 0
-              }
-            >
-              <p class="px-3 py-2 text-xs text-muted">No chats found</p>
-            </Show>
+              ))}
+              {Boolean(model.query.trim()) && model.searching ? (
+                <p class="px-3 py-2 text-xs text-muted">Searching chats…</p>
+              ) : null}
+              {!model.searching &&
+              Boolean(model.query.trim()) &&
+              localChats.length === 0 &&
+              newRemoteResults.length === 0 ? (
+                <p class="px-3 py-2 text-xs text-muted">No chats found</p>
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
-    </Portal>
-  );
-}
+      </Portal>
+    );
+  }),
+});

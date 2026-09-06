@@ -42,9 +42,7 @@ test('chooses a new reaction from the message reaction picker', async ({ page })
   await message.getByRole('button', { name: 'React to message 80' }).click();
   await page
     .getByRole('dialog', { name: 'Choose reaction' })
-    .getByRole('button', {
-      name: 'React with 🔥',
-    })
+    .getByRole('button', { name: 'React with 🔥' })
     .click();
 
   await expect(message.getByRole('button', { name: 'Remove 🔥 reaction' })).toContainText('1');

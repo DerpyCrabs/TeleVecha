@@ -21,10 +21,7 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 describe('MTProto authorization security', () => {
   it('factors bounded server semiprimes and rejects invalid values', () => {
     expect(factorizePq(323n)).toEqual({ p: 17n, q: 19n });
-    expect(factorizePq(0x17ed_4894_1a08_f981n)).toEqual({
-      p: 1_229_739_323n,
-      q: 1_402_015_859n,
-    });
+    expect(factorizePq(0x17ed_4894_1a08_f981n)).toEqual({ p: 1_229_739_323n, q: 1_402_015_859n });
     for (const value of [0n, 1n, 2n, 3n, 4n, 5n, 17n, 45n, 49n]) {
       expect(() => factorizePq(value)).toThrow();
     }
@@ -77,11 +74,7 @@ describe('MTProto authorization security', () => {
         const verifier = modPow(3n, bytesToBigInt(passwordHash), prime);
         const serverPublic = (multiplier * verifier + modPow(3n, 654_321n, prime)) % prime;
         const proof = yield* computePasswordSrpCheck(
-          {
-            currentAlgo: algorithm,
-            srpB: bigIntToBytes(serverPublic, 256),
-            srpId: 42n,
-          },
+          { currentAlgo: algorithm, srpB: bigIntToBytes(serverPublic, 256), srpId: 42n },
           'correct horse',
         );
         expect(proof._).toBe('inputCheckPasswordSRP');
@@ -105,11 +98,7 @@ describe('MTProto authorization security', () => {
         );
         expect(
           (yield* computePasswordSrpCheck(
-            {
-              currentAlgo: algorithm,
-              srpB: new Uint8Array(256),
-              srpId: 1n,
-            },
+            { currentAlgo: algorithm, srpB: new Uint8Array(256), srpId: 1n },
             'x',
           ).pipe(Effect.result))._tag,
         ).toBe('Failure');

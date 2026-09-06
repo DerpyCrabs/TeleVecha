@@ -46,24 +46,13 @@ export interface EncryptedMessageState {
     this: void,
     body: Uint8Array,
     contentRelated: boolean,
-  ): {
-    data: Uint8Array;
-    messageId: bigint;
-    sequenceNumber: number;
-  };
+  ): { data: Uint8Array; messageId: bigint; sequenceNumber: number };
   encryptPrepared(this: void, data: Uint8Array): Effect.Effect<Uint8Array, MtprotoError>;
   encrypt(
     this: void,
     body: Uint8Array,
     contentRelated: boolean,
-  ): Effect.Effect<
-    {
-      packet: Uint8Array;
-      messageId: bigint;
-      sequenceNumber: number;
-    },
-    MtprotoError
-  >;
+  ): Effect.Effect<{ packet: Uint8Array; messageId: bigint; sequenceNumber: number }, MtprotoError>;
   decrypt(this: void, packet: Uint8Array): Effect.Effect<DecryptedMessage, MtprotoError>;
   setServerSalt(this: void, salt: bigint): void;
   setFutureSalts(

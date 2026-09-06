@@ -169,9 +169,7 @@ test('Escape closes only the topmost media viewer before its shared-media dialog
 }) => {
   await page.getByRole('button', { name: /Photos.*128/ }).click();
   const shared = page.getByRole('dialog', { name: 'Shared photos' });
-  const preview = shared.getByRole('button', {
-    name: 'Open fixture.jpg fullscreen preview',
-  });
+  const preview = shared.getByRole('button', { name: 'Open fixture.jpg fullscreen preview' });
   await preview.click();
   const viewer = page.getByRole('dialog', { name: 'Media preview: fixture.jpg' });
   await expect(viewer).toBeVisible();

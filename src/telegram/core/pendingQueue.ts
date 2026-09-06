@@ -45,10 +45,7 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
         : undefined,
       botStart: pending.botStart ? Object.freeze({ ...pending.botStart }) : undefined,
       attachment: pending.attachment
-        ? Object.freeze({
-            ...pending.attachment,
-            sendAs: pending.attachment.sendAs ?? 'media',
-          })
+        ? Object.freeze({ ...pending.attachment, sendAs: pending.attachment.sendAs ?? 'media' })
         : undefined,
       album: albumAttachments ? Object.freeze({ attachments: albumAttachments }) : undefined,
     });

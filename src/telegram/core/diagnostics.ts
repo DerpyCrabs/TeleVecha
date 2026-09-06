@@ -20,10 +20,7 @@ export function subscribeDiagnostics(listener: (event: TimestampedDiagnosticEven
 }
 
 export function reportDiagnostic(event: DiagnosticEvent) {
-  const entry = {
-    time: new Date().toISOString(),
-    ...event,
-  };
+  const entry = { time: new Date().toISOString(), ...event };
   for (const listener of listeners) {
     try {
       listener(entry);

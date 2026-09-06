@@ -74,15 +74,7 @@ function sourceMessage(): TelegramMessage {
         {
           kind: 'table',
           bordered: true,
-          rows: [
-            [
-              {
-                header: true,
-                colSpan: 2,
-                text: { kind: 'text', text: 'Private heading' },
-              },
-            ],
-          ],
+          rows: [[{ header: true, colSpan: 2, text: { kind: 'text', text: 'Private heading' } }]],
         },
         {
           kind: 'media',
@@ -292,11 +284,7 @@ describe('.tvbug snapshot format', () => {
       if (/\s/u.test(secretText[index]!)) expect(safe.text[index]).toBe(secretText[index]);
     }
     expect(safe.formats).toEqual([{ offset: 7, length: 3, kind: 'bold' }]);
-    expect(safe.mentions![0]).toEqual({
-      offset: 7,
-      length: 3,
-      userId: 'u:1',
-    });
+    expect(safe.mentions![0]).toEqual({ offset: 7, length: 3, userId: 'u:1' });
     expect(safe.media).toMatchObject({
       kind: 'video',
       mimeType: 'video/mp4',
@@ -359,10 +347,7 @@ describe('.tvbug snapshot format', () => {
     ]);
     expect(strFromU8(files['trace.v2.ndjson']!).trim().split('\n')).toHaveLength(2);
     const parsed = parseTvBugBundle(bytes);
-    expect(parsed.manifest).toMatchObject({
-      version: 2,
-      privacy: { profile: 'account-free-v2' },
-    });
+    expect(parsed.manifest).toMatchObject({ version: 2, privacy: { profile: 'account-free-v2' } });
     expect(parsed.trace.map(({ seq }) => seq)).toEqual([1, 2]);
     expect(parsed.snapshot).toEqual(state);
   });

@@ -1,47 +1,46 @@
-import Bug from 'lucide-solid/icons/bug';
-import Download from 'lucide-solid/icons/download';
-import LogOut from 'lucide-solid/icons/log-out';
-import RotateCcw from 'lucide-solid/icons/rotate-ccw';
-import Settings from 'lucide-solid/icons/settings';
-import X from 'lucide-solid/icons/x';
-import { Show } from 'solid-js';
-import { Portal } from 'solid-js/web';
-
 import type { TelegramWallpaper } from '../../telegram/types';
-import { useModalDialog } from '../shared/useModalDialog';
-import { AppearanceSettings } from '../theme/AppearanceSettings';
+import Bug from '@effectweb/lucide/icons/bug';
+import Download from '@effectweb/lucide/icons/download';
+import LogOut from '@effectweb/lucide/icons/log-out';
+import RotateCcw from '@effectweb/lucide/icons/rotate-ccw';
+import Settings from '@effectweb/lucide/icons/settings';
+import X from '@effectweb/lucide/icons/x';
+import { Portal, view } from 'effectweb';
+import { modalMount } from '../shared/modalMount';
 import { panelCloseButtonClass, panelHeaderClass } from '../shared/panelStyles';
+import { AppearanceSettings } from '../theme/AppearanceSettings';
 import type { ThemePreferences, ThemePresetId } from '../theme/themePreferences';
-
-export function SettingsDialog(props: {
-  loggingOut: boolean;
-  clearingCache: boolean;
-  debugReportBusy: boolean;
-  debugReportError: string;
-  close: () => void;
-  clearCache: () => void;
-  downloadDebugReport?: (() => void) | undefined;
-  logOut: () => void;
-  appearance: ThemePreferences;
-  telegramWallpapers: TelegramWallpaper[];
-  wallpaperBusy: boolean;
-  wallpaperError: string;
-  setTheme: (theme: ThemePresetId) => void;
-  setAccentColor: (color: string) => void;
-  setSystemAccent: (enabled: boolean) => void;
-  setChatFontSize: (size: number) => void;
-  setWallpaper: (wallpaper: ThemePreferences['wallpaper']) => void;
-  setTelegramWallpaper: (wallpaper: TelegramWallpaper) => void;
-  setWallpaperEffects: (effects: Pick<ThemePreferences, 'wallpaperBlur' | 'wallpaperDim'>) => void;
-  uploadWallpaper: (file: File) => void;
-}) {
-  let overlay: HTMLDivElement | undefined;
-  useModalDialog(() => overlay, props.close);
-
+export const SettingsDialog = view<
+  {
+    loggingOut: boolean;
+    clearingCache: boolean;
+    debugReportBusy: boolean;
+    debugReportError: string;
+    close: () => void;
+    clearCache: () => void;
+    downloadDebugReport?: (() => void) | undefined;
+    logOut: () => void;
+    appearance: ThemePreferences;
+    telegramWallpapers: TelegramWallpaper[];
+    wallpaperBusy: boolean;
+    wallpaperError: string;
+    setTheme: (theme: ThemePresetId) => void;
+    setAccentColor: (color: string) => void;
+    setSystemAccent: (enabled: boolean) => void;
+    setChatFontSize: (size: number) => void;
+    setWallpaper: (wallpaper: ThemePreferences['wallpaper']) => void;
+    setTelegramWallpaper: (wallpaper: TelegramWallpaper) => void;
+    setWallpaperEffects: (
+      effects: Pick<ThemePreferences, 'wallpaperBlur' | 'wallpaperDim'>,
+    ) => void;
+    uploadWallpaper: (file: File) => void;
+  },
+  never
+>((props, _send) => {
   return (
     <Portal>
       <div
-        ref={(element) => (overlay = element)}
+        use={modalMount(props.close)}
         class="panel-overlay"
         role="presentation"
         tabIndex={-1}
@@ -87,35 +86,35 @@ export function SettingsDialog(props: {
               setEffects={props.setWallpaperEffects}
               uploadWallpaper={props.uploadWallpaper}
             />
-            <Show when={props.downloadDebugReport} keyed>
-              {(downloadDebugReport) => (
-                <div class="settings-section flex items-center justify-between gap-4 p-4 [&_p]:mt-[0.35rem] [&_p]:mb-0 [&_p]:max-w-80 [&_p]:text-[0.78rem] [&_p]:leading-[1.2rem] [&_p]:text-muted">
-                  <div>
-                    <strong class="flex items-center gap-2">
-                      <Bug size={17} /> Debug report
-                    </strong>
-                    <p>
-                      Download a compact snapshot of the current problem. Message text is replaced
-                      with generated text of the same length. Login data and media files are
-                      excluded.
-                    </p>
-                    <Show when={props.debugReportError}>
-                      <p class="text-red-300" role="alert">
-                        {props.debugReportError}
+            {props.downloadDebugReport
+              ? ((downloadDebugReport) => (
+                  <div class="settings-section flex items-center justify-between gap-4 p-4 [&_p]:mt-[0.35rem] [&_p]:mb-0 [&_p]:max-w-80 [&_p]:text-[0.78rem] [&_p]:leading-[1.2rem] [&_p]:text-muted">
+                    <div>
+                      <strong class="flex items-center gap-2">
+                        <Bug size={17} /> Debug report
+                      </strong>
+                      <p>
+                        Download a compact snapshot of the current problem. Message text is replaced
+                        with generated text of the same length. Login data and media files are
+                        excluded.
                       </p>
-                    </Show>
+                      {props.debugReportError ? (
+                        <p class="text-red-300" role="alert">
+                          {props.debugReportError}
+                        </p>
+                      ) : null}
+                    </div>
+                    <button
+                      class="settings-cache-action flex shrink-0 items-center gap-[0.45rem] rounded-[0.6rem] border border-blue-400/25 bg-blue-800/15 px-3 py-[0.6rem] text-blue-300 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={props.loggingOut || props.clearingCache || props.debugReportBusy}
+                      onClick={downloadDebugReport}
+                    >
+                      <Download size={17} />
+                      {props.debugReportBusy ? 'Preparing…' : 'Download report'}
+                    </button>
                   </div>
-                  <button
-                    class="settings-cache-action flex shrink-0 items-center gap-[0.45rem] rounded-[0.6rem] border border-blue-400/25 bg-blue-800/15 px-3 py-[0.6rem] text-blue-300 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={props.loggingOut || props.clearingCache || props.debugReportBusy}
-                    onClick={downloadDebugReport}
-                  >
-                    <Download size={17} />
-                    {props.debugReportBusy ? 'Preparing…' : 'Download report'}
-                  </button>
-                </div>
-              )}
-            </Show>
+                ))(props.downloadDebugReport!)
+              : null}
             <div class="settings-section flex items-center justify-between gap-4 p-4 [&_p]:mt-[0.35rem] [&_p]:mb-0 [&_p]:max-w-76 [&_p]:text-[0.78rem] [&_p]:leading-[1.2rem] [&_p]:text-muted">
               <div>
                 <strong>Local cache</strong>
@@ -155,4 +154,4 @@ export function SettingsDialog(props: {
       </div>
     </Portal>
   );
-}
+});

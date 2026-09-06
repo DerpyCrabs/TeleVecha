@@ -64,10 +64,7 @@ const MTPROTO_UNTAGGED_DECLARATIONS = new Set([
 const COMMENTED_MTPROTO_DECLARATIONS = new Map([
   [
     'rpc_result#f35c6d01 req_msg_id:long result:string = RpcResult;',
-    {
-      kind: 'constructor',
-      line: 'rpc_result#f35c6d01 req_msg_id:long result:Object = RpcResult;',
-    },
+    { kind: 'constructor', line: 'rpc_result#f35c6d01 req_msg_id:long result:Object = RpcResult;' },
   ],
   [
     'destroy_session_ok#e22045fc session_id:long = DestroySessionRes;',
@@ -99,10 +96,7 @@ const COMMENTED_MTPROTO_DECLARATIONS = new Map([
   ],
   [
     'msg_copy#e06046b2 orig_message:Message = MessageCopy;',
-    {
-      kind: 'constructor',
-      line: 'msg_copy#e06046b2 orig_message:%mtproto.message = MessageCopy;',
-    },
+    { kind: 'constructor', line: 'msg_copy#e06046b2 orig_message:%mtproto.message = MessageCopy;' },
   ],
   [
     'ping#7abe77ec ping_id:long = Pong;',
@@ -110,10 +104,7 @@ const COMMENTED_MTPROTO_DECLARATIONS = new Map([
   ],
   [
     'destroy_session#e7512126 session_id:long = DestroySessionRes;',
-    {
-      kind: 'method',
-      line: 'destroy_session#e7512126 session_id:long = DestroySessionRes;',
-    },
+    { kind: 'method', line: 'destroy_session#e7512126 session_id:long = DestroySessionRes;' },
   ],
 ]);
 
@@ -176,10 +167,7 @@ function canonicalDefinition(line, sourceName) {
   if (!body.startsWith(' ') || !body.includes(' = ')) {
     throw Error(`Invalid TL definition body for ${name} in ${sourceName}: ${line}`);
   }
-  return {
-    line: `${name}#${id.toLowerCase().padStart(8, '0')}${body};`,
-    name,
-  };
+  return { line: `${name}#${id.toLowerCase().padStart(8, '0')}${body};`, name };
 }
 
 function parseApiTl(source) {
@@ -250,10 +238,7 @@ function legacyServerDhParamsFail(source) {
     .map((line) => line.trim())
     .filter((line) => line.startsWith('server_DH_params_fail#'));
   if (matches.length !== 1) throw Error('Could not isolate legacy server_DH_params_fail.');
-  return {
-    definition: canonicalDefinition(matches[0], 'legacy mtproto_api.tl').line,
-    sourceHash,
-  };
+  return { definition: canonicalDefinition(matches[0], 'legacy mtproto_api.tl').line, sourceHash };
 }
 
 function parseMtprotoTl(source, legacySource) {

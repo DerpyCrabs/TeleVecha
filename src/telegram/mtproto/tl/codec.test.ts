@@ -59,10 +59,7 @@ describe('functional Telegram TL catalog', () => {
       id: 0x79cb045d,
       kind: 'constructor',
     });
-    expect(descriptorFor('gzip_packed')).toMatchObject({
-      id: 0x3072cfa1,
-      kind: 'constructor',
-    });
+    expect(descriptorFor('gzip_packed')).toMatchObject({ id: 0x3072cfa1, kind: 'constructor' });
     expect(descriptorFor('mtproto.message')).toMatchObject({ id: 0, kind: 'bare' });
 
     expect(Object.isFrozen(Api)).toBe(true);

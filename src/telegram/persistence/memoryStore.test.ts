@@ -43,14 +43,7 @@ function message(target: TelegramPeer, id: number, cacheEpoch = 1): CachedMessag
 }
 
 function send(id: string, createdAt: number, target = peer): PendingSend {
-  return {
-    id,
-    peer: target,
-    text: id,
-    randomId: `random-${id}`,
-    createdAt,
-    attempts: 0,
-  };
+  return { id, peer: target, text: id, randomId: `random-${id}`, createdAt, attempts: 0 };
 }
 
 const member: TelegramGroupMember = {
@@ -189,10 +182,7 @@ describe('MemoryCacheStore', () => {
       messages: [message(peer, 1, 6)],
       drafts: { [peer.id]: 'keep' },
       pending: [send('keep', 1)],
-      blobs: {
-        discard: new Blob(['discard']),
-        preserve: new Blob(['preserve']),
-      },
+      blobs: { discard: new Blob(['discard']), preserve: new Blob(['preserve']) },
     });
     const cursor = { pts: 20, qts: 2, date: 30, seq: 4 };
 
@@ -230,11 +220,7 @@ describe('MemoryCacheStore', () => {
     const first = { ...send('first', 20), queueOrder: 1 };
 
     await run(
-      store.commitOutbox([second, first], {
-        peerId: peer.id,
-        text: 'caption',
-        revision: 4,
-      }),
+      store.commitOutbox([second, first], { peerId: peer.id, text: 'caption', revision: 4 }),
     );
     first.text = 'mutated after write';
     await run(store.commitOutbox({ ...send('later', 30), attempts: 2 }));

@@ -1,24 +1,23 @@
-import FileText from 'lucide-solid/icons/file-text';
-import FileImage from 'lucide-solid/icons/file-image';
-import Headphones from 'lucide-solid/icons/headphones';
-import Image from 'lucide-solid/icons/image';
-import Link from 'lucide-solid/icons/link';
-import Mic from 'lucide-solid/icons/mic';
-import Video from 'lucide-solid/icons/video';
-import Hand from 'lucide-solid/icons/hand';
-import PanelRightClose from 'lucide-solid/icons/panel-right-close';
-import Pencil from 'lucide-solid/icons/pencil';
-import Share2 from 'lucide-solid/icons/share-2';
-import Trash2 from 'lucide-solid/icons/trash-2';
-import { For, Show } from 'solid-js';
-
 import type { ChatSummary } from '../../domain/models';
 import type { SharedMediaCounts, SharedMediaKind, TelegramGroupMember } from '../../telegram/types';
+import { peerRows } from '../collections';
+import FileImage from '@effectweb/lucide/icons/file-image';
+import FileText from '@effectweb/lucide/icons/file-text';
+import Hand from '@effectweb/lucide/icons/hand';
+import Headphones from '@effectweb/lucide/icons/headphones';
+import Image from '@effectweb/lucide/icons/image';
+import Link from '@effectweb/lucide/icons/link';
+import Mic from '@effectweb/lucide/icons/mic';
+import PanelRightClose from '@effectweb/lucide/icons/panel-right-close';
+import Pencil from '@effectweb/lucide/icons/pencil';
+import Share2 from '@effectweb/lucide/icons/share-2';
+import Trash2 from '@effectweb/lucide/icons/trash-2';
+import Video from '@effectweb/lucide/icons/video';
 import type { MediaAssets } from '../media/mediaAssets';
+import { view } from 'effectweb';
 import { AutoLinkText } from '../shared/AutoLinkText';
 import { Avatar } from '../shared/Avatar';
 import type { ContactDetailsSession } from './contactDetailsSession';
-
 interface DetailsPaneProps {
   chat: ChatSummary;
   counts?: SharedMediaCounts | undefined;
@@ -31,12 +30,11 @@ interface DetailsPaneProps {
   openShared: (kind: SharedMediaKind) => void;
   setBlocked: (blocked: boolean) => void;
 }
-
-export function DetailsPane(props: DetailsPaneProps) {
+export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
   const detailRowClass =
     'detail-row grid w-full grid-cols-[1.4rem_1fr_auto] items-center gap-2 rounded-[0.45rem] border-0 bg-transparent px-3 py-3 text-left text-[0.82rem] text-muted hover:bg-[var(--surface-subtle)] [&>span]:text-ink [&>b]:font-medium [&>b]:text-muted';
   const phone = () => {
-    const value = props.details.userDetails()?.phone;
+    const value = props.details.userDetails?.phone;
     return value && !value.startsWith('+') ? `+${value}` : value;
   };
   const status = () => {
@@ -59,7 +57,7 @@ export function DetailsPane(props: DetailsPaneProps) {
     return 'offline';
   };
   const birthday = () => {
-    const value = props.details.userDetails()?.birthday;
+    const value = props.details.userDetails?.birthday;
     if (!value) return undefined;
     return new Intl.DateTimeFormat(undefined, {
       month: 'long',
@@ -98,38 +96,38 @@ export function DetailsPane(props: DetailsPaneProps) {
           <h2 class="mt-4 font-semibold">{props.chat.title}</h2>
           <p class="mt-1 text-xs text-[var(--muted)]">{status()}</p>
         </section>
-        <Show when={props.chat.kind === 'user' && props.details.userDetails()}>
+        {props.chat.kind === 'user' && props.details.userDetails ? (
           <section class="grid gap-4 border-b border-line px-5 py-4 [&_a]:grid [&_a]:gap-1 [&_a]:text-ink [&_a]:no-underline [&_a>span]:text-[#65bff0] [&_div]:grid [&_div]:gap-1 [&_small]:text-xs [&_small]:text-muted [&_.autolink-text]:whitespace-pre-wrap [&_.autolink-text]:[overflow-wrap:anywhere] [&_.autolink-text_a]:inline [&_.autolink-text_a]:text-[#65bff0]">
-            <Show when={phone()}>
+            {phone() ? (
               <div>
                 <span>{phone()}</span>
                 <small>Mobile</small>
               </div>
-            </Show>
-            <Show when={props.details.userDetails()?.bio}>
+            ) : null}
+            {props.details.userDetails?.bio ? (
               <div>
-                <AutoLinkText text={props.details.userDetails()!.bio!} />
+                <AutoLinkText text={props.details.userDetails!.bio!} />
                 <small>Bio</small>
               </div>
-            </Show>
-            <Show when={props.details.userDetails()?.username}>
+            ) : null}
+            {props.details.userDetails?.username ? (
               <a
-                href={`https://t.me/${props.details.userDetails()!.username}`}
+                href={`https://t.me/${props.details.userDetails!.username}`}
                 target="_blank"
                 rel="noreferrer"
               >
-                <span>@{props.details.userDetails()!.username}</span>
+                <span>@{props.details.userDetails!.username}</span>
                 <small>Username</small>
               </a>
-            </Show>
-            <Show when={birthday()}>
+            ) : null}
+            {birthday() ? (
               <div>
                 <span>{birthday()}</span>
                 <small>Birthday</small>
               </div>
-            </Show>
+            ) : null}
           </section>
-        </Show>
+        ) : null}
         <section class="p-2">
           <button
             class={detailRowClass}
@@ -195,7 +193,7 @@ export function DetailsPane(props: DetailsPaneProps) {
             <b>{props.counts?.gifs ?? '…'}</b>
           </button>
         </section>
-        <Show when={props.chat.kind === 'user' && props.details.userDetails()}>
+        {props.chat.kind === 'user' && props.details.userDetails ? (
           <section
             class="grid border-y border-line px-2 py-2 [&>button]:grid [&>button]:w-full [&>button]:grid-cols-[1.4rem_minmax(0,1fr)] [&>button]:items-center [&>button]:gap-2 [&>button]:rounded-[0.45rem] [&>button]:border-0 [&>button]:bg-transparent [&>button]:px-3 [&>button]:py-2.5 [&>button]:text-left [&>button]:text-[0.82rem] [&>button]:text-ink [&>button:hover]:bg-[var(--surface-subtle)]"
             aria-label="Contact actions"
@@ -204,53 +202,49 @@ export function DetailsPane(props: DetailsPaneProps) {
               <Share2 size={17} />
               <span>Share this contact</span>
             </button>
-            <Show when={props.details.userDetails()?.isContact}>
-              <button onClick={props.details.edit}>
-                <Pencil size={17} />
-                <span>Edit contact</span>
-              </button>
-              <button onClick={props.details.remove}>
-                <Trash2 size={17} />
-                <span>Delete contact</span>
-              </button>
-            </Show>
-            <Show when={!props.details.userDetails()?.isContact}>
+            {props.details.userDetails?.isContact ? (
+              <>
+                <button onClick={props.details.edit}>
+                  <Pencil size={17} />
+                  <span>Edit contact</span>
+                </button>
+                <button onClick={props.details.remove}>
+                  <Trash2 size={17} />
+                  <span>Delete contact</span>
+                </button>
+              </>
+            ) : null}
+            {!props.details.userDetails?.isContact ? (
               <button onClick={props.details.add}>
                 <span aria-hidden="true" class="text-base leading-none">
                   +
                 </span>
                 <span>Add contact</span>
               </button>
-            </Show>
+            ) : null}
             <button
               class="!text-red-400"
               disabled={!props.conversationReady}
-              onClick={() => props.setBlocked(!props.details.userDetails()?.blocked)}
+              onClick={() => props.setBlocked(!props.details.userDetails?.blocked)}
             >
               <Hand size={17} />
-              <span>{props.details.userDetails()?.blocked ? 'Unblock user' : 'Block user'}</span>
+              <span>{props.details.userDetails?.blocked ? 'Unblock user' : 'Block user'}</span>
             </button>
           </section>
-        </Show>
-        <Show when={props.chat.kind !== 'user'}>
+        ) : null}
+        {props.chat.kind !== 'user' ? (
           <section class="group-members border-b border-line px-2.5 py-3" aria-label="Members">
             <header class="flex items-center justify-between px-2 py-1 pb-2.5 text-xs [&>span]:text-muted">
               <strong>Members</strong>
               <span>
-                {props.details.membersLoading()
+                {props.details.membersLoading
                   ? '…'
-                  : props.details.membersTotal() || props.details.members().length}
+                  : props.details.membersTotal || props.details.members.length}
               </span>
             </header>
-            <Show
-              when={!props.details.membersLoading()}
-              fallback={<p class="m-0 px-2 py-3 text-xs text-muted">Loading members…</p>}
-            >
-              <For
-                each={props.details.members()}
-                fallback={<p class="m-0 px-2 py-3 text-xs text-muted">Members are unavailable.</p>}
-              >
-                {(member) => (
+            {!props.details.membersLoading ? (
+              <>
+                {peerRows(props.details.members).map((member) => (
                   <div class="group-member grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] px-2 py-2 hover:bg-[var(--surface-subtle)]">
                     <Avatar
                       identity={`${member.peer.id}:${member.avatarId ?? 'none'}`}
@@ -286,7 +280,7 @@ export function DetailsPane(props: DetailsPaneProps) {
                         {memberStatus(member)}
                       </small>
                     </span>
-                    <Show when={member.role}>
+                    {member.role ? (
                       <b
                         class="member-role rounded-full bg-[rgb(101_185_135/0.14)] px-1.5 py-0.5 text-[0.62rem] font-semibold text-[#65b987]"
                         classList={{
@@ -297,23 +291,25 @@ export function DetailsPane(props: DetailsPaneProps) {
                       >
                         {member.role}
                       </b>
-                    </Show>
+                    ) : null}
                   </div>
-                )}
-              </For>
-              <Show when={props.details.membersHasMore()}>
-                <button
-                  class="mt-1 w-full rounded-[0.45rem] border-0 bg-transparent px-2 py-2 text-xs text-muted hover:bg-[var(--surface-subtle)] hover:text-ink"
-                  disabled={props.details.membersLoadingMore()}
-                  onClick={() => void props.details.loadMoreMembers()}
-                >
-                  {props.details.membersLoadingMore() ? 'Loading…' : 'Load more members'}
-                </button>
-              </Show>
-            </Show>
+                ))}
+                {props.details.membersHasMore ? (
+                  <button
+                    class="mt-1 w-full rounded-[0.45rem] border-0 bg-transparent px-2 py-2 text-xs text-muted hover:bg-[var(--surface-subtle)] hover:text-ink"
+                    disabled={props.details.membersLoadingMore}
+                    onClick={() => props.details.loadMoreMembers()}
+                  >
+                    {props.details.membersLoadingMore ? 'Loading…' : 'Load more members'}
+                  </button>
+                ) : null}
+              </>
+            ) : (
+              <p class="m-0 px-2 py-3 text-xs text-muted">Loading members…</p>
+            )}
           </section>
-        </Show>
+        ) : null}
       </div>
     </aside>
   );
-}
+});

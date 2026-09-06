@@ -1,7 +1,5 @@
-import { For } from 'solid-js';
-
 import type { TelegramBotButton, TelegramBotKeyboard } from '../../telegram/types';
-
+import { sequence, view } from 'effectweb';
 interface BotKeyboardProps {
   keyboard: TelegramBotKeyboard;
   disabled?: boolean | undefined;
@@ -9,8 +7,7 @@ interface BotKeyboardProps {
   label: string;
   onPress: (button: TelegramBotButton, key: string) => void;
 }
-
-export function BotKeyboard(props: BotKeyboardProps) {
+export const BotKeyboard = view<BotKeyboardProps, never>((props, _send) => {
   return (
     <div
       class={`bot-keyboard bot-keyboard-${props.keyboard.kind}`}
@@ -18,34 +15,30 @@ export function BotKeyboard(props: BotKeyboardProps) {
       aria-label={props.label}
       data-testid={`${props.keyboard.kind}-bot-keyboard`}
     >
-      <For each={props.keyboard.rows}>
-        {(row, rowIndex) => (
-          <div class="bot-keyboard-row">
-            <For each={row}>
-              {(button, buttonIndex) => {
-                const key = () => `${rowIndex()}:${buttonIndex()}`;
-                return (
-                  <button
-                    type="button"
-                    disabled={
-                      props.disabled || Boolean(props.busyButton) || button.kind === 'unsupported'
-                    }
-                    aria-busy={props.busyButton === key()}
-                    title={
-                      button.kind === 'unsupported'
-                        ? 'This Telegram button type is not supported.'
-                        : undefined
-                    }
-                    onClick={() => props.onPress(button, key())}
-                  >
-                    {props.busyButton === key() ? 'Working…' : button.text}
-                  </button>
-                );
-              }}
-            </For>
-          </div>
-        )}
-      </For>
+      {sequence(props.keyboard.rows).map((row, rowIndex) => (
+        <div class="bot-keyboard-row">
+          {sequence(row).map((button, buttonIndex) => {
+            const key = () => `${rowIndex}:${buttonIndex}`;
+            return (
+              <button
+                type="button"
+                disabled={
+                  props.disabled || Boolean(props.busyButton) || button.kind === 'unsupported'
+                }
+                aria-busy={props.busyButton === key()}
+                title={
+                  button.kind === 'unsupported'
+                    ? 'This Telegram button type is not supported.'
+                    : undefined
+                }
+                onClick={() => props.onPress(button, key())}
+              >
+                {props.busyButton === key() ? 'Working…' : button.text}
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
-}
+});

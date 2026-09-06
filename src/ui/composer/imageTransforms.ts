@@ -42,12 +42,9 @@ export function planImageTransform(
   };
 }
 
-async function decodeImage(file: File): Promise<{
-  source: CanvasImageSource;
-  width: number;
-  height: number;
-  close(): void;
-}> {
+async function decodeImage(
+  file: File,
+): Promise<{ source: CanvasImageSource; width: number; height: number; close(): void }> {
   if ('createImageBitmap' in window) {
     const bitmap = await createImageBitmap(file);
     return {

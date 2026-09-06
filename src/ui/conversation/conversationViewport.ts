@@ -1,28 +1,30 @@
-import { createEffect, createSignal, onCleanup, untrack, type Accessor } from 'solid-js';
-
+import { Effect } from 'effect';
+import type { Read } from 'effectweb/session';
+import { program } from 'effectweb';
+import { actionCommand } from 'effectweb/program';
+import type {
+  ConversationViewportEffect,
+  ConversationViewportEvent,
+  ConversationViewportState,
+} from './conversationViewportMachine';
 import {
   initialConversationViewportState,
   transitionConversationViewport,
-  type ConversationViewportEffect,
-  type ConversationViewportEvent,
 } from './conversationViewportMachine';
-
 interface ConversationMessage {
   id: string;
   outgoing: boolean;
 }
-
 interface ConversationViewportOptions {
-  scroller: Accessor<HTMLDivElement | undefined>;
-  activePeerId: Accessor<string>;
-  messages: Accessor<readonly ConversationMessage[]>;
-  canLoadOlder: Accessor<boolean>;
+  scroller: Read<HTMLDivElement | undefined>;
+  activePeerId: Read<string>;
+  messages: Read<readonly ConversationMessage[]>;
+  canLoadOlder: Read<boolean>;
   reportVisibility: () => void;
   dismissUnreadMarker: () => void;
   loadOlder: (scroller: HTMLDivElement) => Promise<void>;
   cancelMessageOpen: () => void;
 }
-
 interface ReadingAnchorPoint {
   element: HTMLElement;
   top: number;
@@ -37,10 +39,37 @@ interface ReadingAnchorPoint {
  * User input selects reading mode; scroll events only observe boundaries.
  */
 export function createConversationViewport(options: ConversationViewportOptions) {
-  const [state, setState] = createSignal(initialConversationViewportState);
-  const followingPresent = () => state().mode === 'present';
-  const jumpVisible = () => state().mode === 'history';
-  const ready = () => state().phase === 'ready';
+  type Input = {
+    type: 'Viewport';
+    event: ConversationViewportEvent;
+    scroller: HTMLDivElement | undefined;
+  };
+  const source = program<ConversationViewportState, Input>({
+    initial: initialConversationViewportState,
+    update: (state, input) => {
+      const next = transitionConversationViewport(state, input.event);
+      const model =
+        next.state.mode === state.mode &&
+        next.state.phase === state.phase &&
+        next.state.pagination === state.pagination
+          ? state
+          : next.state;
+      return {
+        model,
+        commands: [
+          actionCommand('dom', () =>
+            Effect.sync(() => {
+              applyEffects(next.effects, input.scroller);
+              options.reportVisibility();
+            }),
+          ),
+        ],
+      };
+    },
+  });
+  const followingPresent = () => source.model().mode === 'present';
+  const jumpVisible = () => source.model().mode === 'history';
+  const ready = () => source.model().phase === 'ready';
   let positionedPeer = '';
   let prependHeight: number | undefined;
   let resizeObserver: ResizeObserver | undefined;
@@ -48,14 +77,12 @@ export function createConversationViewport(options: ConversationViewportOptions)
   let readingAnchors: ReadingAnchorPoint[] = [];
   let touchY: number | undefined;
   let pointerScrollCandidate = false;
-
   const isScrollbarPointer = (scroller: HTMLDivElement, event: PointerEvent) => {
     if (event.target !== scroller || event.pointerType === 'touch') return false;
     const bounds = scroller.getBoundingClientRect();
     const scrollbarStart = Math.min(bounds.left + scroller.clientWidth, bounds.right - 12);
     return event.clientX >= scrollbarStart;
   };
-
   const atPresent = (scroller: HTMLDivElement) => {
     const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     if (distance <= 2) return true;
@@ -67,7 +94,6 @@ export function createConversationViewport(options: ConversationViewportOptions)
       markerBounds.top >= viewportBounds.top - 2 && markerBounds.bottom <= viewportBounds.bottom + 2
     );
   };
-
   const captureReadingAnchors = (scroller: HTMLDivElement) => {
     const viewportTop = scroller.getBoundingClientRect().top;
     const measured = [...scroller.querySelectorAll<HTMLElement>('article.message')].map(
@@ -80,18 +106,15 @@ export function createConversationViewport(options: ConversationViewportOptions)
       top: bounds.top,
     }));
   };
-
   const preserveReadingAnchor = (scroller: HTMLDivElement) => {
     const anchor = readingAnchors.find(({ element }) => element.isConnected);
     if (!anchor) return;
     const delta = anchor.element.getBoundingClientRect().top - anchor.top;
     if (delta !== 0) scroller.scrollTop += delta;
   };
-
   const pinPresent = (scroller: HTMLDivElement) => {
     scroller.scrollTop = scroller.scrollHeight;
   };
-
   const applyEffects = (
     effects: ConversationViewportEffect[],
     scroller: HTMLDivElement | undefined,
@@ -113,32 +136,20 @@ export function createConversationViewport(options: ConversationViewportOptions)
       }
     }
   };
-
-  function dispatch(
-    event: ConversationViewportEvent,
-    scroller = options.scroller(),
-  ): ConversationViewportEffect[] {
-    return untrack(() => {
-      const transition = transitionConversationViewport(state(), event);
-      setState(transition.state);
-      applyEffects(transition.effects, scroller);
-      options.reportVisibility();
-      return transition.effects;
-    });
+  function dispatch(event: ConversationViewportEvent, scroller = options.scroller()) {
+    source.send({ type: 'Viewport', event, scroller });
   }
-
-  createEffect(() => {
-    if (options.messages().length === 0) {
-      untrack(() => dispatch({ type: 'conversation-empty' }));
-    }
-  });
-
+  let wasEmpty = false;
+  const refresh = () => {
+    const empty = options.messages().length === 0;
+    if (empty && !wasEmpty) dispatch({ type: 'conversation-empty' });
+    wasEmpty = empty;
+  };
   const readHistory = (scroller: HTMLDivElement) => {
     if (!followingPresent()) return;
     options.cancelMessageOpen();
     dispatch({ type: 'user-left-present' }, scroller);
   };
-
   const attach = (scroller: HTMLDivElement, content: HTMLDivElement) => {
     const handleScroll = () => {
       if (followingPresent() && pointerScrollCandidate && !atPresent(scroller)) {
@@ -188,13 +199,11 @@ export function createConversationViewport(options: ConversationViewportOptions)
     scroller.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerEnd, true);
     window.addEventListener('pointercancel', handlePointerEnd, true);
-
     resizeObserver = new ResizeObserver(() => {
       dispatch({ type: 'geometry-changed' }, scroller);
     });
     resizeObserver.observe(scroller);
     resizeObserver.observe(content);
-
     mutationObserver = new MutationObserver(() => {
       if (!followingPresent() && prependHeight !== undefined) {
         const addedHeight = scroller.scrollHeight - prependHeight;
@@ -206,7 +215,6 @@ export function createConversationViewport(options: ConversationViewportOptions)
       dispatch({ type: 'content-changed' }, scroller);
     });
     mutationObserver.observe(content, { childList: true });
-
     return () => {
       scroller.removeEventListener('scroll', handleScroll);
       scroller.removeEventListener('wheel', handleWheel);
@@ -221,14 +229,12 @@ export function createConversationViewport(options: ConversationViewportOptions)
       mutationObserver = undefined;
     };
   };
-
   const resetForPeer = () => {
     positionedPeer = '';
     prependHeight = undefined;
     readingAnchors = [];
     dispatch({ type: 'peer-reset' });
   };
-
   const positionForPeer = (
     peerId: string,
     unreadAfterId: number | undefined,
@@ -288,17 +294,14 @@ export function createConversationViewport(options: ConversationViewportOptions)
       });
     });
   };
-
   const positionAtPresent = (peerId: string, stillCurrent: () => boolean) =>
     positionForPeer(peerId, undefined, stillCurrent);
-
   const jumpToPresent = () => {
     options.cancelMessageOpen();
     options.dismissUnreadMarker();
     const scroller = options.scroller();
     dispatch({ type: 'jump-to-present' }, scroller);
   };
-
   const showMessage = (messageIndex: number) => {
     const scroller = options.scroller();
     const message = options.messages()[messageIndex];
@@ -312,7 +315,6 @@ export function createConversationViewport(options: ConversationViewportOptions)
     dispatch({ type: 'viewport-scrolled' }, scroller);
     return true;
   };
-
   const reveal = (target: HTMLElement) => {
     const scroller = options.scroller();
     if (!scroller?.contains(target)) return false;
@@ -321,13 +323,19 @@ export function createConversationViewport(options: ConversationViewportOptions)
     dispatch({ type: 'viewport-scrolled' }, scroller);
     return true;
   };
-
-  onCleanup(() => {
-    resizeObserver?.disconnect();
-    mutationObserver?.disconnect();
-  });
-
   return {
+    refresh,
+    subscribe: source.subscribe,
+    dispose: () => {
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      source.dispose();
+    },
+    snapshot: () => ({
+      jumpVisible: jumpVisible(),
+      ready: ready(),
+      followingPresent: followingPresent(),
+    }),
     attach,
     jumpVisible,
     ready,
@@ -357,5 +365,4 @@ export function createConversationViewport(options: ConversationViewportOptions)
     },
   };
 }
-
 export type ConversationViewport = ReturnType<typeof createConversationViewport>;

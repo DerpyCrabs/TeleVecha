@@ -28,10 +28,7 @@ const SIDEBAR_WIDTH_STORAGE_KEY = 'televecha:left-sidebar-width';
 const DETAILS_OPEN_STORAGE_KEY = 'televecha:details-open';
 const TVBUG_THEMES = new Set<ThemePresetId>(['classic', 'day', 'night', 'tinted']);
 
-export type TvBugStatus = {
-  state: 'loading' | 'ready' | 'error';
-  message?: string | undefined;
-};
+export type TvBugStatus = { state: 'loading' | 'ready' | 'error'; message?: string | undefined };
 
 declare global {
   interface Window {

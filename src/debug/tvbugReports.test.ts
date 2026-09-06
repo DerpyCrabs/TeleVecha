@@ -40,10 +40,7 @@ describe('browser debug report recorder', () => {
       devicePixelRatio: 1,
       matchMedia: () => ({ matches: false }),
     });
-    vi.stubGlobal('navigator', {
-      userAgent: 'Mozilla/5.0 Chrome/140.0',
-      language: 'en-US',
-    });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 Chrome/140.0', language: 'en-US' });
     vi.stubGlobal('localStorage', { getItem: () => null });
     vi.spyOn(console, 'info').mockImplementation(() => undefined);
   });

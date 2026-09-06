@@ -1,33 +1,29 @@
-import { createEffect, onCleanup, untrack, type Accessor } from 'solid-js';
-
 import type { ChatMessage } from '../../domain/models';
 import type { EffectConversation } from '../../telegram/core/conversation';
 import type { EngineSnapshot, TelegramHistoryGap } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
+import type { Read } from 'effectweb/session';
 import type { ConversationViewport } from './conversationViewport';
-
 interface ConversationHistoryOptions {
-  snapshot: Accessor<EngineSnapshot>;
-  activePeerId: Accessor<string>;
-  conversation: Accessor<EffectConversation | undefined>;
+  snapshot: Read<EngineSnapshot>;
+  activePeerId: Read<string>;
+  conversation: Read<EffectConversation | undefined>;
   runEffect: UiEffectRunner;
-  loaded: Accessor<boolean>;
-  openingMessage: Accessor<boolean>;
-  unreadAfterId: Accessor<number | undefined>;
-  scroller: Accessor<HTMLDivElement | undefined>;
-  viewport: Accessor<ConversationViewport>;
+  loaded: Read<boolean>;
+  openingMessage: Read<boolean>;
+  unreadAfterId: Read<number | undefined>;
+  scroller: Read<HTMLDivElement | undefined>;
+  viewport: Read<ConversationViewport>;
 }
 
 /** Adapts viewport pagination requests to the active conversation. */
 export function createConversationHistorySession(options: ConversationHistoryOptions) {
   let loadGeneration = 0;
   let loadRunning = false;
-
   const reset = () => {
     loadGeneration += 1;
     loadRunning = false;
   };
-
   const loadOlder = async (scroller: HTMLDivElement, keepAtPresent = false) => {
     const viewport = options.viewport();
     const beforeLoad = options.snapshot();
@@ -40,7 +36,6 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
     }
     if (!keepAtPresent) viewport.pauseAtHistory();
     if (loadRunning || beforeLoad.loadingOlderMessages) return;
-
     const generation = ++loadGeneration;
     loadRunning = true;
     try {
@@ -52,7 +47,6 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
       }
     }
   };
-
   const loadGap = async (gap: TelegramHistoryGap) => {
     const scroller = options.scroller();
     const snapshot = options.snapshot();
@@ -74,7 +68,6 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
       }
     }
   };
-
   const gapBefore = (message: ChatMessage) => {
     const messageId = Number(message.id);
     if (!Number.isSafeInteger(messageId)) return undefined;
@@ -82,8 +75,7 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
       ({ newerMinMessageId }) => newerMinMessageId === messageId,
     );
   };
-
-  createEffect(() => {
+  const position = () => {
     const peerId = options.activePeerId();
     if (!peerId || !options.loaded()) return;
     const viewport = options.viewport();
@@ -91,13 +83,22 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
       viewport.setReady(true);
       return;
     }
-    untrack(() => viewport.positionForPeer(peerId, options.unreadAfterId(), options.loaded));
-  });
-
-  createEffect(() => {
+    viewport.positionForPeer(peerId, options.unreadAfterId(), options.loaded);
+  };
+  let fillInputs: readonly unknown[] = [];
+  const fill = () => {
     const peerId = options.activePeerId();
     const snapshot = options.snapshot();
     const viewport = options.viewport();
+    const inputs = [
+      peerId,
+      options.loaded(),
+      snapshot.hasOlderMessages,
+      snapshot.loadingOlderMessages,
+      viewport.followingPresent(),
+    ];
+    if (inputs.every((value, index) => Object.is(value, fillInputs[index]))) return;
+    fillInputs = inputs;
     if (
       !options.loaded() ||
       !snapshot.hasOlderMessages ||
@@ -122,9 +123,16 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
       }
       void loadOlder(scroller, true).catch(() => undefined);
     });
-  });
-
-  onCleanup(reset);
-
-  return { reset, loadOlder, loadGap, gapBefore };
+  };
+  return {
+    refresh: () => {
+      position();
+      fill();
+    },
+    dispose: reset,
+    reset,
+    loadOlder,
+    loadGap,
+    gapBefore,
+  };
 }

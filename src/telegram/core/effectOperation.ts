@@ -2,11 +2,7 @@ import { Effect, Schema } from 'effect';
 
 class OperationDeadlineExceeded extends Schema.TaggedError<OperationDeadlineExceeded>()(
   'OperationDeadlineExceeded',
-  {
-    operation: Schema.String,
-    message: Schema.String,
-    durationMs: Schema.Number,
-  },
+  { operation: Schema.String, message: Schema.String, durationMs: Schema.Number },
 ) {}
 
 export function withOperationDeadline<Value, Error, Requirements>(
@@ -18,14 +14,7 @@ export function withOperationDeadline<Value, Error, Requirements>(
   return effect.pipe(
     Effect.timeoutOrElse({
       duration: durationMs,
-      orElse: () =>
-        Effect.fail(
-          new OperationDeadlineExceeded({
-            operation,
-            message,
-            durationMs,
-          }),
-        ),
+      orElse: () => Effect.fail(new OperationDeadlineExceeded({ operation, message, durationMs })),
     }),
   );
 }

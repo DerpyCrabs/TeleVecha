@@ -75,9 +75,7 @@ export const createObfuscatedAbridgedCodec = Effect.fn('mtproto.connection.abrid
         createMtprotoError(
           'crypto',
           `Could not initialize MTProto encryption: ${errorMessage(cause)}`,
-          {
-            cause,
-          },
+          { cause },
         ),
     });
     header.set(OBFUSCATED_ABRIDGED_TAG, 56);
@@ -97,9 +95,7 @@ export const createObfuscatedAbridgedCodec = Effect.fn('mtproto.connection.abrid
             createMtprotoError(
               'protocol',
               `Could not encode an MTProto packet: ${errorMessage(cause)}`,
-              {
-                cause,
-              },
+              { cause },
             ),
         });
       },

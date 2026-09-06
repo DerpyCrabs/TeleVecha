@@ -55,14 +55,7 @@ function cachedMessage(target: TelegramPeer, id: number): CachedMessage {
 }
 
 function pending(id: string, createdAt: number): PendingSend {
-  return {
-    id,
-    peer,
-    text: id,
-    randomId: id,
-    createdAt,
-    attempts: 0,
-  };
+  return { id, peer, text: id, randomId: id, createdAt, attempts: 0 };
 }
 
 describe('IndexedDbCacheStore', () => {
@@ -142,11 +135,7 @@ describe('IndexedDbCacheStore', () => {
     expect(await run(store.loadEpoch())).toBe(2);
     expect(await run(store.loadCursor())).toEqual(nextCursor);
     expect(await run(store.loadDialogs())).toEqual([
-      expect.objectContaining({
-        peer: secondPeer,
-        title: 'Current second',
-        cacheEpoch: 2,
-      }),
+      expect.objectContaining({ peer: secondPeer, title: 'Current second', cacheEpoch: 2 }),
     ]);
     expect(await run(store.loadMessages(peer.id))).toEqual([]);
     expect(await run(store.loadMessages(secondPeer.id))).toEqual([]);
@@ -231,21 +220,12 @@ describe('IndexedDbCacheStore', () => {
         {
           ...cachedMessage(peer, 1),
           groupedId: 'album-1',
-          media: {
-            kind: 'voice',
-            name: 'voice.ogg',
-            mimeType: 'audio/ogg',
-            duration: 9,
-          },
+          media: { kind: 'voice', name: 'voice.ogg', mimeType: 'audio/ogg', duration: 9 },
         },
         {
           ...cachedMessage(peer, 2),
           text: 'Alice pinned a message',
-          service: {
-            kind: 'message-pinned',
-            text: 'Alice pinned a message',
-            actorId: 'u:1',
-          },
+          service: { kind: 'message-pinned', text: 'Alice pinned a message', actorId: 'u:1' },
         },
       ]),
     );
@@ -255,9 +235,7 @@ describe('IndexedDbCacheStore', () => {
         groupedId: 'album-1',
         media: expect.objectContaining({ kind: 'voice', duration: 9 }),
       }),
-      expect.objectContaining({
-        service: expect.objectContaining({ kind: 'message-pinned' }),
-      }),
+      expect.objectContaining({ service: expect.objectContaining({ kind: 'message-pinned' }) }),
     ]);
   });
 
@@ -410,10 +388,7 @@ describe('IndexedDbCacheStore', () => {
       [peer.id]: 'First draft',
       [secondPeer.id]: 'Second draft',
     });
-    expect(await run(store.loadDraftRevisions())).toEqual({
-      [peer.id]: 7,
-      [secondPeer.id]: 0,
-    });
+    expect(await run(store.loadDraftRevisions())).toEqual({ [peer.id]: 7, [secondPeer.id]: 0 });
     expect((await run(store.loadWorkspace())).draftDetails).toEqual({
       [peer.id]: {
         formats: [{ offset: 0, length: 5, kind: 'bold' }],
@@ -609,9 +584,7 @@ describe('IndexedDbCacheStore', () => {
         const database = request.result;
         database.createObjectStore('meta');
         database.createObjectStore('dialogs', { keyPath: 'peer.id' });
-        const messages = database.createObjectStore('messages', {
-          keyPath: ['peerId', 'id'],
-        });
+        const messages = database.createObjectStore('messages', { keyPath: ['peerId', 'id'] });
         messages.createIndex('byPeer', 'peerId');
         database.createObjectStore('drafts', { keyPath: 'peerId' });
         const outbox = database.createObjectStore('outbox', { keyPath: 'id' });
@@ -637,9 +610,7 @@ describe('IndexedDbCacheStore', () => {
         const database = request.result;
         database.createObjectStore('meta');
         database.createObjectStore('dialogs', { keyPath: 'peer.id' });
-        const messages = database.createObjectStore('messages', {
-          keyPath: ['peerId', 'id'],
-        });
+        const messages = database.createObjectStore('messages', { keyPath: ['peerId', 'id'] });
         messages.createIndex('byPeer', 'peerId');
         database.createObjectStore('drafts', { keyPath: 'peerId' });
         const outbox = database.createObjectStore('outbox', { keyPath: 'id' });
@@ -667,9 +638,7 @@ describe('IndexedDbCacheStore', () => {
         const database = request.result;
         database.createObjectStore('meta');
         database.createObjectStore('dialogs', { keyPath: 'peer.id' });
-        const messages = database.createObjectStore('messages', {
-          keyPath: ['peerId', 'id'],
-        });
+        const messages = database.createObjectStore('messages', { keyPath: ['peerId', 'id'] });
         messages.createIndex('byPeer', 'peerId');
         messages.put(cachedMessage(peer, 7));
         messages.put(cachedMessage(secondPeer, 7));
@@ -702,9 +671,7 @@ describe('IndexedDbCacheStore', () => {
         const database = request.result;
         database.createObjectStore('meta');
         database.createObjectStore('dialogs', { keyPath: 'peer.id' });
-        const messages = database.createObjectStore('messages', {
-          keyPath: ['peerId', 'id'],
-        });
+        const messages = database.createObjectStore('messages', { keyPath: ['peerId', 'id'] });
         messages.createIndex('byPeer', 'peerId');
         messages.createIndex('byMessageId', 'id');
         messages.createIndex('byDate', 'date');

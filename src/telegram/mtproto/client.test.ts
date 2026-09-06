@@ -7,11 +7,7 @@ import { createMtprotoError } from './errors';
 import type { MtprotoError } from './errors';
 import { Api, type Tl } from './tl';
 
-const session = {
-  load: Effect.succeed(undefined),
-  save: () => Effect.void,
-  clear: Effect.void,
-};
+const session = { load: Effect.succeed(undefined), save: () => Effect.void, clear: Effect.void };
 
 describe('MTProto client seam', () => {
   it.each([
@@ -24,10 +20,7 @@ describe('MTProto client seam', () => {
   ])('rejects invalid client configuration in the error channel', (configuration) =>
     Effect.runPromise(
       Effect.scoped(
-        createMtprotoClient({
-          ...configuration,
-          session,
-        }).pipe(
+        createMtprotoClient({ ...configuration, session }).pipe(
           Effect.provide(BrowserCrypto.layer),
           Effect.provide(BrowserSocket.layerWebSocketConstructor),
           Effect.result,

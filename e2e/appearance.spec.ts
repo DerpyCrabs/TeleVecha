@@ -109,9 +109,7 @@ test('does not show the removed saved Telegram themes catalog', async ({ page })
 
 test('downloads a Telegram wallpaper but never installs it in the account', async ({ page }) => {
   const settings = page.getByRole('dialog', { name: 'Settings' });
-  const wallpaper = settings.getByRole('button', {
-    name: 'Telegram background fixture-lagoon',
-  });
+  const wallpaper = settings.getByRole('button', { name: 'Telegram background fixture-lagoon' });
   await expect(wallpaper).toBeVisible();
   await wallpaper.click();
 

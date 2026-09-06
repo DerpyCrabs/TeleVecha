@@ -1,14 +1,13 @@
-import Command from 'lucide-solid/icons/command';
-import RotateCcw from 'lucide-solid/icons/rotate-ccw';
-import { For, Show } from 'solid-js';
-
 import type {
   TelegramBotButton,
   TelegramBotCommand,
   TelegramBotKeyboard,
 } from '../../telegram/types';
+import { commandRows } from '../collections';
+import Command from '@effectweb/lucide/icons/command';
+import RotateCcw from '@effectweb/lucide/icons/rotate-ccw';
+import { view } from 'effectweb';
 import { BotKeyboard } from './BotKeyboard';
-
 interface BotControlsProps {
   isBot: boolean;
   showCommands: boolean;
@@ -25,14 +24,13 @@ interface BotControlsProps {
   onCommand: (command: TelegramBotCommand) => void;
   onReplyButton: (button: TelegramBotButton, key: string) => void;
 }
-
-export function BotControls(props: BotControlsProps) {
+export const BotControls = view<BotControlsProps, never>((props, _send) => {
   return (
     <section
       class="bot-controls"
       aria-label={props.isBot ? 'Bot controls' : 'Conversation reply keyboard'}
     >
-      <Show when={props.isBot && !props.started}>
+      {props.isBot && !props.started ? (
         <button
           class="bot-start-button"
           type="button"
@@ -41,8 +39,8 @@ export function BotControls(props: BotControlsProps) {
         >
           {props.starting ? 'Starting…' : 'Start bot'}
         </button>
-      </Show>
-      <Show when={props.showCommands && (!props.isBot || props.started)}>
+      ) : null}
+      {props.showCommands && (!props.isBot || props.started) ? (
         <div class="bot-command-bar">
           <button
             type="button"
@@ -53,9 +51,9 @@ export function BotControls(props: BotControlsProps) {
           >
             <Command size={16} aria-hidden="true" /> Commands
           </button>
-          <Show when={props.menuOpen}>
+          {props.menuOpen ? (
             <div class="bot-command-menu" role="menu" aria-label="Bot commands">
-              <Show when={props.isBot}>
+              {props.isBot ? (
                 <button
                   role="menuitem"
                   disabled={!props.enabled || props.starting}
@@ -64,52 +62,50 @@ export function BotControls(props: BotControlsProps) {
                   <RotateCcw size={15} aria-hidden="true" />
                   {props.starting ? 'Restarting…' : 'Restart bot'}
                 </button>
-              </Show>
-              <Show when={props.loadingCommands}>
-                <span role="status">Loading commands…</span>
-              </Show>
-              <For each={props.commands}>
-                {(command) => (
-                  <button
-                    role="menuitem"
-                    disabled={!props.enabled}
-                    onClick={() => props.onCommand(command)}
-                  >
-                    <strong>
-                      /{command.command}
-                      {!props.isBot && command.botUsername ? `@${command.botUsername}` : ''}
-                    </strong>
-                    <small>
-                      {!props.isBot && command.botName ? `${command.botName} · ` : ''}
-                      {command.description}
-                    </small>
-                  </button>
-                )}
-              </For>
-              <Show when={!props.loadingCommands && props.commands.length === 0}>
+              ) : null}
+              {props.loadingCommands ? <span role="status">Loading commands…</span> : null}
+              {commandRows(props.commands).map((command) => (
+                <button
+                  role="menuitem"
+                  disabled={!props.enabled}
+                  onClick={() => props.onCommand(command)}
+                >
+                  <strong>
+                    /{command.command}
+                    {!props.isBot && command.botUsername ? `@${command.botUsername}` : ''}
+                  </strong>
+                  <small>
+                    {!props.isBot && command.botName ? `${command.botName} · ` : ''}
+                    {command.description}
+                  </small>
+                </button>
+              ))}
+              {!props.loadingCommands && props.commands.length === 0 ? (
                 <span>No commands published by this bot.</span>
-              </Show>
+              ) : null}
             </div>
-          </Show>
+          ) : null}
         </div>
-      </Show>
-      <Show
-        when={
-          props.replyKeyboard?.hidden || !props.replyKeyboard?.rows.some((row) => row.length > 0)
-            ? undefined
-            : props.replyKeyboard
-        }
-      >
-        {(keyboard) => (
-          <BotKeyboard
-            keyboard={keyboard()}
-            disabled={!props.enabled}
-            busyButton={props.busyButton}
-            label="Bot reply keyboard"
-            onPress={props.onReplyButton}
-          />
-        )}
-      </Show>
+      ) : null}
+      {(
+        props.replyKeyboard?.hidden || !props.replyKeyboard?.rows.some((row) => row.length > 0)
+          ? undefined
+          : props.replyKeyboard
+      )
+        ? ((keyboard) => (
+            <BotKeyboard
+              keyboard={keyboard}
+              disabled={!props.enabled}
+              busyButton={props.busyButton}
+              label="Bot reply keyboard"
+              onPress={props.onReplyButton}
+            />
+          ))(
+            (props.replyKeyboard?.hidden || !props.replyKeyboard?.rows.some((row) => row.length > 0)
+              ? undefined
+              : props.replyKeyboard)!,
+          )
+        : null}
     </section>
   );
-}
+});

@@ -71,20 +71,14 @@ test('marks a chat read when any live tab is visible and forgets a closed follow
     const runtime = window.__televechaRuntimes?.get('fixture:default');
     if (runtime)
       await runtime.runEffect(
-        runtime.engine.setActiveConversationVisibility('u:101', {
-          visible: false,
-          atBottom: true,
-        }),
+        runtime.engine.setActiveConversationVisibility('u:101', { visible: false, atBottom: true }),
       );
   });
   await second.evaluate(async () => {
     const runtime = window.__televechaRuntimes?.get('fixture:default');
     if (runtime)
       await runtime.runEffect(
-        runtime.engine.setActiveConversationVisibility('u:101', {
-          visible: true,
-          atBottom: true,
-        }),
+        runtime.engine.setActiveConversationVisibility('u:101', { visible: true, atBottom: true }),
       );
   });
 
@@ -112,10 +106,7 @@ test('marks a chat read when any live tab is visible and forgets a closed follow
     const runtime = window.__televechaRuntimes?.get('fixture:default');
     if (runtime)
       await runtime.runEffect(
-        runtime.engine.setActiveConversationVisibility('u:101', {
-          visible: true,
-          atBottom: true,
-        }),
+        runtime.engine.setActiveConversationVisibility('u:101', { visible: true, atBottom: true }),
       );
   });
   await second.close();
@@ -123,10 +114,7 @@ test('marks a chat read when any live tab is visible and forgets a closed follow
     const runtime = window.__televechaRuntimes?.get('fixture:default');
     if (runtime)
       await runtime.runEffect(
-        runtime.engine.setActiveConversationVisibility('u:101', {
-          visible: false,
-          atBottom: true,
-        }),
+        runtime.engine.setActiveConversationVisibility('u:101', { visible: false, atBottom: true }),
       );
   });
 

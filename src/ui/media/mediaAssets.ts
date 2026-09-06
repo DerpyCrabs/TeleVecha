@@ -10,14 +10,14 @@ import type {
   TelegramTransferProgress,
 } from '../../telegram/types';
 import { cachedAssetUrl, clearAssetUrls, loadAssetUrl, rememberAssetUrl } from './assetUrls';
-import type { UiEffectRunner, UiSharedEffectRunner } from '../app/appRuntime';
+import type { UiSharedEffectRunner } from '../app/appRuntime';
 
 const MAX_AVATAR_URLS = 256;
 
 export interface MediaAsset {
   readonly revision: string;
   cached(): string | undefined;
-  load(progress?: TelegramTransferProgress): Promise<string>;
+  load(progress?: TelegramTransferProgress): Effect.Effect<string, MessagingError>;
 }
 
 type MediaSource = Pick<
@@ -32,7 +32,6 @@ type MediaSource = Pick<
 
 export function createMediaAssets(
   engine: MediaSource,
-  runEffect: UiEffectRunner,
   runSharedEffect: UiSharedEffectRunner,
   dialogs: () => TelegramDialog[],
 ) {
@@ -45,43 +44,44 @@ export function createMediaAssets(
     hasAvatar: boolean,
     avatarId: string | undefined,
     cachedOnly = false,
-  ) => {
-    if (!hasAvatar) return runEffect(Effect.succeed(undefined));
-    const key = `${peer.id}:${avatarId ?? 'unknown'}`;
-    const cached = avatarUrls.get(key);
-    if (cached) {
-      avatarUrls.delete(key);
-      avatarUrls.set(key, cached);
-      return runEffect(Effect.succeed(cached));
-    }
-    const loadKey = `media:avatar:${key}`;
-    activeLoadKeys.add(loadKey);
-    return runSharedEffect(
-      loadKey,
-      (cachedOnly
-        ? engine.loadCachedAvatar(peer, avatarId)
-        : engine.downloadAvatar(peer, avatarId)
-      ).pipe(
-        Effect.map((value) => {
-          if (!value) return undefined;
-          const url = URL.createObjectURL(value);
-          avatarUrls.set(key, url);
-          while (avatarUrls.size > MAX_AVATAR_URLS) {
-            const oldest = avatarUrls.entries().next().value as [string, string] | undefined;
-            if (!oldest) break;
-            avatarUrls.delete(oldest[0]);
-            URL.revokeObjectURL(oldest[1]);
-          }
-          return url;
-        }),
-        Effect.ensuring(
-          Effect.sync(() => {
-            activeLoadKeys.delete(loadKey);
+  ) =>
+    Effect.suspend(() => {
+      if (!hasAvatar) return Effect.succeed(undefined);
+      const key = `${peer.id}:${avatarId ?? 'unknown'}`;
+      const cached = avatarUrls.get(key);
+      if (cached) {
+        avatarUrls.delete(key);
+        avatarUrls.set(key, cached);
+        return Effect.succeed(cached);
+      }
+      const loadKey = `media:avatar:${key}`;
+      activeLoadKeys.add(loadKey);
+      return runSharedEffect.load(
+        loadKey,
+        (cachedOnly
+          ? engine.loadCachedAvatar(peer, avatarId)
+          : engine.downloadAvatar(peer, avatarId)
+        ).pipe(
+          Effect.map((value) => {
+            if (!value) return undefined;
+            const url = URL.createObjectURL(value);
+            avatarUrls.set(key, url);
+            while (avatarUrls.size > MAX_AVATAR_URLS) {
+              const oldest = avatarUrls.entries().next().value as [string, string] | undefined;
+              if (!oldest) break;
+              avatarUrls.delete(oldest[0]);
+              URL.revokeObjectURL(oldest[1]);
+            }
+            return url;
           }),
+          Effect.ensuring(
+            Effect.sync(() => {
+              activeLoadKeys.delete(loadKey);
+            }),
+          ),
         ),
-      ),
-    );
-  };
+      );
+    });
 
   const asset = (
     revision: string,
@@ -90,20 +90,21 @@ export function createMediaAssets(
     return {
       revision,
       cached: () => cachedAssetUrl(revision),
-      load: (progress) => {
-        const loadKey = `media:asset:${revision}`;
-        activeLoadKeys.add(loadKey);
-        return runSharedEffect(
-          loadKey,
-          loadAssetUrl(revision, () => load(progress)).pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                activeLoadKeys.delete(loadKey);
-              }),
+      load: (progress) =>
+        Effect.suspend(() => {
+          const loadKey = `media:asset:${revision}`;
+          activeLoadKeys.add(loadKey);
+          return runSharedEffect.load(
+            loadKey,
+            loadAssetUrl(revision, () => load(progress)).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  activeLoadKeys.delete(loadKey);
+                }),
+              ),
             ),
-          ),
-        );
-      },
+          );
+        }),
     };
   };
 
@@ -120,7 +121,7 @@ export function createMediaAssets(
       const dialog = dialogs().find(({ peer }) => peer.id === peerId);
       return dialog
         ? loadPeerAvatar(dialog.peer, dialog.hasAvatar, dialog.avatarId, cachedOnly)
-        : runEffect(Effect.succeed(undefined));
+        : Effect.succeed(undefined);
     },
     avatarIdentity(peerId: string) {
       const dialog = dialogs().find(({ peer }) => peer.id === peerId);
@@ -137,29 +138,30 @@ export function createMediaAssets(
     loadMedia: (value: TelegramMessage, progress?: TelegramTransferProgress) =>
       message(value).load(progress),
     loadSticker: (value: TelegramSticker) => sticker(value).load(),
-    loadCustomEmoji(documentId: string) {
-      const assetKey = `custom-emoji:${documentId}`;
-      const current = customEmojiAssets.get(documentId);
-      if (current && cachedAssetUrl(assetKey)) return runEffect(Effect.succeed(current));
-      customEmojiAssets.delete(documentId);
-      const loadKey = `media:emoji:${documentId}`;
-      activeLoadKeys.add(loadKey);
-      return runSharedEffect(
-        loadKey,
-        engine.downloadCustomEmoji(documentId).pipe(
-          Effect.map((blob) => {
-            const loaded = { url: rememberAssetUrl(assetKey, blob), mimeType: blob.type };
-            customEmojiAssets.set(documentId, loaded);
-            return loaded;
-          }),
-          Effect.ensuring(
-            Effect.sync(() => {
-              activeLoadKeys.delete(loadKey);
+    loadCustomEmoji: (documentId: string) =>
+      Effect.suspend(() => {
+        const assetKey = `custom-emoji:${documentId}`;
+        const current = customEmojiAssets.get(documentId);
+        if (current && cachedAssetUrl(assetKey)) return Effect.succeed(current);
+        customEmojiAssets.delete(documentId);
+        const loadKey = `media:emoji:${documentId}`;
+        activeLoadKeys.add(loadKey);
+        return runSharedEffect.load(
+          loadKey,
+          engine.downloadCustomEmoji(documentId).pipe(
+            Effect.map((blob) => {
+              const loaded = { url: rememberAssetUrl(assetKey, blob), mimeType: blob.type };
+              customEmojiAssets.set(documentId, loaded);
+              return loaded;
             }),
+            Effect.ensuring(
+              Effect.sync(() => {
+                activeLoadKeys.delete(loadKey);
+              }),
+            ),
           ),
-        ),
-      );
-    },
+        );
+      }),
     dispose() {
       for (const url of avatarUrls.values()) URL.revokeObjectURL(url);
       avatarUrls.clear();

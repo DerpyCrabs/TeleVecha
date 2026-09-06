@@ -1,5 +1,3 @@
-import { createSignal } from 'solid-js';
-
 interface InertState {
   count: number;
   originallyInert: boolean;
@@ -30,9 +28,20 @@ const focusableSelector = [
 
 const inertStates = new Map<HTMLElement, InertState>();
 const scopeStack: symbol[] = [];
-const [openModalCount, setOpenModalCount] = createSignal(0);
+let openModalCount = 0;
+const listeners = new Set<() => void>();
+function changeModalCount(delta: number) {
+  openModalCount = Math.max(0, openModalCount + delta);
+  for (const listener of listeners) listener();
+}
+export function subscribeModalVisibility(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
-export const modalVisible = () => openModalCount() > 0;
+export const modalVisible = () => openModalCount > 0;
 
 function focusableElements(root: HTMLElement) {
   return [...root.querySelectorAll<HTMLElement>(focusableSelector)].filter(
@@ -69,7 +78,7 @@ export function activateFocusScope(options: FocusScopeOptions) {
   );
   scopeStack.push(token);
   for (const element of inerted) makeInert(element);
-  if (options.modal) setOpenModalCount((count) => count + 1);
+  if (options.modal) changeModalCount(1);
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if (scopeStack.at(-1) !== token) return;
@@ -113,7 +122,7 @@ export function activateFocusScope(options: FocusScopeOptions) {
     const index = scopeStack.lastIndexOf(token);
     if (index >= 0) scopeStack.splice(index, 1);
     for (const element of inerted) releaseInert(element);
-    if (options.modal) setOpenModalCount((count) => Math.max(0, count - 1));
+    if (options.modal) changeModalCount(-1);
     if (!wasTopmost) return;
     requestAnimationFrame(() => {
       const target = options.restoreFocus?.() ?? previouslyFocused;

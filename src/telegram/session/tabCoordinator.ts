@@ -287,9 +287,7 @@ function isCrossTabValue(input: unknown, seen = new WeakSet<object>()): boolean 
 
 const CrossTabValueSchema = Schema.declare(
   (input: unknown): input is unknown => isCrossTabValue(input),
-  {
-    identifier: 'CrossTabStructuredCloneValue',
-  },
+  { identifier: 'CrossTabStructuredCloneValue' },
 );
 
 type CoordinatorMessage =
@@ -307,12 +305,7 @@ type CoordinatorMessage =
       conversation: ConversationViewSnapshot;
       pendingPayloadIds?: string[] | undefined;
     }
-  | {
-      type: 'resource';
-      version: number;
-      from: string;
-      event: TelegramResourceInvalidation;
-    }
+  | { type: 'resource'; version: number; from: string; event: TelegramResourceInvalidation }
   | {
       type: 'request';
       version: number;
@@ -685,11 +678,7 @@ const CoordinatorMessageSchema = Schema.Union([
     result: Schema.optional(CrossTabValueSchema),
     error: Schema.optional(MessagingErrorPayload),
   }),
-  Schema.Struct({
-    ...envelope,
-    type: Schema.Literals(['version-mismatch']),
-    to: Schema.String,
-  }),
+  Schema.Struct({ ...envelope, type: Schema.Literals(['version-mismatch']), to: Schema.String }),
 ]);
 const decodeCoordinatorMessage = Schema.decodeUnknownEffect(CoordinatorMessageSchema);
 
@@ -1126,12 +1115,7 @@ function errorMessage(error: unknown) {
   }
   function announceOwner() {
     ownerSeenAt = Date.now();
-    post({
-      type: 'owner',
-      version: PROTOCOL_VERSION,
-      from: thisClientId,
-      at: ownerSeenAt,
-    });
+    post({ type: 'owner', version: PROTOCOL_VERSION, from: thisClientId, at: ownerSeenAt });
   }
   function announceClosing() {
     if (stopped) return;
@@ -1199,11 +1183,7 @@ function errorMessage(error: unknown) {
           activeOwnerId = message.from;
           ownerSeenAt = Date.now();
           if (ownerChanged) {
-            post({
-              type: 'hello',
-              version: PROTOCOL_VERSION,
-              from: thisClientId,
-            });
+            post({ type: 'hello', version: PROTOCOL_VERSION, from: thisClientId });
             const activePeerId = currentSnapshot().activePeerId;
             if (activePeerId) {
               yield* fork(invokeCoalesced('openConversation', [activePeerId]).pipe(Effect.ignore));
@@ -1331,11 +1311,7 @@ function errorMessage(error: unknown) {
         }
         yield* maintainPendingRequests();
         if (activeOwnerId) {
-          post({
-            type: 'client-heartbeat',
-            version: PROTOCOL_VERSION,
-            from: thisClientId,
-          });
+          post({ type: 'client-heartbeat', version: PROTOCOL_VERSION, from: thisClientId });
         }
         if (!activeOwnerId) {
           activeOwnerId = undefined;
@@ -1350,11 +1326,7 @@ function errorMessage(error: unknown) {
     );
     yield* electOwner();
     if (!activeOwner) {
-      post({
-        type: 'hello',
-        version: PROTOCOL_VERSION,
-        from: thisClientId,
-      });
+      post({ type: 'hello', version: PROTOCOL_VERSION, from: thisClientId });
     }
   });
   const electOwner = Effect.fn('TabCoordinator.electOwner')(function* () {
@@ -1387,11 +1359,7 @@ function errorMessage(error: unknown) {
           Effect.catch(abandonFailedOwnership),
         );
       } else {
-        post({
-          type: 'hello',
-          version: PROTOCOL_VERSION,
-          from: thisClientId,
-        });
+        post({ type: 'hello', version: PROTOCOL_VERSION, from: thisClientId });
       }
     });
     yield* coordinatorTasks.runExclusive('election', election).pipe(
@@ -2006,10 +1974,7 @@ function errorMessage(error: unknown) {
     return operation.pipe(
       Effect.tapError((error) =>
         !stopped
-          ? setSnapshot({
-              ...currentSnapshot(),
-              operationError: errorMessage(error),
-            })
+          ? setSnapshot({ ...currentSnapshot(), operationError: errorMessage(error) })
           : Effect.void,
       ),
     );

@@ -90,10 +90,7 @@ describe('encrypted MTProto message state', () => {
     );
 
   it('generates monotonic IDs and content-related sequence numbers', async () => {
-    const state = await makeState({
-      authKey: authKey(),
-      now: () => 1_700_000_000_000,
-    });
+    const state = await makeState({ authKey: authKey(), now: () => 1_700_000_000_000 });
     const { prepare } = state;
     const first = prepare(Uint8Array.of(1, 2, 3, 4), true);
     const second = prepare(Uint8Array.of(5, 6, 7, 8), false);
@@ -124,18 +121,8 @@ describe('encrypted MTProto message state', () => {
     let now = 1_700_000_000_000;
     const key = authKey();
     const crypto = cryptoDouble();
-    const session = bytesToBigInt(new Uint8Array(8).fill(1), {
-      littleEndian: true,
-      signed: true,
-    });
-    const state = await makeState(
-      {
-        authKey: key,
-        now: () => now,
-        serverSalt: 5n,
-      },
-      crypto,
-    );
+    const session = bytesToBigInt(new Uint8Array(8).fill(1), { littleEndian: true, signed: true });
+    const state = await makeState({ authKey: key, now: () => now, serverSalt: 5n }, crypto);
     const firstMessageId = (1_700_000_000n << 32n) | 1n;
     const known = await Effect.runPromise(
       state.decrypt(
@@ -199,16 +186,9 @@ describe('encrypted MTProto message state', () => {
   it('rejects replayed packets below the retained message-id floor', async () => {
     const key = authKey();
     const crypto = cryptoDouble();
-    const session = bytesToBigInt(new Uint8Array(8).fill(1), {
-      littleEndian: true,
-      signed: true,
-    });
+    const session = bytesToBigInt(new Uint8Array(8).fill(1), { littleEndian: true, signed: true });
     const state = await makeState(
-      {
-        authKey: key,
-        now: () => 1_700_000_000_000,
-        serverSalt: 5n,
-      },
+      { authKey: key, now: () => 1_700_000_000_000, serverSalt: 5n },
       crypto,
     );
     const first = await incomingPacket({

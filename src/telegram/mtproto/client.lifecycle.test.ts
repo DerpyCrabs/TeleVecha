@@ -4,11 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { MtprotoClientService, mtprotoClientLayer } from './client';
 
-const session = {
-  load: Effect.succeed(undefined),
-  save: () => Effect.void,
-  clear: Effect.void,
-};
+const session = { load: Effect.succeed(undefined), save: () => Effect.void, clear: Effect.void };
 
 describe('MTProto client layer lifecycle', () => {
   it('memoizes one client service for the enclosing scope', () =>

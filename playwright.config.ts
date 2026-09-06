@@ -13,22 +13,10 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: 'line',
-  use: {
-    baseURL,
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
-  },
+  use: { baseURL, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   projects: [
-    {
-      name: 'desktop-chromium',
-      testIgnore: /\.mobile\.spec\.ts/u,
-      use: devices['Desktop Chrome'],
-    },
-    {
-      name: 'mobile-chromium',
-      testMatch: /\.mobile\.spec\.ts/u,
-      use: devices['Pixel 5'],
-    },
+    { name: 'desktop-chromium', testIgnore: /\.mobile\.spec\.ts/u, use: devices['Desktop Chrome'] },
+    { name: 'mobile-chromium', testMatch: /\.mobile\.spec\.ts/u, use: devices['Pixel 5'] },
   ],
   webServer: {
     command: `npm run dev:e2e -- ${port}`,

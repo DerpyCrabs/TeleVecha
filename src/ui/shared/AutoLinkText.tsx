@@ -1,14 +1,10 @@
-import { For } from 'solid-js';
-
+import { sequence, view } from 'effectweb';
 import { safeExternalUrl } from './safeUrl';
-
 interface TextPart {
   text: string;
   href?: string | undefined;
 }
-
 const LINK_PATTERN = /(?:https?:\/\/|www\.)[^\s]+|[\w.%+-]+@[\w.-]+\.[a-z]{2,}|@[a-z][\w]{3,31}/giu;
-
 export function linkifyText(value: string): TextPart[] {
   const parts: TextPart[] = [];
   let offset = 0;
@@ -33,21 +29,18 @@ export function linkifyText(value: string): TextPart[] {
   if (offset < value.length) parts.push({ text: value.slice(offset) });
   return parts;
 }
-
-export function AutoLinkText(props: { text: string }) {
+export const AutoLinkText = view<{ text: string }, never>((props, _send) => {
   return (
     <span class="autolink-text">
-      <For each={linkifyText(props.text)}>
-        {(part) =>
-          part.href ? (
-            <a href={part.href} target="_blank" rel="noopener noreferrer">
-              {part.text}
-            </a>
-          ) : (
-            part.text
-          )
-        }
-      </For>
+      {sequence(linkifyText(props.text)).map((part) =>
+        part.href ? (
+          <a href={part.href} target="_blank" rel="noopener noreferrer">
+            {part.text}
+          </a>
+        ) : (
+          part.text
+        ),
+      )}
     </span>
   );
-}
+});

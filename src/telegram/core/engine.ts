@@ -652,12 +652,7 @@ function makeMessagingEngineModule(
       engineTasks.interruptNetwork,
       engineTasks.interruptBackground,
     ]);
-    const cleanup = patch({
-      phase: 'idle',
-      sync: 'stale',
-      online: false,
-      pending: [],
-    }).pipe(
+    const cleanup = patch({ phase: 'idle', sync: 'stale', online: false, pending: [] }).pipe(
       Effect.ensuring(
         Effect.gen(function* () {
           tabLease = undefined;
@@ -692,10 +687,7 @@ function makeMessagingEngineModule(
     peerId: string,
   ): Effect.fn.Return<ConversationViewSnapshot, unknown> {
     return yield* tryLoadConversationView(peerId).pipe(
-      Effect.repeat({
-        while: (view) => view === undefined,
-        schedule: Schedule.recurs(2),
-      }),
+      Effect.repeat({ while: (view) => view === undefined, schedule: Schedule.recurs(2) }),
       Effect.map((view) => view ?? projectConversationView(peerId)),
     );
   });
@@ -738,14 +730,7 @@ function makeMessagingEngineModule(
       const messages = sortMessages(cached);
       const oldestId = messages[0]?.id;
       if (oldestId !== undefined) histories.setOffset(peerId, oldestId);
-      rememberHistory(
-        peerId,
-        {
-          messages,
-          hasOlderMessages: true,
-        },
-        'newest',
-      );
+      rememberHistory(peerId, { messages, hasOlderMessages: true }, 'newest');
       yield* scheduleCachedHistoryRepair(dialog, messages);
       return projectConversationView(peerId);
     }
@@ -885,10 +870,7 @@ function makeMessagingEngineModule(
     const accountId = activeAccountId;
     if (!currentSnapshot().online || !accountId) return undefined;
     const counts = yield* getSharedMediaCountsWithDeadline(dialog.peer).pipe(
-      Effect.retry({
-        times: 1,
-        schedule: Schedule.spaced(SHARED_MEDIA_COUNT_RETRY_DELAY_MS),
-      }),
+      Effect.retry({ times: 1, schedule: Schedule.spaced(SHARED_MEDIA_COUNT_RETRY_DELAY_MS) }),
     );
     if (!isOperationCurrent(session, accountId)) return undefined;
     yield* writeMetadata(cacheKey, counts);
@@ -1227,10 +1209,7 @@ function makeMessagingEngineModule(
         const oldestId = messages[0]?.id;
         const history = rememberHistory(
           message.peerId,
-          {
-            messages,
-            hasOlderMessages: conversation.hasOlderMessages || (oldestId ?? 1) > 1,
-          },
+          { messages, hasOlderMessages: conversation.hasOlderMessages || (oldestId ?? 1) > 1 },
           'anchor',
         );
         return {
@@ -1349,11 +1328,7 @@ function makeMessagingEngineModule(
             if (!isOperationCurrent(session, accountId)) return;
             const failure = recordHistoryFailure(peerId);
             const message = `Could not load messages in ${dialog.title}. ${errorMessage(error)}`;
-            histories.setIssue(peerId, {
-              message,
-              retryAt: failure.retryAt,
-              gap: currentGap,
-            });
+            histories.setIssue(peerId, { message, retryAt: failure.retryAt, gap: currentGap });
             view = { ...view, historyError: message, historyRetryAt: failure.retryAt };
             yield* reportFailure(
               'sync',
@@ -1560,10 +1535,7 @@ function makeMessagingEngineModule(
           (members) =>
             ({
               members: members.slice(0, limit),
-              ...(groupMemberPages.get(peer.id) ?? {
-                totalCount: members.length,
-                hasMore: false,
-              }),
+              ...(groupMemberPages.get(peer.id) ?? { totalCount: members.length, hasMore: false }),
             }) satisfies TelegramGroupMemberPage,
         ),
       );
@@ -2112,10 +2084,7 @@ function makeMessagingEngineModule(
         clearHistoryFailure(peerId);
         const history = rememberHistory(
           peerId,
-          {
-            messages,
-            hasOlderMessages: page.hasOlder && advanced,
-          },
+          { messages, hasOlderMessages: page.hasOlder && advanced },
           histories.anchor(peerId) !== undefined ? 'anchor' : 'oldest',
         );
         view = {
@@ -2138,11 +2107,7 @@ function makeMessagingEngineModule(
                 const nextFailure = recordHistoryFailure(peerId);
                 const message = `Could not load older messages from ${dialog.title}. ${errorMessage(error)}`;
                 histories.setIssue(peerId, { message, retryAt: nextFailure.retryAt });
-                view = {
-                  ...view,
-                  historyError: message,
-                  historyRetryAt: nextFailure.retryAt,
-                };
+                view = { ...view, historyError: message, historyRetryAt: nextFailure.retryAt };
               }
               if (isOperationCurrent(session, accountId)) {
                 yield* reportFailure(
@@ -2500,11 +2465,7 @@ function makeMessagingEngineModule(
         index += count;
       }
     }
-    yield* enqueuePendingBatch(pending, {
-      peerId: peer.id,
-      text: caption,
-      revision: draftVersion,
-    });
+    yield* enqueuePendingBatch(pending, { peerId: peer.id, text: caption, revision: draftVersion });
   });
   const downloadMedia = Effect.fn('MessagingEngine.downloadMedia')(function* (
     message: TelegramMessage,
@@ -2556,10 +2517,7 @@ function makeMessagingEngineModule(
     if (cached) return cached;
     return yield* Effect.gen(function* () {
       const blob = yield* runTransportWithDeadline(
-        () =>
-          telegramTransport.downloadMedia(message, {
-            ...options,
-          }),
+        () => telegramTransport.downloadMedia(message, { ...options }),
         MEDIA_DELIVERY_TIMEOUT_MS,
         'Media download timed out after 5 minutes.',
         'media-download',
@@ -2634,10 +2592,7 @@ function makeMessagingEngineModule(
           const refreshed = context.find(({ id }) => id === message.id);
           if (!refreshed) return yield* Effect.fail(firstError);
           const blob = yield* runTransportWithDeadline(
-            () =>
-              telegramTransport.downloadMedia(refreshed, {
-                ...options,
-              }),
+            () => telegramTransport.downloadMedia(refreshed, { ...options }),
             MEDIA_DELIVERY_TIMEOUT_MS,
             'Media download timed out after 5 minutes.',
             'media-download',
@@ -3126,10 +3081,7 @@ function makeMessagingEngineModule(
       : emoji;
     const optimistic = reactionsAfterChoice(previous, target);
     const version = nextReactionVersion(key);
-    yield* applyReactionChange(peer.id, messageId, optimistic, version, {
-      session,
-      accountId,
-    });
+    yield* applyReactionChange(peer.id, messageId, optimistic, version, { session, accountId });
     if (!isOperationCurrent(session, accountId)) return;
     yield* Effect.gen(function* () {
       const result = yield* runTelegramOperation(
@@ -3337,11 +3289,7 @@ function makeMessagingEngineModule(
       randomId: yield* randomId(),
       createdAt: Date.now(),
       attempts: 0,
-      forward: {
-        fromPeer,
-        messageId,
-        ...(source.media ? { mediaKind: source.media.kind } : {}),
-      },
+      forward: { fromPeer, messageId, ...(source.media ? { mediaKind: source.media.kind } : {}) },
     });
     yield* enqueuePending(pending);
   });
@@ -3452,12 +3400,7 @@ function makeMessagingEngineModule(
           }).pipe(Effect.ignore),
         ).pipe(Effect.forkIn(session, { startImmediately: true }));
       }
-      yield* patch({
-        authStep: undefined,
-        codeViaApp: undefined,
-        error: undefined,
-        online: true,
-      });
+      yield* patch({ authStep: undefined, codeViaApp: undefined, error: undefined, online: true });
       yield* renewAccountReady();
       yield* Deferred.succeed(accountReadySignal, undefined);
       const startupSync = runSerialized('update', '', () =>
@@ -3527,10 +3470,7 @@ function makeMessagingEngineModule(
                 }
                 const fetched = messageRevisions.filter(
                   peerId,
-                  page.messages.map((message) => ({
-                    ...message,
-                    cacheEpoch: requestedCacheEpoch,
-                  })),
+                  page.messages.map((message) => ({ ...message, cacheEpoch: requestedCacheEpoch })),
                   requestRevision,
                 );
                 yield* cacheStore.putMessages(fetched);
@@ -3610,12 +3550,7 @@ function makeMessagingEngineModule(
       yield* groupMemberCache.clear;
       groupMemberPages.clear();
       yield* sendQueue.clear;
-      yield* patch({
-        dialogs: [],
-        drafts: {},
-        draftDetails: {},
-        pending: [],
-      });
+      yield* patch({ dialogs: [], drafts: {}, draftDetails: {}, pending: [] });
       return true;
     }
 
@@ -3788,10 +3723,7 @@ function makeMessagingEngineModule(
         const cachedDialogs = sortDialogs(
           freshDialogs.map((dialog) => ({ ...dialog, cacheEpoch: epoch })),
         );
-        yield* patch({
-          dialogs: cachedDialogs,
-          activities: [],
-        });
+        yield* patch({ dialogs: cachedDialogs, activities: [] });
         yield* invalidateResource({ kind: 'expressions' });
         yield* invalidateResource({ kind: 'bot-commands' });
         yield* publishConversationEvent({ type: 'history-reset' });
@@ -4310,11 +4242,7 @@ function makeMessagingEngineModule(
       if (publish) {
         yield* Effect.all(
           [...messagePeers].map(([peerId, ids]) =>
-            publishConversationEvent({
-              type: 'messages-delete',
-              peerId,
-              messageIds: [...ids],
-            }),
+            publishConversationEvent({ type: 'messages-delete', peerId, messageIds: [...ids] }),
           ),
           { discard: true },
         );
@@ -4333,10 +4261,7 @@ function makeMessagingEngineModule(
               readInboxMaxId: Math.max(dialog.readInboxMaxId, update.maxMessageId),
               unreadCount: update.stillUnreadCount ?? 0,
             }
-          : {
-              ...dialog,
-              readOutboxMaxId: Math.max(dialog.readOutboxMaxId, update.maxMessageId),
-            };
+          : { ...dialog, readOutboxMaxId: Math.max(dialog.readOutboxMaxId, update.maxMessageId) };
       });
       versions.next('dialog', update.peerId);
       yield* patch({ dialogs });
@@ -4387,11 +4312,7 @@ function makeMessagingEngineModule(
     if (update.type === 'presence-changed') {
       const dialogs = currentSnapshot().dialogs.map((dialog) =>
         dialog.peer.id === update.peerId
-          ? {
-              ...dialog,
-              presence: update.presence,
-              lastSeenAt: update.lastSeenAt,
-            }
+          ? { ...dialog, presence: update.presence, lastSeenAt: update.lastSeenAt }
           : dialog,
       );
       versions.next('dialog', update.peerId);
@@ -4951,9 +4872,7 @@ function makeMessagingEngineModule(
               const result = yield* transport.sendAlbum(
                 attempting.peer,
                 attempting.album.attachments.map((attachment) => ({
-                  file: new File([attachment.blob], attachment.name, {
-                    type: attachment.mimeType,
-                  }),
+                  file: new File([attachment.blob], attachment.name, { type: attachment.mimeType }),
                   randomId: attachment.randomId,
                   sendAs: 'media',
                 })),
@@ -5040,10 +4959,7 @@ function makeMessagingEngineModule(
             if (sendQueue.isCancelled(attempting.id)) return false;
             const current =
               currentSnapshot().pending.find(({ id }) => id === attempting.id) ?? attempting;
-            const failed = sendQueue.capture({
-              ...current,
-              lastError: errorMessage(error),
-            });
+            const failed = sendQueue.capture({ ...current, lastError: errorMessage(error) });
             yield* cacheStore.commitOutbox(failed);
             if (!isOperationCurrent(session, accountId)) return false;
             if (sendQueue.isCancelled(attempting.id)) {

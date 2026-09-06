@@ -28,9 +28,7 @@ test('keeps an open conversation live when another tab views a different chat', 
 
     await expect(
       page.locator('article.message', { hasText: 'Live in every open tab' }),
-    ).toBeVisible({
-      timeout: 1_000,
-    });
+    ).toBeVisible({ timeout: 1_000 });
   } finally {
     await second.close();
   }

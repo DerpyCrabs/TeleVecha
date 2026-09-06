@@ -1,9 +1,10 @@
-import { createUiResource } from '../reactivity/solid';
-import { Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-
+import { effectCommand } from 'effectweb/program';
+import { Effect } from 'effect';
+import { component, domMount, view } from 'effectweb';
+import type { Send, Transition } from 'effectweb/program';
+import { loadEffect } from 'effectweb/cache';
 const visibleAvatars = new Map<Element, () => void>();
 let avatarObserver: IntersectionObserver | undefined;
-
 function observeAvatar(element: Element, visible: () => void) {
   if (!('IntersectionObserver' in window)) {
     visible();
@@ -30,91 +31,91 @@ function observeAvatar(element: Element, visible: () => void) {
     }
   };
 }
-
 interface AvatarProps {
   identity: string;
   initials: string;
   color: string;
   size?: 'xs' | 'sm' | 'md' | 'lg';
   online?: boolean;
-  loadCached?: (() => Promise<string | undefined>) | undefined;
-  load?: (() => Promise<string | undefined>) | undefined;
+  loadCached?: (() => Effect.Effect<string | undefined, unknown>) | undefined;
+  load?: (() => Effect.Effect<string | undefined, unknown>) | undefined;
 }
-
-export function Avatar(props: AvatarProps) {
-  let root: HTMLDivElement | undefined;
-  const [visible, setVisible] = createSignal(false);
-  const size = () =>
-    ({
-      xs: 'size-4 text-[0.42rem]',
-      sm: 'size-9 text-xs',
-      md: 'size-12 text-sm',
-      lg: 'size-20 text-xl',
-    })[props.size ?? 'md'];
-  const request = createMemo(
-    () =>
-      visible() && (props.loadCached || props.load)
-        ? {
-            identity: props.identity,
-            loadCached: props.loadCached,
-            load: props.load,
-          }
-        : false,
-    undefined,
-    {
-      equals: (a, b) =>
-        a === b ||
-        Boolean(
-          a &&
-          b &&
-          a.identity === b.identity &&
-          Boolean(a.load) === Boolean(b.load) &&
-          Boolean(a.loadCached) === Boolean(b.loadCached),
-        ),
-    },
-  );
-  const [loadedSource] = createUiResource(request, async ({ identity, loadCached, load }) => {
-    const cached = await loadCached?.().catch(() => undefined);
-    if (cached || !load) return { identity, url: cached };
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (identity !== props.identity) return { identity, url: undefined };
-      const loaded = await load().catch(() => undefined);
-      if (loaded) return { identity, url: loaded };
-    }
-    return { identity, url: undefined };
-  });
-  const source = createMemo(() => {
-    const loaded = loadedSource();
-    return loaded?.identity === props.identity ? loaded.url : undefined;
-  });
-
-  onMount(() => {
-    const element = root;
-    if (!element) return;
-    const stopObserving = observeAvatar(element, () => setVisible(true));
-    onCleanup(stopObserving);
-  });
-
-  return (
-    <div ref={(element) => (root = element)} class="relative shrink-0">
-      <div
-        data-avatar-identity={props.identity}
-        class={`relative grid overflow-hidden place-items-center rounded-full font-semibold tracking-tight text-white shadow-inner ${size()}`}
-        style={{
-          background: `linear-gradient(145deg, ${props.color}, color-mix(in srgb, ${props.color} 60%, #15171c))`,
-        }}
-      >
-        {props.initials}
-        <Show when={source()}>
-          <img class="absolute inset-0 size-full object-cover" src={source()} alt="" />
-        </Show>
+interface AvatarModel {
+  props: AvatarProps;
+  visible: boolean;
+  requested: string;
+  source: string | undefined;
+}
+type AvatarMessage = { type: 'Visible' } | { type: 'Loaded'; source: string | undefined };
+function request(model: AvatarModel): Transition<AvatarModel, AvatarMessage> {
+  const { props } = model;
+  const key = `${props.identity}:${Boolean(props.loadCached)}:${Boolean(props.load)}`;
+  if (!model.visible || key === model.requested) return { model };
+  return {
+    model: { ...model, requested: key, source: undefined },
+    commands: [
+      effectCommand(
+        'avatar',
+        () =>
+          Effect.gen(function* () {
+            const cached = yield* loadEffect(
+              () => props.loadCached?.() ?? Effect.succeed(undefined),
+            ).pipe(Effect.catch(() => Effect.succeed(undefined)));
+            if (cached || !props.load) return cached;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              const source = yield* loadEffect(props.load).pipe(
+                Effect.catch(() => Effect.succeed(undefined)),
+              );
+              if (source) return source;
+            }
+            return undefined;
+          }),
+        {
+          onSuccess: (source) => ({ type: 'Loaded', source }),
+          onFailure: (): AvatarMessage => ({ type: 'Loaded', source: undefined }),
+        },
+      ),
+    ],
+  };
+}
+const sizes = {
+  xs: 'size-4 text-[0.42rem]',
+  sm: 'size-9 text-xs',
+  md: 'size-12 text-sm',
+  lg: 'size-20 text-xl',
+};
+const visibility = (send: Send<AvatarMessage>) =>
+  domMount<HTMLElement>((element) => observeAvatar(element, () => send({ type: 'Visible' })));
+export const Avatar = component<AvatarProps, AvatarModel, AvatarMessage>({
+  init: (props) => ({ props, visible: false, requested: '', source: undefined }),
+  receive: (model, props) => request({ ...model, props }),
+  update: (model, message) =>
+    message.type === 'Visible'
+      ? request({ ...model, visible: true })
+      : { model: { ...model, source: message.source } },
+  view: view((model, send) => {
+    const props = model.props;
+    return (
+      <div use={visibility(send)} class="relative shrink-0">
+        <div
+          data-avatar-identity={props.identity}
+          class={`relative grid overflow-hidden place-items-center rounded-full font-semibold tracking-tight text-white shadow-inner ${sizes[props.size ?? 'md']}`}
+          style={{
+            background: `linear-gradient(145deg, ${props.color}, color-mix(in srgb, ${props.color} 60%, #15171c))`,
+          }}
+        >
+          {props.initials}
+          {model.source ? (
+            <img class="absolute inset-0 size-full object-cover" src={model.source} alt="" />
+          ) : null}
+        </div>
+        {props.online ? (
+          <span
+            class="avatar-online-indicator absolute bottom-0 right-0 size-3 rounded-full border-2 border-[var(--panel)] bg-emerald-400"
+            aria-label="Online"
+          />
+        ) : null}
       </div>
-      <Show when={props.online}>
-        <span
-          class="avatar-online-indicator absolute bottom-0 right-0 size-3 rounded-full border-2 border-[var(--panel)] bg-emerald-400"
-          aria-label="Online"
-        />
-      </Show>
-    </div>
-  );
-}
+    );
+  }),
+});

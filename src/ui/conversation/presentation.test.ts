@@ -105,9 +105,7 @@ describe('presentation', () => {
   it('keeps the forwarded message source', () => {
     expect(
       presentMessage(
-        message({
-          forwardedFrom: { name: 'Release Channel', peerId: 'c:202', messageId: 17 },
-        }),
+        message({ forwardedFrom: { name: 'Release Channel', peerId: 'c:202', messageId: 17 } }),
         0,
       ).forwardedFrom,
     ).toEqual({ name: 'Release Channel', peerId: 'c:202', messageId: 17 });

@@ -114,9 +114,7 @@ describe('layoutMessages', () => {
     const layouts = layoutMessages(
       [
         outgoing('1'),
-        outgoing('2', {
-          media: { kind: 'photo', name: 'photo.jpg', mimeType: 'image/jpeg' },
-        }),
+        outgoing('2', { media: { kind: 'photo', name: 'photo.jpg', mimeType: 'image/jpeg' } }),
         outgoing('3', { replyToId: 1, replyTo: 'quoted' }),
       ],
       { ...chat, kind: 'user' },

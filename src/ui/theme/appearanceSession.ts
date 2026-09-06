@@ -1,41 +1,91 @@
-import { createUiResource } from '../reactivity/solid';
-import { createSignal, onCleanup, onMount } from 'solid-js';
 import type { Effect } from 'effect';
-
-import type { TelegramWallpaper } from '../../telegram/types';
 import type { MessagingError } from '../../telegram/core/messagingError';
-import { loadCustomWallpaper, saveCustomWallpaper } from './customWallpaperStore';
+import type { TelegramWallpaper } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
+import type { SessionContext } from 'effectweb/session';
+import { lifetime, queryResource } from 'effectweb/session';
+import { available, program, resourceError, query } from 'effectweb';
+import { loadCustomWallpaper, saveCustomWallpaper } from './customWallpaperStore';
+import type { ThemePreferences, ThemePresetId } from './themePreferences';
 import {
   applyThemePreferences,
   normalizeThemePreferences,
   readThemePreferences,
   saveThemePreferences,
-  type ThemePreferences,
-  type ThemePresetId,
 } from './themePreferences';
-
 interface AppearanceSource {
   getWallpapers(): Effect.Effect<TelegramWallpaper[], MessagingError>;
   downloadWallpaper(wallpaperId: string): Effect.Effect<Blob, MessagingError>;
 }
 
+const wallpaperCatalog = query({
+  name: 'wallpapers',
+  key: (_source: AppearanceSource) => 'catalog',
+  load: (source: AppearanceSource) => source.getWallpapers(),
+});
+
 /** Owns application-wide appearance persistence and wallpaper object URLs. */
-export function createAppearanceSession(source: AppearanceSource, runEffect: UiEffectRunner) {
-  const [appearance, setAppearance] = createSignal(readThemePreferences());
-  const [catalogRequested, setCatalogRequested] = createSignal(false);
-  const [catalog, catalogResource] = createUiResource(
-    () => catalogRequested() && 'catalog',
-    () => source.getWallpapers(),
-    { namespace: 'wallpapers' },
-  );
-  const telegramWallpapers = () => catalog() ?? [];
-  const catalogLoading = () => catalog.loading;
-  const [wallpaperBusy, setWallpaperBusy] = createSignal(false);
-  const [wallpaperError, setWallpaperError] = createSignal('');
+export function createAppearanceSession(
+  source: AppearanceSource,
+  runEffect: UiEffectRunner,
+  context: SessionContext,
+) {
+  const scope = lifetime();
+  type AppearanceSessionModel = {
+    appearance: ThemePreferences;
+    catalogRequested: boolean;
+    wallpaperBusy: boolean;
+    wallpaperError: string;
+  };
+  type AppearanceSessionMessage =
+    | { type: 'Appearance'; value: ThemePreferences }
+    | { type: 'CatalogRequested'; value: boolean }
+    | { type: 'WallpaperBusy'; value: boolean }
+    | { type: 'WallpaperError'; value: string };
+  const state = program<AppearanceSessionModel, AppearanceSessionMessage>({
+    initial: {
+      appearance: readThemePreferences(),
+      catalogRequested: false,
+      wallpaperBusy: false,
+      wallpaperError: '',
+    },
+    update: (model, message) => {
+      switch (message.type) {
+        case 'Appearance':
+          return {
+            model: Object.is(model.appearance, message.value)
+              ? model
+              : { ...model, appearance: message.value },
+          };
+        case 'CatalogRequested':
+          return {
+            model: Object.is(model.catalogRequested, message.value)
+              ? model
+              : { ...model, catalogRequested: message.value },
+          };
+        case 'WallpaperBusy':
+          return {
+            model: Object.is(model.wallpaperBusy, message.value)
+              ? model
+              : { ...model, wallpaperBusy: message.value },
+          };
+        case 'WallpaperError':
+          return {
+            model: Object.is(model.wallpaperError, message.value)
+              ? model
+              : { ...model, wallpaperError: message.value },
+          };
+      }
+    },
+  });
+  const catalog = queryResource(context, wallpaperCatalog);
+  const refresh = () => catalog.select(state.model().catalogRequested ? source : undefined);
+  scope.add(catalog.dispose);
+  scope.add(state.subscribe(refresh));
+  const telegramWallpapers = () => available(catalog.read()) ?? [];
+  const catalogLoading = () => catalog.read().waiting;
   let loadGeneration = 0;
   let objectUrl: string | undefined;
-
   const showWallpaper = (blob?: Blob) => {
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     objectUrl = blob ? URL.createObjectURL(blob) : undefined;
@@ -45,8 +95,7 @@ export function createAppearanceSession(source: AppearanceSource, runEffect: UiE
       document.documentElement.style.removeProperty('--wallpaper-asset');
     }
   };
-
-  const loadStoredWallpaper = async (preferences = appearance()) => {
+  const loadStoredWallpaper = async (preferences = state.model().appearance) => {
     const generation = ++loadGeneration;
     try {
       const blob =
@@ -59,15 +108,15 @@ export function createAppearanceSession(source: AppearanceSource, runEffect: UiE
     } catch (cause) {
       if (generation !== loadGeneration) return;
       showWallpaper();
-      setWallpaperError(
-        cause instanceof Error ? cause.message : 'Could not load the saved background.',
-      );
+      state.send({
+        type: 'WallpaperError',
+        value: cause instanceof Error ? cause.message : 'Could not load the saved background.',
+      });
     }
   };
-
   const commit = (next: ThemePreferences) => {
     const normalized = normalizeThemePreferences(next);
-    setAppearance(normalized);
+    state.send({ type: 'Appearance', value: normalized });
     applyThemePreferences(normalized);
     try {
       saveThemePreferences(normalized);
@@ -79,30 +128,27 @@ export function createAppearanceSession(source: AppearanceSource, runEffect: UiE
       showWallpaper();
     }
   };
-
   const loadCatalog = async () => {
-    if (catalog.error) catalogResource.refetch();
-    setCatalogRequested(true);
+    if (resourceError(catalog.read())) catalog.refresh();
+    state.send({ type: 'CatalogRequested', value: true });
   };
-
   const selectWallpaper = (wallpaper: ThemePreferences['wallpaper']) => {
-    const next = { ...appearance(), wallpaper };
+    const next = { ...state.model().appearance, wallpaper };
     commit(next);
     if (wallpaper === 'custom' || wallpaper === 'telegram') void loadStoredWallpaper(next);
   };
-
   const selectTelegramWallpaper = async (wallpaper: TelegramWallpaper) => {
-    if (wallpaperBusy()) return;
-    setWallpaperBusy(true);
-    setWallpaperError('');
+    if (state.model().wallpaperBusy) return;
+    state.send({ type: 'WallpaperBusy', value: true });
+    state.send({ type: 'WallpaperError', value: '' });
     try {
       const blob = wallpaper.hasFile
         ? await runEffect(source.downloadWallpaper(wallpaper.id))
         : undefined;
       const next: ThemePreferences = {
-        ...appearance(),
+        ...state.model().appearance,
         wallpaper: 'telegram',
-        wallpaperBlur: wallpaper.settings.blur ? 8 : appearance().wallpaperBlur,
+        wallpaperBlur: wallpaper.settings.blur ? 8 : state.model().appearance.wallpaperBlur,
         telegramWallpaper: {
           id: wallpaper.id,
           label: wallpaper.slug || `Telegram ${wallpaper.id}`,
@@ -119,56 +165,75 @@ export function createAppearanceSession(source: AppearanceSource, runEffect: UiE
       commit(next);
       showWallpaper(blob);
     } catch (cause) {
-      setWallpaperError(cause instanceof Error ? cause.message : 'Could not load the background.');
+      state.send({
+        type: 'WallpaperError',
+        value: cause instanceof Error ? cause.message : 'Could not load the background.',
+      });
     } finally {
-      setWallpaperBusy(false);
+      state.send({ type: 'WallpaperBusy', value: false });
     }
   };
-
   const uploadWallpaper = async (file: File) => {
-    if (wallpaperBusy()) return;
-    setWallpaperBusy(true);
-    setWallpaperError('');
+    if (state.model().wallpaperBusy) return;
+    state.send({ type: 'WallpaperBusy', value: true });
+    state.send({ type: 'WallpaperError', value: '' });
     try {
       await runEffect(saveCustomWallpaper(file));
-      commit({ ...appearance(), wallpaper: 'custom' });
+      commit({ ...state.model().appearance, wallpaper: 'custom' });
       showWallpaper(file);
     } catch (cause) {
-      setWallpaperError(cause instanceof Error ? cause.message : 'Could not save the background.');
+      state.send({
+        type: 'WallpaperError',
+        value: cause instanceof Error ? cause.message : 'Could not save the background.',
+      });
     } finally {
-      setWallpaperBusy(false);
+      state.send({ type: 'WallpaperBusy', value: false });
     }
   };
-
-  onMount(() => {
-    const preferences = appearance();
+  (() => {
+    const preferences = state.model().appearance;
     if (
       preferences.wallpaper === 'custom' ||
       (preferences.wallpaper === 'telegram' && preferences.telegramWallpaper?.hasFile)
     ) {
       void loadStoredWallpaper(preferences);
     }
-  });
-  onCleanup(() => {
+  })();
+  scope.add(() => {
     loadGeneration += 1;
     if (objectUrl) URL.revokeObjectURL(objectUrl);
   });
-
-  return {
-    appearance,
-    telegramWallpapers,
-    catalogLoading,
-    wallpaperBusy,
-    wallpaperError,
+  const actions = {
+    refresh,
     loadCatalog,
-    selectTheme: (theme: ThemePresetId) => commit({ ...appearance(), theme }),
+    selectTheme: (theme: ThemePresetId) => commit({ ...state.model().appearance, theme }),
     selectAccentColor: (accentColor: string) =>
-      commit({ ...appearance(), accentColor, systemAccent: false }),
-    selectSystemAccent: (systemAccent: boolean) => commit({ ...appearance(), systemAccent }),
-    selectChatFontSize: (chatFontSize: number) => commit({ ...appearance(), chatFontSize }),
-    update: (changes: Partial<ThemePreferences>) => commit({ ...appearance(), ...changes }),
+      commit({ ...state.model().appearance, accentColor, systemAccent: false }),
+    selectSystemAccent: (systemAccent: boolean) =>
+      commit({ ...state.model().appearance, systemAccent }),
+    selectChatFontSize: (chatFontSize: number) =>
+      commit({ ...state.model().appearance, chatFontSize }),
+    update: (changes: Partial<ThemePreferences>) =>
+      commit({ ...state.model().appearance, ...changes }),
     selectWallpaper,
     selectTelegramWallpaper,
     uploadWallpaper,
+  };
+  return {
+    ...actions,
+    model: state.model,
+    subscribe: state.subscribe,
+    dispose: () => {
+      scope.dispose();
+      state.dispose();
+    },
+    snapshot: () => ({
+      ...actions,
+      appearance: state.model().appearance,
+      telegramWallpapers: telegramWallpapers(),
+      catalogLoading: catalogLoading(),
+      wallpaperBusy: state.model().wallpaperBusy,
+      wallpaperError: state.model().wallpaperError,
+    }),
   };
 }

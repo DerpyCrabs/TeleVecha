@@ -161,10 +161,7 @@ export const createAuthorizationKey = Effect.fn('mtproto.auth.authorize')(functi
   yield* validateNonces(dhParams, nonce, response.serverNonce, 'server DH parameters');
   if (dhParams.kind === 'fail') {
     const digest = yield* sha1(bigIntToBytes(newNonce, 32, { littleEndian: true, signed: true }));
-    const expected = bytesToBigInt(digest.subarray(4, 20), {
-      littleEndian: true,
-      signed: true,
-    });
+    const expected = bytesToBigInt(digest.subarray(4, 20), { littleEndian: true, signed: true });
     if (dhParams.newNonceHash !== expected)
       return yield* Effect.fail(fail('DH rejection contained the wrong nonce hash.'));
     return yield* Effect.fail(fail('Telegram rejected the DH parameters.'));
@@ -262,10 +259,7 @@ export const createAuthorizationKey = Effect.fn('mtproto.auth.authorize')(functi
       return yield* Effect.fail(fail('Telegram rejected the generated DH key.'));
     yield* Ref.set(
       retryId,
-      bytesToBigInt(authKey.hash.subarray(0, 8), {
-        littleEndian: true,
-        signed: true,
-      }),
+      bytesToBigInt(authKey.hash.subarray(0, 8), { littleEndian: true, signed: true }),
     );
     return yield* Effect.fail(
       createMtprotoError('protocol', 'Telegram requested another DH key.', {

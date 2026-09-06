@@ -149,11 +149,7 @@ function parseDefinition(line, kind) {
     const wireName = field[1];
     let rawType = field[2];
     const flag = rawType.match(/^(flags\d*)\.(\d+)\?(.+)$/);
-    const descriptor = {
-      name: lowerCamel(wireName),
-      wireName,
-      type: undefined,
-    };
+    const descriptor = { name: lowerCamel(wireName), wireName, type: undefined };
     if (flag) {
       descriptor.flag = { field: lowerCamel(flag[1]), bit: Number(flag[2]) };
       rawType = flag[3];

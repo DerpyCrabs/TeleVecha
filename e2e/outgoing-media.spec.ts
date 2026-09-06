@@ -4,9 +4,7 @@ import { fixtureStats, openReady, selectAlice } from './helpers';
 
 const imagePath = 'e2e/fixtures/outgoing-media.png';
 const wideImage = (
-  globalThis as unknown as {
-    Buffer: { from(value: string, encoding: 'base64'): Uint8Array };
-  }
+  globalThis as unknown as { Buffer: { from(value: string, encoding: 'base64'): Uint8Array } }
 ).Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAZAAAADIAQMAAAD82yWhAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURWZQ2P///6CHLScAAAABYktHRAH/Ai3eAAAAB3RJTUUH6ggXFDI3yFdMcQAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyNi0wOC0yM1QyMDo1MDo1NSswMDowMADZTO4AAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjYtMDgtMjNUMjA6NTA6NTUrMDA6MDBxhPRSAAAAKHRFWHRkYXRlOnRpbWVzdGFtcAAyMDI2LTA4LTIzVDIwOjUwOjU1KzAwOjAwJpHVjQAAACFJREFUaN7twTEBAAAAwqD1T20ND6AAAAAAAAAAAACAFwMn2AABnEBoEQAAAABJRU5ErkJggg==',
   'base64',
@@ -150,11 +148,9 @@ test('crops and rotates a staged image before sending', async ({ page }) => {
 });
 
 test('keeps a quarter-turned image fully inside the editor preview', async ({ page }) => {
-  await page.locator('input[type="file"]').setInputFiles({
-    name: 'wide.png',
-    mimeType: 'image/png',
-    buffer: wideImage as never,
-  });
+  await page
+    .locator('input[type="file"]')
+    .setInputFiles({ name: 'wide.png', mimeType: 'image/png', buffer: wideImage as never });
   await page.getByRole('button', { name: 'Edit image wide.png' }).click();
   const editor = page.getByRole('dialog', { name: 'Edit image' });
   await editor.getByRole('button', { name: 'Rotate right' }).click();

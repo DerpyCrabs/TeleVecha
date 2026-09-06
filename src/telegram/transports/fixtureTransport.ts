@@ -116,13 +116,7 @@ const messages = new Map<string, TelegramMessage[]>([
             }
           : {}),
         ...(id === 73
-          ? {
-              forwardedFrom: {
-                name: 'Release Channel',
-                peerId: peers[1]!.id,
-                messageId: 5,
-              },
-            }
+          ? { forwardedFrom: { name: 'Release Channel', peerId: peers[1]!.id, messageId: 5 } }
           : {}),
         ...(id === 74
           ? {
@@ -167,10 +161,7 @@ const messages = new Map<string, TelegramMessage[]>([
                     bordered: true,
                     rows: [
                       [
-                        {
-                          header: true,
-                          text: { kind: 'text' as const, text: 'Feature' },
-                        },
+                        { header: true, text: { kind: 'text' as const, text: 'Feature' } },
                         { text: { kind: 'text' as const, text: 'Status' } },
                       ],
                     ],
@@ -301,6 +292,12 @@ interface FixtureStats {
   readHistoryPeers: string[];
   getReadOutboxMaxId: number;
   downloadMedia: number;
+  downloadMediaRequests: Array<{
+    peerId: string;
+    messageId: number;
+    name: string | undefined;
+    preview: boolean;
+  }>;
   downloadMediaPreview: number;
   downloadMediaFull: number;
   downloadAvatar: number;
@@ -559,6 +556,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       readHistoryPeers: [],
       getReadOutboxMaxId: 0,
       downloadMedia: 0,
+      downloadMediaRequests: [],
       downloadMediaPreview: 0,
       downloadMediaFull: 0,
       downloadAvatar: 0,
@@ -853,12 +851,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
           text: 'Shared diagram',
           date: 1_700_002_000,
           outgoing: false,
-          media: {
-            kind: 'file',
-            name: 'shared-diagram.png',
-            mimeType: 'image/png',
-            size: 42_000,
-          },
+          media: { kind: 'file', name: 'shared-diagram.png', mimeType: 'image/png', size: 42_000 },
         };
         const sharedVideo: TelegramMessage = {
           id: 82,
@@ -1199,8 +1192,12 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
     function setPinnedMessage(peer: TelegramPeer, messageId: number, pinned: boolean) {
       return Effect.sync(() => {
         stats.setPinnedMessage += 1;
-        const message = messages.get(peer.id)?.find(({ id }) => id === messageId);
-        if (message) message.pinned = pinned;
+        messages.set(
+          peer.id,
+          (messages.get(peer.id) ?? []).map((message) =>
+            message.id === messageId ? { ...message, pinned } : message,
+          ),
+        );
         return {};
       });
     }
@@ -1336,6 +1333,12 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       options?: TelegramDownloadOptions,
     ) {
       stats.downloadMedia += 1;
+      stats.downloadMediaRequests.push({
+        peerId: message.peerId,
+        messageId: message.id,
+        name: message.media?.name ?? message.linkPreview?.media?.name,
+        preview: Boolean(options?.preview),
+      });
       if (options?.preview) stats.downloadMediaPreview += 1;
       else stats.downloadMediaFull += 1;
       if (!connected) {
@@ -1657,11 +1660,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         const configured = botCommandsByPeer.get(peer.id);
         if (configured) return configured.map((command) => ({ ...command }));
         const botId = peer.kind === 'user' ? peer.id : 'u:606';
-        const bot = {
-          botId,
-          botUsername: 'fixture_helper_bot',
-          botName: 'Fixture Helper Bot',
-        };
+        const bot = { botId, botUsername: 'fixture_helper_bot', botName: 'Fixture Helper Bot' };
         return [
           { command: 'help', description: 'Show available commands', ...bot },
           { command: 'status', description: 'Show fixture status', ...bot },
@@ -1735,12 +1734,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
             [
               { kind: 'callback', text: 'Refresh', data: [1] },
               { kind: 'url', text: 'Docs', url: 'https://example.com/bot' },
-              {
-                kind: 'url-auth',
-                text: 'Sign in',
-                url: 'https://example.com/auth',
-                buttonId: 4,
-              },
+              { kind: 'url-auth', text: 'Sign in', url: 'https://example.com/auth', buttonId: 4 },
               { kind: 'copy', text: 'Copy code', copyText: 'fixture-code' },
             ],
           ],
@@ -1748,24 +1742,10 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       };
       messages.set(peer.id, [...current, outgoing, replyMessage, inlineMessage]);
       yield* PubSub.publish(updateHub, {
-        updates: [
-          {
-            type: 'new-message',
-            pts: ++fixturePts,
-            ptsCount: 1,
-            message: replyMessage,
-          },
-        ],
+        updates: [{ type: 'new-message', pts: ++fixturePts, ptsCount: 1, message: replyMessage }],
       });
       yield* PubSub.publish(updateHub, {
-        updates: [
-          {
-            type: 'new-message',
-            pts: ++fixturePts,
-            ptsCount: 1,
-            message: inlineMessage,
-          },
-        ],
+        updates: [{ type: 'new-message', pts: ++fixturePts, ptsCount: 1, message: inlineMessage }],
       });
       return { message: outgoing };
     });
@@ -1794,10 +1774,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
           matchCodesFirst: extendedUrlAuth,
           isApp: extendedUrlAuth,
           ...(extendedUrlAuth
-            ? {
-                matchCodes: ['F7Q2', 'L9M4'],
-                verifiedAppName: 'Fixture Web App',
-              }
+            ? { matchCodes: ['F7Q2', 'L9M4'], verifiedAppName: 'Fixture Web App' }
             : {}),
         };
       });
@@ -1845,21 +1822,24 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
     function setReaction(peer: TelegramPeer, messageId: number, emoji?: string) {
       return Effect.sync(() => {
         stats.setReaction += 1;
-        const message = messages.get(peer.id)?.find(({ id }) => id === messageId);
-        if (message) {
-          message.reactions = emoji
-            ? [
-                {
-                  emoji,
-                  ...(emoji.startsWith('custom:')
-                    ? { customEmojiId: emoji.slice('custom:'.length) }
-                    : {}),
-                  count: 1,
-                  chosen: true,
-                },
-              ]
-            : [];
-        }
+        const reactions = emoji
+          ? [
+              {
+                emoji,
+                ...(emoji.startsWith('custom:')
+                  ? { customEmojiId: emoji.slice('custom:'.length) }
+                  : {}),
+                count: 1,
+                chosen: true,
+              },
+            ]
+          : [];
+        messages.set(
+          peer.id,
+          (messages.get(peer.id) ?? []).map((message) =>
+            message.id === messageId ? { ...message, reactions } : message,
+          ),
+        );
         return {};
       });
     }
@@ -1891,21 +1871,30 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       const message = messages.get(peer.id)?.find(({ id }) => id === messageId);
       if (!message)
         return yield* Effect.fail(createMtprotoError('transport', 'Fixture message was not found'));
-      message.text = text;
-      message.formats = formats?.filter(({ kind }) => kind !== 'textUrl');
-      message.links = formats
-        ?.filter(({ kind }) => kind === 'textUrl')
-        .map(({ offset, length, url }) => ({ offset, length, url }));
-      if (replacement) {
-        message.media = {
-          kind: fixtureMediaKind(replacement.file, replacement.sendAs),
-          name: replacement.file.name,
-          mimeType: replacement.file.type || 'application/octet-stream',
-          size: replacement.file.size,
-        };
-      }
-      message.editedAt = Math.floor(Date.now() / 1000);
-      return { message: { ...message } };
+      const edited: TelegramMessage = {
+        ...message,
+        text,
+        formats: formats?.filter(({ kind }) => kind !== 'textUrl'),
+        links: formats
+          ?.filter(({ kind }) => kind === 'textUrl')
+          .map(({ offset, length, url }) => ({ offset, length, url })),
+        ...(replacement
+          ? {
+              media: {
+                kind: fixtureMediaKind(replacement.file, replacement.sendAs),
+                name: replacement.file.name,
+                mimeType: replacement.file.type || 'application/octet-stream',
+                size: replacement.file.size,
+              },
+            }
+          : {}),
+        editedAt: Math.floor(Date.now() / 1000),
+      };
+      messages.set(
+        peer.id,
+        (messages.get(peer.id) ?? []).map((item) => (item.id === messageId ? edited : item)),
+      );
+      return { message: edited };
     });
     function fixtureMediaKind(file: File, sendAs: OutgoingAttachmentMode) {
       if (sendAs === 'file') return 'file';

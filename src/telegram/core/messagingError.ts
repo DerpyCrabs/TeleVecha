@@ -19,10 +19,7 @@ export const MessagingErrorPayload = Schema.Struct({
 
 export type MessagingErrorPayload = typeof MessagingErrorPayload.Type;
 
-type ErrorRecord = {
-  readonly code?: unknown;
-  readonly message?: unknown;
-};
+type ErrorRecord = { readonly code?: unknown; readonly message?: unknown };
 
 function errorRecord(error: unknown): ErrorRecord | undefined {
   return typeof error === 'object' && error !== null ? (error as ErrorRecord) : undefined;

@@ -48,9 +48,9 @@ test('typing a draft does not replace messages, media, or unchanged chat rows', 
   const imageSource = await image.getAttribute('src');
   const callsBefore = await fixtureStats(page);
 
-  await page.getByRole('textbox', { name: 'Message' }).pressSequentially('draft text', {
-    delay: 5,
-  });
+  await page
+    .getByRole('textbox', { name: 'Message' })
+    .pressSequentially('draft text', { delay: 5 });
 
   await expectMarked(bubble, 'bubble');
   await expectMarked(image, 'image');

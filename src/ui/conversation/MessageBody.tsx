@@ -1,10 +1,9 @@
-import { For, Show, createSignal } from 'solid-js';
-
+import type { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
-import { LinkPreview } from './LinkPreview';
+import { component, sequence, view } from 'effectweb';
 import { safeExternalUrl } from '../shared/safeUrl';
+import { LinkPreview } from './LinkPreview';
 import { RichMessageBody } from './RichMessageBody';
-
 interface TextPart {
   text: string;
   kind: 'text' | 'mention' | 'link';
@@ -19,26 +18,21 @@ interface TextPart {
     }
   >;
 }
-
 function textParts(message: ChatMessage): TextPart[] {
-  const ranges: Array<{
-    offset: number;
-    length: number;
-    kind: 'mention' | 'link';
-    url?: string;
-  }> = [
-    ...(message.mentions ?? []).map(({ offset, length }) => ({
-      offset,
-      length,
-      kind: 'mention' as const,
-    })),
-    ...(message.links ?? []).map(({ offset, length, url }) => ({
-      offset,
-      length,
-      kind: 'link' as const,
-      ...(url ? { url } : {}),
-    })),
-  ];
+  const ranges: Array<{ offset: number; length: number; kind: 'mention' | 'link'; url?: string }> =
+    [
+      ...(message.mentions ?? []).map(({ offset, length }) => ({
+        offset,
+        length,
+        kind: 'mention' as const,
+      })),
+      ...(message.links ?? []).map(({ offset, length, url }) => ({
+        offset,
+        length,
+        kind: 'link' as const,
+        ...(url ? { url } : {}),
+      })),
+    ];
   for (const match of message.body.matchAll(/https?:\/\/[^\s]+/gu)) {
     const offset = match.index;
     const text = match[0].replace(/[),.!?]+$/u, '');
@@ -47,7 +41,6 @@ function textParts(message: ChatMessage): TextPart[] {
     );
     if (!overlaps) ranges.push({ offset, length: text.length, kind: 'link', url: text });
   }
-
   const boundaries = new Set([0, message.body.length]);
   for (const range of [...ranges, ...(message.formats ?? [])]) {
     boundaries.add(Math.max(0, Math.min(message.body.length, range.offset)));
@@ -83,104 +76,115 @@ function textParts(message: ChatMessage): TextPart[] {
     ];
   });
 }
+type PartModel = { props: { part: TextPart }; spoilerRevealed: boolean; quoteExpanded: boolean };
+type PartMessage =
+  | { type: 'SpoilerRevealed'; value: boolean }
+  | { type: 'QuoteExpanded'; value: boolean };
+const Part = component<{ part: TextPart }, PartModel, PartMessage>({
+  init: (props) => ({ props, spoilerRevealed: false, quoteExpanded: false }),
 
-function Part(props: { part: TextPart }) {
-  const [spoilerRevealed, setSpoilerRevealed] = createSignal(false);
-  const [quoteExpanded, setQuoteExpanded] = createSignal(false);
-  const isSpoiler = () => props.part.formats.has('spoiler');
-  const isExpandableQuote = () => props.part.formats.has('expandableBlockquote');
-  const activateHidden = (event: MouseEvent | KeyboardEvent) => {
-    if (isSpoiler() && !spoilerRevealed()) {
+  update: (model, message) => {
+    switch (message.type) {
+      case 'SpoilerRevealed':
+        return { model: { ...model, spoilerRevealed: message.value } };
+      case 'QuoteExpanded':
+        return { model: { ...model, quoteExpanded: message.value } };
+    }
+  },
+  view: view((model, send) => {
+    const props = model.props;
+    const isSpoiler = () => props.part.formats.has('spoiler');
+    const isExpandableQuote = () => props.part.formats.has('expandableBlockquote');
+    const activateHidden = (event: MouseEvent | KeyboardEvent) => {
+      if (isSpoiler() && !model.spoilerRevealed) {
+        event.preventDefault();
+        event.stopPropagation();
+        send({ type: 'SpoilerRevealed', value: true });
+        return true;
+      }
+      if (!isExpandableQuote()) return false;
       event.preventDefault();
       event.stopPropagation();
-      setSpoilerRevealed(true);
+      send({ type: 'QuoteExpanded', value: ((expanded) => !expanded)(model.quoteExpanded) });
       return true;
-    }
-    if (!isExpandableQuote()) return false;
-    event.preventDefault();
-    event.stopPropagation();
-    setQuoteExpanded((expanded) => !expanded);
-    return true;
-  };
-  const formattedDateTitle = () => {
-    const timestamp = props.part.formatData.get('formattedDate')?.timestamp;
-    return timestamp
-      ? new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'short' }).format(
-          new Date(timestamp * 1000),
-        )
-      : undefined;
-  };
-  const content = (interactive: boolean) => (
-    <span
-      classList={{
-        mention: props.part.kind === 'mention',
-        bold: props.part.formats.has('bold'),
-        italic: props.part.formats.has('italic'),
-        underline: props.part.formats.has('underline'),
-        strike: props.part.formats.has('strike'),
-        code: props.part.formats.has('code'),
-        pre: props.part.formats.has('pre'),
-        blockquote: props.part.formats.has('blockquote'),
-        'expandable-blockquote': props.part.formats.has('expandableBlockquote'),
-        expanded: quoteExpanded(),
-        'custom-emoji': props.part.formats.has('customEmoji'),
-        'formatted-date': props.part.formats.has('formattedDate'),
-        'diff-insert': props.part.formats.has('diffInsert'),
-        'diff-replace': props.part.formats.has('diffReplace'),
-        'diff-delete': props.part.formats.has('diffDelete'),
-        spoiler: isSpoiler(),
-        revealed: spoilerRevealed(),
-      }}
-      role={interactive && (isSpoiler() || isExpandableQuote()) ? 'button' : undefined}
-      aria-expanded={
-        interactive
-          ? isSpoiler()
-            ? spoilerRevealed()
-            : isExpandableQuote()
-              ? quoteExpanded()
-              : undefined
-          : undefined
-      }
-      aria-label={
-        interactive && isSpoiler()
-          ? spoilerRevealed()
-            ? `Revealed spoiler: ${props.part.text}`
-            : 'Hidden spoiler. Activate to reveal.'
-          : interactive && isExpandableQuote()
-            ? quoteExpanded()
-              ? 'Collapse quote'
-              : 'Expand quote'
+    };
+    const formattedDateTitle = () => {
+      const timestamp = props.part.formatData.get('formattedDate')?.timestamp;
+      return timestamp
+        ? new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'short' }).format(
+            new Date(timestamp * 1000),
+          )
+        : undefined;
+    };
+    const content = (interactive: boolean) => (
+      <span
+        classList={{
+          mention: props.part.kind === 'mention',
+          bold: props.part.formats.has('bold'),
+          italic: props.part.formats.has('italic'),
+          underline: props.part.formats.has('underline'),
+          strike: props.part.formats.has('strike'),
+          code: props.part.formats.has('code'),
+          pre: props.part.formats.has('pre'),
+          blockquote: props.part.formats.has('blockquote'),
+          'expandable-blockquote': props.part.formats.has('expandableBlockquote'),
+          expanded: model.quoteExpanded,
+          'custom-emoji': props.part.formats.has('customEmoji'),
+          'formatted-date': props.part.formats.has('formattedDate'),
+          'diff-insert': props.part.formats.has('diffInsert'),
+          'diff-replace': props.part.formats.has('diffReplace'),
+          'diff-delete': props.part.formats.has('diffDelete'),
+          spoiler: isSpoiler(),
+          revealed: model.spoilerRevealed,
+        }}
+        role={interactive && (isSpoiler() || isExpandableQuote()) ? 'button' : undefined}
+        aria-expanded={
+          interactive
+            ? isSpoiler()
+              ? model.spoilerRevealed
+              : isExpandableQuote()
+                ? model.quoteExpanded
+                : undefined
             : undefined
-      }
-      title={formattedDateTitle() ?? props.part.formatData.get('diffReplace')?.oldText}
-      data-document-id={props.part.formatData.get('customEmoji')?.customEmojiId}
-      tabIndex={interactive && (isSpoiler() || isExpandableQuote()) ? 0 : undefined}
-      onClick={(event) => interactive && activateHidden(event)}
-      onKeyDown={(event) => {
-        if (interactive && (event.key === 'Enter' || event.key === ' ')) activateHidden(event);
-      }}
-    >
-      {props.part.text}
-    </span>
-  );
-  const href = () =>
-    safeExternalUrl(
-      props.part.url ??
-        (props.part.kind === 'mention' && /^@[\p{L}\p{N}_]+$/u.test(props.part.text)
-          ? `https://t.me/${props.part.text.slice(1)}`
-          : undefined),
+        }
+        aria-label={
+          interactive && isSpoiler()
+            ? model.spoilerRevealed
+              ? `Revealed spoiler: ${props.part.text}`
+              : 'Hidden spoiler. Activate to reveal.'
+            : interactive && isExpandableQuote()
+              ? model.quoteExpanded
+                ? 'Collapse quote'
+                : 'Expand quote'
+              : undefined
+        }
+        title={formattedDateTitle() ?? props.part.formatData.get('diffReplace')?.oldText}
+        data-document-id={props.part.formatData.get('customEmoji')?.customEmojiId}
+        tabIndex={interactive && (isSpoiler() || isExpandableQuote()) ? 0 : undefined}
+        onClick={(event) => interactive && activateHidden(event)}
+        onKeyDown={(event) => {
+          if (interactive && (event.key === 'Enter' || event.key === ' ')) activateHidden(event);
+        }}
+      >
+        {props.part.text}
+      </span>
     );
-  return (
-    <Show
-      when={(props.part.kind === 'link' || props.part.kind === 'mention') && href()}
-      fallback={content(true)}
-    >
+    const href = () =>
+      safeExternalUrl(
+        props.part.url ??
+          (props.part.kind === 'mention' && /^@[\p{L}\p{N}_]+$/u.test(props.part.text)
+            ? `https://t.me/${props.part.text.slice(1)}`
+            : undefined),
+      );
+    return (props.part.kind === 'link' || props.part.kind === 'mention') && href() ? (
       <a
         href={href()}
         target="_blank"
         rel="noopener noreferrer"
         aria-label={
-          isSpoiler() && !spoilerRevealed() ? 'Hidden spoiler link. Activate to reveal.' : undefined
+          isSpoiler() && !model.spoilerRevealed
+            ? 'Hidden spoiler link. Activate to reveal.'
+            : undefined
         }
         onClick={activateHidden}
         onKeyDown={(event) => {
@@ -189,36 +193,41 @@ function Part(props: { part: TextPart }) {
       >
         {content(false)}
       </a>
-    </Show>
-  );
-}
-
-export function MessageBody(props: {
-  message: ChatMessage;
-  loadPreviewPhoto?: (() => Promise<string>) | undefined;
-  loadPreviewMedia?: (() => Promise<string>) | undefined;
-}) {
+    ) : (
+      content(true)
+    );
+  }),
+});
+export const MessageBody = view<
+  {
+    message: ChatMessage;
+    loadPreviewPhoto?: (() => Effect.Effect<string, unknown>) | undefined;
+    loadPreviewMedia?: (() => Effect.Effect<string, unknown>) | undefined;
+  },
+  never
+>((props, _send) => {
   return (
     <>
-      <Show
-        when={props.message.richMessage}
-        fallback={
-          <p class="message-body">
-            <For each={textParts(props.message)}>{(part) => <Part part={part} />}</For>
-          </p>
-        }
-      >
-        {(rich) => <RichMessageBody blocks={rich().blocks} rtl={rich().rtl} />}
-      </Show>
-      <Show when={props.message.linkPreview}>
-        {(preview) => (
-          <LinkPreview
-            preview={preview()}
-            loadPhoto={props.loadPreviewPhoto}
-            loadMedia={props.loadPreviewMedia}
-          />
-        )}
-      </Show>
+      {props.message.richMessage ? (
+        ((rich) => <RichMessageBody blocks={rich.blocks} rtl={rich.rtl} />)(
+          props.message.richMessage!,
+        )
+      ) : (
+        <p class="message-body">
+          {sequence(textParts(props.message)).map((part) => (
+            <Part part={part} />
+          ))}
+        </p>
+      )}
+      {props.message.linkPreview
+        ? ((preview) => (
+            <LinkPreview
+              preview={preview}
+              loadPhoto={props.loadPreviewPhoto}
+              loadMedia={props.loadPreviewMedia}
+            />
+          ))(props.message.linkPreview!)
+        : null}
     </>
   );
-}
+});

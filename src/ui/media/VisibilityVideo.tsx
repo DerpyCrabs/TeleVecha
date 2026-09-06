@@ -1,45 +1,36 @@
-import { onCleanup, onMount } from 'solid-js';
+import { domMount, view } from 'effectweb';
 
-export function VisibilityVideo(props: { source: string; label?: string | undefined }) {
-  let video: HTMLVideoElement | undefined;
+const playback = domMount<HTMLVideoElement>((element) => {
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let visible = !('IntersectionObserver' in window);
+  const update = () => {
+    if (visible && !reducedMotion.matches) void element.play().catch(() => undefined);
+    else element.pause();
+  };
+  reducedMotion.addEventListener('change', update);
+  const observer =
+    'IntersectionObserver' in window
+      ? new IntersectionObserver(
+          ([entry]) => {
+            visible = Boolean(entry?.isIntersecting);
+            update();
+          },
+          { rootMargin: '80px' },
+        )
+      : undefined;
+  observer?.observe(element);
+  update();
+  return () => {
+    observer?.disconnect();
+    reducedMotion.removeEventListener('change', update);
+    element.pause();
+  };
+});
 
-  onMount(() => {
-    if (!video) return;
-    const element = video;
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let visible = !('IntersectionObserver' in window);
-    const updatePlayback = () => {
-      if (visible && !reducedMotion.matches) void element.play().catch(() => undefined);
-      else element.pause();
-    };
-    const handleMotionPreference = () => updatePlayback();
-    reducedMotion.addEventListener('change', handleMotionPreference);
-    if (!('IntersectionObserver' in window)) {
-      updatePlayback();
-      onCleanup(() => {
-        reducedMotion.removeEventListener('change', handleMotionPreference);
-        element.pause();
-      });
-      return;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        visible = Boolean(entry?.isIntersecting);
-        updatePlayback();
-      },
-      { rootMargin: '80px' },
-    );
-    observer.observe(element);
-    onCleanup(() => {
-      observer.disconnect();
-      reducedMotion.removeEventListener('change', handleMotionPreference);
-      element.pause();
-    });
-  });
-
-  return (
+export const VisibilityVideo = view<{ source: string; label?: string | undefined }, never>(
+  (props, _send) => (
     <video
-      ref={(element) => (video = element)}
+      use={playback}
       src={props.source}
       muted
       loop
@@ -47,5 +38,5 @@ export function VisibilityVideo(props: { source: string; label?: string | undefi
       preload="metadata"
       aria-label={props.label}
     />
-  );
-}
+  ),
+);

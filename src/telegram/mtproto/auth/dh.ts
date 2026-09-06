@@ -113,10 +113,7 @@ export const calculateDhValues = Effect.fn('mtproto.auth.calculateDhValues')(fun
 ) {
   const clientPublic = modPow(BigInt(generator), privateExponent, prime);
   yield* validateDhPublicValue(clientPublic, prime, 'g_b');
-  return {
-    clientPublic,
-    sharedSecret: modPow(serverPublic, privateExponent, prime),
-  };
+  return { clientPublic, sharedSecret: modPow(serverPublic, privateExponent, prime) };
 });
 
 function isGeneratorGood(prime: bigint, generator: number) {

@@ -1,5 +1,5 @@
 import { BrowserCrypto, BrowserSocket } from '@effect/platform-browser';
-import { Crypto, Effect, Exit, FiberMap, FiberSet, Layer } from 'effect';
+import { Crypto, Effect, Exit, Fiber, FiberSet, Layer } from 'effect';
 import * as Socket from 'effect/unstable/socket/Socket';
 
 import { createBrowserDebugReportRecorder } from '../../debug/tvbugReports';
@@ -24,19 +24,20 @@ import type { PendingSend, TelegramCredentials, TelegramTransport } from '../../
 export interface AppRuntime {
   engine: EffectMessagingClient;
   runEffect: UiEffectRunner;
-  runLatestEffect: UiLatestEffectRunner;
+  runTask: UiTaskRunner;
   runSharedEffect: UiSharedEffectRunner;
   debugReports?: DebugReportModule | undefined;
 }
 
 export type UiEffectRunner = <Value, Error>(effect: Effect.Effect<Value, Error>) => Promise<Value>;
-export type UiLatestEffectRunner = <Value, Error>(
-  key: string,
+/** Start work in the application scope and keep its completion as an Effect fiber. */
+export type UiTaskRunner = <Value, Error>(
   effect: Effect.Effect<Value, Error>,
-) => Promise<Value>;
+) => Fiber.Fiber<Value, Error>;
 export interface UiSharedEffectRunner {
   <Value, Error>(key: string, effect: Effect.Effect<Value, Error>): Promise<Value>;
   cancel(key: string): Promise<void>;
+  load<Value, Error>(key: string, effect: Effect.Effect<Value, Error>): Effect.Effect<Value, Error>;
 }
 
 export interface PreparedDebugReport {
@@ -107,7 +108,7 @@ const makeRuntime = Effect.fn('AppRuntime.make')(function* (
   fixtureMode: boolean,
   fixtureScenario: string | null,
   runEffect: UiEffectRunner,
-  runLatestEffect: UiLatestEffectRunner,
+  runTask: UiTaskRunner,
 ) {
   const crypto = yield* Crypto.Crypto;
   const webSocket = yield* Socket.WebSocketConstructor;
@@ -121,7 +122,11 @@ const makeRuntime = Effect.fn('AppRuntime.make')(function* (
   const runSharedEffect: UiSharedEffectRunner = Object.assign(
     <Value, Error>(key: string, effect: Effect.Effect<Value, Error>) =>
       runEffect(sharedEffects.load(key, () => effect)),
-    { cancel: (key: string) => runEffect(sharedEffects.forget(key)) },
+    {
+      cancel: (key: string) => runEffect(sharedEffects.forget(key)),
+      load: <Value, Error>(key: string, effect: Effect.Effect<Value, Error>) =>
+        sharedEffects.load(key, () => effect),
+    },
   );
   const pendingPayloads = new Map<string, PendingSend>();
   let controlled: ControlledRuntime | undefined;
@@ -188,10 +193,8 @@ const makeRuntime = Effect.fn('AppRuntime.make')(function* (
   const recorder = createBrowserDebugReportRecorder(store as IndexedDbCacheStore);
   yield* Effect.addFinalizer(() => Effect.sync(() => recorder.dispose()));
   recorder.attachEngine(engine);
-  const debugReports: DebugReportModule = {
-    ...recorder,
-  };
-  controlled = { engine, runEffect, runLatestEffect, runSharedEffect, debugReports };
+  const debugReports: DebugReportModule = { ...recorder };
+  controlled = { engine, runEffect, runTask, runSharedEffect, debugReports };
   if (import.meta.env.VITE_TELEVECHA_E2E === '1') {
     const root = globalThis as typeof globalThis & {
       __televechaRuntimes?: Map<string, ControlledRuntime>;
@@ -213,21 +216,26 @@ export const appRuntimeLayer = Layer.mergeAll(
 export const makeDefaultAppEnvironment = Effect.fn('AppEnvironment.make')(function* (
   search = window.location.search,
 ) {
-  const runEffect = yield* FiberSet.makeRuntimePromise();
-  const runLatestEffect = yield* FiberMap.makeRuntimePromise<never, string>();
+  const tasks = yield* FiberSet.make();
+  const runEffect = yield* FiberSet.runtimePromise(tasks)();
+  const runTask = yield* FiberSet.runtime(tasks)();
   const tvbugBundle = injectedTvBugBundle();
   if (tvbugBundle) {
     const sharedEffects = yield* makeResourceCache();
     const runSharedEffect: UiSharedEffectRunner = Object.assign(
       <Value, Error>(key: string, effect: Effect.Effect<Value, Error>) =>
         runEffect(sharedEffects.load(key, () => effect)),
-      { cancel: (key: string) => runEffect(sharedEffects.forget(key)) },
+      {
+        cancel: (key: string) => runEffect(sharedEffects.forget(key)),
+        load: <Value, Error>(key: string, effect: Effect.Effect<Value, Error>) =>
+          sharedEffects.load(key, () => effect),
+      },
     );
     return {
       runtime: {
         engine: createTvBugSnapshotClient(tvbugBundle),
         runEffect,
-        runLatestEffect,
+        runTask,
         runSharedEffect,
       },
       tvbug: true,
@@ -237,7 +245,7 @@ export const makeDefaultAppEnvironment = Effect.fn('AppEnvironment.make')(functi
   const credentials = fixtureMode ? { apiId: 1, apiHash: 'fixture' } : environmentCredentials();
   const fixtureScenario = new URLSearchParams(search).get('scenario');
   return {
-    runtime: yield* makeRuntime(fixtureMode, fixtureScenario, runEffect, runLatestEffect),
+    runtime: yield* makeRuntime(fixtureMode, fixtureScenario, runEffect, runTask),
     credentials,
     configurationError: credentials
       ? undefined

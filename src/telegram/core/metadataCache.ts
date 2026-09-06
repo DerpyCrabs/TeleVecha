@@ -81,10 +81,7 @@ const stickerForStorage = (sticker: TelegramSticker) => ({
 
 const wallpaperFromStorage = (wallpaper: typeof Wallpaper.Type): TelegramWallpaper => ({
   ...wallpaper,
-  settings: {
-    ...wallpaper.settings,
-    backgroundColors: [...wallpaper.settings.backgroundColors],
-  },
+  settings: { ...wallpaper.settings, backgroundColors: [...wallpaper.settings.backgroundColors] },
 });
 
 const chatAppearanceFromStorage = (

@@ -1,28 +1,44 @@
-import { createEffect, onCleanup, type Accessor } from 'solid-js';
 import { activateFocusScope } from '../shared/focusScope';
+import type { Read } from 'effectweb/session';
 
 /** Applies modal focus containment and restoration to responsive side drawers. */
 export function createDrawerFocusSession(options: {
-  root: Accessor<HTMLElement | undefined>;
-  conversationPane: Accessor<HTMLElement | undefined>;
-  mobileTrigger: Accessor<HTMLElement | undefined>;
-  mobileOpen: Accessor<boolean>;
-  detailsOpen: Accessor<boolean>;
-  viewportWidth: Accessor<number>;
+  root: Read<HTMLElement | undefined>;
+  conversationPane: Read<HTMLElement | undefined>;
+  mobileTrigger: Read<HTMLElement | undefined>;
+  mobileOpen: Read<boolean>;
+  detailsOpen: Read<boolean>;
+  viewportWidth: Read<number>;
   closeMobile: () => void;
   closeDetails: () => void;
 }) {
-  createEffect(() => {
+  let active: HTMLElement | undefined,
+    kind = '';
+  let release: (() => void) | undefined;
+  const refresh = () => {
     const sidebarModal = options.mobileOpen() && options.viewportWidth() <= 650;
     const detailsModal = options.detailsOpen() && options.viewportWidth() <= 1100;
-    if (!sidebarModal && !detailsModal) return;
-
+    if (!sidebarModal && !detailsModal) {
+      release?.();
+      release = undefined;
+      active = undefined;
+      kind = '';
+      return;
+    }
     const root = options.root();
     const sidebar = root?.querySelector<HTMLElement>('[data-testid="chat-sidebar"]');
     const details = root?.querySelector<HTMLElement>('.details-pane');
     const panel = sidebarModal ? sidebar : details;
+    const nextKind = sidebarModal ? 'sidebar' : 'details';
+    if (panel === active && kind === nextKind) return;
+    release?.();
+    release = undefined;
+    active = undefined;
+    kind = '';
     if (!panel) return;
-    const deactivate = activateFocusScope({
+    active = panel;
+    kind = nextKind;
+    release = activateFocusScope({
       root: panel,
       close: sidebarModal ? options.closeMobile : options.closeDetails,
       inert: [options.conversationPane(), detailsModal ? sidebar : undefined],
@@ -32,6 +48,13 @@ export function createDrawerFocusSession(options: {
           ? options.mobileTrigger()
           : document.querySelector<HTMLElement>('button[aria-label="Open details"]'),
     });
-    onCleanup(deactivate);
-  });
+  };
+  return {
+    refresh,
+    dispose: () => {
+      release?.();
+      release = undefined;
+      active = undefined;
+    },
+  };
 }

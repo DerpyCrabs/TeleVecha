@@ -47,9 +47,7 @@ const makeEngineTasks = Effect.gen(function* () {
   const inboxReadDelays = yield* FiberMap.make<string, void>();
   const retries = yield* FiberMap.make<EngineRetrySlot, void>();
   const operations = yield* FiberMap.make<string, void, unknown>();
-  const semaphores = yield* RcMap.make({
-    lookup: () => Semaphore.make(1),
-  });
+  const semaphores = yield* RcMap.make({ lookup: () => Semaphore.make(1) });
   const serial = {
     dialogState: yield* FiberSet.make<unknown, unknown>(),
     draftWrite: yield* FiberSet.make<unknown, unknown>(),

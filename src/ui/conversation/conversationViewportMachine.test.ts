@@ -49,10 +49,7 @@ describe('conversation viewport machine', () => {
   it('requests one older page only from idle history at the top', () => {
     for (const state of states) {
       for (const canLoad of [false, true]) {
-        const transition = transitionConversationViewport(state, {
-          type: 'top-reached',
-          canLoad,
-        });
+        const transition = transitionConversationViewport(state, { type: 'top-reached', canLoad });
         const shouldLoad = state.mode === 'history' && state.pagination === 'idle' && canLoad;
         expect(transition.effects.includes('request-older')).toBe(shouldLoad);
         expect(transition.state.pagination).toBe(shouldLoad ? 'loading' : state.pagination);
@@ -61,11 +58,7 @@ describe('conversation viewport machine', () => {
   });
 
   it('cannot request another page until the current request settles', () => {
-    let state: ConversationViewportState = {
-      mode: 'history',
-      phase: 'ready',
-      pagination: 'idle',
-    };
+    let state: ConversationViewportState = { mode: 'history', phase: 'ready', pagination: 'idle' };
     const first = transitionConversationViewport(state, { type: 'top-reached', canLoad: true });
     state = first.state;
     expect(first.effects).toEqual(['request-older']);

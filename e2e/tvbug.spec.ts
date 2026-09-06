@@ -112,11 +112,7 @@ test('exports a compact account-free snapshot and inspects it without Telegram',
   const { stdout } = await execFileAsync(
     process.execPath,
     ['scripts/inspect-tvbug.mjs', '--headless', downloadPath],
-    {
-      cwd: process.cwd(),
-      env: { ...process.env, TELEVECHA_TVBUG_PORT: '42875' },
-      timeout: 30_000,
-    },
+    { cwd: process.cwd(), env: { ...process.env, TELEVECHA_TVBUG_PORT: '42875' }, timeout: 30_000 },
   );
   expect(stdout).toContain('Snapshot status: ready.');
 });

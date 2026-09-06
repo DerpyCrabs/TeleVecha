@@ -199,10 +199,7 @@ test('coalesces a burst of resize events without rerendering chat or message nod
       );
       for (let index = 0; index < 200; index += 1) {
         window.dispatchEvent(
-          new PointerEvent('pointermove', {
-            bubbles: true,
-            clientX: startX + (index % 120),
-          }),
+          new PointerEvent('pointermove', { bubbles: true, clientX: startX + (index % 120) }),
         );
       }
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));

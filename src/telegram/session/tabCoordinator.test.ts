@@ -61,10 +61,7 @@ describe('tab coordinator', () => {
 
           expect(result).toMatchObject({
             _tag: 'Failure',
-            failure: {
-              _tag: 'MessagingError',
-              operation: 'refreshUpdates',
-            },
+            failure: { _tag: 'MessagingError', operation: 'refreshUpdates' },
           });
         }),
       ),

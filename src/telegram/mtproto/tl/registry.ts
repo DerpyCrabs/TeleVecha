@@ -102,10 +102,7 @@ export function createTlFactory<
     tlName: { value: descriptor.name, enumerable: true },
     kind: { value: descriptor.kind, enumerable: true },
     result: { value: descriptor.result, enumerable: true },
-    is: {
-      value: (value: unknown): value is Value => isTl(value, name),
-      enumerable: true,
-    },
+    is: { value: (value: unknown): value is Value => isTl(value, name), enumerable: true },
   });
   return Object.freeze(factory) as TlFactory<Value, Fields>;
 }

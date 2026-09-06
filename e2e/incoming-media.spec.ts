@@ -11,9 +11,7 @@ test('renders voice notes, rectangular video messages, service events, and album
 
   await page.evaluate(() => {
     const fixture = (
-      window as typeof window & {
-        __televechaFixture?: { emit(update: TransportUpdate): void };
-      }
+      window as typeof window & { __televechaFixture?: { emit(update: TransportUpdate): void } }
     ).__televechaFixture;
     if (!fixture) return;
     const peerId = 'u:101';
@@ -128,13 +126,7 @@ test('renders voice notes, rectangular video messages, service events, and album
         type: 'new-message',
         pts: 11 + index,
         ptsCount: 1,
-        message: {
-          ...message,
-          peerId,
-          senderId: peerId,
-          date: date + index,
-          outgoing: false,
-        },
+        message: { ...message, peerId, senderId: peerId, date: date + index, outgoing: false },
       }),
     );
   });
@@ -363,10 +355,7 @@ test('centers a forwarded header vertically above its media', async ({ page }) =
     const articleBox = article.getBoundingClientRect();
     const headerBox = header.getBoundingClientRect();
     const mediaBox = media.getBoundingClientRect();
-    return {
-      top: headerBox.top - articleBox.top,
-      bottom: mediaBox.top - headerBox.bottom,
-    };
+    return { top: headerBox.top - articleBox.top, bottom: mediaBox.top - headerBox.bottom };
   });
   expect(Math.abs(gaps.top - gaps.bottom)).toBeLessThan(0.5);
 });

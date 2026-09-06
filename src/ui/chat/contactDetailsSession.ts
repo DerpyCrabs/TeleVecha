@@ -1,17 +1,17 @@
-import { createUiPages } from '../reactivity/solid';
-import { createMemo, createSignal, onCleanup, type Accessor } from 'solid-js';
+import { available, pages } from 'effectweb';
 import { Effect } from 'effect';
-
+import { permissionsForDialog } from '../../telegram/core/chatPermissions';
+import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
   TelegramDialog,
   TelegramGroupMemberPage,
   TelegramPeer,
   TelegramResourceInvalidation,
 } from '../../telegram/types';
-import type { MessagingError } from '../../telegram/core/messagingError';
-import { permissionsForDialog } from '../../telegram/core/chatPermissions';
-import { subscribeAtUi, type UiEffectRunner } from '../app/appRuntime';
-
+import type { UiEffectRunner } from '../app/appRuntime';
+import { subscribeAtUi } from '../app/appRuntime';
+import type { Read, SessionContext } from 'effectweb/session';
+import { lifetime } from 'effectweb/session';
 interface ContactDetailsSource {
   getGroupMembers(
     peer: TelegramPeer,
@@ -31,59 +31,67 @@ interface ContactDetailsSource {
 }
 
 /** Owns contact actions and the group-member catalog shown by the details pane. */
-export function createContactDetailsSession(options: {
-  source: ContactDetailsSource;
-  runEffect: UiEffectRunner;
-  dialog: Accessor<TelegramDialog | undefined>;
-  detailsOpen: Accessor<boolean>;
-}) {
-  const [memberRevision, setMemberRevision] = createSignal(0);
-  onCleanup(
+export function createContactDetailsSession(
+  options: {
+    source: ContactDetailsSource;
+    runEffect: UiEffectRunner;
+    dialog: Read<TelegramDialog | undefined>;
+    detailsOpen: Read<boolean>;
+  },
+  context: SessionContext,
+) {
+  const scope = lifetime();
+  let memberRevision = 0;
+  type Input = { peer: TelegramPeer | undefined; revision: number };
+  const members = pages<Input, TelegramGroupMemberPage['members'][number], number>({
+    key: ({ peer, revision }) =>
+      peer ? `${peer.id}:${peer.accessHash ?? ''}:${revision}` : undefined,
+    itemKey: (member) => member.peer.id,
+    load: ({ peer }, offset) =>
+      options.source
+        .getGroupMembers(peer!, 50, offset)
+        .pipe(
+          Effect.map((page) => ({
+            items: page.members,
+            totalCount: page.totalCount,
+            next: page.hasMore
+              ? (page.nextOffset ?? (offset ?? 0) + page.members.length)
+              : undefined,
+          })),
+        ),
+  }).create({ peer: undefined, revision: 0 });
+  scope.add(members.dispose);
+  scope.add(members.subscribe(context.changed));
+  context.cache.registry.get(context.cache.generation);
+  scope.add(
+    context.cache.registry.subscribe(context.cache.generation, () => {
+      members.receive({ peer: undefined, revision: memberRevision });
+    }),
+  );
+  const userDetails = () => options.dialog()?.userDetails;
+  const refresh = () => {
+    const dialog = options.dialog();
+    const peer =
+      options.detailsOpen() &&
+      dialog &&
+      dialog.peer.kind !== 'user' &&
+      permissionsForDialog(dialog).canViewMembers
+        ? dialog.peer
+        : undefined;
+    members.receive({ peer, revision: memberRevision });
+  };
+  scope.add(
     subscribeAtUi(
       options.runEffect,
       options.source.subscribeResources((event) => {
         if (event.kind === 'group-members' && event.peerId === options.dialog()?.peer.id) {
-          setMemberRevision((revision) => revision + 1);
+          memberRevision++;
+          refresh();
         }
       }),
     ),
   );
-  const userDetails = () => options.dialog()?.userDetails;
-  const memberRequest = createMemo(() => {
-    const revision = memberRevision();
-    const dialog = options.dialog();
-    if (
-      !options.detailsOpen() ||
-      !dialog ||
-      dialog.peer.kind === 'user' ||
-      !permissionsForDialog(dialog).canViewMembers
-    )
-      return false;
-    return {
-      key: `${dialog.peer.id}:${dialog.peer.accessHash ?? ''}:${revision}`,
-      peer: dialog.peer,
-    };
-  });
-  const pages = createUiPages(
-    memberRequest,
-    (request, offset: number | undefined) =>
-      options.source.getGroupMembers(request.peer, 50, offset).pipe(
-        Effect.map((page) => ({
-          items: page.members,
-          totalCount: page.totalCount,
-          next: page.hasMore ? (page.nextOffset ?? (offset ?? 0) + page.members.length) : undefined,
-        })),
-      ),
-    { key: (request) => request.key, itemKey: (member) => member.peer.id },
-  );
-  const members = pages.items;
-  const membersLoading = pages.loading;
-  const membersTotal = () =>
-    pages.totalCount() ?? options.dialog()?.permissions?.memberCount ?? members().length;
-  const membersHasMore = pages.hasMore;
-  const loadingMoreMembers = pages.loadingMore;
-  const loadMoreMembers = async () => pages.more();
-
+  const loadMoreMembers = () => members.send({ type: 'More' });
   const share = async () => {
     const dialog = options.dialog();
     if (!dialog) return;
@@ -96,7 +104,6 @@ export function createContactDetailsSession(options: {
     }
     await navigator.clipboard.writeText(text);
   };
-
   const edit = () => {
     const dialog = options.dialog();
     const details = userDetails();
@@ -111,7 +118,6 @@ export function createContactDetailsSession(options: {
       .runEffect(options.source.updateContact(dialog.peer, firstName, lastName, phone))
       .catch(() => undefined);
   };
-
   const add = () => {
     const dialog = options.dialog();
     const details = userDetails();
@@ -126,27 +132,33 @@ export function createContactDetailsSession(options: {
       .runEffect(options.source.updateContact(dialog.peer, firstName, lastName, phone))
       .catch(() => undefined);
   };
-
   const remove = () => {
     const dialog = options.dialog();
     if (!dialog || dialog.peer.kind !== 'user') return;
     if (!window.confirm(`Delete ${dialog.title} from your contacts?`)) return;
     void options.runEffect(options.source.deleteContact(dialog.peer)).catch(() => undefined);
   };
-
+  const actions = { loadMoreMembers, share, add, edit, remove };
   return {
-    userDetails,
-    members,
-    membersLoading,
-    membersTotal,
-    membersHasMore,
-    membersLoadingMore: loadingMoreMembers,
-    loadMoreMembers,
-    share,
-    add,
-    edit,
-    remove,
+    ...actions,
+    refresh,
+    dispose: () => scope.dispose(),
+    snapshot: () => {
+      const result = members.model().result;
+      const page = available(result);
+      return {
+        ...actions,
+        userDetails: userDetails(),
+        members: page?.items ?? [],
+        membersLoading: result.waiting && !page,
+        membersTotal:
+          page?.totalCount ?? options.dialog()?.permissions?.memberCount ?? page?.items.length ?? 0,
+        membersHasMore: page?.next !== undefined,
+        membersLoadingMore: result.waiting && Boolean(page),
+      };
+    },
   };
 }
-
-export type ContactDetailsSession = ReturnType<typeof createContactDetailsSession>;
+export type ContactDetailsSession = ReturnType<
+  ReturnType<typeof createContactDetailsSession>['snapshot']
+>;

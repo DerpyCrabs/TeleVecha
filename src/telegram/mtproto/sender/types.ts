@@ -49,10 +49,7 @@ export interface MtprotoSenderOptions {
   readonly requestTimeoutMs?: number | undefined;
   readonly receiveQueueCapacity?: number | undefined;
   readonly reconnect?:
-    | {
-        readonly retries?: number | undefined;
-        readonly delayMs?: number | undefined;
-      }
+    | { readonly retries?: number | undefined; readonly delayMs?: number | undefined }
     | undefined;
 }
 

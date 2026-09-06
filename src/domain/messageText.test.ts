@@ -33,13 +33,7 @@ describe('message text for the clipboard', () => {
         {
           kind: 'list',
           ordered: false,
-          items: [
-            {
-              checkbox: true,
-              checked: true,
-              text: { kind: 'text', text: 'Finished task' },
-            },
-          ],
+          items: [{ checkbox: true, checked: true, text: { kind: 'text', text: 'Finished task' } }],
         },
         {
           kind: 'quote',
@@ -71,11 +65,7 @@ describe('message text for the clipboard', () => {
           kind: 'details',
           title: { kind: 'text', text: 'More' },
           blocks: [
-            {
-              kind: 'text',
-              role: 'paragraph',
-              text: { kind: 'text', text: 'Nested content' },
-            },
+            { kind: 'text', role: 'paragraph', text: { kind: 'text', text: 'Nested content' } },
           ],
         },
       ],

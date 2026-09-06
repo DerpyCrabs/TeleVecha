@@ -249,17 +249,8 @@ export interface TvBugTextV2 {
 export interface TvBugManifestV2 {
   format: typeof TVBUG_FORMAT;
   version: typeof TVBUG_VERSION;
-  producer: {
-    appVersion: string;
-    commit?: string | undefined;
-    telegramLayer?: number | undefined;
-  };
-  capture: {
-    durationMs: number;
-    complete: boolean;
-    truncated: boolean;
-    tabCount: number;
-  };
+  producer: { appVersion: string; commit?: string | undefined; telegramLayer?: number | undefined };
+  capture: { durationMs: number; complete: boolean; truncated: boolean; tabCount: number };
   environment?: {
     browser?: string | undefined;
     browserMajor?: number | undefined;
@@ -372,11 +363,7 @@ export type TvBugRichTextV2 =
   | { kind: 'date'; child: TvBugRichTextV2; timestamp: number };
 
 export type TvBugRichBlockV2 =
-  | {
-      kind: 'text';
-      role: Extract<RichBlock, { kind: 'text' }>['role'];
-      text: TvBugRichTextV2;
-    }
+  | { kind: 'text'; role: Extract<RichBlock, { kind: 'text' }>['role']; text: TvBugRichTextV2 }
   | { kind: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6; text: TvBugRichTextV2 }
   | { kind: 'pre'; text: TvBugRichTextV2; language?: TvBugTextV2 | undefined }
   | { kind: 'divider' }
@@ -430,20 +417,14 @@ export type TvBugRichBlockV2 =
       mediaKind: 'photo' | 'video' | 'audio' | 'embed' | 'map';
       id?: string | undefined;
       url?: string | undefined;
-      caption?: {
-        text: TvBugRichTextV2;
-        credit?: TvBugRichTextV2 | undefined;
-      };
+      caption?: { text: TvBugRichTextV2; credit?: TvBugRichTextV2 | undefined };
       spoiler?: boolean | undefined;
     }
   | {
       kind: 'group';
       mode: 'cover' | 'collage' | 'slideshow';
       blocks: TvBugRichBlockV2[];
-      caption?: {
-        text: TvBugRichTextV2;
-        credit?: TvBugRichTextV2 | undefined;
-      };
+      caption?: { text: TvBugRichTextV2; credit?: TvBugRichTextV2 | undefined };
     }
   | { kind: 'author'; author: TvBugRichTextV2; publishedAt: number };
 
@@ -2344,9 +2325,7 @@ class StateSanitizer {
           items: block.items.map((item) => ({
             ...(item.text ? { text: this.sanitizeRichText(item.text, depth + 1) } : {}),
             ...(item.blocks
-              ? {
-                  blocks: item.blocks.map((child) => this.sanitizeRichBlock(child, depth + 1)),
-                }
+              ? { blocks: item.blocks.map((child) => this.sanitizeRichBlock(child, depth + 1)) }
               : {}),
             ...(item.checked !== undefined ? { checked: item.checked } : {}),
             ...(item.checkbox !== undefined ? { checkbox: item.checkbox } : {}),

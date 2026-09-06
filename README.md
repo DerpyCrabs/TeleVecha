@@ -1,12 +1,12 @@
 # TeleVecha
 
-A local-first Telegram web client built with SolidJS, Vite+, Tailwind CSS, and a project-owned browser MTProto implementation.
+A local-first Telegram web client built with [EffectWeb](https://github.com/DerpyCrabs/EffectWeb), Effect, Vite+, Tailwind CSS, and a project-owned browser MTProto implementation.
 
 The current client handles production-account login and logout, complete main and archived dialog lists, Telegram-wide peer search, paginated history and message search, focus-aware read receipts, live updates, formatted text, replies, reactions, forwarding, pinning, bot controls, multi-file/photo uploads with progress, media albums, and Telegram sticker formats. IndexedDB stores a bounded disposable cache, local-only drafts, the Telegram session, and an account-bound durable send queue. Offline caching covers Telegram and user data, including drafts and queued sends. HTML, CSS, and other application assets are not cached by a service worker. The client publishes the total unread count through the browser application-badge API when it is available.
 
 ## Run it
 
-TeleVecha requires Node.js 22.12 or newer.
+TeleVecha requires Node.js 22.14+. EffectWeb and its prebuilt native compiler install from npm; Rust and a sibling framework checkout are not required.
 
 ```sh
 npm install
@@ -92,8 +92,6 @@ TeleVecha generates tagged TypeScript objects and binary codec descriptors from 
 
 ## Module design
 
-This branch experiments with Effect atoms and a shared Solid adapter across the app. See [the experiment notes](docs/effect-solid-experiment.md) for ownership rules, resource reads, validation, and the work that still requires array scans.
-
 `src/telegram/core/engine.ts` composes the account runtime. It does not persist a selected conversation; `TabCoordinator` combines the account snapshot with a separate conversation projection for each tab, and the tab URL owns navigation persistence. UI code enters a selected chat through `openConversation`, which returns a handle that binds peer identity once. Drafts, sends, and explicit-peer mutations remain addressed to that peer even when history is loading or another tab changes its view. Only pagination and message-jump operations require that tab's projection to remain selected.
 
 The engine's external dependencies live at two seams:
@@ -109,9 +107,9 @@ Snapshot streams retain the newest complete value. Delta streams apply backpress
 
 Functional modules own peer histories, message revisions, dialog reconciliation, persisted peer metadata, coalesced read work, resource requests, version tokens, durable per-peer outbox ordering, tab presence, and request replay without exposing their mutable storage. They stay as plain functions where an Effect service would add ceremony without improving lifetime or failure semantics. In particular, Effect `LayerMap` is reserved for keyed scoped resources and Effect `Cache` for stable lookup functions with TTL or capacity; the app's race-versioned, caller-supplied loaders need different semantics and remain small dedicated modules.
 
-UI workflow modules under `src/ui` own composer and expression state, bot and reply-keyboard behavior, contact details, conversation headers, responsive drawers, viewport layout, and global or chat-specific appearance. `App.tsx` composes those modules and renders the application shell. Solid signals hold immediate interaction state; the Effect runtime does not sit in the keystroke or render path. Tests exercise module interfaces and persistence seams rather than private engine maps or timers.
+UI workflow modules under `src/ui` own composer and expression state, bot and reply-keyboard behavior, contact details, conversation headers, responsive drawers, viewport layout, and appearance. `appController.ts` coordinates those modules and publishes immutable snapshots; `AppView.tsx` renders the application shell through the native JSX compiler.
 
-Solid state follows ownership. Signals hold writable interaction state, memos and derived accessors calculate values, and resources own reactive async reads. Effects are reserved for browser side effects, subscriptions, cleanup, and explicit invalidation workflows; `on` names the intended dependency when the effect also reads incidental state.
+UI programs use typed messages, immutable updates, and scoped Effect commands. The compiler supplies cached derivations and direct DOM updates, while collections declare domain identity. Views read plain immutable values; Promise libraries are adapted through `fromPromise` and run through an owner. DOM bindings manage focus traps, observers, video, scrolling, and cleanup.
 
 ## License
 

@@ -46,6 +46,11 @@ const groups: Array<[string, string]> = [
   ],
 ];
 
-export const emojiEntries: EmojiEntry[] = groups.flatMap(([values, keywords]) =>
-  values.split(' ').map((value) => ({ value, keywords })),
-);
+const keywordsByEmoji = new Map<string, string>();
+for (const [values, keywords] of groups)
+  for (const value of values.split(' '))
+    keywordsByEmoji.set(value, [keywordsByEmoji.get(value), keywords].filter(Boolean).join(' '));
+export const emojiEntries: EmojiEntry[] = [...keywordsByEmoji].map(([value, keywords]) => ({
+  value,
+  keywords,
+}));

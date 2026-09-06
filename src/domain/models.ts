@@ -52,12 +52,7 @@ export interface ChatMessage {
         color?: string | undefined;
       }
     | undefined;
-  service?:
-    | {
-        kind: string;
-        text: string;
-      }
-    | undefined;
+  service?: { kind: string; text: string } | undefined;
   botKeyboard?:
     | {
         kind: 'inline' | 'reply';
@@ -94,12 +89,7 @@ export interface ChatMessage {
   replyMediaPeerId?: string | undefined;
   reaction?: string;
   reactions?:
-    | Array<{
-        emoji: string;
-        customEmojiId?: string | undefined;
-        count: number;
-        chosen: boolean;
-      }>
+    | Array<{ emoji: string; customEmojiId?: string | undefined; count: number; chosen: boolean }>
     | undefined;
   mentions?: Array<{ offset: number; length: number; userId?: string | undefined }> | undefined;
   links?: Array<{ offset: number; length: number; url?: string | undefined }> | undefined;

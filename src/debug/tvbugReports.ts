@@ -87,9 +87,7 @@ function appendTrace(state: RecorderState, event: StoredTraceEvent['event']): Re
  */
 export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
   const startedAt = performance.now();
-  const sanitizer = createTvBugSanitizer({
-    sourceEpochMs: Math.floor(Date.now() / 1_000) * 1_000,
-  });
+  const sanitizer = createTvBugSanitizer({ sourceEpochMs: Math.floor(Date.now() / 1_000) * 1_000 });
   let recorder: RecorderState = {
     bootstrapActivePeerId: currentUrlPeerId(),
     diagnosticCount: 0,
@@ -367,10 +365,7 @@ function browserDetails(userAgent: string) {
         : /Safari\//u.test(userAgent)
           ? 'Safari'
           : 'Unknown';
-  return {
-    browser,
-    ...(match ? { browserMajor: Number(match[1]) } : {}),
-  };
+  return { browser, ...(match ? { browserMajor: Number(match[1]) } : {}) };
 }
 
 function wallpaperKind(value: string): 'none' | 'solid' | 'gradient' | 'pattern' | 'image' {

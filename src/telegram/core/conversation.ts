@@ -75,10 +75,9 @@ export interface ConversationHost {
   ): Operation<void>;
   toggleReaction(peer: TelegramPeer, messageId: number, emoji: string): Operation<void>;
   deleteMessage(peer: TelegramPeer, messageId: number, revoke: boolean): Operation<unknown>;
-  openMessageInConversationView(message: TelegramMessage): Operation<{
-    conversation: ConversationViewSnapshot;
-    found: boolean;
-  }>;
+  openMessageInConversationView(
+    message: TelegramMessage,
+  ): Operation<{ conversation: ConversationViewSnapshot; found: boolean }>;
   loadOlderConversationView(peerId: string): Operation<ConversationViewSnapshot>;
   retryConversationView(peerId: string): Operation<ConversationViewSnapshot>;
   loadHistoryGapConversationView(

@@ -403,11 +403,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         current = mapCursor(result.intermediateState);
         continue;
       }
-      return {
-        type: 'complete',
-        cursor: mapCursor(result.state),
-        updates,
-      };
+      return { type: 'complete', cursor: mapCursor(result.state), updates };
     }
   });
   const getChannelDifference = Effect.fn('WebTelegramTransport.getChannelDifference')(function* (
@@ -626,9 +622,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   });
   const getDialog = Effect.fn('WebTelegramTransport.getDialog')(function* (peer: TelegramPeer) {
     const result = yield* (yield* getClient).invoke(
-      Api.messages.GetPeerDialogs({
-        peers: [Api.InputDialogPeer({ peer: toInputPeer(peer) })],
-      }),
+      Api.messages.GetPeerDialogs({ peers: [Api.InputDialogPeer({ peer: toInputPeer(peer) })] }),
     );
     rememberEntities(result.users, result.chats);
     const messages = new Map<string, TelegramMessage>();
@@ -728,18 +722,12 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   ): Effect.fn.Return<TransportMutationResult, MtprotoError> {
     if (peer.kind === 'channel') {
       yield* (yield* getClient).invoke(
-        Api.channels.ReadHistory({
-          channel: inputChannel(peer),
-          maxId: maxMessageId,
-        }),
+        Api.channels.ReadHistory({ channel: inputChannel(peer), maxId: maxMessageId }),
       );
       return {};
     }
     const result = yield* (yield* getClient).invoke(
-      Api.messages.ReadHistory({
-        peer: toInputPeer(peer),
-        maxId: maxMessageId,
-      }),
+      Api.messages.ReadHistory({ peer: toInputPeer(peer), maxId: maxMessageId }),
     );
     return {
       updateBatches: [
@@ -762,9 +750,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     peer: TelegramPeer,
   ) {
     const result = yield* (yield* getClient).invoke(
-      Api.messages.GetPeerDialogs({
-        peers: [Api.InputDialogPeer({ peer: toInputPeer(peer) })],
-      }),
+      Api.messages.GetPeerDialogs({ peers: [Api.InputDialogPeer({ peer: toInputPeer(peer) })] }),
     );
     const dialog = result.dialogs.find(
       (candidate): candidate is Tl.Dialog =>
@@ -777,10 +763,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   ) {
     const filters = sharedMediaFilters();
     const counters = yield* (yield* getClient).invoke(
-      Api.messages.GetSearchCounters({
-        peer: toInputPeer(peer),
-        filters: Object.values(filters),
-      }),
+      Api.messages.GetSearchCounters({ peer: toInputPeer(peer), filters: Object.values(filters) }),
     );
     return {
       photos: counters[0]?.count ?? 0,
@@ -946,12 +929,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     if (peer.kind !== 'user')
       return yield* Effect.fail(createMtprotoError('protocol', 'Only users can be contacts.'));
     yield* (yield* getClient).invoke(
-      Api.contacts.AddContact({
-        id: inputUser(peer),
-        firstName,
-        lastName,
-        phone,
-      }),
+      Api.contacts.AddContact({ id: inputUser(peer), firstName, lastName, phone }),
     );
   });
   const deleteContact = Effect.fn('WebTelegramTransport.deleteContact')(function* (
@@ -1097,11 +1075,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         const updateBatches: TransportUpdateBatch[] = [];
         for (let attempt = 0; attempt < 100; attempt += 1) {
           const history = yield* (yield* getClient).invoke(
-            Api.messages.DeleteHistory({
-              revoke: true,
-              peer: toInputPeer(peer),
-              maxId: 0,
-            }),
+            Api.messages.DeleteHistory({ revoke: true, peer: toInputPeer(peer), maxId: 0 }),
           );
           updateBatches.push({
             updates: [{ type: 'pts-advanced', pts: history.pts, ptsCount: history.ptsCount }],
@@ -1121,11 +1095,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       const updateBatches: TransportUpdateBatch[] = [];
       for (let attempt = 0; attempt < 100; attempt += 1) {
         const history = yield* (yield* getClient).invoke(
-          Api.messages.DeleteHistory({
-            justClear: true,
-            peer: toInputPeer(peer),
-            maxId: 0,
-          }),
+          Api.messages.DeleteHistory({ justClear: true, peer: toInputPeer(peer), maxId: 0 }),
         );
         updateBatches.push({
           updates: [{ type: 'pts-advanced', pts: history.pts, ptsCount: history.ptsCount }],
@@ -1222,10 +1192,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       .find((candidate): candidate is TelegramMessage => Boolean(candidate));
     if (message) {
       const sentMessage = { ...message, randomId };
-      return {
-        message: sentMessage,
-        updateBatches: toUpdateBatches(result, [sentMessage]),
-      };
+      return { message: sentMessage, updateBatches: toUpdateBatches(result, [sentMessage]) };
     }
     return yield* Effect.fail(
       createMtprotoError('protocol', 'Telegram accepted the send but returned no message.'),
@@ -1270,10 +1237,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         createMtprotoError('protocol', 'Telegram accepted the upload but returned no message.'),
       );
     const sentMessage = { ...message, randomId: options.randomId };
-    return {
-      message: sentMessage,
-      updateBatches: toUpdateBatches(result, [sentMessage]),
-    };
+    return { message: sentMessage, updateBatches: toUpdateBatches(result, [sentMessage]) };
   });
   const sendAlbum = Effect.fn('WebTelegramTransport.sendAlbum')(function* (
     peer: TelegramPeer,
@@ -1334,10 +1298,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       ...message,
       randomId: attachments[index]!.randomId,
     }));
-    return {
-      messages: sentMessages,
-      updateBatches: toUpdateBatches(result, sentMessages),
-    };
+    return { messages: sentMessages, updateBatches: toUpdateBatches(result, sentMessages) };
   });
   const downloadMedia = Effect.fn('WebTelegramTransport.downloadMedia')(function* (
     message: TelegramMessage,
@@ -1490,9 +1451,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return yield* Effect.fail(
         createMtprotoError('protocol', 'Reload the Telegram backgrounds and try again.'),
       );
-    const bytes = yield* (yield* getClient).downloadMedia(document, {
-      workers: 1,
-    });
+    const bytes = yield* (yield* getClient).downloadMedia(document, { workers: 1 });
     if (!bytes)
       return yield* Effect.fail(
         createMtprotoError('protocol', 'Telegram returned no background image bytes.'),
@@ -1627,9 +1586,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
           level: 'warn',
           area: 'transport',
           message: `Could not load the installed sticker pack ${set?.title ?? set?.id ?? 'unknown'}.`,
-          details: {
-            error: loaded.failure.message,
-          },
+          details: { error: loaded.failure.message },
         });
       }
     }
@@ -1717,9 +1674,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return yield* Effect.fail(
         createMtprotoError('protocol', 'Telegram returned no custom emoji document.'),
       );
-    const bytes = yield* (yield* getClient).downloadMedia(document, {
-      workers: 1,
-    });
+    const bytes = yield* (yield* getClient).downloadMedia(document, { workers: 1 });
     if (!bytes)
       return yield* Effect.fail(
         createMtprotoError('protocol', 'Telegram returned no custom emoji bytes.'),
@@ -1787,11 +1742,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         data: new Uint8Array(data),
       }),
     );
-    return {
-      message: result.message,
-      alert: Boolean(result.alert),
-      url: result.url,
-    };
+    return { message: result.message, alert: Boolean(result.alert), url: result.url };
   });
   const requestUrlAuth = Effect.fn('WebTelegramTransport.requestUrlAuth')(function* (
     peer: TelegramPeer,
@@ -1799,11 +1750,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     buttonId: number,
   ) {
     const result = yield* (yield* getClient).invoke(
-      Api.messages.RequestUrlAuth({
-        peer: toInputPeer(peer),
-        msgId: messageId,
-        buttonId,
-      }),
+      Api.messages.RequestUrlAuth({ peer: toInputPeer(peer), msgId: messageId, buttonId }),
     );
     return mapUrlAuthResult(result);
   });
@@ -1868,10 +1815,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         createMtprotoError('protocol', 'Telegram accepted the sticker but returned no message.'),
       );
     const sentMessage = { ...message, randomId };
-    return {
-      message: sentMessage,
-      updateBatches: toUpdateBatches(result, [sentMessage]),
-    };
+    return { message: sentMessage, updateBatches: toUpdateBatches(result, [sentMessage]) };
   });
   const setReaction = Effect.fn('WebTelegramTransport.setReaction')(function* (
     peer: TelegramPeer,
@@ -2085,11 +2029,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   ): TransportUpdate[] {
     if (Api.UpdateMessageID.is(update)) {
       return [
-        {
-          type: 'message-id-assigned',
-          messageId: update.id,
-          randomId: update.randomId.toString(),
-        },
+        { type: 'message-id-assigned', messageId: update.id, randomId: update.randomId.toString() },
       ];
     }
     if (Api.UpdatePtsChanged.is(update)) return [{ type: 'too-long' }];
@@ -2274,10 +2214,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     }
     if (update._ === 'updateUserName') {
       return [
-        {
-          type: 'peer-metadata-changed',
-          peerId: `u:${(update as Tl.UpdateUserName).userId}`,
-        },
+        { type: 'peer-metadata-changed', peerId: `u:${(update as Tl.UpdateUserName).userId}` },
       ];
     }
     if (update._ === 'updatePeerBlocked') {
@@ -2834,12 +2771,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return { kind: 'url', text: button.text, url: button.url };
     }
     if (Api.KeyboardButtonUrlAuth.is(button)) {
-      return {
-        kind: 'url-auth',
-        text: button.text,
-        url: button.url,
-        buttonId: button.buttonId,
-      };
+      return { kind: 'url-auth', text: button.text, url: button.url, buttonId: button.buttonId };
     }
     if (Api.KeyboardButtonCallback.is(button)) {
       return { kind: 'callback', text: button.text, data: [...button.data] };
@@ -2886,13 +2818,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         return [{ offset: entity.offset, length: entity.length }];
       }
       if (Api.MessageEntityMentionName.is(entity)) {
-        return [
-          {
-            offset: entity.offset,
-            length: entity.length,
-            userId: `u:${entity.userId}`,
-          },
-        ];
+        return [{ offset: entity.offset, length: entity.length, userId: `u:${entity.userId}` }];
       }
       return [];
     });
@@ -3089,11 +3015,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return { kind: 'link', child: mapRichText(text.text), url: `tel:${text.phone}` };
     }
     if (Api.TextAutoUrl.is(text)) {
-      return {
-        kind: 'link',
-        child: mapRichText(text.text),
-        url: richTextValue(text.text),
-      };
+      return { kind: 'link', child: mapRichText(text.text), url: richTextValue(text.text) };
     }
     if (Api.TextAutoEmail.is(text)) {
       return {
@@ -3110,11 +3032,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       };
     }
     if (Api.TextMentionName.is(text)) {
-      return {
-        kind: 'link',
-        child: mapRichText(text.text),
-        url: `tg://user?id=${text.userId}`,
-      };
+      return { kind: 'link', child: mapRichText(text.text), url: `tg://user?id=${text.userId}` };
     }
     if (Api.TextMention.is(text)) {
       const value = richTextValue(text.text);
@@ -3138,11 +3056,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return { kind: 'date', child: mapRichText(text.text), timestamp: text.date };
     }
     if (Api.TextDiff.is(text)) {
-      return {
-        kind: 'diff',
-        child: mapRichText(text.text),
-        oldText: mapRichText(text.oldText),
-      };
+      return { kind: 'diff', child: mapRichText(text.text), oldText: mapRichText(text.oldText) };
     }
     if ('text' in text && text.text) return mapRichText(text.text);
     return { kind: 'text', text: '' };
@@ -3189,11 +3103,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
                 : undefined;
     if (heading && 'text' in block) {
       return [
-        {
-          kind: 'heading',
-          level: heading as 1 | 2 | 3 | 4 | 5 | 6,
-          text: mapRichText(block.text),
-        },
+        { kind: 'heading', level: heading as 1 | 2 | 3 | 4 | 5 | 6, text: mapRichText(block.text) },
       ];
     }
     if (Api.PageBlockPreformatted.is(block)) {
@@ -3206,11 +3116,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     if (Api.PageBlockMath.is(block)) return [{ kind: 'math', source: block.source }];
     if (Api.PageBlockAuthorDate.is(block)) {
       return [
-        {
-          kind: 'author',
-          author: mapRichText(block.author),
-          publishedAt: block.publishedDate,
-        },
+        { kind: 'author', author: mapRichText(block.author), publishedAt: block.publishedDate },
       ];
     }
     if (Api.PageBlockList.is(block) || Api.PageBlockOrderedList.is(block)) {
@@ -3474,10 +3380,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
 
     if (asSticker) {
       attributes.push(
-        Api.DocumentAttributeSticker({
-          alt: '🙂',
-          stickerset: Api.InputStickerSetEmpty(),
-        }),
+        Api.DocumentAttributeSticker({ alt: '🙂', stickerset: Api.InputStickerSetEmpty() }),
       );
     } else if (sendAs === 'media' && file.type === 'image/gif') {
       attributes.push(Api.DocumentAttributeAnimated());
@@ -3832,10 +3735,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
           : { memberCount: entity.participantsCount }),
       };
     }
-    return {
-      ...groupFallbackPermissions(),
-      canLeave: true,
-    };
+    return { ...groupFallbackPermissions(), canLeave: true };
   }
   function groupFallbackPermissions(): TelegramChatPermissions {
     return {
@@ -3991,10 +3891,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         createMtprotoError('protocol', 'Telegram accepted the send but returned no message.'),
       );
     const sentMessage = { ...message, randomId };
-    return {
-      message: sentMessage,
-      updateBatches: shortSentUpdateBatches(result, sentMessage),
-    };
+    return { message: sentMessage, updateBatches: shortSentUpdateBatches(result, sentMessage) };
   });
   const mapOutgoingSendResult = Effect.fn('WebTelegramTransport.mapOutgoingSendResult')(function* (
     result: Tl.TypeUpdates,
@@ -4056,14 +3953,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   ): TransportUpdateBatch[] {
     return [
       {
-        updates: [
-          {
-            type: 'new-message',
-            pts: result.pts,
-            ptsCount: result.ptsCount,
-            message,
-          },
-        ],
+        updates: [{ type: 'new-message', pts: result.pts, ptsCount: result.ptsCount, message }],
 
         date: result.date,
       },
@@ -4120,11 +4010,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       ? Api.messages.MessagesSlice.is(result) && result.nextRate !== undefined
       : result.messages.length > limit;
     if (!hasContinuation) {
-      return {
-        messages,
-        hasMore: false,
-        ...(channelPts === undefined ? {} : { channelPts }),
-      };
+      return { messages, hasMore: false, ...(channelPts === undefined ? {} : { channelPts }) };
     }
 
     let last: Tl.Message | undefined;
@@ -4136,19 +4022,11 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       }
     }
     if (!last) {
-      return {
-        messages,
-        hasMore: false,
-        ...(channelPts === undefined ? {} : { channelPts }),
-      };
+      return { messages, hasMore: false, ...(channelPts === undefined ? {} : { channelPts }) };
     }
     const nextPeer = global ? mapPeer(last.peerId, state.entities) : undefined;
     if (global && !nextPeer) {
-      return {
-        messages,
-        hasMore: false,
-        ...(channelPts === undefined ? {} : { channelPts }),
-      };
+      return { messages, hasMore: false, ...(channelPts === undefined ? {} : { channelPts }) };
     }
     const nextOffset: TelegramSearchOffset = {
       messageId: last.id,
@@ -4323,10 +4201,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     const label = postAuthor?.trim() || role?.label;
     if (!label) return {};
     const ownerLabel = /^(owner|creator|владелец)$/iu.test(label);
-    return {
-      senderRole: label,
-      senderRoleKind: role?.kind ?? (ownerLabel ? 'owner' : 'admin'),
-    };
+    return { senderRole: label, senderRoleKind: role?.kind ?? (ownerLabel ? 'owner' : 'admin') };
   }
   const ensureChannelSenderRoles = Effect.fn('WebTelegramTransport.ensureChannelSenderRoles')(
     function* (peer: TelegramPeer, senderIds: readonly string[]) {

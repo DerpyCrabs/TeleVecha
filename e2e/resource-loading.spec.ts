@@ -9,11 +9,16 @@ test('loads only the Lucide icons used by the interface', async ({ page }) => {
     performance
       .getEntriesByType('resource')
       .map((entry) => entry.name)
-      .filter((name) => name.includes('/lucide-solid/') && name.includes('/icons/')),
+      .filter(
+        (name) =>
+          name.includes('/@effectweb_lucide_icons_') ||
+          name.includes('/@effectweb/lucide/dist/icons/'),
+      ),
   );
 
   expect(iconResources).not.toEqual(expect.arrayContaining([expect.stringContaining('ambulance')]));
-  expect(iconResources.length).toBeLessThanOrEqual(65);
+  expect(iconResources.length).toBeGreaterThan(0);
+  expect(iconResources.length).toBeLessThanOrEqual(66);
 });
 
 test('serves the TeleVecha browser identity', async ({ page, request }) => {

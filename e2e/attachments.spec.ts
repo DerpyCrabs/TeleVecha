@@ -172,12 +172,7 @@ test('reports and cancels an attachment download', async ({ page }) => {
         text: '',
         date: 1_700_002_000,
         outgoing: false,
-        media: {
-          kind: 'file',
-          name: 'held-image.png',
-          mimeType: 'image/png',
-          size: 1_000_000,
-        },
+        media: { kind: 'file', name: 'held-image.png', mimeType: 'image/png', size: 1_000_000 },
       },
     }),
   );
@@ -267,11 +262,7 @@ test('renders a single photo with one media canvas instead of nested containers'
       mediaTopRightRadius: getComputedStyle(
         element.querySelector<HTMLElement>('.media-attachment')!,
       ).borderTopRightRadius,
-      message: {
-        top: messageRect.top,
-        right: messageRect.right,
-        left: messageRect.left,
-      },
+      message: { top: messageRect.top, right: messageRect.right, left: messageRect.left },
       visual: {
         top: visualRect.top,
         right: visualRect.right,
@@ -713,26 +704,25 @@ test('downloads a generic file on demand from its file card', async ({ page, con
         text: 'Attached report',
         date: 1_700_002_000,
         outgoing: false,
-        media: {
-          kind: 'file',
-          name: 'report.pdf',
-          mimeType: 'application/pdf',
-          size: 123,
-        },
+        media: { kind: 'file', name: 'report.pdf', mimeType: 'application/pdf', size: 123 },
       },
     }),
   );
 
   const attachment = page.locator('article[data-message-id="81"]');
-  await expect
-    .poll(async () => (await fixtureStats(page))?.downloadMedia ?? 0)
-    .toBeGreaterThanOrEqual(2);
-  const downloadsBefore = (await fixtureStats(page))?.downloadMedia ?? 0;
+  const fileRequests = async () =>
+    (await fixtureStats(page))?.downloadMediaRequests.filter(
+      (request) => request.peerId === 'u:101' && request.messageId === 81,
+    ) ?? [];
+  await expect(attachment.getByRole('button', { name: 'Download report.pdf' })).toBeVisible();
+  expect(await fileRequests()).toEqual([]);
   const download = page.waitForEvent('download');
   await attachment.getByRole('button', { name: 'Download report.pdf' }).click();
   expect((await download).suggestedFilename()).toBe('report.pdf');
   await expect(attachment.getByRole('button', { name: 'Download report.pdf' })).toBeVisible();
-  expect((await fixtureStats(page))?.downloadMedia).toBe(downloadsBefore + 1);
+  expect(await fileRequests()).toEqual([
+    { peerId: 'u:101', messageId: 81, name: 'report.pdf', preview: false },
+  ]);
 
   await attachment.getByRole('button', { name: 'Download report.pdf' }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Copy filename' }).click();

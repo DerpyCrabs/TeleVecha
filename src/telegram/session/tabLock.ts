@@ -2,10 +2,7 @@ import { Effect, Schedule, Schema } from 'effect';
 
 export class TabLockUnsupportedError extends Schema.TaggedError<TabLockUnsupportedError>()(
   'TabLockUnsupportedError',
-  {
-    message: Schema.String,
-    cause: Schema.optionalKey(Schema.Defect()),
-  },
+  { message: Schema.String, cause: Schema.optionalKey(Schema.Defect()) },
 ) {}
 
 const tabLockUnsupported = (cause?: unknown): TabLockUnsupportedError => {

@@ -111,9 +111,7 @@ describe('web Telegram transport', () => {
           }),
         () =>
           Effect.succeed(
-            clientDouble({
-              getMe: Effect.succeed(Api.User({ id: 991n, firstName: 'Self' })),
-            }),
+            clientDouble({ getMe: Effect.succeed(Api.User({ id: 991n, firstName: 'Self' })) }),
           ),
       ),
     ));
@@ -143,13 +141,7 @@ describe('web Telegram transport', () => {
                       messages: [],
                       chats: [],
                       users: [],
-                      state: Api.updates.State({
-                        pts: 0,
-                        qts: 0,
-                        date: 0,
-                        seq: 0,
-                        unreadCount: 0,
-                      }),
+                      state: Api.updates.State({ pts: 0, qts: 0, date: 0, seq: 0, unreadCount: 0 }),
                     }),
                   );
                 }
@@ -284,10 +276,7 @@ describe('web Telegram transport', () => {
             yield* PubSub.publish(
               events,
               updateEvent(
-                Api.UpdateUserStatus({
-                  userId: 1n,
-                  status: Api.UserStatusOnline({ expires: 10 }),
-                }),
+                Api.UpdateUserStatus({ userId: 1n, status: Api.UserStatusOnline({ expires: 10 }) }),
               ),
             );
             const batch = yield* Fiber.join(received);
@@ -482,11 +471,7 @@ describe('web Telegram transport', () => {
                 webPageId: '20',
                 linkPreview: {
                   type: 'video',
-                  media: {
-                    kind: 'video',
-                    name: 'reddit-video.mp4',
-                    mimeType: 'video/mp4',
-                  },
+                  media: { kind: 'video', name: 'reddit-video.mp4', mimeType: 'video/mp4' },
                 },
               },
             ]);
@@ -540,9 +525,7 @@ describe('web Telegram transport', () => {
             const batch = yield* Fiber.join(received);
             expect(batch).toMatchObject({
               _tag: 'Some',
-              value: {
-                updates: [{ type: 'message-id-assigned', messageId: 81, randomId: '123' }],
-              },
+              value: { updates: [{ type: 'message-id-assigned', messageId: 81, randomId: '123' }] },
             });
           }),
         ),

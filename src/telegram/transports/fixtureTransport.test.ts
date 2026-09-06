@@ -15,6 +15,27 @@ describe('FixtureTelegramTransport contracts', () => {
   const make = () => Effect.runPromise(Effect.scoped(createFixtureTelegramTransport()));
   const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 
+  it('edits, pins and reacts without mutating messages already returned to callers', async () => {
+    const target = await make();
+    const peer = { id: 'u:101', kind: 'user' as const, accessHash: '1' };
+    const read = async () =>
+      (await run(target.getHistory(peer, 80))).messages.find((message) => message.id === 20)!;
+    const original = Object.freeze(await read());
+    await run(target.setPinnedMessage(peer, original.id, true));
+    const pinned = Object.freeze(await read());
+    expect(pinned).not.toBe(original);
+    expect(pinned.pinned).toBe(true);
+    expect(original.pinned).not.toBe(true);
+    await run(target.setReaction(peer, original.id, '👍'));
+    const reacted = Object.freeze(await read());
+    expect(reacted.reactions).toMatchObject([{ emoji: '👍', chosen: true }]);
+    expect(pinned.reactions).not.toEqual(reacted.reactions);
+    await run(target.editMessage(peer, original.id, 'Immutable fixture edit'));
+    expect((await read()).text).toBe('Immutable fixture edit');
+    expect(original.text).toBe('Fixture message 20');
+    expect(reacted.text).toBe(original.text);
+  });
+
   it('provides a stable account identity and per-channel cursor', async () => {
     const target = await make();
     const dialogs = await run(target.getDialogs());
@@ -46,10 +67,7 @@ describe('FixtureTelegramTransport contracts', () => {
     });
     await expect(
       run(target.searchMessages('Fixture message', alice, 2, firstSearch.nextOffset)),
-    ).resolves.toMatchObject({
-      messages: [{ id: 77 }, { id: 75 }],
-      hasMore: true,
-    });
+    ).resolves.toMatchObject({ messages: [{ id: 77 }, { id: 75 }], hasMore: true });
 
     const firstMedia = await run(target.getSharedMedia(alice, 'photos', 1));
     expect(firstMedia).toMatchObject({
@@ -59,10 +77,7 @@ describe('FixtureTelegramTransport contracts', () => {
     });
     await expect(
       run(target.getSharedMedia(alice, 'photos', 1, firstMedia.nextOffset)),
-    ).resolves.toEqual({
-      messages: [expect.objectContaining({ id: 5 })],
-      hasMore: false,
-    });
+    ).resolves.toEqual({ messages: [expect.objectContaining({ id: 5 })], hasMore: false });
     expect(window.__televechaFixture?.stats.searchMessages).toBe(2);
     expect(window.__televechaFixture?.stats.getSharedMedia).toBe(2);
   });
@@ -74,18 +89,11 @@ describe('FixtureTelegramTransport contracts', () => {
     expect(first).toMatchObject({
       messages: [{ peerId: 'g:303', id: 12 }],
       hasMore: true,
-      nextOffset: {
-        messageId: 12,
-        peer: { id: 'g:303' },
-        rate: 1,
-      },
+      nextOffset: { messageId: 12, peer: { id: 'g:303' }, rate: 1 },
     });
     await expect(
       run(target.searchMessages('message', undefined, 1, first.nextOffset)),
-    ).resolves.toMatchObject({
-      messages: [{ peerId: 'u:101', id: 80 }],
-      hasMore: true,
-    });
+    ).resolves.toMatchObject({ messages: [{ peerId: 'u:101', id: 80 }], hasMore: true });
   });
 
   it('returns group members in pages with a stable continuation offset', async () => {

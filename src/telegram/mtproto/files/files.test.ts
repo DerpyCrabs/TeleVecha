@@ -92,10 +92,7 @@ describe('Telegram file transfers', () => {
         const result = yield* downloadFile(
           rpc,
           { _: 'inputDocumentFileLocation' },
-          {
-            dcId: 4,
-            fileSize: 70 * 1_024,
-          },
+          { dcId: 4, fileSize: 70 * 1_024 },
         );
         expect(result).toHaveLength(70 * 1_024);
         expect(result[0]).toBe(9);

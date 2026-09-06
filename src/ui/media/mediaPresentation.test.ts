@@ -4,13 +4,7 @@ import type { TelegramMedia } from '../../telegram/types';
 import { describeMedia, formatMediaDuration, mediaPresentation } from './mediaPresentation';
 
 function media(overrides: Partial<TelegramMedia> = {}): TelegramMedia {
-  return {
-    kind: 'file',
-    name: 'diagram.png',
-    mimeType: 'image/png',
-    size: 42_000,
-    ...overrides,
-  };
+  return { kind: 'file', name: 'diagram.png', mimeType: 'image/png', size: 42_000, ...overrides };
 }
 
 describe('media presentation', () => {

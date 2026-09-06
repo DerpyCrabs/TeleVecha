@@ -84,13 +84,7 @@ export interface TelegramUserDetails {
   phone?: string | undefined;
   username?: string | undefined;
   bio?: string | undefined;
-  birthday?:
-    | {
-        day: number;
-        month: number;
-        year?: number | undefined;
-      }
-    | undefined;
+  birthday?: { day: number; month: number; year?: number | undefined } | undefined;
   isContact?: boolean | undefined;
   blocked: boolean;
 }
@@ -386,9 +380,7 @@ export interface TelegramMedia {
   spoiler?: boolean | undefined;
 }
 
-export type TelegramTransferProgress = ((progress: number) => void) & {
-  isCanceled?: boolean;
-};
+export type TelegramTransferProgress = ((progress: number) => void) & { isCanceled?: boolean };
 
 export type TelegramTransportProgress = (progress: number) => Effect.Effect<void>;
 
@@ -398,11 +390,7 @@ export interface TelegramDownloadOptions {
 }
 
 export type TransportUpdate =
-  | {
-      type: 'message-id-assigned';
-      messageId: number;
-      randomId: string;
-    }
+  | { type: 'message-id-assigned'; messageId: number; randomId: string }
   | {
       type: 'new-message';
       pts: number;
@@ -444,45 +432,19 @@ export type TransportUpdate =
       direction: 'inbox' | 'outbox';
       stillUnreadCount?: number | undefined;
     }
-  | {
-      type: 'dialog-changed';
-      dialog: TelegramDialog;
-    }
-  | {
-      type: 'reaction-changed';
-      peerId: string;
-      messageId: number;
-      reactions: TelegramReaction[];
-    }
-  | {
-      type: 'activity';
-      activity: TelegramActivity;
-    }
-  | {
-      type: 'activity-ended';
-      peerId: string;
-      senderId: string;
-    }
+  | { type: 'dialog-changed'; dialog: TelegramDialog }
+  | { type: 'reaction-changed'; peerId: string; messageId: number; reactions: TelegramReaction[] }
+  | { type: 'activity'; activity: TelegramActivity }
+  | { type: 'activity-ended'; peerId: string; senderId: string }
   | {
       type: 'presence-changed';
       peerId: string;
       presence: 'online' | 'recently' | 'offline';
       lastSeenAt?: number | undefined;
     }
-  | {
-      type: 'mute-changed';
-      peerId: string;
-      muted: boolean;
-    }
-  | {
-      type: 'dialog-pinned';
-      peerId: string;
-      pinned: boolean;
-    }
-  | {
-      type: 'expression-index-changed';
-      kind: 'stickers' | 'gifs' | 'all';
-    }
+  | { type: 'mute-changed'; peerId: string; muted: boolean }
+  | { type: 'dialog-pinned'; peerId: string; pinned: boolean }
+  | { type: 'expression-index-changed'; kind: 'stickers' | 'gifs' | 'all' }
   | {
       type: 'pinned-messages';
       pts: number;
@@ -498,35 +460,13 @@ export type TransportUpdate =
       ptsCount: number;
       folders: { peerId: string; folderId: number }[];
     }
-  | {
-      type: 'bot-commands-changed';
-      peerId: string;
-      botId?: string | undefined;
-    }
-  | {
-      type: 'pts-advanced';
-      pts: number;
-      ptsCount: number;
-      channelScoped?: boolean | undefined;
-    }
-  | {
-      type: 'dialog-list-invalidated';
-    }
-  | {
-      type: 'peer-metadata-changed';
-      peerId: string;
-    }
-  | {
-      type: 'channel-too-long';
-      peerId: string;
-    }
-  | {
-      type: 'connection-state';
-      connected: boolean;
-    }
-  | {
-      type: 'too-long';
-    };
+  | { type: 'bot-commands-changed'; peerId: string; botId?: string | undefined }
+  | { type: 'pts-advanced'; pts: number; ptsCount: number; channelScoped?: boolean | undefined }
+  | { type: 'dialog-list-invalidated' }
+  | { type: 'peer-metadata-changed'; peerId: string }
+  | { type: 'channel-too-long'; peerId: string }
+  | { type: 'connection-state'; connected: boolean }
+  | { type: 'too-long' };
 
 export interface TransportUpdateBatch {
   updates: TransportUpdate[];
@@ -536,26 +476,12 @@ export interface TransportUpdateBatch {
 }
 
 export type DifferenceResult =
-  | {
-      type: 'complete';
-      cursor: SyncCursor;
-      updates: TransportUpdate[];
-    }
-  | {
-      type: 'too-long';
-      cursor: SyncCursor;
-    };
+  | { type: 'complete'; cursor: SyncCursor; updates: TransportUpdate[] }
+  | { type: 'too-long'; cursor: SyncCursor };
 
 export type ChannelDifferenceResult =
-  | {
-      type: 'complete';
-      pts: number;
-      updates: TransportUpdate[];
-    }
-  | {
-      type: 'too-long';
-      pts: number;
-    };
+  | { type: 'complete'; pts: number; updates: TransportUpdate[] }
+  | { type: 'too-long'; pts: number };
 
 export interface DialogPage {
   dialogs: TelegramDialog[];
@@ -867,23 +793,11 @@ export interface PendingSend {
   formats?: TelegramTextFormat[] | undefined;
   sticker?: TelegramSticker | undefined;
   forward?:
-    | {
-        fromPeer: TelegramPeer;
-        messageId: number;
-        mediaKind?: TelegramMedia['kind'] | undefined;
-      }
+    | { fromPeer: TelegramPeer; messageId: number; mediaKind?: TelegramMedia['kind'] | undefined }
     | undefined;
-  botStart?:
-    | {
-        startParam: string;
-      }
-    | undefined;
+  botStart?: { startParam: string } | undefined;
   attachment?: PendingAttachment | undefined;
-  album?:
-    | {
-        attachments: PendingAlbumAttachment[];
-      }
-    | undefined;
+  album?: { attachments: PendingAlbumAttachment[] } | undefined;
 }
 
 export interface CachedDialog extends TelegramDialog {

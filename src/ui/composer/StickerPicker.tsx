@@ -1,162 +1,152 @@
-import { createUiResource } from '../reactivity/solid';
-import Clock3 from 'lucide-solid/icons/clock-3';
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-
+import type { Effect } from 'effect';
 import type { TelegramSticker, TelegramStickerPack } from '../../telegram/types';
-import { TgsPlayer } from '../media/TgsPlayer';
-import { VisibilityVideo } from '../media/VisibilityVideo';
-
+import { idRows } from '../collections';
+import Clock3 from '@effectweb/lucide/icons/clock-3';
+import { LazyMedia } from '../media/LazyMedia';
+import { component, view } from 'effectweb';
+function scrollPackTabs(event: WheelEvent & { currentTarget: HTMLElement }) {
+  if (event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return;
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+  event.currentTarget.scrollLeft += delta;
+  event.preventDefault();
+}
 interface StickerImageProps {
   sticker: TelegramSticker;
-  load: () => Promise<string>;
+  load: () => Effect.Effect<string, unknown>;
   cachedUrl: () => string | undefined;
   eager?: boolean;
   label?: string | undefined;
 }
-
-function StickerImage(props: StickerImageProps) {
-  const [visible, setVisible] = createSignal(Boolean(props.eager));
-  const [loaded] = createUiResource(
-    () => visible() && props.sticker.id,
-    () => props.cachedUrl() ?? props.load(),
-  );
-  const source = () => props.cachedUrl() ?? loaded();
-  let root: HTMLSpanElement | undefined;
-  const load = () => {
-    setVisible(true);
+const StickerImage = view<StickerImageProps, never>((props, _send) => (
+  <LazyMedia
+    identity={props.sticker.id}
+    mimeType={props.sticker.mimeType}
+    label={props.label}
+    placeholder={props.sticker.emoji}
+    load={props.load}
+    cachedUrl={props.cachedUrl}
+    eager={props.eager}
+    rootSelector=".sticker-pack-grid"
+    class="sticker-image"
+  />
+));
+type StickerPickerModel = {
+  props: {
+    packs: TelegramStickerPack[];
+    loading: boolean;
+    query: string;
+    load: (sticker: TelegramSticker) => Effect.Effect<string, unknown>;
+    cachedUrl: (sticker: TelegramSticker) => string | undefined;
+    send: (sticker: TelegramSticker) => void;
+    enabled: boolean;
   };
-  onMount(() => {
-    if (props.eager || !('IntersectionObserver' in window)) return load();
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry?.isIntersecting) return;
-        observer.disconnect();
-        load();
-      },
-      { root: root?.closest('.sticker-pack-grid') ?? null, rootMargin: '120px' },
-    );
-    if (root) observer.observe(root);
-    onCleanup(() => observer.disconnect());
-  });
-  return (
-    <span ref={(element) => (root = element)} class="sticker-image">
-      <Show
-        when={source()}
-        fallback={<span class="sticker-placeholder">{props.sticker.emoji}</span>}
-      >
-        {(url) => (
-          <Show
-            when={props.sticker.mimeType === 'application/x-tgsticker'}
-            fallback={
-              <Show
-                when={props.sticker.mimeType.startsWith('video/')}
-                fallback={<img src={url()} alt="" />}
-              >
-                <VisibilityVideo source={url()} label={props.label} />
-              </Show>
-            }
-          >
-            <TgsPlayer
-              source={url()}
-              label={props.label ?? `${props.sticker.emoji} animated sticker`}
-            />
-          </Show>
-        )}
-      </Show>
-    </span>
-  );
-}
+  activePackId: string;
+};
+type StickerPickerMessage = { type: 'ActivePackId'; value: string };
+export const StickerPicker = component<
+  {
+    packs: TelegramStickerPack[];
+    loading: boolean;
+    query: string;
+    load: (sticker: TelegramSticker) => Effect.Effect<string, unknown>;
+    cachedUrl: (sticker: TelegramSticker) => string | undefined;
+    send: (sticker: TelegramSticker) => void;
+    enabled: boolean;
+  },
+  StickerPickerModel,
+  StickerPickerMessage
+>({
+  init: (props) => ({ props, activePackId: 'recent' }),
 
-export function StickerPicker(props: {
-  packs: TelegramStickerPack[];
-  loading: boolean;
-  query: string;
-  load: (sticker: TelegramSticker) => Promise<string>;
-  cachedUrl: (sticker: TelegramSticker) => string | undefined;
-  send: (sticker: TelegramSticker) => void;
-  enabled: boolean;
-}) {
-  const [activePackId, setActivePackId] = createSignal('recent');
-  const activePack = () => props.packs.find(({ id }) => id === activePackId()) ?? props.packs[0];
-  const results = createMemo(() => {
-    const term = props.query.trim().toLocaleLowerCase();
-    if (!term) return activePack()?.stickers ?? [];
-    return props.packs.flatMap((pack) =>
-      pack.stickers.filter((sticker) =>
-        `${pack.title} ${sticker.emoji}`.toLocaleLowerCase().includes(term),
-      ),
-    );
-  });
-  return (
-    <div class="sticker-picker" aria-label="Stickers">
-      <Show when={!props.loading} fallback={<p>Loading sticker index…</p>}>
-        <nav
-          class="sticker-pack-tabs"
-          aria-label="Sticker packs"
-          onWheel={(event) => {
-            if (event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return;
-            const delta =
-              Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-            event.currentTarget.scrollLeft += delta;
-            event.preventDefault();
-          }}
-        >
-          <For each={props.packs}>
-            {(pack) => (
-              <button
-                classList={{ active: pack.id === activePack()?.id }}
-                onClick={(event) => {
-                  setActivePackId(pack.id);
-                  event.currentTarget.scrollIntoView({ block: 'nearest', inline: 'center' });
-                }}
-                aria-label={pack.title}
-                title={pack.title}
-              >
-                <Show
-                  when={pack.id !== 'recent'}
-                  fallback={<Clock3 size={19} aria-hidden="true" />}
+  update: (model, message) => {
+    switch (message.type) {
+      case 'ActivePackId':
+        return { model: { ...model, activePackId: message.value } };
+    }
+  },
+  view: view((model, send) => {
+    const props = model.props;
+    const activePack = () =>
+      props.packs.find(({ id }) => id === model.activePackId) ?? props.packs[0];
+    const results = (() => {
+      const term = props.query.trim().toLocaleLowerCase();
+      if (!term) return activePack()?.stickers ?? [];
+      return [
+        ...new Map(
+          props.packs
+            .flatMap((pack) =>
+              pack.stickers.filter((sticker) =>
+                `${pack.title} ${sticker.emoji}`.toLocaleLowerCase().includes(term),
+              ),
+            )
+            .map((sticker) => [sticker.id, sticker]),
+        ).values(),
+      ];
+    })();
+    return (
+      <div class="sticker-picker" aria-label="Stickers">
+        {!props.loading ? (
+          <>
+            <nav class="sticker-pack-tabs" aria-label="Sticker packs" onWheel={scrollPackTabs}>
+              {idRows(props.packs).map((pack) => (
+                <button
+                  classList={{ active: pack.id === activePack()?.id }}
+                  onClick={(event) => {
+                    send({ type: 'ActivePackId', value: pack.id });
+                    event.currentTarget.scrollIntoView({ block: 'nearest', inline: 'center' });
+                  }}
+                  aria-label={pack.title}
+                  title={pack.title}
                 >
-                  <Show when={pack.stickers[0]}>
-                    {(sticker) => (
-                      <StickerImage
-                        sticker={sticker()}
-                        load={() => props.load(sticker())}
-                        cachedUrl={() => props.cachedUrl(sticker())}
-                        eager
-                        label={`${pack.title} icon`}
-                      />
-                    )}
-                  </Show>
-                </Show>
-              </button>
-            )}
-          </For>
-        </nav>
-        <div
-          class="sticker-pack-grid"
-          aria-label={
-            props.query ? 'Sticker search results' : activePack()?.title || 'Sticker pack'
-          }
-        >
-          <For each={results()} fallback={<p>No stickers found</p>}>
-            {(sticker) => (
-              <button
-                class="sticker-option"
-                disabled={!props.enabled}
-                onClick={() => props.send(sticker)}
-                aria-label={`Send ${sticker.emoji} sticker`}
-                title={sticker.emoji}
-              >
-                <StickerImage
-                  sticker={sticker}
-                  load={() => props.load(sticker)}
-                  cachedUrl={() => props.cachedUrl(sticker)}
-                />
-              </button>
-            )}
-          </For>
-        </div>
-      </Show>
-    </div>
-  );
-}
+                  {pack.id !== 'recent' ? (
+                    pack.stickers[0] ? (
+                      ((sticker) => (
+                        <StickerImage
+                          sticker={sticker}
+                          load={() => props.load(sticker)}
+                          cachedUrl={() => props.cachedUrl(sticker)}
+                          eager
+                          label={`${pack.title} icon`}
+                        />
+                      ))(pack.stickers[0]!)
+                    ) : null
+                  ) : (
+                    <Clock3 size={19} aria-hidden="true" />
+                  )}
+                </button>
+              ))}
+            </nav>
+            <div
+              class="sticker-pack-grid"
+              aria-label={
+                props.query ? 'Sticker search results' : activePack()?.title || 'Sticker pack'
+              }
+            >
+              {results!.length ? (
+                idRows(results).map((sticker) => (
+                  <button
+                    class="sticker-option"
+                    disabled={!props.enabled}
+                    onClick={() => props.send(sticker)}
+                    aria-label={`Send ${sticker.emoji} sticker`}
+                    title={sticker.emoji}
+                  >
+                    <StickerImage
+                      sticker={sticker}
+                      load={() => props.load(sticker)}
+                      cachedUrl={() => props.cachedUrl(sticker)}
+                    />
+                  </button>
+                ))
+              ) : (
+                <p>No stickers found</p>
+              )}
+            </div>
+          </>
+        ) : (
+          <p>Loading sticker index…</p>
+        )}
+      </div>
+    );
+  }),
+});

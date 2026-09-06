@@ -1,19 +1,33 @@
-import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js';
-
 import type { EngineSnapshot } from '../../telegram/types';
-
+import type { Read } from 'effectweb/session';
+import { lifetime } from 'effectweb/session';
+import { program } from 'effectweb';
 /** Owns reply-keyboard visibility, single-use dismissal, and forced replies. */
 export function createReplyKeyboardSession(options: {
-  snapshot: Accessor<EngineSnapshot>;
-  activePeerId: Accessor<string>;
-  reply: Accessor<unknown>;
-  editing: Accessor<unknown>;
+  snapshot: Read<EngineSnapshot>;
+  activePeerId: Read<string>;
+  reply: Read<unknown>;
+  editing: Read<unknown>;
   forceReply: (messageId: number, preview: string) => void;
 }) {
-  const [dismissed, setDismissed] = createSignal<ReadonlySet<string>>(new Set());
+  const scope = lifetime();
+  type ReplyKeyboardSessionModel = { dismissed: ReadonlySet<string> };
+  type ReplyKeyboardSessionMessage = { type: 'Dismissed'; value: ReadonlySet<string> };
+  const state = program<ReplyKeyboardSessionModel, ReplyKeyboardSessionMessage>({
+    initial: { dismissed: new Set() },
+    update: (model, message) => {
+      switch (message.type) {
+        case 'Dismissed':
+          return {
+            model: Object.is(model.dismissed, message.value)
+              ? model
+              : { ...model, dismissed: message.value },
+          };
+      }
+    },
+  });
   const handledForceReplies = new Set<string>();
-
-  const active = createMemo(() => {
+  const active = () => {
     const peerId = options.activePeerId();
     const snapshot = options.snapshot();
     if (peerId === 'empty' || snapshot.activePeerId !== peerId) return undefined;
@@ -24,16 +38,14 @@ export function createReplyKeyboardSession(options: {
       }
     }
     return undefined;
-  });
-
-  const visible = createMemo(() => {
+  };
+  const visible = () => {
     const current = active();
     if (!current || current.keyboard.hidden) return undefined;
     const key = `${options.activePeerId()}:${current.messageId}`;
-    return dismissed().has(key) ? undefined : current;
-  });
-
-  const botStarted = createMemo(() => {
+    return state.model().dismissed.has(key) ? undefined : current;
+  };
+  const botStarted = () => {
     const snapshot = options.snapshot();
     if (snapshot.activePeerId !== options.activePeerId()) return false;
     return (
@@ -42,17 +54,18 @@ export function createReplyKeyboardSession(options: {
         ({ peer, botStart }) => peer.id === options.activePeerId() && Boolean(botStart),
       )
     );
-  });
-
+  };
   const dismissSingleUse = (owner: string) => {
     if (owner !== 'reply') return;
     const current = visible();
     if (!current?.keyboard.singleUse) return;
     const key = `${options.activePeerId()}:${current.messageId}`;
-    setDismissed((currentDismissed) => new Set(currentDismissed).add(key));
+    state.send({
+      type: 'Dismissed',
+      value: ((currentDismissed) => new Set(currentDismissed).add(key))(state.model().dismissed),
+    });
   };
-
-  createEffect(() => {
+  const refresh = () => {
     const current = visible();
     if (!current?.keyboard.forceReply) return;
     const key = `${options.activePeerId()}:${current.messageId}`;
@@ -62,7 +75,16 @@ export function createReplyKeyboardSession(options: {
       current.messageId,
       current.message.text || current.message.media?.name || 'The bot requested a reply',
     );
-  });
-
-  return { visible, botStarted, dismissSingleUse };
+  };
+  const actions = { refresh, dismissSingleUse };
+  return {
+    ...actions,
+    model: state.model,
+    subscribe: state.subscribe,
+    dispose: () => {
+      scope.dispose();
+      state.dispose();
+    },
+    snapshot: () => ({ ...actions, visible: visible(), botStarted: botStarted() }),
+  };
 }

@@ -36,6 +36,12 @@ interface Window {
       readHistoryPeers: string[];
       getReadOutboxMaxId: number;
       downloadMedia: number;
+      downloadMediaRequests: Array<{
+        peerId: string;
+        messageId: number;
+        name: string | undefined;
+        preview: boolean;
+      }>;
       downloadMediaPreview: number;
       downloadMediaFull: number;
       downloadAvatar: number;

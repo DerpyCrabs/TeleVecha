@@ -1,15 +1,6 @@
-import {
-  Context,
-  Effect,
-  Equal,
-  Fiber,
-  FiberSet,
-  Layer,
-  Option,
-  PubSub,
-  Ref,
-  Stream,
-} from 'effect';
+import { shareValue, type ShareFields } from 'effectweb/share';
+import { ids, peers, messages } from '../../domain/collections';
+import { Context, Effect, Fiber, FiberSet, Layer, Option, PubSub, Ref, Stream } from 'effect';
 
 import type {
   AccountSnapshot,
@@ -101,42 +92,23 @@ export function engineSnapshot(
   return { ...account, ...conversation };
 }
 
-/**
- * Reuses top-level values that are structurally unchanged. Snapshot producers
- * may deserialize or refetch equal arrays and records, but observers should see
- * those as the same state.
- */
-export function shareEqualSnapshotFields<Snapshot>(previous: Snapshot, next: Snapshot): Snapshot {
-  if (Object.is(previous, next)) return previous;
-  if (
-    typeof previous !== 'object' ||
-    previous === null ||
-    typeof next !== 'object' ||
-    next === null
-  ) {
-    return Equal.equals(previous, next) ? previous : next;
-  }
+const accountSharing = {
+  dialogs: peers.share,
+  pending: ids.share,
+} satisfies ShareFields<AccountSnapshot>;
 
-  const previousRecord = previous as Record<string, unknown>;
-  const nextRecord = next as Record<string, unknown>;
-  const previousKeys = Object.keys(previousRecord);
-  const nextKeys = Object.keys(nextRecord);
-  const shared = { ...nextRecord };
-  let changed = previousKeys.length !== nextKeys.length;
+const snapshotSharing = {
+  ...accountSharing,
+  messages: messages.share,
+  pinnedMessages: messages.share,
+} satisfies ShareFields<EngineSnapshot>;
 
-  for (const key of nextKeys) {
-    if (!Object.hasOwn(previousRecord, key)) {
-      changed = true;
-      continue;
-    }
-    const previousValue = previousRecord[key];
-    const nextValue = nextRecord[key];
-    if (Object.is(previousValue, nextValue)) continue;
-    if (Equal.equals(previousValue, nextValue)) shared[key] = previousValue;
-    else changed = true;
-  }
-
-  return changed ? (shared as Snapshot) : previous;
+/** Preserve domain entities before UI projections, including across tab snapshots and refetches. */
+export function shareEqualSnapshotFields(
+  previous: EngineSnapshot,
+  next: EngineSnapshot,
+): EngineSnapshot {
+  return shareValue(previous, next, snapshotSharing);
 }
 
 interface State<Snapshot> {
@@ -166,7 +138,10 @@ export const initialEngineSnapshot = (): EngineSnapshot => ({
   historyGaps: [],
 });
 
-const makeSnapshotState = <Snapshot>(initial: Snapshot) =>
+const makeSnapshotState = <Snapshot>(
+  initial: Snapshot,
+  share: (previous: Snapshot, next: Snapshot) => Snapshot,
+) =>
   Effect.gen(function* () {
     const state = yield* Ref.make<State<Snapshot>>({
       snapshot: initial,
@@ -188,7 +163,7 @@ const makeSnapshotState = <Snapshot>(initial: Snapshot) =>
       update: (snapshot: Snapshot) => Snapshot,
     ) {
       const changed = yield* Ref.modify(state, (current) => {
-        const snapshot = shareEqualSnapshotFields(current.snapshot, update(current.snapshot));
+        const snapshot = share(current.snapshot, update(current.snapshot));
         if (snapshot === current.snapshot) return [Option.none<Snapshot>(), current];
         if (current.notificationBatchDepth > 0) {
           return [Option.none<Snapshot>(), { ...current, snapshot, notificationPending: true }];
@@ -264,8 +239,10 @@ const makeSnapshotState = <Snapshot>(initial: Snapshot) =>
     };
   });
 
-const makeEngineState = makeSnapshotState(initialEngineSnapshot());
-const makeAccountState = makeSnapshotState(initialAccountSnapshot());
+const makeEngineState = makeSnapshotState(initialEngineSnapshot(), shareEqualSnapshotFields);
+const makeAccountState = makeSnapshotState(initialAccountSnapshot(), (previous, next) =>
+  shareValue(previous, next, accountSharing),
+);
 
 export type EngineState = Effect.Success<typeof makeEngineState>;
 export const EngineState = Context.Service<EngineState>('televecha/telegram/core/EngineState');

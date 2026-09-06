@@ -8,12 +8,7 @@ describe('Telegram WebSocket packet connection', () => {
       'wss://zws2.web.telegram.org:443/apiws',
     );
     expect(
-      telegramWebSocketUrl({
-        host: 'example.test',
-        port: 8443,
-        test: true,
-        premium: true,
-      }),
+      telegramWebSocketUrl({ host: 'example.test', port: 8443, test: true, premium: true }),
     ).toBe('wss://example.test:8443/apiws_test_premium');
   });
 

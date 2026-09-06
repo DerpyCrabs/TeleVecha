@@ -11,38 +11,18 @@ type RichStyledTextKind =
   | 'diff';
 
 type RichStyledText = {
-  [Kind in RichStyledTextKind]: {
-    kind: Kind;
-    child: RichText;
-    oldText?: RichText | undefined;
-  };
+  [Kind in RichStyledTextKind]: { kind: Kind; child: RichText; oldText?: RichText | undefined };
 }[RichStyledTextKind];
 
 export type RichText =
   | { kind: 'text'; text: string }
   | { kind: 'concat'; children: RichText[] }
   | RichStyledText
-  | {
-      kind: 'link';
-      child: RichText;
-      url: string;
-    }
-  | {
-      kind: 'anchor';
-      child: RichText;
-      name: string;
-    }
-  | {
-      kind: 'customEmoji';
-      alt: string;
-      documentId: string;
-    }
+  | { kind: 'link'; child: RichText; url: string }
+  | { kind: 'anchor'; child: RichText; name: string }
+  | { kind: 'customEmoji'; alt: string; documentId: string }
   | { kind: 'math'; source: string }
-  | {
-      kind: 'date';
-      child: RichText;
-      timestamp: number;
-    };
+  | { kind: 'date'; child: RichText; timestamp: number };
 
 export interface RichCaption {
   text: RichText;
@@ -99,12 +79,7 @@ export type RichBlock =
       pull?: boolean | undefined;
       expandable?: boolean | undefined;
     }
-  | {
-      kind: 'details';
-      title: RichText;
-      blocks: RichBlock[];
-      open?: boolean | undefined;
-    }
+  | { kind: 'details'; title: RichText; blocks: RichBlock[]; open?: boolean | undefined }
   | {
       kind: 'table';
       title?: RichText | undefined;

@@ -1,7 +1,5 @@
-import { createUiResource, useUiModel } from '../reactivity/solid';
-import { createEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js';
+import { query } from 'effectweb/query';
 import type { Effect } from 'effect';
-
 import type { EffectConversation } from '../../telegram/core/conversation';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
@@ -14,9 +12,17 @@ import type {
   TelegramUrlAuthAcceptOptions,
   TelegramUrlAuthResult,
 } from '../../telegram/types';
+import type { UiEffectRunner } from '../app/appRuntime';
+import { subscribeAtUi } from '../app/appRuntime';
+import type { Read, SessionContext } from 'effectweb/session';
+import { lifetime, queryResource } from 'effectweb/session';
+import { available, program } from 'effectweb';
 import { safeExternalUrl } from '../shared/safeUrl';
-import { subscribeAtUi, type UiEffectRunner } from '../app/appRuntime';
-
+const botCommandsQuery = query({
+  name: 'bot-commands',
+  key: (conversation: EffectConversation) => conversation.peerId,
+  load: (conversation: EffectConversation) => conversation.getBotCommands(),
+});
 interface PendingBotUrlAuth {
   peer: TelegramPeer;
   messageId: number;
@@ -26,19 +32,17 @@ interface PendingBotUrlAuth {
   generation: number;
   owner: string;
 }
-
 interface PendingInlineSwitch {
   query: string;
   botUsername?: string | undefined;
   owner: string;
 }
-
 interface BotSessionOptions {
-  conversation: Accessor<EffectConversation | undefined>;
+  conversation: Read<EffectConversation | undefined>;
   runEffect: UiEffectRunner;
-  snapshot: Accessor<EngineSnapshot>;
-  activePeerId: Accessor<string>;
-  activeDialog: Accessor<TelegramDialog | undefined>;
+  snapshot: Read<EngineSnapshot>;
+  activePeerId: Read<string>;
+  activeDialog: Read<TelegramDialog | undefined>;
   selectChat: (peerId: string) => Promise<boolean>;
   setDraft: (value: string) => void;
   setPeerDraft: (peerId: string, value: string) => Effect.Effect<unknown, MessagingError>;
@@ -50,20 +54,93 @@ interface BotSessionOptions {
     ): Effect.Effect<Effect.Effect<void>, MessagingError>;
   };
 }
-
-export function createBotSession(options: BotSessionOptions) {
-  const [commandsRequested, setCommandsRequested] = createSignal('');
-  const model = useUiModel();
-  const [menuOpen, setMenuOpen] = createSignal(false);
-  const [starting, setStarting] = createSignal(false);
-  const [buttonBusy, setButtonBusy] = createSignal<{ owner: string; key: string }>();
-  const [notice, setNotice] = createSignal('');
-  const [urlAuth, setUrlAuth] = createSignal<PendingBotUrlAuth>();
-  const [urlAuthBusy, setUrlAuthBusy] = createSignal(false);
-  const [inlineSwitch, setInlineSwitch] = createSignal<PendingInlineSwitch>();
+export function createBotSession(options: BotSessionOptions, context: SessionContext) {
+  const scope = lifetime();
+  type BotSessionModel = {
+    commandsRequested: string;
+    menuOpen: boolean;
+    starting: boolean;
+    buttonBusy: { owner: string; key: string } | undefined;
+    notice: string;
+    urlAuth: PendingBotUrlAuth | undefined;
+    urlAuthBusy: boolean;
+    inlineSwitch: PendingInlineSwitch | undefined;
+  };
+  type BotSessionMessage =
+    | { type: 'CommandsRequested'; value: string }
+    | { type: 'MenuOpen'; value: boolean }
+    | { type: 'Starting'; value: boolean }
+    | { type: 'ButtonBusy'; value: { owner: string; key: string } | undefined }
+    | { type: 'Notice'; value: string }
+    | { type: 'UrlAuth'; value: PendingBotUrlAuth | undefined }
+    | { type: 'UrlAuthBusy'; value: boolean }
+    | { type: 'InlineSwitch'; value: PendingInlineSwitch | undefined };
+  const state = program<BotSessionModel, BotSessionMessage>({
+    initial: {
+      commandsRequested: '',
+      menuOpen: false,
+      starting: false,
+      buttonBusy: undefined,
+      notice: '',
+      urlAuth: undefined,
+      urlAuthBusy: false,
+      inlineSwitch: undefined,
+    },
+    update: (model, message) => {
+      switch (message.type) {
+        case 'CommandsRequested':
+          return {
+            model: Object.is(model.commandsRequested, message.value)
+              ? model
+              : { ...model, commandsRequested: message.value },
+          };
+        case 'MenuOpen':
+          return {
+            model: Object.is(model.menuOpen, message.value)
+              ? model
+              : { ...model, menuOpen: message.value },
+          };
+        case 'Starting':
+          return {
+            model: Object.is(model.starting, message.value)
+              ? model
+              : { ...model, starting: message.value },
+          };
+        case 'ButtonBusy':
+          return {
+            model: Object.is(model.buttonBusy, message.value)
+              ? model
+              : { ...model, buttonBusy: message.value },
+          };
+        case 'Notice':
+          return {
+            model: Object.is(model.notice, message.value)
+              ? model
+              : { ...model, notice: message.value },
+          };
+        case 'UrlAuth':
+          return {
+            model: Object.is(model.urlAuth, message.value)
+              ? model
+              : { ...model, urlAuth: message.value },
+          };
+        case 'UrlAuthBusy':
+          return {
+            model: Object.is(model.urlAuthBusy, message.value)
+              ? model
+              : { ...model, urlAuthBusy: message.value },
+          };
+        case 'InlineSwitch':
+          return {
+            model: Object.is(model.inlineSwitch, message.value)
+              ? model
+              : { ...model, inlineSwitch: message.value },
+          };
+      }
+    },
+  });
   let actionGeneration = 0;
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-
   const isCurrent = (peerId: string, generation: number) =>
     options.activePeerId() === peerId && actionGeneration === generation;
   const currentConversation = (peerId: string) => {
@@ -73,9 +150,9 @@ export function createBotSession(options: BotSessionOptions) {
   const focusComposer = () => queueMicrotask(options.focusComposer);
   const showNotice = (message: string) => {
     if (noticeTimer) clearTimeout(noticeTimer);
-    setNotice(message);
+    state.send({ type: 'Notice', value: message });
     noticeTimer = setTimeout(() => {
-      setNotice('');
+      state.send({ type: 'Notice', value: '' });
       noticeTimer = undefined;
     }, 5_000);
   };
@@ -88,50 +165,45 @@ export function createBotSession(options: BotSessionOptions) {
     const opened = window.open(url, '_blank', 'noopener,noreferrer');
     if (!opened) showNotice('The browser blocked the new tab.');
   };
-
-  const [loadedCommands] = createUiResource(
-    () => {
-      const dialog = options.activeDialog();
-      const conversation = dialog && currentConversation(dialog.peer.id);
-      return conversation &&
-        (dialog?.peer.kind === 'group' || (dialog?.bot && commandsRequested() === dialog.peer.id))
-        ? conversation
-        : false;
-    },
-    (conversation) => conversation.getBotCommands(),
-    { namespace: 'bot-commands', key: (conversation) => conversation.peerId },
-  );
-  const commands = () => loadedCommands() ?? [];
-  const commandsLoading = () => loadedCommands.loading;
+  const commandsResource = queryResource(context, botCommandsQuery);
+  scope.add(commandsResource.dispose);
+  const commands = () => available(commandsResource.read()) ?? [];
+  const commandsLoading = () => commandsResource.read().waiting;
   const loadCommands = async () => {
-    setCommandsRequested(options.activePeerId());
+    state.send({ type: 'CommandsRequested', value: options.activePeerId() });
   };
-
-  createEffect(
-    on(
-      () => `${options.activePeerId()}\0${options.conversation()?.peerId ?? ''}`,
-      () => {
-        const peerId = options.activePeerId();
-        const conversationPeerId = options.conversation()?.peerId ?? '';
-        actionGeneration += 1;
-        setCommandsRequested('');
-        setMenuOpen(false);
-        setStarting(false);
-        setButtonBusy(undefined);
-        setNotice('');
-        setUrlAuth(undefined);
-        setUrlAuthBusy(false);
-        setInlineSwitch(undefined);
-        if (noticeTimer) clearTimeout(noticeTimer);
-        const dialog = options.activeDialog();
-        if (conversationPeerId === peerId && dialog?.peer.kind === 'group') {
-          void loadCommands().catch(() => undefined);
-        }
-      },
-    ),
-  );
-
-  onCleanup(
+  let activeKey: string | undefined;
+  const refresh = () => {
+    const peerId = options.activePeerId(),
+      conversationPeerId = options.conversation()?.peerId ?? '';
+    const nextKey = `${peerId}\0${conversationPeerId}`;
+    if (nextKey !== activeKey) {
+      activeKey = nextKey;
+      actionGeneration++;
+      state.send({ type: 'CommandsRequested', value: '' });
+      state.send({ type: 'MenuOpen', value: false });
+      state.send({ type: 'Starting', value: false });
+      state.send({ type: 'ButtonBusy', value: undefined });
+      state.send({ type: 'Notice', value: '' });
+      state.send({ type: 'UrlAuth', value: undefined });
+      state.send({ type: 'UrlAuthBusy', value: false });
+      state.send({ type: 'InlineSwitch', value: undefined });
+      if (noticeTimer) clearTimeout(noticeTimer);
+      if (conversationPeerId === peerId && options.activeDialog()?.peer.kind === 'group')
+        void loadCommands();
+    }
+    const dialog = options.activeDialog(),
+      conversation = dialog && currentConversation(dialog.peer.id);
+    const request =
+      conversation &&
+      (dialog?.peer.kind === 'group' ||
+        (dialog?.bot && state.model().commandsRequested === dialog.peer.id))
+        ? conversation
+        : undefined;
+    commandsResource.select(request || undefined);
+  };
+  scope.add(state.subscribe(refresh));
+  scope.add(
     subscribeAtUi(
       options.runEffect,
       options.resources.subscribeResources((event) => {
@@ -140,36 +212,33 @@ export function createBotSession(options: BotSessionOptions) {
           (event.peerId !== undefined && event.peerId !== options.activePeerId())
         )
           return;
-        model.invalidate(
-          event.peerId === undefined ? 'bot-commands:' : `bot-commands:${event.peerId}`,
-        );
+        context.cache.invalidateQuery(botCommandsQuery);
       }),
     ),
   );
-
   const toggleMenu = () => {
-    const open = !menuOpen();
-    setMenuOpen(open);
+    const open = !state.model().menuOpen;
+    state.send({ type: 'MenuOpen', value: open });
     if (open) void loadCommands().catch(() => undefined);
   };
   const start = async () => {
     const dialog = options.activeDialog();
-    if (!dialog?.bot || starting()) return;
+    if (!dialog?.bot || state.model().starting) return;
     const peerId = dialog.peer.id;
     const generation = actionGeneration;
-    setStarting(true);
-    setMenuOpen(false);
+    state.send({ type: 'Starting', value: true });
+    state.send({ type: 'MenuOpen', value: false });
     try {
       const conversation = currentConversation(peerId);
       if (conversation) await options.runEffect(conversation.startBot());
     } finally {
-      if (isCurrent(peerId, generation)) setStarting(false);
+      if (isCurrent(peerId, generation)) state.send({ type: 'Starting', value: false });
     }
   };
   const sendCommand = (command: TelegramBotCommand) => {
     const dialog = options.activeDialog();
     if (!dialog) return;
-    setMenuOpen(false);
+    state.send({ type: 'MenuOpen', value: false });
     const suffix = dialog.bot || !command.botUsername ? '' : `@${command.botUsername}`;
     const conversation = currentConversation(dialog.peer.id);
     if (conversation) {
@@ -178,7 +247,6 @@ export function createBotSession(options: BotSessionOptions) {
         .catch(() => undefined);
     }
   };
-
   const press = async (
     button: TelegramBotButton,
     owner: string,
@@ -186,11 +254,11 @@ export function createBotSession(options: BotSessionOptions) {
     messageId?: number,
   ) => {
     const dialog = options.activeDialog();
-    if (!dialog || buttonBusy()) return;
+    if (!dialog || state.model().buttonBusy) return;
     const peer = { ...dialog.peer };
     const peerId = peer.id;
     const generation = actionGeneration;
-    setButtonBusy({ owner, key });
+    state.send({ type: 'ButtonBusy', value: { owner, key } });
     try {
       if (button.kind === 'text') {
         const conversation = currentConversation(peerId);
@@ -222,14 +290,17 @@ export function createBotSession(options: BotSessionOptions) {
           return;
         }
         if (result.kind === 'request') {
-          setUrlAuth({
-            peer,
-            messageId,
-            buttonId: button.buttonId,
-            fallbackUrl: button.url,
-            request: result,
-            generation,
-            owner,
+          state.send({
+            type: 'UrlAuth',
+            value: {
+              peer,
+              messageId,
+              buttonId: button.buttonId,
+              fallbackUrl: button.url,
+              request: result,
+              generation,
+              owner,
+            },
           });
           return;
         }
@@ -265,10 +336,13 @@ export function createBotSession(options: BotSessionOptions) {
       if (button.kind === 'switch-inline') {
         if (!button.samePeer) {
           if (isCurrent(peerId, generation)) {
-            setInlineSwitch({
-              query: button.query ?? '',
-              ...(button.botUsername ? { botUsername: button.botUsername } : {}),
-              owner,
+            state.send({
+              type: 'InlineSwitch',
+              value: {
+                query: button.query ?? '',
+                ...(button.botUsername ? { botUsername: button.botUsername } : {}),
+                owner,
+              },
             });
           }
           return;
@@ -289,30 +363,32 @@ export function createBotSession(options: BotSessionOptions) {
       if (isCurrent(peerId, generation)) showNotice('The bot action failed.');
     } finally {
       if (isCurrent(peerId, generation)) {
-        setButtonBusy((current) =>
-          current?.owner === owner && current.key === key ? undefined : current,
-        );
+        state.send({
+          type: 'ButtonBusy',
+          value: ((current) =>
+            current?.owner === owner && current.key === key ? undefined : current)(
+            state.model().buttonBusy,
+          ),
+        });
       }
     }
   };
-
   const chooseInlineChat = async (peerId: string) => {
-    const pending = inlineSwitch();
+    const pending = state.model().inlineSwitch;
     if (!pending) return;
     const prefix = pending.botUsername ? `@${pending.botUsername} ` : '';
     const nextDraft = `${prefix}${pending.query}`;
     options.dismissSingleUseKeyboard(pending.owner);
-    setInlineSwitch(undefined);
+    state.send({ type: 'InlineSwitch', value: undefined });
     await options.runEffect(options.setPeerDraft(peerId, nextDraft));
     if (!(await options.selectChat(peerId))) return;
     options.setDraft(nextDraft);
     if (options.activePeerId() === peerId) focusComposer();
   };
-
   const acceptUrlAuth = async (acceptOptions: TelegramUrlAuthAcceptOptions) => {
-    const pending = urlAuth();
-    if (!pending || urlAuthBusy()) return;
-    setUrlAuthBusy(true);
+    const pending = state.model().urlAuth;
+    if (!pending || state.model().urlAuthBusy) return;
+    state.send({ type: 'UrlAuthBusy', value: true });
     try {
       const conversation = currentConversation(pending.peer.id);
       const result = conversation
@@ -323,10 +399,10 @@ export function createBotSession(options: BotSessionOptions) {
       if (!isCurrent(pending.peer.id, pending.generation)) return;
       if (!result) throw new Error('Telegram URL authorization is unavailable.');
       if (result.kind === 'request') {
-        setUrlAuth({ ...pending, request: result });
+        state.send({ type: 'UrlAuth', value: { ...pending, request: result } });
         return;
       }
-      setUrlAuth(undefined);
+      state.send({ type: 'UrlAuth', value: undefined });
       openUrl(
         result.kind === 'accepted' ? (result.url ?? pending.fallbackUrl) : pending.fallbackUrl,
       );
@@ -336,34 +412,46 @@ export function createBotSession(options: BotSessionOptions) {
         showNotice('Telegram could not complete this sign-in request.');
       }
     } finally {
-      if (isCurrent(pending.peer.id, pending.generation)) setUrlAuthBusy(false);
+      if (isCurrent(pending.peer.id, pending.generation))
+        state.send({ type: 'UrlAuthBusy', value: false });
     }
   };
-
-  onCleanup(() => {
+  scope.add(() => {
     if (noticeTimer) clearTimeout(noticeTimer);
   });
-
-  return {
-    commands,
-    commandsLoading,
-    menuOpen,
-    starting,
-    buttonBusy,
-    notice,
-    urlAuth,
-    urlAuthBusy,
-    inlineSwitch,
+  const actions = {
+    refresh,
     toggleMenu,
-    closeMenu: () => setMenuOpen(false),
+    closeMenu: () => state.send({ type: 'MenuOpen', value: false }),
     start,
     sendCommand,
     press,
     chooseInlineChat,
     acceptUrlAuth,
-    closeInlineSwitch: () => setInlineSwitch(undefined),
+    closeInlineSwitch: () => state.send({ type: 'InlineSwitch', value: undefined }),
     closeUrlAuth: () => {
-      if (!urlAuthBusy()) setUrlAuth(undefined);
+      if (!state.model().urlAuthBusy) state.send({ type: 'UrlAuth', value: undefined });
     },
+  };
+  return {
+    ...actions,
+    model: state.model,
+    subscribe: state.subscribe,
+    dispose: () => {
+      scope.dispose();
+      state.dispose();
+    },
+    snapshot: () => ({
+      ...actions,
+      commands: commands(),
+      commandsLoading: commandsLoading(),
+      menuOpen: state.model().menuOpen,
+      starting: state.model().starting,
+      buttonBusy: state.model().buttonBusy,
+      notice: state.model().notice,
+      urlAuth: state.model().urlAuth,
+      urlAuthBusy: state.model().urlAuthBusy,
+      inlineSwitch: state.model().inlineSwitch,
+    }),
   };
 }

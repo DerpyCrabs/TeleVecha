@@ -5,13 +5,7 @@ if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
   throw new Error(`Invalid Playwright server port: ${process.argv[2] ?? ''}`);
 }
 
-const server = await createServer({
-  server: {
-    host: '127.0.0.1',
-    port,
-    strictPort: true,
-  },
-});
+const server = await createServer({ server: { host: '127.0.0.1', port, strictPort: true } });
 
 let closing = false;
 const close = async () => {

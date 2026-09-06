@@ -61,12 +61,7 @@ export const pbkdf2Sha512 = Effect.fn('mtproto.crypto.pbkdf2Sha512')(function* (
         ['deriveBits'],
       );
       const derived = await crypto.subtle.deriveBits(
-        {
-          name: 'PBKDF2',
-          hash: 'SHA-512',
-          salt: new Uint8Array(salt),
-          iterations,
-        },
+        { name: 'PBKDF2', hash: 'SHA-512', salt: new Uint8Array(salt), iterations },
         key,
         bits,
       );

@@ -25,10 +25,7 @@ export const uploadFile = Effect.fn('mtproto.files.upload')(function* (
   const name = file.name?.trim() || 'upload.bin';
   const partSize = yield* uploadPartSize(file.size);
   const partCount = Math.max(1, Math.ceil(file.size / partSize));
-  const fileId = bytesToBigInt(yield* rpc.randomBytes(8), {
-    littleEndian: true,
-    signed: true,
-  });
+  const fileId = bytesToBigInt(yield* rpc.randomBytes(8), { littleEndian: true, signed: true });
   const large = file.size > LARGE_FILE_BYTES;
   const completed = yield* Ref.make(0);
   const workerCount = Math.max(1, Math.min(Math.trunc(options.workers ?? 2), 3, partCount));

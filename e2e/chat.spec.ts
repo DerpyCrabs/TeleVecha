@@ -10,9 +10,9 @@ test.beforeEach(async ({ page }) => {
 test('renders real previews, avatars, a contained layout, and a visible composer', async ({
   page,
 }) => {
-  const alice = page.locator('[data-testid="chat-list"]').getByRole('button', {
-    name: /Alice Fixture/,
-  });
+  const alice = page
+    .locator('[data-testid="chat-list"]')
+    .getByRole('button', { name: /Alice Fixture/ });
   await expect(alice).toContainText('Newest message from fixture');
   await expect(alice).not.toContainText('No messages yet');
   await expect(alice.locator('img')).toBeVisible();
@@ -95,9 +95,9 @@ test('fills a one-message first page automatically and keeps the newest message 
   page,
 }) => {
   await page.goto('/?scenario=single-message-first-page');
-  const alice = page.locator('[data-testid="chat-list"]').getByRole('button', {
-    name: /Alice Fixture/,
-  });
+  const alice = page
+    .locator('[data-testid="chat-list"]')
+    .getByRole('button', { name: /Alice Fixture/ });
   await expect(alice).toBeVisible();
   await alice.click();
 
@@ -162,10 +162,7 @@ test('keeps outgoing message bubbles readable and distinct from incoming message
         color: (style.color.match(/[\d.]+/gu) ?? []).slice(0, 3).map(Number),
       };
     };
-    return {
-      incoming: readStyle('.message.incoming'),
-      outgoing: readStyle('.message.outgoing'),
-    };
+    return { incoming: readStyle('.message.incoming'), outgoing: readStyle('.message.outgoing') };
   });
   const average = (rgb: number[]) => rgb.reduce((sum, channel) => sum + channel, 0) / rgb.length;
 

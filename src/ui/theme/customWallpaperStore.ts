@@ -17,18 +17,12 @@ type StorageOperation = typeof StorageOperation.Type;
 
 export class WallpaperStorageError extends Schema.TaggedError<WallpaperStorageError>()(
   'WallpaperStorageError',
-  {
-    operation: StorageOperation,
-    message: Schema.String,
-    cause: Schema.Defect(),
-  },
+  { operation: StorageOperation, message: Schema.String, cause: Schema.Defect() },
 ) {}
 
 export class WallpaperValidationError extends Schema.TaggedError<WallpaperValidationError>()(
   'WallpaperValidationError',
-  {
-    message: Schema.String,
-  },
+  { message: Schema.String },
 ) {}
 
 const operationMessages: Record<StorageOperation, string> = {
@@ -39,11 +33,7 @@ const operationMessages: Record<StorageOperation, string> = {
 };
 
 const storageError = (operation: StorageOperation, cause: unknown): WallpaperStorageError =>
-  new WallpaperStorageError({
-    operation,
-    message: operationMessages[operation],
-    cause,
-  });
+  new WallpaperStorageError({ operation, message: operationMessages[operation], cause });
 
 const validationError = (message: string): WallpaperValidationError =>
   new WallpaperValidationError({ message });

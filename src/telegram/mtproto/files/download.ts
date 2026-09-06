@@ -45,13 +45,15 @@ const requestPart = Effect.fn('mtproto.files.requestPart')(function* (
   request: TlObject,
   requestTimeoutMs: number,
 ) {
-  const attempt = rpc.invokeOnDc<unknown>(dcId, request).pipe(
-    Effect.timeoutOrElse({
-      duration: requestTimeoutMs,
-      orElse: () =>
-        Effect.fail(createMtprotoError('transport', 'Telegram file-part request timed out.')),
-    }),
-  );
+  const attempt = rpc
+    .invokeOnDc<unknown>(dcId, request)
+    .pipe(
+      Effect.timeoutOrElse({
+        duration: requestTimeoutMs,
+        orElse: () =>
+          Effect.fail(createMtprotoError('transport', 'Telegram file-part request timed out.')),
+      }),
+    );
   return yield* attempt.pipe(
     Effect.catch((error) =>
       error.kind === 'transport'

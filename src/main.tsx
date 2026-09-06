@@ -1,8 +1,7 @@
 import { BrowserRuntime } from '@effect/platform-browser';
 import { Effect } from 'effect';
-import { render } from 'solid-js/web';
 
-import { App } from './ui/app/App';
+import { mountApp } from './ui/app/App';
 import { applyTvBugUiState, injectedTvBugBundle } from './debug/tvbugRuntime';
 import { appRuntimeLayer, makeDefaultAppEnvironment } from './ui/app/appRuntime';
 import { applyThemePreferences, readThemePreferences } from './ui/theme/themePreferences';
@@ -27,7 +26,7 @@ const main = Effect.scoped(
       applyThemePreferences(readThemePreferences());
     });
     const environment = yield* makeDefaultAppEnvironment();
-    const dispose = yield* Effect.sync(() => render(() => <App environment={environment} />, root));
+    const dispose = yield* Effect.sync(() => mountApp(root, environment));
     yield* Effect.addFinalizer(() => Effect.sync(dispose));
     return yield* Effect.never;
   }),

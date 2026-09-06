@@ -1,141 +1,139 @@
-import Crop from 'lucide-solid/icons/crop';
-import RotateCcw from 'lucide-solid/icons/rotate-ccw';
-import RotateCw from 'lucide-solid/icons/rotate-cw';
-import X from 'lucide-solid/icons/x';
-import { Portal } from 'solid-js/web';
-import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
-
-import { transformImageFile, type CropAspect, type ImageRotation } from './imageTransforms';
+import { Effect } from 'effect';
+import Crop from '@effectweb/lucide/icons/crop';
+import RotateCcw from '@effectweb/lucide/icons/rotate-ccw';
+import RotateCw from '@effectweb/lucide/icons/rotate-cw';
+import X from '@effectweb/lucide/icons/x';
+import { Portal, defineTasks, resourceError, domMount, sequence, view } from 'effectweb';
+import { fromPromise } from 'effectweb/load';
+import { modalMount } from '../shared/modalMount';
+import type { CropAspect } from './imageTransforms';
+import { transformImageFile, type ImageRotation } from './imageTransforms';
 import type { StagedAttachment } from './outgoingAttachments';
-import { useModalDialog } from '../shared/useModalDialog';
-
 interface ImageAttachmentEditorProps {
   attachment: StagedAttachment;
   close: () => void;
   apply: (file: File) => void;
 }
-
 const crops = [
   ['original', 'Original'],
   ['square', 'Square'],
   ['4:3', '4:3'],
   ['16:9', '16:9'],
 ] as const;
-
-export function ImageAttachmentEditor(props: ImageAttachmentEditorProps) {
-  const [rotation, setRotation] = createSignal<ImageRotation>(0);
-  const [crop, setCrop] = createSignal<CropAspect>('original');
-  const [previewUrl, setPreviewUrl] = createSignal('');
-  const [applying, setApplying] = createSignal(false);
-  const [error, setError] = createSignal('');
-  let overlay: HTMLDivElement | undefined;
-  let currentUrl = '';
-
-  useModalDialog(() => overlay, props.close);
-  createEffect(() => {
-    const file = props.attachment.file;
-    if (currentUrl) URL.revokeObjectURL(currentUrl);
-    currentUrl = URL.createObjectURL(file);
-    setPreviewUrl(currentUrl);
+function imageSource(file: File) {
+  return domMount<HTMLImageElement>((element) => {
+    const url = URL.createObjectURL(file);
+    element.src = url;
+    return () => URL.revokeObjectURL(url);
   });
-  onCleanup(() => {
-    if (currentUrl) URL.revokeObjectURL(currentUrl);
-  });
-
-  const rotate = (step: number) => {
-    const value = (rotation() + step + 360) % 360;
-    setRotation(value as ImageRotation);
-  };
-  const apply = async () => {
-    if (applying()) return;
-    setApplying(true);
-    setError('');
-    try {
-      props.apply(await transformImageFile(props.attachment.file, rotation(), crop()));
-      props.close();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not edit the image.');
-    } finally {
-      setApplying(false);
-    }
-  };
-
-  return (
-    <Portal>
-      <div
-        ref={(element) => (overlay = element)}
-        class="image-editor-overlay"
-        tabIndex={-1}
-        onPointerDown={(event) => event.target === event.currentTarget && props.close()}
-      >
-        <section
-          class="image-editor"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="image-editor-title"
-        >
-          <header>
-            <h2 id="image-editor-title">Edit image</h2>
-            <button type="button" onClick={props.close} aria-label="Close image editor">
-              <X size={18} />
-            </button>
-          </header>
-          <div
-            class="image-editor-preview"
-            data-crop={crop()}
-            data-rotation={rotation()}
-            style={{
-              '--image-rotation': `${rotation()}deg`,
-            }}
-          >
-            <img src={previewUrl()} alt="Image edit preview" />
-          </div>
-          <div class="image-editor-controls">
-            <div class="image-editor-rotate" aria-label="Rotate image">
-              <button type="button" onClick={() => rotate(-90)} aria-label="Rotate left">
-                <RotateCcw size={17} /> Rotate left
-              </button>
-              <button type="button" onClick={() => rotate(90)} aria-label="Rotate right">
-                <RotateCw size={17} /> Rotate right
-              </button>
-            </div>
-            <div class="image-editor-crops" aria-label="Crop aspect ratio">
-              <span>
-                <Crop size={16} /> Crop
-              </span>
-              <For each={crops}>
-                {([value, label]) => (
-                  <button
-                    type="button"
-                    aria-pressed={crop() === value}
-                    onClick={() => setCrop(value)}
-                  >
-                    {label}
-                  </button>
-                )}
-              </For>
-            </div>
-          </div>
-          <Show when={error()}>
-            <p class="image-editor-error" role="alert">
-              {error()}
-            </p>
-          </Show>
-          <footer>
-            <button type="button" onClick={props.close}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              class="primary"
-              disabled={applying()}
-              onClick={() => void apply()}
-            >
-              {applying() ? 'Applying…' : 'Apply'}
-            </button>
-          </footer>
-        </section>
-      </div>
-    </Portal>
-  );
 }
+const editing = defineTasks({
+  init: (_props: ImageAttachmentEditorProps) => ({
+    rotation: 0 as ImageRotation,
+    crop: 'original' as CropAspect,
+  }),
+  identity: (props) => props.attachment.id,
+}).tasks({
+  apply: {
+    policy: 'drop',
+    run: (model) =>
+      fromPromise(() =>
+        transformImageFile(model.props.attachment.file, model.rotation, model.crop),
+      ).pipe(
+        Effect.tap((file) =>
+          Effect.sync(() => {
+            model.props.apply(file);
+            model.props.close();
+          }),
+        ),
+      ),
+  },
+});
+export const ImageAttachmentEditor = editing.view(
+  view((model, send) => {
+    const props = model.props;
+    const controls = editing.controls(send);
+    const error = model.tasks.apply.waiting ? '' : resourceError(model.tasks.apply);
+    const rotate = (step: number) => {
+      const value = (model.rotation + step + 360) % 360;
+      controls.patch({ rotation: value as ImageRotation });
+    };
+    return (
+      <Portal>
+        <div
+          use={modalMount(props.close)}
+          class="image-editor-overlay"
+          tabIndex={-1}
+          onPointerDown={(event) => event.target === event.currentTarget && props.close()}
+        >
+          <section
+            class="image-editor"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="image-editor-title"
+          >
+            <header>
+              <h2 id="image-editor-title">Edit image</h2>
+              <button type="button" onClick={props.close} aria-label="Close image editor">
+                <X size={18} />
+              </button>
+            </header>
+            <div
+              class="image-editor-preview"
+              data-crop={model.crop}
+              data-rotation={model.rotation}
+              style={{ '--image-rotation': `${model.rotation}deg` }}
+            >
+              <img use={imageSource(props.attachment.file)} alt="Image edit preview" />
+            </div>
+            <div class="image-editor-controls">
+              <div class="image-editor-rotate" aria-label="Rotate image">
+                <button type="button" onClick={() => rotate(-90)} aria-label="Rotate left">
+                  <RotateCcw size={17} /> Rotate left
+                </button>
+                <button type="button" onClick={() => rotate(90)} aria-label="Rotate right">
+                  <RotateCw size={17} /> Rotate right
+                </button>
+              </div>
+              <div class="image-editor-crops" aria-label="Crop aspect ratio">
+                <span>
+                  <Crop size={16} /> Crop
+                </span>
+                {sequence(crops).map((_item) => {
+                  const [value, label] = _item;
+                  return (
+                    <button
+                      type="button"
+                      aria-pressed={model.crop === value}
+                      onClick={() => controls.patch({ crop: value })}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {error ? (
+              <p class="image-editor-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <footer>
+              <button type="button" onClick={props.close}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="primary"
+                disabled={model.tasks.apply.waiting}
+                onClick={() => controls.run('apply')}
+              >
+                {model.tasks.apply.waiting ? 'Applying…' : 'Apply'}
+              </button>
+            </footer>
+          </section>
+        </div>
+      </Portal>
+    );
+  }),
+);

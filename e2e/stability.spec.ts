@@ -122,9 +122,7 @@ test('reconnects automatically when focus returns after a background disconnect'
     window.__televechaFixture?.emit({ type: 'connection-state', connected: false });
   });
 
-  const connectionChip = page.getByRole('button', {
-    name: /Offline.*Retry Telegram connection/i,
-  });
+  const connectionChip = page.getByRole('button', { name: /Offline.*Retry Telegram connection/i });
   await expect(connectionChip).toBeVisible();
   await page.evaluate(() => {
     Reflect.deleteProperty(document, 'hasFocus');

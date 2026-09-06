@@ -714,10 +714,7 @@ function parseTrace(bytes) {
       throw new TvBugInputError(`${label} contains malformed JSON: ${errorMessage(error)}`);
     }
     const event = requireRecord(value, label);
-    const sequence = requireFiniteNumber(event.seq, `${label} seq`, {
-      integer: true,
-      minimum: 0,
-    });
+    const sequence = requireFiniteNumber(event.seq, `${label} seq`, { integer: true, minimum: 0 });
     const time = requireFiniteNumber(event.tMs, `${label} tMs`, { minimum: 0 });
     if (sequence <= previousSequence) {
       throw new TvBugInputError(`${label} seq must increase.`);
@@ -1094,11 +1091,7 @@ function tvbugBundlePlugin(bundle) {
       order: 'pre',
       handler() {
         return [
-          {
-            tag: 'script',
-            children: `window.__televechaTvBugBundle=${source};`,
-            injectTo: 'head',
-          },
+          { tag: 'script', children: `window.__televechaTvBugBundle=${source};`, injectTo: 'head' },
         ];
       },
     },

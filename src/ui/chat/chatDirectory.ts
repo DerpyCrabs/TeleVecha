@@ -1,5 +1,3 @@
-import type { Accessor } from 'solid-js';
-
 import type { EffectMessagingClient } from '../../telegram/core/client';
 import type {
   TelegramDeleteDialogAction,
@@ -7,7 +5,7 @@ import type {
   TelegramPeerSearchResult,
 } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
-
+import type { Read } from 'effectweb/session';
 type DirectorySource = Pick<
   EffectMessagingClient,
   | 'searchPeers'
@@ -24,7 +22,7 @@ type DirectorySource = Pick<
 export function createChatDirectory(
   source: DirectorySource,
   runEffect: UiEffectRunner,
-  dialogs: Accessor<TelegramDialog[]>,
+  dialogs: Read<TelegramDialog[]>,
   selectPeer: (peerId: string) => Promise<boolean>,
 ) {
   let openGeneration = 0;
@@ -33,7 +31,6 @@ export function createChatDirectory(
     if (!current) throw new Error('Chat is no longer available.');
     return current;
   };
-
   return {
     search: (query: string) => source.searchPeers(query),
     select(peerId: string) {
@@ -61,5 +58,4 @@ export function createChatDirectory(
       runEffect(source.deleteDialog(dialog(peerId).peer, action)),
   };
 }
-
 export type ChatDirectory = ReturnType<typeof createChatDirectory>;

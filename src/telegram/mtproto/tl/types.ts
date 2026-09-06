@@ -48,10 +48,7 @@ export type TlRequest<Result> = Readonly<{ [tlResult]: Result }>;
 
 export type TlResultOf<Request> = Request extends TlRequest<infer Result> ? Result : never;
 
-export type TlReader = {
-  readonly bytes: Uint8Array;
-  offset: number;
-};
+export type TlReader = { readonly bytes: Uint8Array; offset: number };
 
 type TlFactoryCall<
   Value extends TlObject = AnyTlObject,

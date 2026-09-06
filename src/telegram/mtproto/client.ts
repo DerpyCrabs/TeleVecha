@@ -150,11 +150,7 @@ const endpoint = Effect.fn('mtproto.client.endpoint')(function* (
       createMtprotoError('configuration', `Telegram data center ${dcId} is not supported.`),
     );
   }
-  return {
-    dcId,
-    host: `zws${dcId}${dedicatedMedia ? '-1' : ''}.web.telegram.org`,
-    port: 443,
-  };
+  return { dcId, host: `zws${dcId}${dedicatedMedia ? '-1' : ''}.web.telegram.org`, port: 443 };
 });
 
 function field<Value>(value: TlObject, camel: string, snake: string): Value {
@@ -164,18 +160,20 @@ function field<Value>(value: TlObject, camel: string, snake: string): Value {
 function normalizedHandshakeWire(plain: PlainMtprotoTransport): AuthorizationHandshakeWire {
   return {
     requestPq: (nonce): Effect.Effect<ResPq, MtprotoError> =>
-      plain.invoke(createTl('req_pq_multi', { nonce })).pipe(
-        Effect.map((result) => ({
-          nonce: field(result, 'nonce', 'nonce'),
-          serverNonce: field(result, 'serverNonce', 'server_nonce'),
-          pq: field(result, 'pq', 'pq'),
-          serverPublicKeyFingerprints: field(
-            result,
-            'serverPublicKeyFingerprints',
-            'server_public_key_fingerprints',
-          ),
-        })),
-      ),
+      plain
+        .invoke(createTl('req_pq_multi', { nonce }))
+        .pipe(
+          Effect.map((result) => ({
+            nonce: field(result, 'nonce', 'nonce'),
+            serverNonce: field(result, 'serverNonce', 'server_nonce'),
+            pq: field(result, 'pq', 'pq'),
+            serverPublicKeyFingerprints: field(
+              result,
+              'serverPublicKeyFingerprints',
+              'server_public_key_fingerprints',
+            ),
+          })),
+        ),
     encodePqInnerData: (input) =>
       encodeTl(
         createTl('p_q_inner_data_dc', {
@@ -300,11 +298,7 @@ function retryableServerError(error: MtprotoError) {
 }
 
 type SenderKey = `${MtprotoConnectionPurpose}:${number}`;
-type RetryRequest = Readonly<{
-  _tag: 'RetryRequest';
-  cause: MtprotoError;
-  delayMs?: number;
-}>;
+type RetryRequest = Readonly<{ _tag: 'RetryRequest'; cause: MtprotoError; delayMs?: number }>;
 
 const retryRequest = (cause: MtprotoError, delayMs?: number): RetryRequest => ({
   _tag: 'RetryRequest',
@@ -392,11 +386,7 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
     const dedicatedMedia = purpose === 'media' && storedKey !== undefined;
     const dc = yield* endpoint(dcId, dedicatedMedia);
     const unresolvedConnection = options.connectionFactory
-      ? options.connectionFactory({
-          ...dc,
-          isTestServer: snapshot.isTest === true,
-          purpose,
-        })
+      ? options.connectionFactory({ ...dc, isTestServer: snapshot.isTest === true, purpose })
       : createWebSocketPacketConnection({
           url: telegramWebSocketUrl({
             host: dc.host,

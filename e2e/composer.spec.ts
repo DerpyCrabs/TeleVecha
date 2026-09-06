@@ -174,11 +174,7 @@ test('does not send whitespace or submit while an IME composition is active', as
 
   await input.fill('composing');
   await input.evaluate((element) => {
-    const event = new KeyboardEvent('keydown', {
-      bubbles: true,
-      cancelable: true,
-      key: 'Enter',
-    });
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter' });
     Object.defineProperty(event, 'isComposing', { value: true });
     element.dispatchEvent(event);
   });

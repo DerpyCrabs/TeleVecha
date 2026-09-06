@@ -17,10 +17,7 @@ describe('MTProto client construction', () => {
         providePlatform(
           Effect.gen(function* () {
             const load = vi.fn(() =>
-              Effect.succeed({
-                mainDcId: 2,
-                keys: { 2: 'ab'.repeat(256).toUpperCase() },
-              }),
+              Effect.succeed({ mainDcId: 2, keys: { 2: 'ab'.repeat(256).toUpperCase() } }),
             );
             const client = yield* createMtprotoClient({
               apiId: 1,

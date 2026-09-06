@@ -45,10 +45,7 @@ export function transitionConversationViewport(
 ): ConversationViewportTransition {
   switch (event.type) {
     case 'peer-reset':
-      return {
-        state: { mode: 'present', phase: 'positioning', pagination: 'idle' },
-        effects: [],
-      };
+      return { state: { mode: 'present', phase: 'positioning', pagination: 'idle' }, effects: [] };
     case 'peer-positioned':
       return {
         state: { mode: 'present', phase: 'ready', pagination: 'idle' },
@@ -60,28 +57,19 @@ export function transitionConversationViewport(
       return { state: { ...state, phase: 'positioning' }, effects: [] };
     case 'user-left-present':
     case 'history-target-opened':
-      return {
-        state: { ...state, mode: 'history' },
-        effects: ['capture-reading-anchor'],
-      };
+      return { state: { ...state, mode: 'history' }, effects: ['capture-reading-anchor'] };
     case 'present-visible':
       return { state: { ...state, mode: 'present' }, effects: [] };
     case 'jump-to-present':
     case 'conversation-empty':
-      return {
-        state: { ...state, mode: 'present' },
-        effects: ['pin-present'],
-      };
+      return { state: { ...state, mode: 'present' }, effects: ['pin-present'] };
     case 'viewport-scrolled':
       return {
         state,
         effects: [state.mode === 'present' ? 'pin-present' : 'capture-reading-anchor'],
       };
     case 'reading-anchor-requested':
-      return {
-        state,
-        effects: state.mode === 'history' ? ['capture-reading-anchor'] : [],
-      };
+      return { state, effects: state.mode === 'history' ? ['capture-reading-anchor'] : [] };
     case 'geometry-changed':
     case 'content-changed':
       return {
@@ -92,10 +80,7 @@ export function transitionConversationViewport(
       if (state.mode !== 'history' || state.pagination !== 'idle' || !event.canLoad) {
         return { state, effects: [] };
       }
-      return {
-        state: { ...state, pagination: 'loading' },
-        effects: ['request-older'],
-      };
+      return { state: { ...state, pagination: 'loading' }, effects: ['request-older'] };
     case 'older-load-settled':
       return { state: { ...state, pagination: 'idle' }, effects: [] };
   }

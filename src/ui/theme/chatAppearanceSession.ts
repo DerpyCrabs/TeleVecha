@@ -1,23 +1,31 @@
-import { createEffect, createMemo, onCleanup, type Accessor } from 'solid-js';
-import { createUiResource } from '../reactivity/solid';
 import type { Effect } from 'effect';
-
-import type { TelegramChatAppearance, TelegramDialog, TelegramPeer } from '../../telegram/types';
 import type { MessagingError } from '../../telegram/core/messagingError';
+import type { TelegramChatAppearance, TelegramDialog, TelegramPeer } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
-import {
-  readableTextColor,
-  telegramWallpaperBackground,
-  type ThemePreferences,
-} from './themePreferences';
-
+import type { Read, SessionContext } from 'effectweb/session';
+import { lifetime, queryResource } from 'effectweb/session';
+import { available, query } from 'effectweb';
+import type { ThemePreferences } from './themePreferences';
+import { readableTextColor, telegramWallpaperBackground } from './themePreferences';
 interface ChatAppearanceSource {
   getChatAppearance(
     peer: TelegramPeer,
   ): Effect.Effect<TelegramChatAppearance | undefined, MessagingError>;
   downloadWallpaper(wallpaperId: string): Effect.Effect<Blob, MessagingError>;
 }
-
+export const chatAppearanceQuery = query({
+  name: 'chat-appearance',
+  key: ({ peer }: { source: ChatAppearanceSource; peer: TelegramPeer }) =>
+    `${peer.kind}:${peer.id}:${peer.accessHash ?? ''}`,
+  load: ({ source, peer }: { source: ChatAppearanceSource; peer: TelegramPeer }) =>
+    source.getChatAppearance(peer),
+});
+const wallpaperBlobQuery = query({
+  name: 'wallpaper-blob',
+  key: ({ id }: { source: ChatAppearanceSource; id: string }) => id,
+  load: ({ source, id }: { source: ChatAppearanceSource; id: string }) =>
+    source.downloadWallpaper(id),
+});
 function themeSettings(
   chatAppearance: TelegramChatAppearance | undefined,
   preferences: ThemePreferences,
@@ -37,7 +45,6 @@ function themeSettings(
     settings?.[0]
   );
 }
-
 function reportAppearance(
   peer: TelegramPeer,
   chatAppearance: TelegramChatAppearance,
@@ -63,27 +70,28 @@ function reportAppearance(
 }
 
 /** Owns chat-scoped Telegram theme resolution, downloads, and object URLs. */
-export function createChatAppearanceSession(options: {
-  source: ChatAppearanceSource;
-  runEffect: UiEffectRunner;
-  activeDialog: Accessor<TelegramDialog | undefined>;
-  preferences: Accessor<ThemePreferences>;
-}) {
-  const [chatAppearance] = createUiResource(
-    () => {
-      const dialog = options.activeDialog();
-      return dialog && !dialog.transient ? dialog.peer : false;
-    },
-    (peer) => options.source.getChatAppearance(peer),
-    {
-      namespace: 'chat-appearance',
-      key: (peer) => `${peer.kind}:${peer.id}:${peer.accessHash ?? ''}`,
-    },
-  );
-
-  const settings = createMemo(() => themeSettings(chatAppearance(), options.preferences()));
-  const wallpaper = createMemo(() => chatAppearance()?.wallpaper ?? settings()?.wallpaper);
-  const pattern = createMemo(() => {
+export function createChatAppearanceSession(
+  options: {
+    source: ChatAppearanceSource;
+    runEffect: UiEffectRunner;
+    activeDialog: Read<TelegramDialog | undefined>;
+    preferences: Read<ThemePreferences>;
+  },
+  context: SessionContext,
+) {
+  const scope = lifetime();
+  const appearanceResource = queryResource(context, chatAppearanceQuery);
+  const assetResource = queryResource(context, wallpaperBlobQuery);
+  scope.add(appearanceResource.dispose);
+  scope.add(assetResource.dispose);
+  const chatAppearance = () => available(appearanceResource.read());
+  let wallpaperAsset = '',
+    previousBlob: Blob | undefined;
+  let lastReported: TelegramChatAppearance | undefined,
+    lastPreferences: ThemePreferences | undefined;
+  const settings = () => themeSettings(chatAppearance(), options.preferences());
+  const wallpaper = () => chatAppearance()?.wallpaper ?? settings()?.wallpaper;
+  const pattern = () => {
     const current = wallpaper();
     if (!current?.pattern) return undefined;
     const baseTheme = settings()?.baseTheme;
@@ -93,30 +101,15 @@ export function createChatAppearanceSession(options: {
       baseTheme === 'tinted'
       ? 'inverted'
       : 'normal';
-  });
-  const [wallpaperBlob] = createUiResource(
-    () => {
-      const current = wallpaper();
-      return current?.hasFile ? current.id : false;
-    },
-    (id) => options.source.downloadWallpaper(id),
-    { namespace: 'wallpaper-blob' },
-  );
-  const wallpaperAsset = createMemo(() => {
-    const blob = wallpaperBlob();
-    if (!blob) return '';
-    const url = URL.createObjectURL(blob);
-    onCleanup(() => URL.revokeObjectURL(url));
-    return url;
-  });
-  const style = createMemo(() => {
+  };
+  const style = () => {
     const currentSettings = settings();
     const currentWallpaper = wallpaper();
     const colors = currentWallpaper?.settings.backgroundColors.length
       ? currentWallpaper.settings.backgroundColors
       : undefined;
     return {
-      ...(wallpaperAsset() ? { '--chat-wallpaper-asset': `url("${wallpaperAsset()}")` } : {}),
+      ...(wallpaperAsset ? { '--chat-wallpaper-asset': `url("${wallpaperAsset}")` } : {}),
       ...(colors
         ? {
             '--chat-wallpaper-gradient': telegramWallpaperBackground(
@@ -153,13 +146,38 @@ export function createChatAppearanceSession(options: {
           }
         : {}),
     };
+  };
+  const refresh = () => {
+    const dialog = options.activeDialog(),
+      peer = dialog && !dialog.transient ? dialog.peer : undefined;
+    appearanceResource.select(peer ? { source: options.source, peer } : undefined);
+    const current = wallpaper();
+    assetResource.select(current?.hasFile ? { source: options.source, id: current.id } : undefined);
+    const blob = available(assetResource.read());
+    if (blob !== previousBlob) {
+      if (wallpaperAsset) URL.revokeObjectURL(wallpaperAsset);
+      previousBlob = blob;
+      wallpaperAsset = blob ? URL.createObjectURL(blob) : '';
+    }
+    const appearance = chatAppearance(),
+      preferences = options.preferences();
+    if (peer && appearance && (appearance !== lastReported || preferences !== lastPreferences)) {
+      lastReported = appearance;
+      lastPreferences = preferences;
+      reportAppearance(peer, appearance, preferences);
+    }
+  };
+  scope.add(() => {
+    if (wallpaperAsset) URL.revokeObjectURL(wallpaperAsset);
   });
-
-  createEffect(() => {
-    const peer = options.activeDialog()?.peer;
-    const appearance = chatAppearance();
-    if (peer && appearance) reportAppearance(peer, appearance, options.preferences());
-  });
-
-  return { settings, wallpaper, pattern, style };
+  return {
+    refresh,
+    dispose: () => scope.dispose(),
+    snapshot: () => ({
+      settings: settings(),
+      wallpaper: wallpaper(),
+      pattern: pattern(),
+      style: style(),
+    }),
+  };
 }

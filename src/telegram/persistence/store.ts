@@ -137,14 +137,8 @@ export interface CacheCheckpoint {
 }
 
 interface TeleVechaSchema extends DBSchema {
-  meta: {
-    key: string;
-    value: unknown;
-  };
-  dialogs: {
-    key: string;
-    value: CachedDialog;
-  };
+  meta: { key: string; value: unknown };
+  dialogs: { key: string; value: CachedDialog };
   messages: {
     key: [string, number];
     value: CachedMessage;
@@ -160,15 +154,8 @@ interface TeleVechaSchema extends DBSchema {
       details?: TelegramDraftDetails;
     };
   };
-  outbox: {
-    key: string;
-    value: PendingSend;
-    indexes: { byCreatedAt: number };
-  };
-  files: {
-    key: string;
-    value: { key: string; blob: Blob; savedAt: number };
-  };
+  outbox: { key: string; value: PendingSend; indexes: { byCreatedAt: number } };
+  files: { key: string; value: { key: string; blob: Blob; savedAt: number } };
 }
 
 export interface TransportSessionStorage {
