@@ -413,7 +413,7 @@ export function createAppController(props: AppProps) {
     return dialog ? messageCapabilities(dialog, message) : noMessageCapabilities();
   };
   const chatAppearance = createChatAppearanceSession(
-    { source: engine, runEffect, activeDialog, preferences: appearance },
+    { source: engine, runEffect, activeDialog, online, preferences: appearance },
     context,
   );
   const composer = createComposerSession({
@@ -690,6 +690,7 @@ export function createAppController(props: AppProps) {
     setMobileSidebarOpen(false);
     closeConversationOverlays();
     composer.switchPeer(previousPeerId, id, changingPeer);
+    const focusAtSelection = document.activeElement;
     try {
       const conversation = await runEffect(engine.openConversation(id));
       if (generation !== selectionGeneration || state.model().activeChatId !== id) return false;
@@ -704,7 +705,7 @@ export function createAppController(props: AppProps) {
       ) {
         state.send({ type: 'Changed', changes: { conversationLoadError: current.historyError } });
       }
-      if (changingPeer) composer.focus();
+      if (changingPeer && document.activeElement === focusAtSelection) composer.focus();
       return current.activePeerId === id;
     } catch (cause) {
       if (generation === selectionGeneration && state.model().activeChatId === id) {
@@ -1153,6 +1154,12 @@ export function createAppController(props: AppProps) {
       runEffect,
       engine.subscribe((next) => {
         if (!mounted) return;
+        environment.runtime.debugReports?.recordRuntime?.({
+          phase: next.phase,
+          sync: next.sync,
+          online: next.online,
+          activePeerId: next.activePeerId,
+        });
         const clearedAccount =
           next.phase === 'unauthorized' && state.model().snapshot.phase !== 'unauthorized';
         const authenticated = wasUnauthorized && next.phase === 'ready';
@@ -1757,6 +1764,7 @@ export function createAppController(props: AppProps) {
   scope.add(subscribeModalVisibility(changed));
   function refresh() {
     sessions.refresh();
+    environment.runtime.debugReports?.recordChatAppearance?.(chatAppearance.diagnostics());
     updateAppBadge();
     updateDocumentTitle();
     loadMissingSharedCounts();
@@ -1834,6 +1842,13 @@ export function createAppController(props: AppProps) {
     dom,
   });
   const listeners = new Set<(model: ReturnType<typeof project>) => void>();
+  const detachDebugUi = environment.runtime.debugReports?.attachUi?.(() => ({
+    activePeerId: state.model().activeChatId,
+    sidebarWidth: effectiveLeftSidebarWidth(),
+    detailsOpen: detailsOpen(),
+    chatAppearance: chatAppearance.diagnostics(),
+  }));
+  if (detachDebugUi) scope.add(detachDebugUi);
   refresh();
   let published = project();
   readyToPublish = true;

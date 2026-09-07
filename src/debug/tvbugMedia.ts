@@ -1,5 +1,15 @@
 const MAX_PLACEHOLDER_BYTES = 16 * 1024 * 1024;
 
+/** A visible, transparent pattern for exercising wallpaper masking without original artwork. */
+export function createTvBugWallpaperPlaceholder(): Blob {
+  return new Blob(
+    [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><g fill="none" stroke="white" stroke-width="3"><circle cx="64" cy="64" r="28"/><circle cx="320" cy="320" r="36"/><path d="M180 40l40 40-40 40-40-40zM400 150q60 50 0 100q-60-50 0-100M40 320l90 90m0-90l-90 90M230 440h70"/></g></svg>',
+    ],
+    { type: 'image/svg+xml' },
+  );
+}
+
 export interface TvBugPlaceholderOptions {
   byteSize: number;
   mimeType?: string | undefined;

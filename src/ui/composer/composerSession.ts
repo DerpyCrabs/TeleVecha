@@ -76,13 +76,17 @@ export function createComposerSession(options: ComposerSessionOptions) {
   let typingConversation: EffectConversation | undefined;
   let focusFrame: number | undefined;
   const focusComposer = () => {
+    const requestedFrom = globalThis.document?.activeElement;
     queueMicrotask(() => {
-      if (owner.disposed) return;
+      if (owner.disposed || globalThis.document?.activeElement !== requestedFrom) return;
       options.focus();
+      const focusedElement = globalThis.document?.activeElement;
       if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
       focusFrame = requestAnimationFrame(() => {
         focusFrame = undefined;
-        if (!owner.disposed) options.focus();
+        // A later user focus choice takes precedence over this rendering retry.
+        if (!owner.disposed && globalThis.document?.activeElement === focusedElement)
+          options.focus();
       });
     });
   };

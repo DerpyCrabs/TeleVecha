@@ -7,6 +7,7 @@ import { lifetime, queryResource } from 'effectweb/session';
 import { available, query } from 'effectweb';
 import type { ThemePreferences } from './themePreferences';
 import { readableTextColor, telegramWallpaperBackground } from './themePreferences';
+import { tvbugResourceState, type TvBugChatAppearanceState } from '../../debug/tvbugUiState';
 interface ChatAppearanceSource {
   getChatAppearance(
     peer: TelegramPeer,
@@ -75,6 +76,7 @@ export function createChatAppearanceSession(
     source: ChatAppearanceSource;
     runEffect: UiEffectRunner;
     activeDialog: Read<TelegramDialog | undefined>;
+    online: Read<boolean>;
     preferences: Read<ThemePreferences>;
   },
   context: SessionContext,
@@ -85,6 +87,7 @@ export function createChatAppearanceSession(
   scope.add(appearanceResource.dispose);
   scope.add(assetResource.dispose);
   const chatAppearance = () => available(appearanceResource.read());
+  let wasOnline = options.online();
   let wallpaperAsset = '',
     previousBlob: Blob | undefined;
   let lastReported: TelegramChatAppearance | undefined,
@@ -148,11 +151,18 @@ export function createChatAppearanceSession(
     };
   };
   const refresh = () => {
+    const online = options.online();
+    const reconnected = online && !wasOnline;
+    wasOnline = online;
     const dialog = options.activeDialog(),
       peer = dialog && !dialog.transient ? dialog.peer : undefined;
     appearanceResource.select(peer ? { source: options.source, peer } : undefined);
     const current = wallpaper();
     assetResource.select(current?.hasFile ? { source: options.source, id: current.id } : undefined);
+    if (reconnected) {
+      appearanceResource.refresh();
+      assetResource.refresh();
+    }
     const blob = available(assetResource.read());
     if (blob !== previousBlob) {
       if (wallpaperAsset) URL.revokeObjectURL(wallpaperAsset);
@@ -173,6 +183,17 @@ export function createChatAppearanceSession(
   return {
     refresh,
     dispose: () => scope.dispose(),
+    diagnostics: (): TvBugChatAppearanceState => ({
+      peerId: options.activeDialog()?.peer.id,
+      value: chatAppearance(),
+      appearance: tvbugResourceState(appearanceResource.read()),
+      wallpaper: {
+        ...tvbugResourceState(assetResource.read()),
+        ...(previousBlob ? { byteSize: previousBlob.size, mimeType: previousBlob.type } : {}),
+      },
+      pattern: pattern() ?? 'none',
+      selectedBaseTheme: settings()?.baseTheme,
+    }),
     snapshot: () => ({
       settings: settings(),
       wallpaper: wallpaper(),

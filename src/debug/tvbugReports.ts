@@ -6,10 +6,18 @@ import {
   createTvBugBundle,
   type TvBugStateSourceV2,
   type TvBugTraceEventV2,
+  type TvBugUiSourceV2,
 } from './tvbugFormat';
+import { captureTvBugRenderState, type TvBugChatAppearanceState } from './tvbugUiState';
+import { LAYER } from '../telegram/mtproto/tl/types';
 import { subscribeDiagnostics } from '../telegram/core/diagnostics';
 import type { CacheCheckpoint, IndexedDbCacheStore } from '../telegram/persistence/store';
-import type { EngineSnapshot, PendingSend, TelegramDialog } from '../telegram/types';
+import type {
+  EngineSnapshot,
+  PendingSend,
+  TelegramDialog,
+  TelegramChatAppearance,
+} from '../telegram/types';
 import { readThemePreferences } from '../ui/theme/themePreferences';
 import packageMetadata from '../../package.json';
 
@@ -87,6 +95,9 @@ function appendTrace(state: RecorderState, event: StoredTraceEvent['event']): Re
  */
 export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
   const startedAt = performance.now();
+  let uiSource: (() => TvBugUiSourceV2) | undefined;
+  let lastAppearance = '';
+  let lastRuntime = '';
   const sanitizer = createTvBugSanitizer({ sourceEpochMs: Math.floor(Date.now() / 1_000) * 1_000 });
   let recorder: RecorderState = {
     bootstrapActivePeerId: currentUrlPeerId(),
@@ -138,6 +149,51 @@ export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
       ),
     );
     const snapshot = recorder.engine?.snapshot();
+    const ui = {
+      ...captureUiState(snapshot?.activePeerId, recorder.bootstrapActivePeerId),
+      ...uiSource?.(),
+    };
+    const render = captureTvBugRenderState();
+    if (render?.mediaTruncated) markTruncated();
+    if (ui.chatAppearance?.peerId) {
+      const capturedAppearance = ui.chatAppearance;
+      let metadataReadFailed = false;
+      let wallpaperReadFailed = false;
+      const metadata = yield* store
+        .loadMetadata<TelegramChatAppearance | undefined>(
+          `chat-appearance:${capturedAppearance.peerId}`,
+        )
+        .pipe(
+          Effect.orElseSucceed(() => {
+            metadataReadFailed = true;
+            return undefined;
+          }),
+        );
+      const currentWallpaper =
+        capturedAppearance.value?.wallpaper ??
+        capturedAppearance.value?.theme?.settings.find(
+          ({ baseTheme }) => baseTheme === capturedAppearance.selectedBaseTheme,
+        )?.wallpaper;
+      const cachedWallpaper = currentWallpaper?.hasFile
+        ? yield* store.loadBlob(`wallpaper:${currentWallpaper.id}`).pipe(
+            Effect.orElseSucceed(() => {
+              wallpaperReadFailed = true;
+              return undefined;
+            }),
+          )
+        : undefined;
+      ui.chatAppearance = {
+        ...capturedAppearance,
+        cache: {
+          ...(!metadataReadFailed ? { metadataPresent: Boolean(metadata) } : {}),
+          ...(metadata ? { metadataAgeMs: Math.max(0, Date.now() - metadata.savedAt) } : {}),
+          ...(currentWallpaper?.hasFile && !wallpaperReadFailed
+            ? { wallpaperPresent: Boolean(cachedWallpaper) }
+            : {}),
+          ...(metadataReadFailed || wallpaperReadFailed ? { inspectionFailed: true } : {}),
+        },
+      };
+    }
     const activePeerId = snapshot?.activePeerId ?? checkpoint.lastPeerId;
     const sourceDialogs = snapshot?.dialogs ?? checkpoint.dialogs;
     const sourcePending = snapshot?.pending ?? checkpoint.pending;
@@ -145,11 +201,18 @@ export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
       markTruncated();
     }
     const dialogs = limitDialogs(sourceDialogs, activePeerId);
-    const messages = (
+    const sourceMessages =
       snapshot?.messages ??
-      checkpoint.messages.filter((message) => !activePeerId || message.peerId === activePeerId)
-    ).slice(-MAX_ACTIVE_MESSAGES);
-    if ((snapshot?.messages.length ?? checkpoint.messages.length) > messages.length) {
+      checkpoint.messages.filter((message) => !activePeerId || message.peerId === activePeerId);
+    const visibleIndex = sourceMessages.findIndex(
+      ({ id }) => id === render?.viewport?.firstVisibleMessageId,
+    );
+    const start =
+      visibleIndex < 0
+        ? Math.max(0, sourceMessages.length - MAX_ACTIVE_MESSAGES)
+        : Math.max(0, Math.min(visibleIndex - 100, sourceMessages.length - MAX_ACTIVE_MESSAGES));
+    const messages = sourceMessages.slice(start, start + MAX_ACTIVE_MESSAGES);
+    if (sourceMessages.length > messages.length) {
       markTruncated();
     }
     const captured = recorder;
@@ -183,7 +246,7 @@ export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
         online: snapshot?.online,
       },
       runtime: snapshot ? compactRuntime(snapshot) : {},
-      ui: captureUiState(snapshot?.activePeerId, captured.bootstrapActivePeerId),
+      ui: { ...ui, ...(render ? { render } : {}) },
     };
     const state = sanitizer.sanitizeState(stateSource);
     const trace = captured.trace
@@ -199,6 +262,10 @@ export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
     const manifest = createTvBugManifest({
       producer: {
         appVersion: packageMetadata.version,
+        telegramLayer: LAYER,
+        ...(typeof import.meta.env.VITE_TELEVECHA_SOURCE_MODIFIED === 'boolean'
+          ? { sourceModified: import.meta.env.VITE_TELEVECHA_SOURCE_MODIFIED }
+          : {}),
         ...(import.meta.env.VITE_TELEVECHA_COMMIT
           ? { commit: import.meta.env.VITE_TELEVECHA_COMMIT }
           : {}),
@@ -210,6 +277,23 @@ export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
         tabCount: 1,
       },
       environment: captureEnvironment(),
+      coverage: {
+        mode: 'snapshot',
+        uiState: Boolean(uiSource),
+        chatAppearance: Boolean(ui.chatAppearance),
+        renderState: Boolean(render),
+        media: 'synthetic',
+        networkReplay: false,
+        scope: 'current-tab',
+        omissions: [
+          'original-media-bytes',
+          'network-and-cache-transition-replay',
+          'other-tabs',
+          'complete-ui-interaction-history',
+          'history-outside-capture-window',
+          ...(!import.meta.env.VITE_TELEVECHA_COMMIT ? ['build-commit'] : []),
+        ],
+      },
     });
     const bytes = createTvBugBundle({ manifest, snapshot: state, trace });
     const fingerprint = yield* shortDigest(bytes);
@@ -232,6 +316,38 @@ export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
   return {
     dispose() {
       unsubscribeDiagnostics();
+      uiSource = undefined;
+    },
+    attachUi(source: () => TvBugUiSourceV2) {
+      uiSource = source;
+      return () => {
+        if (uiSource === source) uiSource = undefined;
+      };
+    },
+    recordChatAppearance(value: TvBugChatAppearanceState) {
+      const summary = {
+        peerId: value.peerId,
+        phase: value.appearance.phase,
+        waiting: value.appearance.waiting,
+        hasValue: value.appearance.hasValue,
+        wallpaper: value.wallpaper,
+        pattern: value.pattern,
+      };
+      const serialized = JSON.stringify(summary);
+      if (serialized === lastAppearance) return;
+      lastAppearance = serialized;
+      recordUi('chat-appearance-state', summary);
+    },
+    recordRuntime(value: {
+      phase: string;
+      sync: string;
+      online: boolean;
+      activePeerId?: string | undefined;
+    }) {
+      const serialized = JSON.stringify(value);
+      if (serialized === lastRuntime) return;
+      lastRuntime = serialized;
+      recordUi('runtime-state', value);
     },
     attachEngine(engine: SnapshotSource) {
       recorder = { ...recorder, engine };
@@ -326,6 +442,7 @@ function captureUiState(engineActivePeerId?: string, bootstrapActivePeerId?: str
       blur: preferences.wallpaperBlur,
       dim: preferences.wallpaperDim,
       accentColor: preferences.accentColor,
+      preferences,
     },
   };
 }

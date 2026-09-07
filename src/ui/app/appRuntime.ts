@@ -3,6 +3,8 @@ import { Crypto, Effect, Exit, Fiber, FiberSet, Layer } from 'effect';
 import * as Socket from 'effect/unstable/socket/Socket';
 
 import { createBrowserDebugReportRecorder } from '../../debug/tvbugReports';
+import type { TvBugUiSourceV2 } from '../../debug/tvbugFormat';
+import type { TvBugChatAppearanceState } from '../../debug/tvbugUiState';
 import { createTvBugSnapshotClient, injectedTvBugBundle } from '../../debug/tvbugRuntime';
 import type { EffectMessagingClient } from '../../telegram/core/client';
 import { makeMessagingEngine, MessagingEngineLayer } from '../../telegram/core/engine';
@@ -54,6 +56,14 @@ export interface PreparedDebugReport {
 export interface DebugReportModule {
   dispose(): void;
   prepare(): Effect.Effect<PreparedDebugReport, unknown>;
+  attachUi?(source: () => TvBugUiSourceV2): () => void;
+  recordChatAppearance?(value: TvBugChatAppearanceState): void;
+  recordRuntime?(value: {
+    phase: string;
+    sync: string;
+    online: boolean;
+    activePeerId?: string | undefined;
+  }): void;
   recordPeerSelection?(peerId: string): void;
   recordComposerReply?(peerId: string, messageId: number): void;
   recordComposerSend?(peerId: string, text: string): void;

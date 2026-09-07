@@ -17,6 +17,7 @@ import {
   parseTvBugBundle,
   sanitizeTvBugState,
 } from './tvbugFormat';
+import { DEFAULT_THEME_PREFERENCES } from '../ui/theme/themePreferences';
 
 const sourceEpochSeconds = 1_700_000_000;
 const secretPeerId = '9876543210987654321';
@@ -165,6 +166,114 @@ function manifest() {
 }
 
 describe('.tvbug snapshot format', () => {
+  it('preserves appearance decisions and request failures without exporting wallpaper identity', () => {
+    const state = sanitizeTvBugState({
+      dialogs: [sourceDialog(sourceMessage())],
+      ui: {
+        appearance: {
+          preferences: { ...DEFAULT_THEME_PREFERENCES, wallpaper: 'sunset', systemAccent: true },
+        },
+        chatAppearance: {
+          peerId: secretPeerId,
+          appearance: { phase: 'ready', waiting: false, hasValue: true },
+          wallpaper: {
+            phase: 'error',
+            waiting: false,
+            hasValue: false,
+            error: 'Private download error',
+            code: 'FILE_REFERENCE_EXPIRED',
+          },
+          pattern: 'inverted',
+          cache: { metadataPresent: true, metadataAgeMs: 850, wallpaperPresent: false },
+          value: {
+            wallpaper: {
+              id: 'private-wallpaper-id',
+              slug: 'private-wallpaper-slug',
+              dark: true,
+              pattern: true,
+              hasFile: true,
+              settings: {
+                backgroundColors: ['#123456', '#654321'],
+                blur: false,
+                motion: false,
+                intensity: -60,
+                rotation: 45,
+              },
+            },
+          },
+        },
+      },
+    });
+    const parsed = parseTvBugBundle(
+      createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] }),
+    );
+    expect(parsed.snapshot.ui?.chatAppearance).toMatchObject({
+      peerId: state.dialogs[0]!.peer.id,
+      wallpaper: { phase: 'error', code: 'FILE_REFERENCE_EXPIRED' },
+      value: {
+        wallpaper: {
+          id: 'wallpaper:1',
+          settings: { backgroundColors: ['#123456', '#654321'], intensity: -60 },
+        },
+      },
+      cache: { metadataAgeMs: 850, wallpaperPresent: false },
+    });
+    expect(parsed.snapshot.ui?.appearance?.preferences).toMatchObject({
+      wallpaper: 'sunset',
+      systemAccent: true,
+    });
+    const encoded = JSON.stringify(parsed);
+    for (const secret of [
+      secretPeerId,
+      'private-wallpaper-id',
+      'private-wallpaper-slug',
+      'Private download error',
+    ])
+      expect(encoded).not.toContain(secret);
+    state.ui!.chatAppearance!.value!.wallpaper!.settings.backgroundColors = [
+      'url(https://private.example/image)',
+    ];
+    expect(() => createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] })).toThrow(
+      /appearance colors/u,
+    );
+  });
+
+  it('keeps relative timing and canonical peer references in diagnostics', () => {
+    const sanitizer = createTvBugSanitizer({ sourceEpochMs: sourceEpochSeconds * 1000 });
+    const state = sanitizer.sanitizeState({ dialogs: [sourceDialog(sourceMessage())] });
+    expect(
+      sanitizer.sanitizeValue({
+        activePeerId: secretPeerId,
+        elapsedMs: 123,
+        durationMs: 456,
+        metadataAgeMs: 789,
+        savedAt: sourceEpochSeconds * 1000,
+        phase: 'before-send',
+        draftDetails: { [secretPeerId]: { replyToMessageId: 42 } },
+      }),
+    ).toEqual({
+      activePeerId: state.dialogs[0]!.peer.id,
+      elapsedMs: 123,
+      durationMs: 456,
+      metadataAgeMs: 789,
+      savedAt: TVBUG_FIXED_EPOCH_SECONDS * 1000,
+      phase: 'before-send',
+      draftDetails: { [state.dialogs[0]!.peer.id]: { replyToMessageId: 42 } },
+    });
+  });
+
+  it('aliases webpage video cache keys consistently with ordinary media', () => {
+    const message = sourceMessage();
+    message.linkPreview = {
+      url: 'https://private.example/video',
+      media: { ...message.media!, kind: 'video' },
+    };
+    const state = sanitizeTvBugState({ messages: [message] });
+    expect(state.messages[0]!.linkPreview!.media!.cacheKey).toBe(
+      state.messages[0]!.media!.cacheKey,
+    );
+    expect(JSON.stringify(state)).not.toContain('private-file-reference');
+  });
   it('uses a tagged format error', () => {
     const error = new TvBugFormatError('Malformed bundle.');
     expect(error).toBeInstanceOf(Error);

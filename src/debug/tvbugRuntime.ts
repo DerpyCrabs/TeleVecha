@@ -14,9 +14,10 @@ import type {
   TelegramSearchOffset,
   TelegramSearchPage,
   TelegramSticker,
+  TelegramDownloadOptions,
 } from '../telegram/types';
 import { hydrateTvBugState, type TvBugBundleV2, type TvBugStateV2 } from './tvbugFormat';
-import { createTvBugPlaceholder } from './tvbugMedia';
+import { createTvBugPlaceholder, createTvBugWallpaperPlaceholder } from './tvbugMedia';
 import {
   DEFAULT_THEME_PREFERENCES,
   saveThemePreferences,
@@ -51,6 +52,7 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
     const pinnedMessages = hydrated.pinnedMessages;
     const listeners = new Set<(snapshot: EngineSnapshot) => void>();
     const runtime = runtimeRecord(bundle.snapshot);
+    const capturedAppearance = bundle.snapshot.ui?.chatAppearance;
     let snapshot = snapshotFromState(bundle.snapshot, runtime, hydrated);
     let client: EffectMessagingClient;
 
@@ -61,6 +63,8 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
       if (!snapshot.dialogs.some((dialog) => dialog.peer.id === peerId)) {
         throw new Error('The captured snapshot does not contain this conversation.');
       }
+      // Opening the captured conversation must not erase its loading/error state.
+      if (peerId === snapshot.activePeerId) return;
       snapshot = {
         ...snapshot,
         activePeerId: peerId,
@@ -101,7 +105,8 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
       mediaAssetKey(message: TelegramMessage) {
         return `${message.peerId}:${message.id}:${message.media?.cacheKey ?? 'snapshot'}`;
       },
-      downloadMedia: (message: TelegramMessage) => Effect.succeed(placeholderForMessage(message)),
+      downloadMedia: (message: TelegramMessage, options?: TelegramDownloadOptions) =>
+        Effect.succeed(placeholderForMessage(message, options?.preview)),
       downloadAvatar: () =>
         Effect.succeed(
           createTvBugPlaceholder({
@@ -243,7 +248,10 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
       cancelPendingSend: () => Effect.succeed(false),
       retryOutbox: () => Effect.void,
       addPeer: () => Effect.void,
-      getGroupMembers: () => Effect.succeed({ members: [], totalCount: 0, hasMore: false }),
+      getGroupMembers: (peer) => {
+        const members = hydrated.groupMembers[peer.id]?.value ?? [];
+        return Effect.succeed({ members, totalCount: members.length, hasMore: false });
+      },
       setMuted: () => Effect.succeed(false),
       setBlocked: () => Effect.succeed(false),
       updateContact: () => Effect.succeed(false),
@@ -253,8 +261,45 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
       setArchived: () => Effect.succeed(false),
       deleteDialog: () => Effect.succeed(false),
       getWallpapers: () => Effect.succeed([]),
-      getChatAppearance: () => Effect.succeed(undefined),
-      downloadWallpaper: () => Effect.succeed(new Blob()),
+      getChatAppearance: (peer) => {
+        if (peer.id !== capturedAppearance?.peerId) return Effect.succeed(undefined);
+        if (capturedAppearance.value) return Effect.succeed(capturedAppearance.value);
+        if (capturedAppearance.appearance.phase === 'error')
+          return Effect.fail(
+            new MessagingError({
+              operation: 'getChatAppearance',
+              message:
+                capturedAppearance.appearance.error || 'Captured chat appearance request failed.',
+              ...(capturedAppearance.appearance.code
+                ? { code: capturedAppearance.appearance.code }
+                : {}),
+            }),
+          );
+        if (capturedAppearance.appearance.waiting) return Effect.never;
+        return Effect.succeed(undefined);
+      },
+      downloadWallpaper: (id) => {
+        const value = capturedAppearance?.value;
+        const selected =
+          value?.wallpaper ??
+          value?.theme?.settings.find(
+            ({ baseTheme }) => baseTheme === capturedAppearance?.selectedBaseTheme,
+          )?.wallpaper;
+        if (selected?.id === id && !capturedAppearance?.wallpaper.hasValue) {
+          if (capturedAppearance?.wallpaper.phase === 'error')
+            return Effect.fail(
+              new MessagingError({
+                operation: 'downloadWallpaper',
+                message: capturedAppearance.wallpaper.error || 'Captured wallpaper request failed.',
+                ...(capturedAppearance.wallpaper.code
+                  ? { code: capturedAppearance.wallpaper.code }
+                  : {}),
+              }),
+            );
+          return Effect.never;
+        }
+        return Effect.succeed(createTvBugWallpaperPlaceholder());
+      },
       getRecentStickers: () => Effect.succeed([]),
       getStickerPacks: () => Effect.succeed([]),
       getSavedGifs: () => Effect.succeed([]),
@@ -281,20 +326,22 @@ export function applyTvBugUiState(state: TvBugStateV2) {
   if (appearance) {
     const requestedTheme = appearance.themeId as ThemePresetId | undefined;
     const theme = requestedTheme && TVBUG_THEMES.has(requestedTheme) ? requestedTheme : 'night';
-    saveThemePreferences({
-      ...DEFAULT_THEME_PREFERENCES,
-      theme,
-      accentColor: appearance.accentColor ?? DEFAULT_THEME_PREFERENCES.accentColor,
-      wallpaper: tvbugWallpaper(appearance.wallpaperKind),
-      wallpaperBlur:
-        typeof appearance.blur === 'number'
-          ? appearance.blur
-          : appearance.blur
-            ? 8
-            : DEFAULT_THEME_PREFERENCES.wallpaperBlur,
-      wallpaperDim: appearance.dim ?? DEFAULT_THEME_PREFERENCES.wallpaperDim,
-      chatFontSize: appearance.chatFontSize ?? DEFAULT_THEME_PREFERENCES.chatFontSize,
-    });
+    saveThemePreferences(
+      appearance.preferences ?? {
+        ...DEFAULT_THEME_PREFERENCES,
+        theme,
+        accentColor: appearance.accentColor ?? DEFAULT_THEME_PREFERENCES.accentColor,
+        wallpaper: tvbugWallpaper(appearance.wallpaperKind),
+        wallpaperBlur:
+          typeof appearance.blur === 'number'
+            ? appearance.blur
+            : appearance.blur
+              ? 8
+              : DEFAULT_THEME_PREFERENCES.wallpaperBlur,
+        wallpaperDim: appearance.dim ?? DEFAULT_THEME_PREFERENCES.wallpaperDim,
+        chatFontSize: appearance.chatFontSize ?? DEFAULT_THEME_PREFERENCES.chatFontSize,
+      },
+    );
   }
   try {
     if (ui.sidebarWidth !== undefined) {
@@ -333,15 +380,17 @@ function snapshotFromState(
   return {
     phase: capturedPhase(runtime.phase ?? state.workspace.phase, hydrated.dialogs.length),
     sync: capturedSync(runtime.sync ?? state.workspace.sync),
-    // Inspection is intentionally read-only even when the capture happened online.
-    online: false,
+    // Mutations are stubbed by this client; keep the captured UI's connectivity and controls.
+    online: booleanValue(runtime.online ?? state.workspace.online),
     dialogs: hydrated.dialogs,
     ...(activePeerId ? { activePeerId } : {}),
     messages: activePeerId
       ? (hydrated.histories[activePeerId] ?? hydrated.messages)
       : hydrated.messages,
     drafts: hydrated.drafts,
-    draftDetails: {},
+    draftDetails: Predicate.isObject(runtime.draftDetails)
+      ? (runtime.draftDetails as EngineSnapshot['draftDetails'])
+      : {},
     pending: hydrated.pending,
     loadingMessages: booleanValue(runtime.loadingMessages),
     hasOlderMessages: booleanValue(runtime.hasOlderMessages),
@@ -421,11 +470,11 @@ function optionalString(record: Record<string, unknown>, key: string) {
   return typeof value === 'string' ? { [key]: value } : {};
 }
 
-function placeholderForMessage(message: TelegramMessage) {
+function placeholderForMessage(message: TelegramMessage, preview = false) {
   const media = message.media ?? message.linkPreview?.media;
   return createTvBugPlaceholder({
-    byteSize: media?.size ?? 4_096,
-    mimeType: media?.mimeType ?? 'image/svg+xml',
+    byteSize: preview ? 4_096 : (media?.size ?? 4_096),
+    mimeType: preview ? 'image/svg+xml' : (media?.mimeType ?? 'image/svg+xml'),
     width: media?.width ?? (message.linkPreview?.photoSize === 'small' ? 96 : 640),
     height: media?.height ?? (message.linkPreview?.photoSize === 'small' ? 96 : 360),
   });

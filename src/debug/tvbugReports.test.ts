@@ -144,4 +144,66 @@ describe('browser debug report recorder', () => {
 
     expect(report.preview.diagnosticCount).toBe(0);
   });
+
+  it('captures live wallpaper resource state and cache presence, and detaches its UI owner', async () => {
+    const cache = store();
+    cache.loadMetadata = vi.fn(() =>
+      Effect.succeed({ value: undefined, savedAt: Date.now() - 1000 }),
+    ) as IndexedDbCacheStore['loadMetadata'];
+    cache.loadBlob = vi.fn(() => Effect.succeed(undefined));
+    const recorder = createBrowserDebugReportRecorder(cache);
+    const detach = recorder.attachUi(() => ({
+      chatAppearance: {
+        peerId: 'u:123',
+        appearance: { phase: 'ready', waiting: false, hasValue: true },
+        wallpaper: { phase: 'loading', waiting: true, hasValue: false },
+        pattern: 'normal',
+        value: {
+          wallpaper: {
+            id: 'private-wallpaper',
+            dark: false,
+            pattern: true,
+            hasFile: true,
+            settings: { backgroundColors: ['#123456'], blur: false, motion: false },
+          },
+        },
+      },
+    }));
+    const report = await Effect.runPromise(recorder.prepare());
+    const bundle = parseTvBugBundle(new Uint8Array(await report.file.arrayBuffer()));
+    expect(bundle.snapshot.ui?.chatAppearance).toMatchObject({
+      wallpaper: { phase: 'loading', waiting: true },
+      cache: { metadataPresent: true, wallpaperPresent: false },
+    });
+    expect(cache.loadBlob).toHaveBeenCalledWith('wallpaper:private-wallpaper');
+    expect(bundle.manifest.coverage).toMatchObject({
+      chatAppearance: true,
+      networkReplay: false,
+      media: 'synthetic',
+    });
+    expect(bundle.manifest.producer.telegramLayer).toBe(228);
+    detach();
+    const detached = await Effect.runPromise(recorder.prepare());
+    expect(
+      parseTvBugBundle(new Uint8Array(await detached.file.arrayBuffer())).snapshot.ui
+        ?.chatAppearance,
+    ).toBeUndefined();
+    recorder.dispose();
+  });
+
+  it('records state transitions without flooding the trace on unchanged snapshots', async () => {
+    const recorder = createBrowserDebugReportRecorder(store());
+    const state = { phase: 'connecting', sync: 'stale', online: false, activePeerId: 'u:123' };
+    recorder.recordRuntime(state);
+    recorder.recordRuntime(state);
+    recorder.recordRuntime({ ...state, phase: 'ready', online: true });
+    const report = await Effect.runPromise(recorder.prepare());
+    const bundle = parseTvBugBundle(new Uint8Array(await report.file.arrayBuffer()));
+    expect(bundle.trace).toHaveLength(2);
+    expect(bundle.trace[1]).toMatchObject({
+      method: 'runtime-state',
+      value: { phase: 'ready', online: true },
+    });
+    recorder.dispose();
+  });
 });

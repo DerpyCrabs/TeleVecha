@@ -1,6 +1,7 @@
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
-import { available, resourceComponent, view } from 'effectweb';
+import { available, component, resourceComponent, view } from 'effectweb';
+import { effectCommand } from 'effectweb/program';
 import { loadEffect } from 'effectweb/cache';
 import { safeExternalUrl } from '../shared/safeUrl';
 interface LinkPreviewProps {
@@ -8,38 +9,104 @@ interface LinkPreviewProps {
   loadPhoto?: (() => Effect.Effect<string, unknown>) | undefined;
   loadMedia?: (() => Effect.Effect<string, unknown>) | undefined;
 }
-export const LinkPreview = resourceComponent<
-  LinkPreviewProps,
-  { photo: string | undefined; media: string | undefined }
->({
+interface PreviewVideoProps {
+  identity: string;
+  media: NonNullable<NonNullable<ChatMessage['linkPreview']>['media']>;
+  poster: string | undefined;
+  title: string;
+  load: LinkPreviewProps['loadMedia'];
+}
+interface PreviewVideoModel {
+  props: PreviewVideoProps;
+  source: string | undefined;
+  loading: boolean;
+  failed: boolean;
+}
+type PreviewVideoMessage =
+  | { type: 'Play' }
+  | { type: 'Loaded'; source: string }
+  | { type: 'Failed' };
+const PreviewVideo = component<PreviewVideoProps, PreviewVideoModel, PreviewVideoMessage>({
+  init: (props) => ({ props, source: undefined, loading: false, failed: false }),
+  receive: (model, props) =>
+    model.props.identity === props.identity
+      ? { model: { ...model, props } }
+      : { model: { props, source: undefined, loading: false, failed: false }, cancel: ['media'] },
+  update: (model, message) => {
+    switch (message.type) {
+      case 'Play':
+        if (model.loading) return { model };
+        return {
+          model: { ...model, source: undefined, loading: true, failed: false },
+          commands: [
+            effectCommand(
+              'media',
+              () => model.props.load?.() ?? Effect.fail(new Error('Video unavailable')),
+              {
+                onSuccess: (source) => ({ type: 'Loaded', source }) as const,
+                onFailure: () => ({ type: 'Failed' }) as const,
+              },
+            ),
+          ],
+        };
+      case 'Loaded':
+        return { model: { ...model, source: message.source, loading: false } };
+      case 'Failed':
+        return { model: { ...model, source: undefined, loading: false, failed: true } };
+    }
+  },
+  view: view((model, send) => (
+    <span
+      class="link-preview-media-frame"
+      style={{
+        'aspect-ratio':
+          model.props.media.width && model.props.media.height
+            ? `${model.props.media.width} / ${model.props.media.height}`
+            : '16 / 9',
+      }}
+    >
+      {model.source ? (
+        <video
+          src={model.source}
+          poster={model.props.poster}
+          controls
+          autoplay
+          muted={model.props.media.kind === 'animation'}
+          loop={model.props.media.kind === 'animation'}
+          playsinline
+          preload="none"
+          aria-label={model.props.title}
+          onError={() => send({ type: 'Failed' })}
+        />
+      ) : (
+        <button
+          type="button"
+          class="link-preview-play"
+          disabled={model.loading}
+          aria-label={model.loading ? 'Loading video' : model.failed ? 'Retry video' : 'Play video'}
+          onClick={() => send({ type: 'Play' })}
+        >
+          {model.props.poster ? <img src={model.props.poster} alt="" /> : null}
+          <span>
+            {model.loading ? 'Loading…' : model.failed ? 'Video unavailable · Retry' : '▶'}
+          </span>
+        </button>
+      )}
+    </span>
+  )),
+});
+export const LinkPreview = resourceComponent<LinkPreviewProps, string | undefined>({
   request: (props) => ({
-    key: [
-      props.preview.url,
-      props.preview.hasPhoto,
-      Boolean(props.loadPhoto),
-      props.preview.media?.cacheKey ?? props.preview.media?.name,
-      Boolean(props.loadMedia),
-    ].join(':'),
+    key: [props.preview.url, props.preview.hasPhoto, Boolean(props.loadPhoto)].join(':'),
     load: () =>
-      Effect.all(
-        {
-          photo: loadEffect(
-            () =>
-              (props.preview.hasPhoto ? props.loadPhoto?.() : undefined) ??
-              Effect.succeed(undefined),
-          ).pipe(Effect.catch(() => Effect.succeed(undefined))),
-          media: loadEffect(
-            () =>
-              (props.preview.media ? props.loadMedia?.() : undefined) ?? Effect.succeed(undefined),
-          ).pipe(Effect.catch(() => Effect.succeed(undefined))),
-        },
-        { concurrency: 'unbounded' },
-      ),
+      loadEffect(
+        () =>
+          (props.preview.hasPhoto ? props.loadPhoto?.() : undefined) ?? Effect.succeed(undefined),
+      ).pipe(Effect.catch(() => Effect.succeed(undefined))),
   }),
   view: view((model, _send) => {
     const props = model.props;
-    const photo = () => available(model.result)?.photo;
-    const media = () => available(model.result)?.media;
+    const photo = () => available(model.result);
     const isVideoPreview = () =>
       props.preview.type === 'video' || props.preview.type === 'gif' || props.preview.hasEmbed;
     const usesLargePhoto = () => {
@@ -72,27 +139,13 @@ export const LinkPreview = resourceComponent<
     return props.preview.media ? (
       ((previewMedia) => (
         <div class="link-preview link-preview-large link-preview-media">
-          <span
-            class="link-preview-media-frame"
-            style={{
-              'aspect-ratio':
-                previewMedia.width && previewMedia.height
-                  ? `${previewMedia.width} / ${previewMedia.height}`
-                  : '16 / 9',
-            }}
-          >
-            <video
-              src={media()}
-              poster={photo()}
-              controls={previewMedia.kind === 'video'}
-              autoplay={previewMedia.kind === 'animation'}
-              muted={previewMedia.kind === 'animation'}
-              loop={previewMedia.kind === 'animation'}
-              playsinline
-              preload="metadata"
-              aria-label={props.preview.title || previewMedia.name}
-            />
-          </span>
+          <PreviewVideo
+            identity={`${props.preview.url}:${previewMedia.cacheKey ?? previewMedia.name}`}
+            media={previewMedia}
+            poster={photo()}
+            title={props.preview.title || previewMedia.name}
+            load={props.loadMedia}
+          />
           {href()
             ? ((url) => (
                 <a href={url} target="_blank" rel="noopener noreferrer">

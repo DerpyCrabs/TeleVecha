@@ -6,6 +6,7 @@ import { expect, test } from '@playwright/test';
 import { strFromU8, unzipSync } from 'fflate';
 
 import { openReady, selectAlice } from './helpers';
+import type { TvBugStateV2 } from '../src/debug/tvbugFormat';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +16,13 @@ test('exports a compact account-free snapshot and inspects it without Telegram',
   test.setTimeout(60_000);
   await openReady(page);
   await selectAlice(page);
+  await expect
+    .poll(() =>
+      page
+        .locator('.message-scroll-shell')
+        .evaluate((element) => element.style.getPropertyValue('--chat-wallpaper-asset')),
+    )
+    .toMatch(/^url\("blob:/u);
 
   const source = page.locator('article[data-message-id="79"]');
   await source.getByRole('button', { name: 'Reply to message 79' }).click();
@@ -40,7 +48,7 @@ test('exports a compact account-free snapshot and inspects it without Telegram',
   expect(archiveBytes.byteLength).toBeLessThan(1024 * 1024);
   const archive = unzipSync(archiveBytes);
   const manifest = JSON.parse(strFromU8(archive['manifest.json']!)) as Record<string, unknown>;
-  const state = JSON.parse(strFromU8(archive['snapshot.v2.json']!)) as Record<string, unknown>;
+  const state = JSON.parse(strFromU8(archive['snapshot.v2.json']!)) as TvBugStateV2;
   const trace = strFromU8(archive['trace.v2.ndjson']!)
     .trim()
     .split('\n')
@@ -53,6 +61,30 @@ test('exports a compact account-free snapshot and inspects it without Telegram',
   expect(serialized).not.toContain(reportReplyText);
   expect(serialized).not.toContain('u:101');
   expect(serialized).not.toContain('"year":1994');
+  expect(serialized).not.toContain('wallpaper-fixture-chat-ocean');
+  expect(serialized).not.toContain('document:72');
+  expect(state.ui?.chatAppearance).toMatchObject({
+    peerId: state.workspace.activePeerId,
+    appearance: { phase: 'ready', waiting: false, hasValue: true },
+    wallpaper: { phase: 'ready', hasValue: true },
+    selectedBaseTheme: 'night',
+    pattern: 'inverted',
+    cache: { metadataPresent: true, wallpaperPresent: true },
+  });
+  expect(state.ui?.render?.wallpaper).toMatchObject({
+    visible: true,
+    maskApplied: true,
+    opacity: 0.6,
+  });
+  expect(state.ui?.render?.viewport?.clientHeight).toBeGreaterThan(0);
+  expect(manifest.coverage).toMatchObject({
+    mode: 'snapshot',
+    chatAppearance: true,
+    renderState: true,
+    networkReplay: false,
+  });
+  expect(trace.some((event) => event.method === 'chat-appearance-state')).toBe(true);
+  expect(trace.some((event) => event.method === 'runtime-state')).toBe(true);
   expect(serialized).toContain('"senderColor":"#408acf"');
   expect(serialized).toContain('"width":320');
   expect(serialized).toContain('"height":180');
@@ -78,10 +110,10 @@ test('exports a compact account-free snapshot and inspects it without Telegram',
 
   const inspector = await page.context().newPage();
   await inspector.addInitScript((injected) => {
-    window.__televechaTvBugBundle = injected as unknown as NonNullable<
+    window.__televechaTvBugBundle = JSON.parse(injected) as NonNullable<
       typeof window.__televechaTvBugBundle
     >;
-  }, bundle);
+  }, JSON.stringify(bundle));
   await inspector.goto('/');
   await expect
     .poll(() => inspector.evaluate(() => window.__televechaTvBugStatus?.state))
@@ -91,6 +123,27 @@ test('exports a compact account-free snapshot and inspects it without Telegram',
     throw new Error(`Snapshot did not become ready: ${JSON.stringify(inspectionStatus)}`);
   }
   await expect(inspector.getByTestId('message-scroller')).toBeVisible();
+  await expect(inspector.locator('.message-scroll-shell')).toHaveAttribute(
+    'data-chat-pattern',
+    'inverted',
+  );
+  await expect
+    .poll(() =>
+      inspector
+        .locator('.chat-wallpaper')
+        .evaluate((element) => getComputedStyle(element, '::before').maskImage),
+    )
+    .toMatch(/^url\("blob:/u);
+  const beforeColors = await page
+    .locator('.message-scroll-shell')
+    .evaluate((element) => element.style.getPropertyValue('--chat-message-1'));
+  await expect
+    .poll(() =>
+      inspector
+        .locator('.message-scroll-shell')
+        .evaluate((element) => element.style.getPropertyValue('--chat-message-1')),
+    )
+    .toBe(beforeColors);
 
   const inspectedReply = inspector.locator('article[data-message-id="81"]');
   await expect(inspectedReply).toBeVisible();
@@ -108,6 +161,32 @@ test('exports a compact account-free snapshot and inspects it without Telegram',
   expect(inspectedPhoto).not.toBeNull();
   expect(inspectedPhoto!.width).toBeCloseTo(capturedPhoto!.width, 1);
   expect(inspectedPhoto!.height).toBeCloseTo(capturedPhoto!.height, 1);
+
+  const failedBundle = structuredClone(bundle);
+  failedBundle.snapshot.ui!.chatAppearance!.wallpaper = {
+    phase: 'error',
+    waiting: false,
+    hasValue: false,
+    code: 'FILE_REFERENCE_EXPIRED',
+  };
+  const failedInspector = await page.context().newPage();
+  await failedInspector.addInitScript((injected) => {
+    window.__televechaTvBugBundle = JSON.parse(injected) as NonNullable<
+      typeof window.__televechaTvBugBundle
+    >;
+  }, JSON.stringify(failedBundle));
+  await failedInspector.goto('/');
+  await expect(failedInspector.locator('.message-scroll-shell')).toHaveAttribute(
+    'data-chat-pattern',
+    'inverted',
+  );
+  await expect
+    .poll(() =>
+      failedInspector
+        .locator('.chat-wallpaper')
+        .evaluate((element) => getComputedStyle(element, '::before').maskImage),
+    )
+    .toBe('none');
 
   const { stdout } = await execFileAsync(
     process.execPath,

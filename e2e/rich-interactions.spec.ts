@@ -478,14 +478,24 @@ test('renders mentions, links, previews, wrapping, formatting, and spoilers', as
   ).toBe(true);
 });
 
-test('renders Telegram webpage videos without overflowing or rounding the accent edge', async ({
-  page,
-}) => {
+test('loads webpage videos only on click and rounds every preview corner', async ({ page }) => {
   const message = page.locator('article[data-message-id="72"]');
   const preview = message.locator('.link-preview-media');
   const video = preview.locator('video');
 
   await expect(preview).toBeVisible();
+  const thumbnail = preview.locator('.link-preview-play img');
+  await expect(thumbnail).toBeVisible();
+  await expect
+    .poll(() => thumbnail.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0);
+  await expect(video).toHaveCount(0);
+  expect(
+    (await fixtureStats(page))?.downloadMediaRequests.filter(
+      (request) => request.messageId === 72 && !request.preview,
+    ),
+  ).toEqual([]);
+  await preview.getByRole('button', { name: 'Play video', exact: true }).click();
   await expect(video).toBeVisible();
   await expect(video).toHaveAttribute('controls', '');
   await expect
@@ -518,8 +528,9 @@ test('renders Telegram webpage videos without overflowing or rounding the accent
       borderLeftWidth: style.borderLeftWidth,
       borderTopLeftRadius: style.borderTopLeftRadius,
       borderBottomLeftRadius: style.borderBottomLeftRadius,
-      accentWidth: accentStyle.width,
-      accentRadius: accentStyle.borderRadius,
+      accentContent: accentStyle.content,
+      borderTopRightRadius: style.borderTopRightRadius,
+      borderBottomRightRadius: style.borderBottomRightRadius,
     };
   });
   expect(layout).toEqual({
@@ -527,11 +538,25 @@ test('renders Telegram webpage videos without overflowing or rounding the accent
     titleInsidePreview: true,
     titleOverflow: 'hidden',
     borderLeftWidth: '0px',
-    borderTopLeftRadius: '0px',
-    borderBottomLeftRadius: '0px',
-    accentWidth: '3px',
-    accentRadius: '0px',
+    borderTopLeftRadius: '5.6px',
+    borderBottomLeftRadius: '5.6px',
+    borderTopRightRadius: '5.6px',
+    borderBottomRightRadius: '5.6px',
+    accentContent: 'none',
   });
+  expect(
+    (await fixtureStats(page))?.downloadMediaRequests.filter(
+      (request) => request.messageId === 72 && !request.preview,
+    ),
+  ).toHaveLength(1);
+  await video.dispatchEvent('error');
+  await expect(preview.getByRole('button', { name: 'Retry video' })).toBeVisible();
+  await expect(thumbnail).toBeVisible();
+  await preview.getByRole('button', { name: 'Retry video' }).click();
+  await expect(video).toBeVisible();
+  await expect
+    .poll(() => video.evaluate((element) => (element as HTMLVideoElement).readyState))
+    .toBeGreaterThanOrEqual(1);
 });
 
 test('clips long link-preview titles before the small thumbnail', async ({ page }) => {

@@ -2,6 +2,13 @@ import { Data } from 'effect';
 import { Inflate, strToU8, zipSync } from 'fflate';
 
 import type { RichBlock, RichMessage, RichText } from '../domain/richMessage';
+import type { ThemePreferences } from '../ui/theme/themePreferences';
+import { normalizeThemePreferences } from '../ui/theme/themePreferences';
+import type {
+  TvBugChatAppearanceState,
+  TvBugRenderState,
+  TvBugResourceState,
+} from './tvbugUiState';
 import type {
   CachedDialog,
   CachedMessage,
@@ -19,6 +26,8 @@ import type {
   TelegramReaction,
   TelegramServiceMessage,
   TelegramTextFormat,
+  TelegramChatAppearance,
+  TelegramWallpaper,
 } from '../telegram/types';
 
 export const TVBUG_FORMAT = 'televecha-debug' as const;
@@ -58,6 +67,7 @@ const SAFE_SEMANTIC_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     'group',
     'channel',
     'photo',
+    'image',
     'video',
     'round-video',
     'voice',
@@ -154,7 +164,13 @@ const SAFE_SEMANTIC_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     'call',
     'resolve',
     'push',
+    'loading',
+    'before-send',
+    'after-send',
   ]),
+  pattern: new Set(['none', 'normal', 'inverted']),
+  source: new Set(['none', 'blob', 'data', 'external']),
+  focusedcontrol: new Set(['composer', 'other', 'none']),
   photosize: new Set(['small', 'large']),
   presence: new Set(['online', 'recently', 'offline']),
   role: new Set([
@@ -249,8 +265,26 @@ export interface TvBugTextV2 {
 export interface TvBugManifestV2 {
   format: typeof TVBUG_FORMAT;
   version: typeof TVBUG_VERSION;
-  producer: { appVersion: string; commit?: string | undefined; telegramLayer?: number | undefined };
+  producer: {
+    appVersion: string;
+    commit?: string | undefined;
+    telegramLayer?: number | undefined;
+    sourceModified?: boolean | undefined;
+  };
   capture: { durationMs: number; complete: boolean; truncated: boolean; tabCount: number };
+  /** Describes reproduction coverage separately from whether bounded capture completed. */
+  coverage?:
+    | {
+        mode: 'snapshot';
+        uiState: boolean;
+        chatAppearance: boolean;
+        renderState: boolean;
+        media: 'synthetic';
+        networkReplay: false;
+        scope: 'current-tab';
+        omissions: string[];
+      }
+    | undefined;
   environment?: {
     browser?: string | undefined;
     browserMajor?: number | undefined;
@@ -606,6 +640,8 @@ export interface TvBugUiSourceV2 {
   activePeerId?: string | undefined;
   sidebarWidth?: number | undefined;
   detailsOpen?: boolean | undefined;
+  chatAppearance?: TvBugChatAppearanceState | undefined;
+  render?: TvBugRenderState | undefined;
   appearance?:
     | {
         themeId?: string | undefined;
@@ -614,6 +650,7 @@ export interface TvBugUiSourceV2 {
         blur?: number | boolean | undefined;
         dim?: number | undefined;
         accentColor?: string | undefined;
+        preferences?: ThemePreferences | undefined;
       }
     | undefined;
 }
@@ -664,6 +701,8 @@ export interface TvBugStateV2 {
     activePeerId?: string | undefined;
     sidebarWidth?: number | undefined;
     detailsOpen?: boolean | undefined;
+    chatAppearance?: TvBugChatAppearanceState | undefined;
+    render?: TvBugRenderState | undefined;
     appearance?: {
       themeId?: string | undefined;
       chatFontSize?: number | undefined;
@@ -671,6 +710,7 @@ export interface TvBugStateV2 {
       blur?: number | boolean | undefined;
       dim?: number | undefined;
       accentColor?: string | undefined;
+      preferences?: ThemePreferences | undefined;
     };
   };
 }
@@ -753,6 +793,7 @@ export function createTvBugManifest(
     version: TVBUG_VERSION,
     producer: { ...input.producer },
     capture: { ...input.capture },
+    ...(input.coverage ? { coverage: { ...input.coverage } } : {}),
     ...(input.environment ? { environment: { ...input.environment } } : {}),
     privacy: {
       profile: 'account-free-v2',
@@ -2019,7 +2060,9 @@ class StateSanitizer {
               ...(preview.media.width !== undefined ? { width: preview.media.width } : {}),
               ...(preview.media.height !== undefined ? { height: preview.media.height } : {}),
               ...(preview.media.duration !== undefined ? { duration: preview.media.duration } : {}),
-              ...(preview.media.cacheKey ? { cacheKey: preview.media.cacheKey } : {}),
+              ...(preview.media.cacheKey
+                ? { cacheKey: this.aliases.get('media', preview.media.cacheKey) }
+                : {}),
             },
           }
         : {}),
@@ -2201,6 +2244,20 @@ class StateSanitizer {
         ? { sidebarWidth: finiteNonNegativeNumber(ui.sidebarWidth, 'ui.sidebarWidth') }
         : {}),
       ...(ui.detailsOpen !== undefined ? { detailsOpen: ui.detailsOpen } : {}),
+      ...(ui.chatAppearance
+        ? { chatAppearance: this.sanitizeChatAppearance(ui.chatAppearance) }
+        : {}),
+      ...(ui.render
+        ? {
+            render: sanitizeJsonValue(
+              ui.render,
+              'ui.render',
+              this.aliases,
+              undefined,
+              0,
+            ) as unknown as TvBugRenderState,
+          }
+        : {}),
       ...(ui.appearance
         ? {
             appearance: {
@@ -2229,6 +2286,130 @@ class StateSanitizer {
               ...(ui.appearance.accentColor
                 ? { accentColor: sanitizeColor(ui.appearance.accentColor) }
                 : {}),
+              ...(ui.appearance.preferences
+                ? { preferences: this.sanitizePreferences(ui.appearance.preferences) }
+                : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
+  private sanitizeWallpaper(wallpaper: TelegramWallpaper): TelegramWallpaper {
+    return {
+      id: this.aliases.get('wallpaper', wallpaper.id),
+      dark: wallpaper.dark,
+      pattern: wallpaper.pattern,
+      hasFile: wallpaper.hasFile,
+      settings: {
+        backgroundColors: wallpaper.settings.backgroundColors.map(sanitizeColor),
+        blur: wallpaper.settings.blur,
+        motion: wallpaper.settings.motion,
+        ...(wallpaper.settings.intensity !== undefined
+          ? { intensity: finiteNumber(wallpaper.settings.intensity, 'wallpaper.intensity') }
+          : {}),
+        ...(wallpaper.settings.rotation !== undefined
+          ? { rotation: finiteNumber(wallpaper.settings.rotation, 'wallpaper.rotation') }
+          : {}),
+      },
+    };
+  }
+
+  private sanitizeChatAppearance(source: TvBugChatAppearanceState): TvBugChatAppearanceState {
+    const resource = (value: TvBugResourceState): TvBugResourceState => ({
+      phase: value.phase,
+      waiting: value.waiting,
+      hasValue: value.hasValue,
+      ...(value.error ? { error: sanitizeTvBugText(value.error).value } : {}),
+      ...(value.code ? { code: sanitizeSemanticString(value.code, 'code') } : {}),
+    });
+    const value = source.value;
+    const safeValue: TelegramChatAppearance | undefined = value
+      ? {
+          ...(value.wallpaper ? { wallpaper: this.sanitizeWallpaper(value.wallpaper) } : {}),
+          ...(value.theme
+            ? {
+                theme: {
+                  id: this.aliases.get('theme', value.theme.id),
+                  slug: '',
+                  title: sanitizeTvBugText(value.theme.title).value,
+                  default: value.theme.default,
+                  forChat: value.theme.forChat,
+                  settings: value.theme.settings.map((settings) => ({
+                    baseTheme: settings.baseTheme,
+                    accentColor: sanitizeColor(settings.accentColor),
+                    ...(settings.outboxAccentColor
+                      ? { outboxAccentColor: sanitizeColor(settings.outboxAccentColor) }
+                      : {}),
+                    messageColors: settings.messageColors.map(sanitizeColor),
+                    messageColorsAnimated: settings.messageColorsAnimated,
+                    ...(settings.wallpaper
+                      ? { wallpaper: this.sanitizeWallpaper(settings.wallpaper) }
+                      : {}),
+                  })),
+                },
+              }
+            : {}),
+        }
+      : undefined;
+    return {
+      ...(source.peerId ? { peerId: this.peerId(source.peerId) } : {}),
+      ...(safeValue ? { value: safeValue } : {}),
+      appearance: resource(source.appearance),
+      wallpaper: {
+        ...resource(source.wallpaper),
+        ...(source.wallpaper.byteSize !== undefined
+          ? { byteSize: finiteNonNegativeInteger(source.wallpaper.byteSize, 'wallpaper.byteSize') }
+          : {}),
+        ...(source.wallpaper.mimeType
+          ? { mimeType: sanitizeMimeType(source.wallpaper.mimeType) }
+          : {}),
+      },
+      pattern: source.pattern,
+      ...(source.selectedBaseTheme ? { selectedBaseTheme: source.selectedBaseTheme } : {}),
+      ...(source.cache
+        ? {
+            cache: {
+              ...(source.cache.metadataPresent !== undefined
+                ? { metadataPresent: source.cache.metadataPresent }
+                : {}),
+              ...(source.cache.metadataAgeMs !== undefined
+                ? {
+                    metadataAgeMs: finiteNonNegativeNumber(
+                      source.cache.metadataAgeMs,
+                      'cache.metadataAgeMs',
+                    ),
+                  }
+                : {}),
+              ...(source.cache.wallpaperPresent !== undefined
+                ? { wallpaperPresent: source.cache.wallpaperPresent }
+                : {}),
+              ...(source.cache.inspectionFailed ? { inspectionFailed: true } : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
+  private sanitizePreferences(source: ThemePreferences): ThemePreferences {
+    const value = normalizeThemePreferences(source);
+    return {
+      ...value,
+      ...(value.telegramTheme
+        ? {
+            telegramTheme: {
+              ...value.telegramTheme,
+              id: this.aliases.get('theme', value.telegramTheme.id),
+              title: sanitizeTvBugText(value.telegramTheme.title).value,
+            },
+          }
+        : {}),
+      ...(value.telegramWallpaper
+        ? {
+            telegramWallpaper: {
+              ...value.telegramWallpaper,
+              id: this.aliases.get('wallpaper', value.telegramWallpaper.id),
+              label: sanitizeTvBugText(value.telegramWallpaper.label).value,
             },
           }
         : {}),
@@ -2570,7 +2751,7 @@ function sanitizeJsonValue(
     if (time && /(?:date|editedat|lastseenat|timestamp|publishedat)$/u.test(key)) {
       return time.shiftSeconds(value);
     }
-    if (time && /(?:createdat|savedat|retryat|ms)$/u.test(key)) {
+    if (time && /(?:createdat|savedat|retryat)(?:ms)?$/u.test(key)) {
       return time.shiftMilliseconds(value);
     }
     return value;
@@ -2583,7 +2764,17 @@ function sanitizeJsonValue(
     const key = normalizeKey(lastPathPart(context));
     if (key === 'url') return `https://example.invalid/${aliases.get('url', value)}`;
     if (key.includes('color')) return sanitizeColor(value);
-    if (['peerid', 'senderid', 'userid', 'actorid', 'targetuserids'].includes(key)) {
+    if (
+      [
+        'peerid',
+        'activepeerid',
+        'bootstrapactivepeerid',
+        'senderid',
+        'userid',
+        'actorid',
+        'targetuserids',
+      ].includes(key)
+    ) {
       return aliases.peer(value);
     }
     if (key === 'accountid') return aliases.get('account', value);
@@ -2630,7 +2821,9 @@ function sanitizeJsonValue(
       peer && key === 'id'
         ? aliases.peer(peer.id, peer.kind)
         : sanitizeJsonValue(child, `${context}.${key}`, aliases, time, depth + 1);
-    if (safe !== undefined) result[key] = safe;
+    const safeKey =
+      normalizeKey(lastPathPart(context)) === 'draftdetails' ? aliases.peer(key) : key;
+    if (safe !== undefined) result[safeKey] = safe;
   }
   if (
     typeof value.id === 'number' &&
@@ -2735,6 +2928,10 @@ function validateBundle(value: unknown): asserts value is TvBugBundleV2 {
   assertCollectionSize(state.pending.length, 'state.pending');
   requireRecord(state.pinnedMessages, 'state.pinnedMessages');
   requireRecord(state.groupMembers, 'state.groupMembers');
+  if (state.ui !== undefined) {
+    const ui = requireRecord(state.ui, 'state.ui');
+    if (ui.chatAppearance !== undefined) validateChatAppearance(ui.chatAppearance);
+  }
   for (const [index, raw] of state.messages.entries()) validateMessage(raw, index);
   let pendingAttachmentBytes = 0;
   for (const [index, raw] of state.pending.entries()) {
@@ -2764,6 +2961,62 @@ function validateBundle(value: unknown): asserts value is TvBugBundleV2 {
     priorTime = tMs;
   }
   auditSafeJson(bundle, 'bundle', 0);
+}
+
+function validateChatAppearance(value: unknown) {
+  const state = requireRecord(value, 'ui.chatAppearance');
+  for (const key of ['appearance', 'wallpaper']) {
+    const resource = requireRecord(state[key], `chatAppearance.${key}`);
+    if (
+      !['idle', 'loading', 'ready', 'error'].includes(String(resource.phase)) ||
+      typeof resource.waiting !== 'boolean' ||
+      typeof resource.hasValue !== 'boolean'
+    ) {
+      throw new TvBugFormatError('Invalid captured appearance resource state.');
+    }
+  }
+  if (!['none', 'normal', 'inverted'].includes(String(state.pattern))) {
+    throw new TvBugFormatError('Invalid captured wallpaper pattern mode.');
+  }
+  const colors = (value: unknown) => {
+    if (
+      !Array.isArray(value) ||
+      value.length > 4 ||
+      value.some((color) => typeof color !== 'string' || sanitizeColor(color) !== color)
+    ) {
+      throw new TvBugFormatError('Invalid captured appearance colors.');
+    }
+  };
+  const wallpaper = (value: unknown) => {
+    const item = requireRecord(value, 'captured wallpaper');
+    requireString(item.id, 'wallpaper.id');
+    for (const key of ['dark', 'pattern', 'hasFile']) {
+      if (typeof item[key] !== 'boolean')
+        throw new TvBugFormatError('Invalid captured wallpaper flags.');
+    }
+    const settings = requireRecord(item.settings, 'wallpaper.settings');
+    colors(settings.backgroundColors);
+    for (const key of ['intensity', 'rotation']) {
+      if (settings[key] !== undefined) finiteNumber(settings[key], `wallpaper.${key}`);
+    }
+  };
+  if (state.value === undefined) return;
+  const appearance = requireRecord(state.value, 'chatAppearance.value');
+  if (appearance.wallpaper !== undefined) wallpaper(appearance.wallpaper);
+  if (appearance.theme !== undefined) {
+    const theme = requireRecord(appearance.theme, 'chatAppearance.theme');
+    if (!Array.isArray(theme.settings) || theme.settings.length > 16)
+      throw new TvBugFormatError('Invalid captured theme settings.');
+    for (const raw of theme.settings) {
+      const settings = requireRecord(raw, 'theme.settings');
+      if (!SAFE_SEMANTIC_VALUES.basetheme!.has(String(settings.baseTheme)))
+        throw new TvBugFormatError('Invalid captured base theme.');
+      colors([settings.accentColor]);
+      if (settings.outboxAccentColor !== undefined) colors([settings.outboxAccentColor]);
+      colors(settings.messageColors);
+      if (settings.wallpaper !== undefined) wallpaper(settings.wallpaper);
+    }
+  }
 }
 
 function validatePending(value: unknown, index: number): number {
@@ -2940,6 +3193,9 @@ function isSemanticStringKey(key: string): boolean {
       'mimetype',
       'mode',
       'phase',
+      'pattern',
+      'source',
+      'focusedcontrol',
       'photosize',
       'presence',
       'sendas',

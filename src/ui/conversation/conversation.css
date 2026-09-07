@@ -106,15 +106,6 @@
 .message-scroll-shell[data-chat-theme='telegram'] .message-window-control {
   color: var(--chat-accent, var(--accent));
 }
-.message-scroll-shell[data-chat-theme='telegram']
-  :where(
-    .message-reply,
-    .message-body .expandable-blockquote,
-    .rich-message blockquote,
-    .rich-quote
-  ) {
-  border-left-color: var(--chat-accent, var(--accent));
-}
 .message-status-read {
   color: var(--chat-outbox-accent, var(--accent));
 }
@@ -312,7 +303,6 @@
   display: inline-block;
   overflow: hidden;
   max-height: 2.8em;
-  border-left: 3px solid var(--accent);
   padding-left: 0.5rem;
   cursor: pointer;
   vertical-align: bottom;
@@ -404,7 +394,6 @@
 }
 .rich-message blockquote,
 .rich-quote {
-  border-left: 3px solid var(--accent);
   padding-left: 0.65rem;
 }
 .rich-pullquote {
@@ -529,23 +518,11 @@
   overflow: hidden;
   margin-top: 0.45rem;
   border-left: 0;
-  border-radius: 0 0.35rem 0.35rem 0;
+  border-radius: 0.35rem;
   background: rgb(0 0 0 / 0.14);
   padding: 0;
   color: inherit;
   text-decoration: none;
-}
-.link-preview::before {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 3px;
-  border-radius: 0;
-  background: var(--link);
-  content: '';
-  pointer-events: none;
 }
 .link-preview-photo {
   position: relative;
@@ -636,6 +613,39 @@
   place-items: center;
   overflow: hidden;
   background: #000;
+}
+.link-preview-play {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 5.75rem;
+  place-items: center;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #fff;
+  cursor: pointer;
+}
+.link-preview-play img {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.link-preview-play > span {
+  z-index: 1;
+  border-radius: 1.5rem;
+  background: rgb(0 0 0 / 0.65);
+  padding: 0.65rem 0.9rem;
+}
+.link-preview-play:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.link-preview-play:disabled {
+  cursor: progress;
 }
 .link-preview-media-frame video {
   width: 100%;

@@ -1,8 +1,35 @@
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite-plus';
 import { effectweb } from '@effectweb/compiler/vite';
+import { execFileSync } from 'node:child_process';
+
+function sourceRevision() {
+  try {
+    return {
+      commit:
+        process.env.VITE_TELEVECHA_COMMIT ||
+        execFileSync('git', ['rev-parse', 'HEAD'], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim(),
+      modified: Boolean(
+        execFileSync('git', ['status', '--porcelain'], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim(),
+      ),
+    };
+  } catch {
+    return { commit: process.env.VITE_TELEVECHA_COMMIT ?? '', modified: undefined };
+  }
+}
+const revision = sourceRevision();
 
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_TELEVECHA_COMMIT': JSON.stringify(revision.commit),
+    'import.meta.env.VITE_TELEVECHA_SOURCE_MODIFIED': JSON.stringify(revision.modified ?? null),
+  },
   plugins: [effectweb(), tailwindcss()],
   build: {
     target: 'es2022',

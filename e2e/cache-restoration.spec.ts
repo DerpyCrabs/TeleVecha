@@ -88,6 +88,36 @@ test('restores an assigned chat background from cache before Telegram reconnects
   expect((await fixtureStats(page))?.downloadWallpaper).toBe(0);
 });
 
+test('loads the assigned chat background after reconnecting without cached appearance', async ({
+  page,
+}) => {
+  await page.goto(CACHE_PATH);
+  await releaseConnectionAndWaitUntilReady(page);
+  await expectAssignedChatBackground(page);
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('televecha-e2e-held-connect+multiple-pins');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = database.transaction('meta', 'readwrite');
+    transaction.objectStore('meta').delete('resource-metadata:chat-appearance:u:101');
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  });
+  await page.reload();
+  await waitForCachedWorkspace(page);
+  await expect(page.locator('.message-scroll-shell')).not.toHaveAttribute(
+    'data-chat-wallpaper',
+    'telegram',
+  );
+  await releaseConnectionAndWaitUntilReady(page);
+  await expectAssignedChatBackground(page);
+});
+
 test('restores a selected Telegram background from cache before Telegram reconnects', async ({
   page,
 }) => {
