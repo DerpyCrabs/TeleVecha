@@ -30,3 +30,86 @@ describe('clientRegistry', () => {
     expect(registry.takeQueuedStateClients()).toEqual([]);
   });
 });
+
+const message = (id: number, text = `message ${id}`) => ({
+  id,
+  peerId: 'peer-1',
+  senderId: 'self',
+  text,
+  date: id,
+  outgoing: true,
+});
+const conversation = (...ids: number[]) => ({
+  ...initialEngineSnapshot(),
+  activePeerId: 'peer-1',
+  messages: ids.map((id) => message(id)),
+});
+
+it('replays concurrent insertions, edits, deletions and pinned changes over a delayed view result', () => {
+  const registry = makeClientRegistry();
+  registry.setSnapshot('tab', conversation(1, 2));
+  const request = registry.beginConversationLoad('tab', 'peer-1');
+  const edited = message(1, 'edited');
+  registry.recordConversationChange({ type: 'message-upsert', message: edited });
+  registry.recordConversationChange({
+    type: 'messages-delete',
+    peerId: 'peer-1',
+    messageIds: [2, 3],
+  });
+  registry.recordConversationChange({
+    type: 'message-upsert',
+    message: message(4),
+    insertIfMissing: true,
+  });
+  registry.recordConversationChange({
+    type: 'pinned-messages',
+    peerId: 'peer-1',
+    messages: [edited],
+  });
+  const result = request.complete(conversation(1, 2, 3));
+  expect(result?.messages).toEqual([edited, message(4)]);
+  expect(result?.pinnedMessages).toEqual([edited]);
+  // A completed request releases its journal. Later events belong to the live projection.
+  registry.recordConversationChange({ type: 'messages-delete', peerId: 'peer-1', messageIds: [1] });
+  expect(request.complete(conversation(1))).toBeUndefined();
+});
+
+it('supersedes a delayed load for the same peer without letting stale cancellation clear its successor', () => {
+  const registry = makeClientRegistry();
+  registry.setSnapshot('tab', conversation(1));
+  const old = registry.beginConversationLoad('tab', 'peer-1');
+  const latest = registry.beginConversationLoad('tab', 'peer-1');
+  old.cancel();
+  registry.recordConversationChange({ type: 'message-upsert', message: message(2) });
+  expect(old.current()).toBe(false);
+  expect(old.complete(conversation(1))).toBeUndefined();
+  expect(latest.complete(conversation(1))?.messages).toEqual([message(1), message(2)]);
+});
+
+it.each(['switch', 'remove', 'clear', 'cancel'] as const)(
+  'discards a load after client %s',
+  (operation) => {
+    const registry = makeClientRegistry();
+    registry.setSnapshot('tab', conversation(1));
+    const request = registry.beginConversationLoad('tab', 'peer-1');
+    if (operation === 'switch')
+      registry.setSnapshot('tab', { ...conversation(), activePeerId: 'peer-2' });
+    else if (operation === 'remove') registry.remove('tab');
+    else if (operation === 'clear') registry.clear();
+    else request.cancel();
+    registry.recordConversationChange({ type: 'message-upsert', message: message(2) });
+    expect(request.complete(conversation(1))).toBeUndefined();
+  },
+);
+
+it('keeps journals independent per client and ignores events for other peers', () => {
+  const registry = makeClientRegistry();
+  registry.setSnapshot('first', conversation(1));
+  registry.setSnapshot('second', { ...conversation(), activePeerId: 'peer-2' });
+  const first = registry.beginConversationLoad('first', 'peer-1');
+  const second = registry.beginConversationLoad('second', 'peer-2');
+  registry.recordConversationChange({ type: 'messages-delete', messageIds: [1] });
+  registry.recordConversationChange({ type: 'message-upsert', message: message(2) });
+  expect(first.complete(conversation(1))?.messages).toEqual([message(2)]);
+  expect(second.complete({ ...conversation(1), activePeerId: 'peer-2' })?.messages).toEqual([]);
+});

@@ -1,4 +1,42 @@
-import type { EngineSnapshot } from '../types';
+import type { ConversationViewSnapshot, EngineSnapshot, TelegramConversationEvent } from '../types';
+
+type ConversationChange = Exclude<TelegramConversationEvent, { type: 'history-reset' }>;
+
+/** Apply the same live-message rules to a published view and a delayed load result. */
+export function applyConversationChange<View extends ConversationViewSnapshot>(
+  view: View,
+  event: ConversationChange,
+): View {
+  const peerId = view.activePeerId;
+  if (!peerId) return view;
+  let messages = view.messages;
+  let pinnedMessages = view.pinnedMessages;
+  if (event.type === 'message-upsert') {
+    if (event.message.peerId !== peerId) return view;
+    const known = messages.some(({ id }) => id === event.message.id);
+    const newestId = messages.at(-1)?.id ?? 0;
+    if (known || event.insertIfMissing || event.message.id > newestId) {
+      messages = [...messages.filter(({ id }) => id !== event.message.id), event.message].sort(
+        (left, right) => left.id - right.id,
+      );
+    }
+    if (pinnedMessages.some(({ id }) => id === event.message.id))
+      pinnedMessages = pinnedMessages.map((message) =>
+        message.id === event.message.id ? event.message : message,
+      );
+  } else if (event.type === 'messages-delete') {
+    if (event.peerId && event.peerId !== peerId) return view;
+    const deleted = new Set(event.messageIds);
+    messages = messages.filter(({ id }) => !deleted.has(id));
+    pinnedMessages = pinnedMessages.filter(({ id }) => !deleted.has(id));
+  } else {
+    if (event.peerId !== peerId) return view;
+    pinnedMessages = event.messages;
+  }
+  return messages === view.messages && pinnedMessages === view.pinnedMessages
+    ? view
+    : { ...view, messages, pinnedMessages };
+}
 
 interface VisibilityReport {
   readonly peerId: string;
@@ -11,6 +49,7 @@ interface ClientRecord {
   seenAt?: number;
   visibility?: VisibilityReport;
   stateQueued?: boolean;
+  conversationLoad?: { peerId: string; changes?: ConversationChange[] | undefined } | undefined;
 }
 
 /** Keeps each tab's projection, liveness, and visibility as one owned record. */
@@ -24,7 +63,44 @@ export function makeClientRegistry() {
       records.set(clientId, { ...record(clientId), seenAt });
     },
     setSnapshot(clientId: string, snapshot: EngineSnapshot) {
-      records.set(clientId, { ...record(clientId), snapshot });
+      const previous = record(clientId);
+      records.set(clientId, {
+        ...previous,
+        snapshot,
+        conversationLoad:
+          previous.conversationLoad?.peerId === snapshot.activePeerId
+            ? previous.conversationLoad
+            : undefined,
+      });
+    },
+    /** A new request supersedes older loads even when the peer is unchanged. */
+    beginConversationLoad(clientId: string, peerId: string) {
+      const request = { peerId, changes: [] as ConversationChange[] | undefined };
+      records.set(clientId, { ...record(clientId), conversationLoad: request });
+      const current = () => {
+        const client = records.get(clientId);
+        return client?.conversationLoad === request && client.snapshot?.activePeerId === peerId;
+      };
+      return {
+        current,
+        complete(view: ConversationViewSnapshot) {
+          if (!current() || view.activePeerId !== peerId || !request.changes) return undefined;
+          const changes = request.changes;
+          request.changes = undefined;
+          return changes.reduce(applyConversationChange, view);
+        },
+        cancel() {
+          request.changes = undefined;
+          if (records.get(clientId)?.conversationLoad === request)
+            records.set(clientId, { ...record(clientId), conversationLoad: undefined });
+        },
+      };
+    },
+    recordConversationChange(event: ConversationChange) {
+      const peerId = event.type === 'message-upsert' ? event.message.peerId : event.peerId;
+      for (const { conversationLoad } of records.values())
+        if (conversationLoad?.changes && (!peerId || conversationLoad.peerId === peerId))
+          conversationLoad.changes.push(event);
     },
     hasSnapshot: (clientId: string) => records.get(clientId)?.snapshot !== undefined,
     snapshot: (clientId: string) => records.get(clientId)?.snapshot,

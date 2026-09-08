@@ -23,7 +23,7 @@ import {
 } from '../core/engineState';
 import { CoordinatorTasks } from './coordinatorTasks';
 import { acquireAvailableTabLease } from './tabLock';
-import { makeClientRegistry } from './clientRegistry';
+import { applyConversationChange, makeClientRegistry } from './clientRegistry';
 import { makeRequestJournal, type PendingRequest } from './requestJournal';
 import type {
   AccountSnapshot,
@@ -1458,34 +1458,9 @@ function errorMessage(error: unknown) {
       yield* reloadClientConversationViews(event.peerId);
       return;
     }
+    clientRegistry.recordConversationChange(event);
     for (const [clientId, previous] of clientRegistry.snapshots()) {
-      const peerId = previous.activePeerId;
-      if (!peerId) continue;
-      let messages = previous.messages;
-      let pinnedMessages = previous.pinnedMessages;
-      if (event.type === 'message-upsert') {
-        if (event.message.peerId !== peerId) continue;
-        const known = messages.some(({ id }) => id === event.message.id);
-        const newestId = messages.at(-1)?.id ?? 0;
-        if (known || event.insertIfMissing || event.message.id > newestId) {
-          messages = [...messages.filter(({ id }) => id !== event.message.id), event.message].sort(
-            (left, right) => left.id - right.id,
-          );
-        }
-        pinnedMessages = pinnedMessages.map((message) =>
-          message.id === event.message.id ? event.message : message,
-        );
-      } else if (event.type === 'messages-delete') {
-        if (event.peerId && event.peerId !== peerId) continue;
-        const deleted = new Set(event.messageIds);
-        messages = messages.filter(({ id }) => !deleted.has(id));
-        pinnedMessages = pinnedMessages.filter(({ id }) => !deleted.has(id));
-      } else {
-        if (event.peerId !== peerId) continue;
-        pinnedMessages = event.messages;
-      }
-      if (messages === previous.messages && pinnedMessages === previous.pinnedMessages) continue;
-      const next = shareEqualSnapshotFields(previous, { ...previous, messages, pinnedMessages });
+      const next = shareEqualSnapshotFields(previous, applyConversationChange(previous, event));
       if (next === previous) continue;
       clientRegistry.setSnapshot(clientId, next);
       if (clientId === thisClientId) yield* setSnapshot(next);
@@ -1508,6 +1483,7 @@ function errorMessage(error: unknown) {
             loadingOlderMessages: false,
           });
         }
+        const request = clientRegistry.beginConversationLoad(clientId, peerId);
         yield* fork(
           Effect.all([
             engine.loadConversationView(peerId),
@@ -1518,24 +1494,30 @@ function errorMessage(error: unknown) {
               onSuccess: ([conversation, pinnedMessages, sharedMediaCounts]) =>
                 Effect.suspend(() => {
                   const current = clientRegistry.snapshot(clientId);
-                  if (current?.activePeerId !== peerId) return Effect.void;
-                  return publishClientSnapshot(
-                    clientId,
-                    engineSnapshot(accountSnapshot(engine.snapshot()), {
-                      ...conversation,
-                      pinnedMessages,
-                      ...(sharedMediaCounts !== undefined
-                        ? { sharedMediaCounts }
-                        : current.sharedMediaCounts !== undefined
-                          ? { sharedMediaCounts: current.sharedMediaCounts }
-                          : {}),
-                    }),
-                  );
+                  if (!request.current() || !current || activeOwner?.engine !== engine)
+                    return Effect.void;
+                  const next = request.complete({
+                    ...conversation,
+                    pinnedMessages,
+                    ...(sharedMediaCounts !== undefined
+                      ? { sharedMediaCounts }
+                      : current.sharedMediaCounts !== undefined
+                        ? { sharedMediaCounts: current.sharedMediaCounts }
+                        : {}),
+                  });
+                  return next
+                    ? publishClientSnapshot(
+                        clientId,
+                        engineSnapshot(accountSnapshot(engine.snapshot()), next),
+                      )
+                    : Effect.void;
                 }),
               onFailure: (error) =>
                 Effect.suspend(() => {
                   const current = clientRegistry.snapshot(clientId);
-                  if (current?.activePeerId !== peerId) return Effect.void;
+                  if (!request.current() || !current || activeOwner?.engine !== engine)
+                    return Effect.void;
+                  request.cancel();
                   return publishClientSnapshot(clientId, {
                     ...current,
                     loadingMessages: false,
@@ -1543,6 +1525,7 @@ function errorMessage(error: unknown) {
                   });
                 }),
             }),
+            Effect.ensuring(Effect.sync(() => request.cancel())),
           ),
         );
       }
@@ -1697,22 +1680,26 @@ function errorMessage(error: unknown) {
     if (!engine) {
       return yield* Effect.fail(new Error('TeleVecha is reconnecting in another tab.'));
     }
+    const request = clientRegistry.beginConversationLoad(clientId, peerId);
     yield* publishClientSnapshot(
       clientId,
       engineSnapshot(accountSnapshot(engine.snapshot()), loading),
     );
-    const conversation = yield* load();
+    const conversation = yield* load().pipe(
+      Effect.onError(() => Effect.sync(() => request.cancel())),
+    );
     const current = clientRegistry.snapshot(clientId);
-    if (current?.activePeerId === peerId) {
+    const next =
+      request.current() && activeOwner?.engine === engine
+        ? request.complete(retainConversationMetadata(current, conversation))
+        : undefined;
+    if (next)
       yield* publishClientSnapshot(
         clientId,
-        engineSnapshot(
-          accountSnapshot(engine.snapshot()),
-          retainConversationMetadata(current, conversation),
-        ),
+        engineSnapshot(accountSnapshot(engine.snapshot()), next),
       );
-    }
-    return conversation;
+    else request.cancel();
+    return { conversation: next ?? conversation, current: request.current };
   });
   const invokeOwner = Effect.fn('TabCoordinator.invokeOwner')(function* (
     clientId: string,
@@ -1737,7 +1724,7 @@ function errorMessage(error: unknown) {
     if (method === 'openConversation') {
       const peerId = String(args[0]);
       const previous = clientRegistry.snapshot(clientId);
-      yield* updateClientConversation(
+      const request = yield* updateClientConversation(
         clientId,
         peerId,
         conversationLoadingSnapshot(previous, peerId),
@@ -1750,7 +1737,8 @@ function errorMessage(error: unknown) {
         ]).pipe(
           Effect.flatMap(([pinnedMessages, sharedMediaCounts]) => {
             const current = clientRegistry.snapshot(clientId);
-            if (current?.activePeerId !== peerId) return Effect.void;
+            if (!request.current() || !current || activeOwner?.engine !== engine)
+              return Effect.void;
             return publishClientSnapshot(clientId, {
               ...current,
               pinnedMessages,
@@ -1780,7 +1768,7 @@ function errorMessage(error: unknown) {
         );
       }
       let found = false;
-      const conversation = yield* updateClientConversation(
+      const { conversation } = yield* updateClientConversation(
         clientId,
         peerId,
         conversationViewSnapshot(previous),
@@ -1819,7 +1807,7 @@ function errorMessage(error: unknown) {
           new Error('This conversation view was superseded by a newer selection.'),
         );
       }
-      return yield* updateClientConversation(
+      const { conversation } = yield* updateClientConversation(
         clientId,
         peerId,
         {
@@ -1839,6 +1827,7 @@ function errorMessage(error: unknown) {
                 )
               : engine.retryConversationView(peerId, conversationViewSnapshot(previous)),
       );
+      return conversation;
     }
     const result = yield* invokeEngineCommand(engine, method, args);
     const next = engine.snapshot();
