@@ -1211,7 +1211,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       text: string,
       randomId: string,
       reply?: TelegramReplyTarget,
-      formats?: TelegramTextFormat[],
+      formats?: readonly TelegramTextFormat[],
     ) {
       stats.sendText += 1;
       stats.lastSendRandomId = randomId;
@@ -1858,7 +1858,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       peer: TelegramPeer,
       messageId: number,
       text: string,
-      formats?: TelegramTextFormat[],
+      formats?: readonly TelegramTextFormat[],
       replacement?: EditMediaOptions,
     ) {
       stats.editMessage += 1;

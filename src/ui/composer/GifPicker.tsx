@@ -53,7 +53,7 @@ export const GifPicker = resourceComponent<
       : undefined,
   view: view((model, _send) => {
     const props = model.props;
-    const results = slot((gifs: TelegramSticker[]) => {
+    const results = slot((gifs: readonly TelegramSticker[]) => {
       if (!gifs.length) return <p>No GIFs found</p>;
       return idRows(gifs).map((gif) => (
         <GifOption

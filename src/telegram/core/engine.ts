@@ -4485,7 +4485,7 @@ function makeMessagingEngineModule(
   const applyReactionChange = Effect.fn('MessagingEngine.applyReactionChange')(function* (
     peerId: string,
     messageId: number,
-    reactions: TelegramReaction[],
+    reactions: readonly TelegramReaction[],
     expectedVersion?: number,
     operation?: { session: Scope.Closeable | undefined; accountId: string | undefined },
   ) {
@@ -4519,7 +4519,7 @@ function makeMessagingEngineModule(
   function nextReactionVersion(key: string) {
     return versions.next('reaction', key);
   }
-  function reactionsAfterChoice(reactions: TelegramReaction[], emoji?: string) {
+  function reactionsAfterChoice(reactions: readonly TelegramReaction[], emoji?: string) {
     const next = reactions.flatMap((reaction) => {
       const count = reaction.chosen ? reaction.count - 1 : reaction.count;
       return count > 0 ? [{ ...reaction, count, chosen: false }] : [];

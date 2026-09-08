@@ -356,6 +356,35 @@ it('keeps an accepted send alive across chat switches and composer disposal', as
   expect(changes).not.toHaveBeenCalled();
 });
 
+it('focuses the composer when closing a menu removes the previously focused item', async () => {
+  const { session, focus } = composerFixture();
+  const menuItem = { isConnected: true };
+  const body = { isConnected: true };
+  const document = { activeElement: menuItem, body };
+  vi.stubGlobal('document', document);
+
+  session.focus();
+  menuItem.isConnected = false;
+  document.activeElement = body;
+  await Promise.resolve();
+
+  expect(focus).toHaveBeenCalledOnce();
+});
+
+it('keeps a later user focus choice after the originating menu item is removed', async () => {
+  const { session, focus } = composerFixture();
+  const menuItem = { isConnected: true };
+  const document = { activeElement: menuItem, body: { isConnected: true } };
+  vi.stubGlobal('document', document);
+
+  session.focus();
+  menuItem.isConnected = false;
+  document.activeElement = { isConnected: true };
+  await Promise.resolve();
+
+  expect(focus).not.toHaveBeenCalled();
+});
+
 it('flushes drafts on disposal and cancels focus and inactivity callbacks', async () => {
   vi.useFakeTimers();
   const { session, tasks, draft, typing, focus } = composerFixture();

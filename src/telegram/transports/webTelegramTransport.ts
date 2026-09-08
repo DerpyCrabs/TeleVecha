@@ -1173,7 +1173,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     text: string,
     randomId: string,
     reply?: TelegramReplyTarget,
-    formats?: TelegramTextFormat[],
+    formats?: readonly TelegramTextFormat[],
   ) {
     const result = yield* (yield* getClient).invoke(
       Api.messages.SendMessage({
@@ -1880,7 +1880,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     peer: TelegramPeer,
     messageId: number,
     text: string,
-    formats?: TelegramTextFormat[],
+    formats?: readonly TelegramTextFormat[],
     replacement?: EditMediaOptions,
   ) {
     const media = replacement
@@ -3855,7 +3855,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     randomId: string,
     result: Tl.UpdateShortSentMessage,
     reply?: TelegramReplyTarget,
-    formats?: TelegramTextFormat[],
+    formats?: readonly TelegramTextFormat[],
   ) {
     const peerId =
       peer.kind === 'user'

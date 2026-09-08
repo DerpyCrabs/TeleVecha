@@ -136,11 +136,11 @@ export interface TelegramMessage {
   service?: TelegramServiceMessage | undefined;
   botKeyboard?: TelegramBotKeyboard | undefined;
   media?: TelegramMedia | undefined;
-  reactions?: TelegramReaction[] | undefined;
-  mentions?: TelegramMention[] | undefined;
-  links?: TelegramLink[] | undefined;
+  reactions?: readonly TelegramReaction[] | undefined;
+  mentions?: readonly TelegramMention[] | undefined;
+  links?: readonly TelegramLink[] | undefined;
   linkPreview?: TelegramLinkPreview | undefined;
-  formats?: TelegramTextFormat[] | undefined;
+  formats?: readonly TelegramTextFormat[] | undefined;
   richMessage?: RichMessage | undefined;
   pinned?: boolean | undefined;
 }
@@ -176,7 +176,7 @@ export interface TelegramBotButton {
   text: string;
   url?: string | undefined;
   buttonId?: number | undefined;
-  data?: number[] | undefined;
+  data?: readonly number[] | undefined;
   copyText?: string | undefined;
   query?: string | undefined;
   samePeer?: boolean | undefined;
@@ -185,7 +185,7 @@ export interface TelegramBotButton {
 
 export interface TelegramBotKeyboard {
   kind: 'inline' | 'reply';
-  rows: TelegramBotButton[][];
+  rows: readonly (readonly TelegramBotButton[])[];
   hidden?: boolean | undefined;
   forceReply?: boolean | undefined;
   singleUse?: boolean | undefined;
@@ -210,7 +210,7 @@ export type TelegramUrlAuthResult =
       requestPhoneNumber: boolean;
       matchCodesFirst: boolean;
       isApp: boolean;
-      matchCodes?: string[] | undefined;
+      matchCodes?: readonly string[] | undefined;
       verifiedAppName?: string | undefined;
     };
 
@@ -242,7 +242,7 @@ export interface TelegramServiceMessage {
   kind: TelegramServiceMessageKind;
   text: string;
   actorId?: string | undefined;
-  targetUserIds?: string[] | undefined;
+  targetUserIds?: readonly string[] | undefined;
   title?: string | undefined;
 }
 
@@ -338,7 +338,7 @@ export interface TelegramReplyTarget {
 }
 
 export interface TelegramDraftDetails {
-  formats: TelegramTextFormat[];
+  formats: readonly TelegramTextFormat[];
   reply?: TelegramReplyTarget & { preview: string };
 }
 
@@ -433,7 +433,12 @@ export type TransportUpdate =
       stillUnreadCount?: number | undefined;
     }
   | { type: 'dialog-changed'; dialog: TelegramDialog }
-  | { type: 'reaction-changed'; peerId: string; messageId: number; reactions: TelegramReaction[] }
+  | {
+      type: 'reaction-changed';
+      peerId: string;
+      messageId: number;
+      reactions: readonly TelegramReaction[];
+    }
   | { type: 'activity'; activity: TelegramActivity }
   | { type: 'activity-ended'; peerId: string; senderId: string }
   | {
@@ -534,7 +539,7 @@ export interface TelegramCredentials {
 export type TelegramBaseTheme = 'classic' | 'day' | 'night' | 'tinted' | 'arctic';
 
 export interface TelegramWallpaperSettings {
-  backgroundColors: string[];
+  backgroundColors: readonly string[];
   blur: boolean;
   motion: boolean;
   intensity?: number | undefined;
@@ -555,7 +560,7 @@ export interface TelegramThemeSettings {
   baseTheme: TelegramBaseTheme;
   accentColor: string;
   outboxAccentColor?: string | undefined;
-  messageColors: string[];
+  messageColors: readonly string[];
   messageColorsAnimated: boolean;
   wallpaper?: TelegramWallpaper | undefined;
 }
@@ -567,7 +572,7 @@ export interface TelegramTheme {
   emoticon?: string | undefined;
   default: boolean;
   forChat: boolean;
-  settings: TelegramThemeSettings[];
+  settings: readonly TelegramThemeSettings[];
 }
 
 export interface TelegramChatAppearance {
@@ -657,7 +662,7 @@ export interface TelegramTransport {
     text: string,
     randomId: string,
     reply?: TelegramReplyTarget,
-    formats?: TelegramTextFormat[],
+    formats?: readonly TelegramTextFormat[],
   ): TransportEffect<SendTextResult>;
   sendFile(
     peer: TelegramPeer,
@@ -723,7 +728,7 @@ export interface TelegramTransport {
     peer: TelegramPeer,
     messageId: number,
     text: string,
-    formats?: TelegramTextFormat[],
+    formats?: readonly TelegramTextFormat[],
     replacement?: EditMediaOptions,
   ): TransportEffect<EditMessageResult>;
   forwardMessage(
@@ -743,7 +748,7 @@ export interface SendFileOptions {
   asSticker: boolean;
   sendAs: OutgoingAttachmentMode;
   reply?: TelegramReplyTarget | undefined;
-  formats?: TelegramTextFormat[] | undefined;
+  formats?: readonly TelegramTextFormat[] | undefined;
   onProgress?: TelegramTransportProgress | undefined;
 }
 
@@ -756,7 +761,7 @@ export interface SendAlbumAttachment {
 export interface SendAlbumOptions {
   caption: string;
   reply?: TelegramReplyTarget | undefined;
-  formats?: TelegramTextFormat[] | undefined;
+  formats?: readonly TelegramTextFormat[] | undefined;
   onProgress?: TelegramTransportProgress | undefined;
 }
 
@@ -790,14 +795,14 @@ export interface PendingSend {
   lastError?: string | undefined;
   uploadProgress?: number | undefined;
   reply?: TelegramReplyTarget | undefined;
-  formats?: TelegramTextFormat[] | undefined;
+  formats?: readonly TelegramTextFormat[] | undefined;
   sticker?: TelegramSticker | undefined;
   forward?:
     | { fromPeer: TelegramPeer; messageId: number; mediaKind?: TelegramMedia['kind'] | undefined }
     | undefined;
   botStart?: { startParam: string } | undefined;
   attachment?: PendingAttachment | undefined;
-  album?: { attachments: PendingAlbumAttachment[] } | undefined;
+  album?: { attachments: readonly PendingAlbumAttachment[] } | undefined;
 }
 
 export interface CachedDialog extends TelegramDialog {

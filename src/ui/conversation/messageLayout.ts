@@ -2,7 +2,7 @@ import type { ChatMessage, ChatSummary } from '../../domain/models';
 import type { TelegramDialog } from '../../telegram/types';
 
 export interface MessageLayout {
-  album: ChatMessage[];
+  album: readonly ChatMessage[];
   author: string;
   caption: ChatMessage;
   className: string;
@@ -76,7 +76,7 @@ function captionMediaWidth(parts: Array<string | undefined>) {
 export function layoutMessages(
   messages: ChatMessage[],
   chat: ChatSummary,
-  dialogs: TelegramDialog[],
+  dialogs: readonly TelegramDialog[],
   previous: MessageLayout[] = [],
 ): MessageLayout[] {
   const continuations = messages.map((message, index) =>

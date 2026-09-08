@@ -61,13 +61,13 @@ export interface TelegramThemePreference {
   baseTheme: 'classic' | 'day' | 'night' | 'tinted' | 'arctic';
   accentColor: string;
   outboxAccentColor?: string | undefined;
-  messageColors: string[];
+  messageColors: readonly string[];
 }
 
 export interface TelegramWallpaperPreference {
   id: string;
   label: string;
-  backgroundColors: string[];
+  backgroundColors: readonly string[];
   rotation: number;
   hasFile: boolean;
   pattern: boolean;
@@ -118,7 +118,7 @@ export function readableTextColor(background: string) {
   return luminance > 0.46 ? '#18212b' : '#f2f6fa';
 }
 
-export function telegramWallpaperBackground(colors: string[], rotation = 135) {
+export function telegramWallpaperBackground(colors: readonly string[], rotation = 135) {
   if (colors.length === 0) return '';
   if (colors.length === 1) return colors[0]!;
   if (colors.length === 2) {

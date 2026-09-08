@@ -73,7 +73,7 @@ function blockToPlainText(block: RichBlock): string {
   return [content, captionToPlainText(block.caption)].filter(Boolean).join('\n');
 }
 
-export function richBlocksToPlainText(blocks: RichBlock[]): string {
+export function richBlocksToPlainText(blocks: readonly RichBlock[]): string {
   return blocks.map(blockToPlainText).filter(Boolean).join('\n\n');
 }
 

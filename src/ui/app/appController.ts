@@ -157,7 +157,7 @@ export function createAppController(props: AppProps) {
     sharedMediaKind: SharedMediaKind | undefined;
     deleteTarget: ChatMessage | undefined;
     mediaViewer:
-      | { messages: ChatMessage[]; index: number; preview: MediaPreview; loading: boolean }
+      | { messages: readonly ChatMessage[]; index: number; preview: MediaPreview; loading: boolean }
       | undefined;
     deleteChatTarget: TelegramDialog | undefined;
   };
@@ -587,7 +587,7 @@ export function createAppController(props: AppProps) {
   }, []);
   const messageRows = selectors.select<{
     entries: RenderedMessage[];
-    messages: ChatMessage[];
+    messages: readonly ChatMessage[];
     layouts: ReturnType<typeof layoutMessages>;
   }>((previous) => {
     const entries = activeMessageEntries();
@@ -965,7 +965,7 @@ export function createAppController(props: AppProps) {
   const openImageViewer = (
     message: ChatMessage,
     preview: MediaPreview,
-    candidates = imageViewerMessages(),
+    candidates: readonly ChatMessage[] = imageViewerMessages(),
   ) => {
     if (preview.kind !== 'image') return false;
     const messages = candidates.filter(
@@ -1647,14 +1647,29 @@ export function createAppController(props: AppProps) {
     navigateImageViewer,
     setMediaViewer: (
       value:
-        | { messages: ChatMessage[]; index: number; preview: MediaPreview; loading: boolean }
+        | {
+            messages: readonly ChatMessage[];
+            index: number;
+            preview: MediaPreview;
+            loading: boolean;
+          }
         | undefined
         | ((
             previous:
-              | { messages: ChatMessage[]; index: number; preview: MediaPreview; loading: boolean }
+              | {
+                  messages: readonly ChatMessage[];
+                  index: number;
+                  preview: MediaPreview;
+                  loading: boolean;
+                }
               | undefined,
           ) =>
-            | { messages: ChatMessage[]; index: number; preview: MediaPreview; loading: boolean }
+            | {
+                messages: readonly ChatMessage[];
+                index: number;
+                preview: MediaPreview;
+                loading: boolean;
+              }
             | undefined),
     ) =>
       state.send({

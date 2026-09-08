@@ -16,7 +16,7 @@ type RichStyledText = {
 
 export type RichText =
   | { kind: 'text'; text: string }
-  | { kind: 'concat'; children: RichText[] }
+  | { kind: 'concat'; children: readonly RichText[] }
   | RichStyledText
   | { kind: 'link'; child: RichText; url: string }
   | { kind: 'anchor'; child: RichText; name: string }
@@ -31,7 +31,7 @@ export interface RichCaption {
 
 export interface RichListItem {
   text?: RichText | undefined;
-  blocks?: RichBlock[] | undefined;
+  blocks?: readonly RichBlock[] | undefined;
   checked?: boolean | undefined;
   checkbox?: boolean | undefined;
   marker?: string | undefined;
@@ -70,20 +70,20 @@ export type RichBlock =
       ordered: boolean;
       reversed?: boolean | undefined;
       start?: number | undefined;
-      items: RichListItem[];
+      items: readonly RichListItem[];
     }
   | {
       kind: 'quote';
-      blocks: RichBlock[];
+      blocks: readonly RichBlock[];
       caption?: RichText | undefined;
       pull?: boolean | undefined;
       expandable?: boolean | undefined;
     }
-  | { kind: 'details'; title: RichText; blocks: RichBlock[]; open?: boolean | undefined }
+  | { kind: 'details'; title: RichText; blocks: readonly RichBlock[]; open?: boolean | undefined }
   | {
       kind: 'table';
       title?: RichText | undefined;
-      rows: RichTableCell[][];
+      rows: readonly (readonly RichTableCell[])[];
       bordered?: boolean | undefined;
       striped?: boolean | undefined;
     }
@@ -99,13 +99,13 @@ export type RichBlock =
   | {
       kind: 'group';
       mode: 'cover' | 'collage' | 'slideshow';
-      blocks: RichBlock[];
+      blocks: readonly RichBlock[];
       caption?: RichCaption;
     }
   | { kind: 'author'; author: RichText; publishedAt: number };
 
 export interface RichMessage {
-  blocks: RichBlock[];
+  blocks: readonly RichBlock[];
   rtl?: boolean | undefined;
   partial?: boolean | undefined;
 }

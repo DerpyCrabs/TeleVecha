@@ -22,7 +22,7 @@ type DirectorySource = Pick<
 export function createChatDirectory(
   source: DirectorySource,
   runEffect: UiEffectRunner,
-  dialogs: Read<TelegramDialog[]>,
+  dialogs: Read<readonly TelegramDialog[]>,
   selectPeer: (peerId: string) => Promise<boolean>,
 ) {
   let openGeneration = 0;

@@ -1,3 +1,4 @@
+import type { Snapshot } from 'effectweb';
 import type { ChatSummary } from '../../domain/models';
 import type { EngineSnapshot } from '../../telegram/types';
 import type { Read } from 'effectweb/session';
@@ -20,7 +21,7 @@ function lastSeenStatus(timestamp: number) {
 
 /** Derives conversation-header status and owns pinned-message navigation. */
 export function createConversationHeaderSession(options: {
-  snapshot: Read<EngineSnapshot>;
+  snapshot: Read<Snapshot<EngineSnapshot>>;
   chat: Read<ChatSummary>;
   activePeerId: Read<string>;
   activePeerMatches: Read<boolean>;

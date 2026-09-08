@@ -56,8 +56,8 @@ export interface ChatMessage {
   botKeyboard?:
     | {
         kind: 'inline' | 'reply';
-        rows: Array<
-          Array<{
+        rows: ReadonlyArray<
+          ReadonlyArray<{
             kind:
               | 'text'
               | 'url'
@@ -69,7 +69,7 @@ export interface ChatMessage {
             text: string;
             url?: string | undefined;
             buttonId?: number | undefined;
-            data?: number[] | undefined;
+            data?: readonly number[] | undefined;
             copyText?: string | undefined;
             query?: string | undefined;
             samePeer?: boolean | undefined;
@@ -89,10 +89,17 @@ export interface ChatMessage {
   replyMediaPeerId?: string | undefined;
   reaction?: string;
   reactions?:
-    | Array<{ emoji: string; customEmojiId?: string | undefined; count: number; chosen: boolean }>
+    | ReadonlyArray<{
+        emoji: string;
+        customEmojiId?: string | undefined;
+        count: number;
+        chosen: boolean;
+      }>
     | undefined;
-  mentions?: Array<{ offset: number; length: number; userId?: string | undefined }> | undefined;
-  links?: Array<{ offset: number; length: number; url?: string | undefined }> | undefined;
+  mentions?:
+    | ReadonlyArray<{ offset: number; length: number; userId?: string | undefined }>
+    | undefined;
+  links?: ReadonlyArray<{ offset: number; length: number; url?: string | undefined }> | undefined;
   linkPreview?:
     | {
         url: string;
@@ -119,7 +126,7 @@ export interface ChatMessage {
       }
     | undefined;
   formats?:
-    | Array<{
+    | ReadonlyArray<{
         offset: number;
         length: number;
         kind:

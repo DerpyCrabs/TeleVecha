@@ -33,7 +33,7 @@ type MediaSource = Pick<
 export function createMediaAssets(
   engine: MediaSource,
   runSharedEffect: UiSharedEffectRunner,
-  dialogs: () => TelegramDialog[],
+  dialogs: () => readonly TelegramDialog[],
 ) {
   const customEmojiAssets = new Map<string, { url: string; mimeType: string }>();
   const avatarUrls = new Map<string, string>();

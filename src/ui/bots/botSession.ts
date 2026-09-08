@@ -1,3 +1,4 @@
+import type { Snapshot } from 'effectweb';
 import { query } from 'effectweb/query';
 import type { Effect } from 'effect';
 import type { EffectConversation } from '../../telegram/core/conversation';
@@ -40,7 +41,7 @@ interface PendingInlineSwitch {
 interface BotSessionOptions {
   conversation: Read<EffectConversation | undefined>;
   runEffect: UiEffectRunner;
-  snapshot: Read<EngineSnapshot>;
+  snapshot: Read<Snapshot<EngineSnapshot>>;
   activePeerId: Read<string>;
   activeDialog: Read<TelegramDialog | undefined>;
   selectChat: (peerId: string) => Promise<boolean>;
@@ -325,7 +326,7 @@ export function createBotSession(options: BotSessionOptions, context: SessionCon
         }
         const conversation = currentConversation(peerId);
         const answer = conversation
-          ? await options.runEffect(conversation.answerBotCallback(messageId, button.data))
+          ? await options.runEffect(conversation.answerBotCallback(messageId, [...button.data]))
           : undefined;
         if (!isCurrent(peerId, generation)) return;
         if (answer?.url) openUrl(answer.url);

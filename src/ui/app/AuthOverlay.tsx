@@ -1,3 +1,4 @@
+import type { Snapshot } from 'effectweb';
 import { Effect } from 'effect';
 import type { EngineSnapshot } from '../../telegram/types';
 import KeyRound from '@effectweb/lucide/icons/key-round';
@@ -107,7 +108,7 @@ const AuthForm = view<
 });
 const ignoreClose = () => undefined;
 const authentication = defineTasks({
-  init: (_props: AuthOverlayProps) => ({ phone: '', code: '', password: '' }),
+  init: (_props: Snapshot<AuthOverlayProps>) => ({ phone: '', code: '', password: '' }),
 }).tasks({
   submit: {
     policy: 'drop',

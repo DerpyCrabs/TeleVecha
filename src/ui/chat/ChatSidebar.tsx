@@ -1,3 +1,4 @@
+import type { Snapshot } from 'effectweb';
 import { effectCommand } from 'effectweb/program';
 import { cachedLoad } from 'effectweb/load';
 import { Effect } from 'effect';
@@ -93,7 +94,7 @@ type ChatSidebarMessage =
   | { type: 'ListViewportHeight'; value: number }
   | { type: 'ContextMenu'; value: { chatId: string; x: number; y: number } | undefined };
 function refreshSidebar(
-  model: ChatSidebarModel,
+  model: Snapshot<ChatSidebarModel>,
   retry = false,
 ): Transition<ChatSidebarModel, ChatSidebarMessage> {
   const term = model.query.trim();

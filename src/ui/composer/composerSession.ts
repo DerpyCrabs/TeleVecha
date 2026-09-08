@@ -1,3 +1,4 @@
+import type { Snapshot } from 'effectweb';
 import { Effect, Fiber } from 'effect';
 import type { ChatMessage } from '../../domain/models';
 import type { EffectConversation } from '../../telegram/core/conversation';
@@ -36,7 +37,7 @@ interface PendingDraftWrite {
 interface ComposerSessionOptions {
   conversation: Read<EffectConversation | undefined>;
   runTask: UiTaskRunner;
-  snapshot: Read<EngineSnapshot>;
+  snapshot: Read<Snapshot<EngineSnapshot>>;
   activePeerId: Read<string>;
   activeDialog: Read<TelegramDialog | undefined>;
   canSend: Read<boolean>;
@@ -78,7 +79,11 @@ export function createComposerSession(options: ComposerSessionOptions) {
   const focusComposer = () => {
     const requestedFrom = globalThis.document?.activeElement;
     queueMicrotask(() => {
-      if (owner.disposed || globalThis.document?.activeElement !== requestedFrom) return;
+      const activeElement = globalThis.document?.activeElement;
+      // Removing a focused menu item leaves the body active; it is not a new user choice.
+      const removedOrigin =
+        requestedFrom && !requestedFrom.isConnected && activeElement === globalThis.document?.body;
+      if (owner.disposed || (activeElement !== requestedFrom && !removedOrigin)) return;
       options.focus();
       const focusedElement = globalThis.document?.activeElement;
       if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);

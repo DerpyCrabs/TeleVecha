@@ -1,3 +1,4 @@
+import type { Snapshot } from 'effectweb';
 import { Effect } from 'effect';
 import type { TelegramDialog, TelegramMessage, TelegramSearchPage } from '../../telegram/types';
 import {
@@ -14,7 +15,7 @@ import { actionCommand } from 'effectweb/program';
 import type { UiLoad } from 'effectweb/cache';
 
 export interface SearchPanelProps {
-  dialogs: TelegramDialog[];
+  dialogs: readonly TelegramDialog[];
   activePeerId: string;
   search: (
     query: string,
@@ -34,7 +35,7 @@ interface SearchInput {
 }
 type Cursor = TelegramSearchPage['nextOffset'];
 export type SearchModel = PagesModel<SearchInput, TelegramMessage, Cursor>;
-export const searchPage = (model: SearchModel) => available(model.result);
+export const searchPage = (model: Snapshot<SearchModel>) => available(model.result);
 export const searchError = resourceError;
 
 const pagination = pages<SearchInput, TelegramMessage, Cursor>({
@@ -52,7 +53,7 @@ const pagination = pages<SearchInput, TelegramMessage, Cursor>({
       ),
 });
 
-const change = (model: SearchModel, input: Partial<SearchInput>, refresh = false) =>
+const change = (model: Snapshot<SearchModel>, input: Partial<SearchInput>, refresh = false) =>
   pagination.receive(model, { ...model.props, ...input }, { refresh });
 
 export const searchActions = defineActions<SearchModel>()({

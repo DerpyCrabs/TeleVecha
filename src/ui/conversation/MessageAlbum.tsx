@@ -27,7 +27,7 @@ function aspectRatio(message: ChatMessage) {
   const height = message.media?.height;
   return width && height ? width / height : 1;
 }
-function albumRows(messages: ChatMessage[]) {
+function albumRows(messages: readonly ChatMessage[]) {
   if (messages.length === 3) return [messages.slice(0, 1), messages.slice(1)];
   const result: ChatMessage[][] = [];
   for (let index = 0; index < messages.length;) {
