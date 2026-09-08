@@ -42,7 +42,8 @@ import { createMediaAssets } from '../media/mediaAssets';
 import type { MediaPreview } from '../media/MediaAttachment';
 import { mediaPresentation } from '../media/mediaPresentation';
 import { domMount, program } from 'effectweb';
-import { makeQueryCache, shareValue } from 'effectweb/cache';
+import { makeQueryCache } from 'effectweb/cache';
+import { projectionPublication } from './projectionPublication';
 import { modalVisible, subscribeModalVisibility } from '../shared/focusScope';
 import { createAppearanceSession } from '../theme/appearanceSession';
 import { createChatAppearanceSession, chatAppearanceQuery } from '../theme/chatAppearanceSession';
@@ -166,26 +167,14 @@ export function createAppController(props: AppProps) {
     | { type: 'ConversationClosed' };
   let initialUrlPeerId = new URL(window.location.href).searchParams.get('chat') ?? undefined;
   const selectors = projectionCache();
-  let readyToPublish = false,
-    queued = false,
-    disposed = false;
-  const changed = () => {
-    selectors.invalidate();
-    if (!readyToPublish || queued || disposed) return;
-    queued = true;
-    queueMicrotask(() => {
-      queued = false;
-      if (disposed) return;
-      refresh();
-      const next = shareValue(published, project());
-      if (next !== published) {
-        published = next;
-        for (const listener of listeners) listener(next);
-      }
-      drawerFocus.refresh();
-    });
-  };
-  scope.add(state.subscribe(changed));
+  const publication = projectionPublication<ReturnType<typeof project>>({
+    invalidate: selectors.invalidate,
+    refresh: () => refresh(),
+    project: () => project(),
+    afterPublish: () => drawerFocus.refresh(),
+  });
+  const changed = publication.changed;
+  publication.watch(state);
   const model = makeQueryCache();
   const context: SessionContext = { cache: model, changed };
   const presentConversation = createConversationPresenter();
@@ -1749,7 +1738,7 @@ export function createAppController(props: AppProps) {
     }),
     mount: domMount(() => {
       queueMicrotask(() => {
-        if (disposed) return;
+        if (publication.disposed) return;
         mount();
         changed();
       });
@@ -1776,7 +1765,7 @@ export function createAppController(props: AppProps) {
   scope.add(() => state.dispose());
   scope.add(() => drawerFocus.dispose());
   scope.add(sessions.dispose);
-  scope.add(subscribeModalVisibility(changed));
+  publication.watch({ subscribe: subscribeModalVisibility });
   function refresh() {
     sessions.refresh();
     environment.runtime.debugReports?.recordChatAppearance?.(chatAppearance.diagnostics());
@@ -1856,7 +1845,6 @@ export function createAppController(props: AppProps) {
     viewportHeight: window.innerHeight,
     dom,
   });
-  const listeners = new Set<(model: ReturnType<typeof project>) => void>();
   const detachDebugUi = environment.runtime.debugReports?.attachUi?.(() => ({
     activePeerId: state.model().activeChatId,
     sidebarWidth: effectiveLeftSidebarWidth(),
@@ -1864,23 +1852,18 @@ export function createAppController(props: AppProps) {
     chatAppearance: chatAppearance.diagnostics(),
   }));
   if (detachDebugUi) scope.add(detachDebugUi);
-  refresh();
-  let published = project();
-  readyToPublish = true;
+  publication.start();
   return {
-    model: () => published,
+    model: publication.model,
     send: (_message: never) => {},
-    subscribe: (listener: (model: ReturnType<typeof project>) => void) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
+    subscribe: publication.subscribe,
     dispose: () => {
-      if (disposed) return;
-      disposed = true;
-      listeners.clear();
-      scope.dispose();
+      if (publication.disposed) return;
+      try {
+        publication.dispose();
+      } finally {
+        scope.dispose();
+      }
     },
   };
 }
