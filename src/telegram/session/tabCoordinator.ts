@@ -1681,25 +1681,25 @@ function errorMessage(error: unknown) {
       return yield* Effect.fail(new Error('TeleVecha is reconnecting in another tab.'));
     }
     const request = clientRegistry.beginConversationLoad(clientId, peerId);
-    yield* publishClientSnapshot(
-      clientId,
-      engineSnapshot(accountSnapshot(engine.snapshot()), loading),
-    );
-    const conversation = yield* load().pipe(
-      Effect.onError(() => Effect.sync(() => request.cancel())),
-    );
-    const current = clientRegistry.snapshot(clientId);
-    const next =
-      request.current() && activeOwner?.engine === engine
-        ? request.complete(retainConversationMetadata(current, conversation))
-        : undefined;
-    if (next)
+    return yield* Effect.gen(function* () {
       yield* publishClientSnapshot(
         clientId,
-        engineSnapshot(accountSnapshot(engine.snapshot()), next),
+        engineSnapshot(accountSnapshot(engine.snapshot()), loading),
       );
-    else request.cancel();
-    return { conversation: next ?? conversation, current: request.current };
+      const conversation = yield* load();
+      const current = clientRegistry.snapshot(clientId);
+      const next =
+        request.current() && activeOwner?.engine === engine
+          ? request.complete(retainConversationMetadata(current, conversation))
+          : undefined;
+      if (next)
+        yield* publishClientSnapshot(
+          clientId,
+          engineSnapshot(accountSnapshot(engine.snapshot()), next),
+        );
+      else request.cancel();
+      return { conversation: next ?? conversation, current: request.current };
+    }).pipe(Effect.onError(() => Effect.sync(() => request.cancel())));
   });
   const invokeOwner = Effect.fn('TabCoordinator.invokeOwner')(function* (
     clientId: string,
@@ -1730,6 +1730,9 @@ function errorMessage(error: unknown) {
         conversationLoadingSnapshot(previous, peerId),
         () => engine.loadConversationView(peerId),
       );
+      if (!request.current() || activeOwner?.engine !== engine) return true;
+      // Metadata outlives the initial view load, so it needs its own live-change journal.
+      const metadata = clientRegistry.beginConversationLoad(clientId, peerId);
       yield* fork(
         Effect.all([
           engine.loadConversationPinnedMessages(peerId),
@@ -1737,14 +1740,16 @@ function errorMessage(error: unknown) {
         ]).pipe(
           Effect.flatMap(([pinnedMessages, sharedMediaCounts]) => {
             const current = clientRegistry.snapshot(clientId);
-            if (!request.current() || !current || activeOwner?.engine !== engine)
+            if (!metadata.current() || !current || activeOwner?.engine !== engine)
               return Effect.void;
-            return publishClientSnapshot(clientId, {
+            const next = metadata.complete({
               ...current,
               pinnedMessages,
               ...(sharedMediaCounts !== undefined ? { sharedMediaCounts } : {}),
             });
+            return next ? publishClientSnapshot(clientId, { ...current, ...next }) : Effect.void;
           }),
+          Effect.ensuring(Effect.sync(() => metadata.cancel())),
           Effect.ignore,
         ),
       );

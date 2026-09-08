@@ -162,3 +162,54 @@ it.each(['send', 'edit', 'delete'] as const)(
     );
   },
 );
+
+it('retains a live pinned-message update while initial conversation metadata is loading', () => {
+  installChannel();
+  return Effect.runPromise(
+    provideCoordinator(
+      Effect.gen(function* () {
+        const transport = yield* createFixtureTelegramTransport();
+        const engine = yield* makeMessagingEngine(transport, makeMemoryCacheStore(), {
+          manageTabLease: false,
+        });
+        const entered = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const coordinator = yield* makeTabCoordinator({
+          key: 'pinned-load-race',
+          loadBlob: () => Effect.succeed(undefined),
+          createOwner: () =>
+            Effect.succeed({
+              engine: {
+                ...engine,
+                loadConversationPinnedMessages: (peerId: string) =>
+                  Effect.gen(function* () {
+                    const captured = yield* engine.loadConversationPinnedMessages(peerId);
+                    yield* Deferred.succeed(entered, undefined);
+                    yield* Deferred.await(release);
+                    return captured;
+                  }),
+              },
+            }),
+        });
+        yield* coordinator.start({ apiId: 1, apiHash: 'fixture' });
+        yield* Effect.yieldNow;
+        yield* coordinator.client.openConversation('u:101');
+        yield* Effect.yieldNow;
+        yield* Deferred.await(entered);
+        yield* Effect.sleep(1);
+        const pinned = {
+          ...coordinator.client.snapshot().messages[0]!,
+          text: 'New pin during metadata',
+        };
+        yield* coordinator.handleInternalEvent({
+          _tag: 'conversation',
+          event: { type: 'pinned-messages', peerId: 'u:101', messages: [pinned] },
+        });
+        expect(coordinator.client.snapshot().pinnedMessages).toEqual([pinned]);
+        yield* Deferred.succeed(release, undefined);
+        yield* Effect.sleep(10);
+        expect(coordinator.client.snapshot().pinnedMessages).toEqual([pinned]);
+      }),
+    ).pipe(Effect.provide(MessagingEngineLayer), Effect.provide(BrowserCrypto.layer)),
+  );
+});
