@@ -166,7 +166,7 @@ describe('MTProto sender', () => {
               failure: {
                 _tag: 'MtprotoError',
                 kind: 'transport',
-                message: expect.stringContaining('timed out'),
+                message: expect.stringContaining('timed out') as unknown,
               },
             });
           }),

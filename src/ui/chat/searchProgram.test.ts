@@ -12,7 +12,7 @@ const message = (id: number): TelegramMessage => ({
   date: 1,
   outgoing: false,
 });
-const page = (ids: number[], hasMore = false): TelegramSearchPage => ({
+const page = (ids: number[], hasMore: boolean = false): TelegramSearchPage => ({
   messages: ids.map(message),
   hasMore,
   nextOffset: hasMore ? { messageId: ids.at(-1)! } : undefined,

@@ -1,3 +1,4 @@
+import { list as renderList } from 'effectweb';
 import { fromPromise } from 'effectweb/load';
 import { Effect } from 'effect';
 import { messageTextForClipboard } from '../../domain/messageText';
@@ -493,7 +494,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                   </div>
                 ) : null}
                 {messageRows.messages!.length ? (
-                  messageEntries(messageRows.entries).map((entry, index) => {
+                  renderList(messageEntries(messageRows.entries), (entry, index) => {
                     const message = entry.message;
                     const layout = (() => entry.layout)();
                     // Layout can change while the caption stays the same (for example,
@@ -604,16 +605,18 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                     const source = forwarded;
                                     if (!source.peerId) return;
                                     if (source.messageId !== undefined) {
-                                      void openMessage({
-                                        id: source.messageId,
-                                        peerId: source.peerId,
-                                        senderId: '',
-                                        text: '',
-                                        date: 0,
-                                        outgoing: false,
-                                      });
+                                      runInBackground(
+                                        openMessage({
+                                          id: source.messageId,
+                                          peerId: source.peerId,
+                                          senderId: '',
+                                          text: '',
+                                          date: 0,
+                                          outgoing: false,
+                                        }),
+                                      );
                                     } else {
-                                      void selectChat(source.peerId);
+                                      runInBackground(selectChat(source.peerId));
                                     }
                                   }}
                                 >
@@ -668,7 +671,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 <span class="reply-media-preview">
                                   <MediaAttachment
                                     media={message.replyMedia!}
-                                    revision={mediaAssetFor(message.replyToId!)?.revision}
+                                    revision={model.mediaRevisions[message.replyToId!]}
                                     load={(progress) => {
                                       const asset = mediaAssetFor(message.replyToId!);
                                       return asset
@@ -703,8 +706,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                           {layout.album.length > 1 ? (
                             <MessageAlbum
                               messages={layout.album}
-                              revision={(albumMessage) => mediaAssetFor(albumMessage.id)?.revision}
-                              progress={(albumMessage) => albumMessage.uploadProgress}
+                              revisions={model.mediaRevisions}
                               cachedUrl={(albumMessage) => mediaAssetFor(albumMessage.id)?.cached()}
                               cachedPreviewUrl={(albumMessage) =>
                                 mediaPreviewAssetFor(albumMessage.id)?.cached()
@@ -735,7 +737,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   <MediaAttachment
                                     media={media}
                                     protected={message.protected}
-                                    revision={mediaAssetFor(message.id)?.revision}
+                                    revision={model.mediaRevisions[message.id]}
                                     cachedUrl={() => mediaAssetFor(message.id)?.cached()}
                                     cachedPreviewUrl={() =>
                                       mediaPreviewAssetFor(message.id)?.cached()
@@ -1223,9 +1225,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                   setSharedMediaKind(undefined);
                   runInBackground(openMessage(message));
                 }}
-                canForwardMessage={(message) =>
-                  telegramMessageCapabilitiesForUi(message).canForward
-                }
+                dialogs={snapshot.dialogs}
                 forwardMessage={(message) => {
                   if (!telegramMessageCapabilitiesForUi(message).canForward) return;
                   setSharedMediaKind(undefined);
@@ -1234,7 +1234,6 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                       ?.readOutboxMaxId ?? 0;
                   setForwardingMessage(presentMessage(message, readOutboxMaxId));
                 }}
-                canDeleteMessage={(message) => telegramMessageCapabilitiesForUi(message).canDelete}
                 deleteMessage={(message) => {
                   if (!telegramMessageCapabilitiesForUi(message).canDelete) return;
                   setSharedMediaKind(undefined);
@@ -1273,7 +1272,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                 confirm={(action) => {
                   const peerId = chat.peer.id;
                   setDeleteChatTarget(undefined);
-                  runInBackground(chatDirectory.delete(peerId, action));
+                  runInBackground(model.deleteChat(peerId, action));
                 }}
               />
             ))(deleteChatTarget!)
@@ -1319,6 +1318,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
 
         <DetailsPane
           chat={activeChat}
+          avatarIdentity={`${activeChat.id}:${activeDialog?.avatarId ?? 'none'}`}
           counts={activeSharedCounts}
           online={online}
           conversationReady={activeConversationReady}

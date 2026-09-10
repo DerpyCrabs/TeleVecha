@@ -6,7 +6,7 @@ import Forward from '@effectweb/lucide/icons/forward';
 import Pencil from '@effectweb/lucide/icons/pencil';
 import Trash2 from '@effectweb/lucide/icons/trash-2';
 import X from '@effectweb/lucide/icons/x';
-import { Portal, component, domMount, view } from 'effectweb';
+import { Portal, component, domBinding, view } from 'effectweb';
 import { modalMount } from '../shared/modalMount';
 import { saveMediaUrl } from './mediaActions';
 function mediaDimensions(element: HTMLImageElement | HTMLVideoElement) {
@@ -14,8 +14,14 @@ function mediaDimensions(element: HTMLImageElement | HTMLVideoElement) {
     ? { width: element.naturalWidth, height: element.naturalHeight }
     : { width: element.videoWidth, height: element.videoHeight };
 }
-function originMount(origin: DOMRect | undefined) {
-  return domMount<HTMLImageElement>((element) => {
+function acquireOrigin(element: HTMLImageElement, input: () => DOMRect | undefined) {
+  let origin = input();
+  const clear = () => {
+    element.style.removeProperty('--media-origin-x');
+    element.style.removeProperty('--media-origin-y');
+    element.style.removeProperty('--media-origin-scale');
+  };
+  const apply = () => {
     const width = document.documentElement.clientWidth,
       height = document.documentElement.clientHeight;
     const properties = origin
@@ -29,11 +35,20 @@ function originMount(origin: DOMRect | undefined) {
       : undefined;
     if (properties)
       for (const [key, value] of Object.entries(properties)) element.style.setProperty(key, value);
-    return () => {
-      if (properties) for (const key of Object.keys(properties)) element.style.removeProperty(key);
-    };
-  });
+  };
+  apply();
+  return {
+    update() {
+      const next = input();
+      if (next === origin) return;
+      clear();
+      origin = next;
+      apply();
+    },
+    dispose: clear,
+  };
 }
+const originMount = (origin: DOMRect | undefined) => domBinding(origin, acquireOrigin);
 export interface MediaViewerProps {
   kind: 'image' | 'video';
   name: string;

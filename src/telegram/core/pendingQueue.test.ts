@@ -5,7 +5,7 @@ import type { PendingSend } from '../types';
 import { EngineTasks, EngineTasksLayer } from './engineTasks';
 import { makePendingSendQueue } from './pendingQueue';
 
-function pending(id: string, peerId = 'u:1') {
+function pending(id: string, peerId: string = 'u:1') {
   return { id, peer: { id: peerId, kind: 'user' }, createdAt: 1 } as PendingSend;
 }
 
@@ -69,7 +69,7 @@ describe('PendingSendQueue coordination', () => {
       withQueue((queue) =>
         Effect.gen(function* () {
           const error = new Error('failed delivery');
-          const secondWork = vi.fn();
+          const secondWork = vi.fn<() => void>();
           const first = yield* queue
             .scheduleDelivery(pending('first'), Effect.fail(error))
             .pipe(Effect.result, Effect.forkChild);

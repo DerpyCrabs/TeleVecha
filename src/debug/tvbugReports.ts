@@ -267,7 +267,7 @@ export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
           ? { sourceModified: import.meta.env.VITE_TELEVECHA_SOURCE_MODIFIED }
           : {}),
         ...(import.meta.env.VITE_TELEVECHA_COMMIT
-          ? { commit: import.meta.env.VITE_TELEVECHA_COMMIT }
+          ? { commit: String(import.meta.env.VITE_TELEVECHA_COMMIT) }
           : {}),
       },
       capture: {

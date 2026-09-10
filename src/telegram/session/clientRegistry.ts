@@ -59,7 +59,7 @@ export function makeClientRegistry() {
   const record = (clientId: string) => records.get(clientId) ?? {};
 
   return {
-    touch(clientId: string, seenAt = Date.now()) {
+    touch(clientId: string, seenAt: number = Date.now()) {
       records.set(clientId, { ...record(clientId), seenAt });
     },
     setSnapshot(clientId: string, snapshot: EngineSnapshot) {
@@ -109,7 +109,7 @@ export function makeClientRegistry() {
         if (value.snapshot) yield [clientId, value.snapshot];
       }
     },
-    setVisibility(clientId: string, visibility: VisibilityReport, seenAt = Date.now()) {
+    setVisibility(clientId: string, visibility: VisibilityReport, seenAt: number = Date.now()) {
       records.set(clientId, { ...record(clientId), seenAt, visibility });
     },
     visibilityReports(peerId: string, seenAfter: number) {

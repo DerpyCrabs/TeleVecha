@@ -75,7 +75,10 @@ async function incomingPacket(options: {
 describe('encrypted MTProto message state', () => {
   const makeState = (
     options: Parameters<typeof createEncryptedMessageState>[0],
-    crypto = cryptoDouble(),
+    crypto: {
+      randomBytes(length: number): Uint8Array<ArrayBuffer>;
+      sha256(bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>>;
+    } = cryptoDouble(),
   ) =>
     Effect.runPromise(
       createEncryptedMessageState(options).pipe(

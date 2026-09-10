@@ -51,7 +51,10 @@ test('packs image batches into a compact grid with batch actions', async ({ page
   await expect(attachments).toHaveCount(5);
 
   const bounds = await attachments.evaluateAll((elements) =>
-    elements.map((element) => element.getBoundingClientRect().toJSON()),
+    elements.map((element) => {
+      const { width, height, top } = element.getBoundingClientRect();
+      return { width, height, top };
+    }),
   );
   expect(bounds.every(({ width, height }) => width < 150 && height < 120)).toBe(true);
   expect(new Set(bounds.map(({ top }) => Math.round(top))).size).toBe(1);
@@ -158,10 +161,11 @@ test('keeps a quarter-turned image fully inside the editor preview', async ({ pa
   const bounds = await editor.evaluate((element) => {
     const preview = element.querySelector<HTMLElement>('.image-editor-preview')!;
     const image = preview.querySelector('img')!;
-    return {
-      preview: preview.getBoundingClientRect().toJSON(),
-      image: image.getBoundingClientRect().toJSON(),
+    const bounds = (item: Element) => {
+      const { left, top, right, bottom } = item.getBoundingClientRect();
+      return { left, top, right, bottom };
     };
+    return { preview: bounds(preview), image: bounds(image) };
   });
   expect(bounds.image.left).toBeGreaterThanOrEqual(bounds.preview.left - 1);
   expect(bounds.image.top).toBeGreaterThanOrEqual(bounds.preview.top - 1);

@@ -609,7 +609,10 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
     }
   };
 
-  const rememberIncomingPacket = (message: IncomingMessage, skipTimeValidation = false) => {
+  const rememberIncomingPacket = (
+    message: IncomingMessage,
+    skipTimeValidation: boolean = false,
+  ) => {
     const localSeconds = Math.floor((options.now ?? Date.now)() / 1_000) + timeOffset;
     const retainedFloor = incomingMessageIds[0];
     const packet = packetMessages(message).sort((left, right) =>
@@ -854,8 +857,8 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
     timeCorrections?: ReadonlySet<string>,
   ) => Effect.Effect<void, MtprotoError> = Effect.fn('mtproto.sender.processMessage')(function* (
     message: IncomingMessage,
-    skipTimeValidation = false,
-    copyDepth = 0,
+    skipTimeValidation: boolean | undefined = false,
+    copyDepth: number | undefined = 0,
     timeCorrections?: ReadonlySet<string>,
   ) {
     if ((message.sequenceNumber & 1) === 1) pendingAcks.add(message.messageId);

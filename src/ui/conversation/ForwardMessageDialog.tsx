@@ -1,3 +1,5 @@
+import { list as renderList } from 'effectweb';
+import { commandSlot } from 'effectweb';
 import type { Snapshot } from 'effectweb';
 import { effectCommand } from 'effectweb/program';
 import { Effect } from 'effect';
@@ -10,6 +12,8 @@ import { component, Portal, view } from 'effectweb';
 import type { Transition } from 'effectweb/program';
 import { loadEffect } from 'effectweb/cache';
 import { modalMount } from '../shared/modalMount';
+const commandSearch = commandSlot('search');
+
 interface ForwardMessageDialogProps {
   chats: ChatSummary[];
   close: () => void;
@@ -33,14 +37,15 @@ function requestSearch(
 ): Transition<ForwardMessageDialogModel, ForwardMessageDialogMessage> {
   const term = model.query.trim();
   if (!term || !model.props.search)
-    return { model: { ...model, remoteResults: [], searching: false }, cancel: ['search'] };
+    return { model: { ...model, remoteResults: [], searching: false }, cancel: [commandSearch] };
   return {
     model: { ...model, remoteResults: [], searching: true },
     commands: [
       effectCommand(
-        'search',
+        commandSearch,
         () => Effect.sleep(180).pipe(Effect.andThen(loadEffect(() => model.props.search!(term)))),
         {
+          policy: 'replace',
           onSuccess: (value) => ({ type: 'RemoteResults', value }) as const,
           onFailure: () => ({ type: 'RemoteResults', value: [] }) as const,
         },
@@ -111,10 +116,10 @@ export const ForwardMessageDialog = component<
               </label>
             ) : null}
             <div>
-              {idRows(localChats).map((chat) => (
+              {renderList(idRows(localChats), (chat) => (
                 <button onClick={() => props.forward(chat.id)}>{chat.title}</button>
               ))}
-              {remotePeerRows(newRemoteResults).map((result) => (
+              {renderList(remotePeerRows(newRemoteResults), (result) => (
                 <button onClick={() => props.forward(result.peer.id, result)}>
                   {result.title}
                   {result.username ? <small>@{result.username}</small> : null}

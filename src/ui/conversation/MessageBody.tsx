@@ -1,3 +1,4 @@
+import { list as renderList } from 'effectweb';
 import type { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
 import { component, sequence, view } from 'effectweb';
@@ -214,7 +215,7 @@ export const MessageBody = view<
         )
       ) : (
         <p class="message-body">
-          {sequence(textParts(props.message)).map((part) => (
+          {renderList(sequence(textParts(props.message)), (part) => (
             <Part part={part} />
           ))}
         </p>

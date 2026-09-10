@@ -283,13 +283,22 @@ const openTeleVechaDatabase = (name: string) =>
               if (!messages.indexNames.contains('byDate')) messages.createIndex('byDate', 'date');
             }
             if (oldVersion === 4) {
-              void transaction.objectStore('dialogs').clear();
-              void transaction.objectStore('messages').clear();
-              void transaction.objectStore('files').clear();
+              transaction
+                .objectStore('dialogs')
+                .clear()
+                .catch(() => undefined);
+              transaction
+                .objectStore('messages')
+                .clear()
+                .catch(() => undefined);
+              transaction
+                .objectStore('files')
+                .clear()
+                .catch(() => undefined);
               const meta = transaction.objectStore('meta');
-              void meta.delete('cursor');
-              void meta.delete('epoch');
-              void meta.delete('last-peer-id');
+              meta.delete('cursor').catch(() => undefined);
+              meta.delete('epoch').catch(() => undefined);
+              meta.delete('last-peer-id').catch(() => undefined);
             }
           },
         });
@@ -460,7 +469,7 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
   });
   const prepareOutboxWrite = Effect.fn('IndexedDbCacheStore.prepareOutboxWrite')(function* (
     bytes: number,
-    forceEviction = false,
+    forceEviction: boolean = false,
   ) {
     if (bytes <= 0 || typeof navigator === 'undefined' || !navigator.storage?.estimate) return;
     yield* idbRequest(() => navigator.storage.persist?.().catch(() => false));
@@ -650,7 +659,7 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
   });
   const loadMessages = Effect.fn('IndexedDbCacheStore.loadMessages')(function* (
     peerId: string,
-    limit = DEFAULT_MESSAGE_LOAD_LIMIT,
+    limit: number = DEFAULT_MESSAGE_LOAD_LIMIT,
   ) {
     const requested = Math.max(0, limit);
     if (requested === 0) return [];
@@ -670,7 +679,7 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
   const loadMessagesBefore = Effect.fn('IndexedDbCacheStore.loadMessagesBefore')(function* (
     peerId: string,
     beforeMessageId: number,
-    limit = DEFAULT_MESSAGE_LOAD_LIMIT,
+    limit: number = DEFAULT_MESSAGE_LOAD_LIMIT,
   ) {
     const requested = Math.max(0, limit);
     if (requested === 0) return [];
@@ -818,7 +827,7 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
   const saveDraft = Effect.fn('IndexedDbCacheStore.saveDraft')(function* (
     peerId: string,
     text: string,
-    revision = 0,
+    revision: number = 0,
     details?: TelegramDraftDetails,
   ) {
     const database = databaseHandle;
@@ -1100,7 +1109,7 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
 export type IndexedDbCacheStore = ReturnType<typeof makeIndexedDbCacheStoreModule>;
 
 export const createIndexedDbCacheStore = Effect.fn('IndexedDbCacheStore.make')(function* (
-  name = 'televecha',
+  name: string = 'televecha',
 ) {
   const database = yield* openTeleVechaDatabase(name);
   return makeIndexedDbCacheStoreModule(database);

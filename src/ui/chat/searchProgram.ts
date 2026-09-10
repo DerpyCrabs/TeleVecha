@@ -1,3 +1,4 @@
+import { commandSlot } from 'effectweb';
 import type { Snapshot } from 'effectweb';
 import { Effect } from 'effect';
 import type { TelegramDialog, TelegramMessage, TelegramSearchPage } from '../../telegram/types';
@@ -13,6 +14,8 @@ import {
 import type { PagesMessage, PagesModel } from 'effectweb/pages';
 import { actionCommand } from 'effectweb/program';
 import type { UiLoad } from 'effectweb/cache';
+
+const commandHost = commandSlot('host');
 
 export interface SearchPanelProps {
   dialogs: readonly TelegramDialog[];
@@ -53,8 +56,11 @@ const pagination = pages<SearchInput, TelegramMessage, Cursor>({
       ),
 });
 
-const change = (model: Snapshot<SearchModel>, input: Partial<SearchInput>, refresh = false) =>
-  pagination.receive(model, { ...model.props, ...input }, { refresh });
+const change = (
+  model: Snapshot<SearchModel>,
+  input: Partial<SearchInput>,
+  refresh: boolean = false,
+) => pagination.receive(model, { ...model.props, ...input }, { refresh });
 
 export const searchActions = defineActions<SearchModel>()({
   Query: (model, query: string) => change(model, { query, submitted: '' }),
@@ -72,12 +78,18 @@ export const searchActions = defineActions<SearchModel>()({
   Open: (model, message: TelegramMessage) => ({
     model,
     commands: [
-      actionCommand('host', () => Effect.sync(() => model.props.host.openResult(message))),
+      actionCommand(
+        commandHost,
+        () => Effect.sync(() => model.props.host.openResult(message)),
+        'replace',
+      ),
     ],
   }),
   Close: (model) => ({
     model,
-    commands: [actionCommand('host', () => Effect.sync(() => model.props.host.close()))],
+    commands: [
+      actionCommand(commandHost, () => Effect.sync(() => model.props.host.close()), 'replace'),
+    ],
   }),
 });
 export type SearchMessage =

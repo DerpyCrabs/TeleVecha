@@ -99,7 +99,7 @@ export interface MemoryCacheStoreInitialState {
       storedBlobs.clear();
     });
   }
-  function prepareOutboxWrite(_bytes: number, _forceEviction = false) {
+  function prepareOutboxWrite(_bytes: number, _forceEviction: boolean = false) {
     return Effect.sync(() => {
       // Memory-backed writes have no storage quota to reserve.
     });
@@ -207,7 +207,7 @@ export interface MemoryCacheStoreInitialState {
       storedDialogs = [...storedDialogs.filter(({ peer }) => peer.id !== next.peer.id), next];
     });
   }
-  function loadMessages(peerId: string, limit = DEFAULT_MESSAGE_LOAD_LIMIT) {
+  function loadMessages(peerId: string, limit: number = DEFAULT_MESSAGE_LOAD_LIMIT) {
     return Effect.sync(() => {
       const requested = normalizeLimit(limit);
       if (requested === 0) return [];
@@ -221,7 +221,7 @@ export interface MemoryCacheStoreInitialState {
   function loadMessagesBefore(
     peerId: string,
     beforeMessageId: number,
-    limit = DEFAULT_MESSAGE_LOAD_LIMIT,
+    limit: number = DEFAULT_MESSAGE_LOAD_LIMIT,
   ) {
     return Effect.sync(() => {
       const requested = normalizeLimit(limit);
@@ -340,7 +340,12 @@ export interface MemoryCacheStoreInitialState {
       return Object.fromEntries(storedDraftRevisions);
     });
   }
-  function saveDraft(peerId: string, text: string, revision = 0, details?: TelegramDraftDetails) {
+  function saveDraft(
+    peerId: string,
+    text: string,
+    revision: number = 0,
+    details?: TelegramDraftDetails,
+  ) {
     return Effect.sync(() => {
       if (text || details) {
         storedDrafts.set(peerId, text);
@@ -466,7 +471,10 @@ function clone<T>(value: T): T {
 
 function seedMap<T>(values?: SeededMap<T>): Map<string, T> {
   if (!values) return new Map();
-  const entries = values instanceof Map ? [...values.entries()] : Object.entries(values);
+  const entries: [string, T][] =
+    values instanceof Map
+      ? [...(values as ReadonlyMap<string, T>).entries()]
+      : Object.entries(values as Readonly<Record<string, T>>);
   return new Map(clone(entries));
 }
 

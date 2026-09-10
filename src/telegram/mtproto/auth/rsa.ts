@@ -48,7 +48,7 @@ export function findTelegramRsaKey(fingerprints: readonly bigint[]) {
 export const encryptRsaPaddedInnerData = Effect.fn('mtproto.auth.rsaEncrypt')(function* (
   innerData: Uint8Array,
   key: TelegramRsaKey,
-  maximumAttempts = 20,
+  maximumAttempts: number = 20,
 ) {
   if (innerData.byteLength > 144) {
     return yield* Effect.fail(

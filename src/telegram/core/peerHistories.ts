@@ -93,7 +93,7 @@ export function createPeerHistories() {
     peerId: string,
     messages: TelegramMessage[],
     mode: HistoryMode,
-    limit = MAX_MESSAGES_PER_HISTORY,
+    limit: number = MAX_MESSAGES_PER_HISTORY,
   ) => {
     const unique = [...new Map(messages.map((message) => [message.id, message])).values()];
     const alreadySortedAndUnique =

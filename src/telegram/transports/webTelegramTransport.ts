@@ -571,7 +571,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   });
   const searchPeers = Effect.fn('WebTelegramTransport.searchPeers')(function* (
     query: string,
-    limit = 50,
+    limit: number = 50,
   ) {
     const term = query.trim();
     if (!term || limit <= 0) return [];
@@ -817,7 +817,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   const searchMessages = Effect.fn('WebTelegramTransport.searchMessages')(function* (
     query: string,
     peer?: TelegramPeer,
-    limit = 50,
+    limit: number = 50,
     offset?: TelegramSearchOffset,
   ) {
     const result = peer
@@ -941,8 +941,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   });
   const getGroupMembers = Effect.fn('WebTelegramTransport.getGroupMembers')(function* (
     peer: TelegramPeer,
-    limit = 50,
-    offset = 0,
+    limit: number = 50,
+    offset: number = 0,
   ) {
     if (peer.kind === 'user') return { members: [], totalCount: 0, hasMore: false };
     if (peer.kind === 'channel') {

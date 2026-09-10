@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { TelegramDialog } from '../types';
 import { reconcileDialogPage } from './dialogReconciliation';
 
-const dialog = (id: string, title: string, topMessageId = 1): TelegramDialog => ({
+const dialog = (id: string, title: string, topMessageId: number = 1): TelegramDialog => ({
   peer: { id, kind: 'user' },
   title,
   initials: title[0] ?? '?',

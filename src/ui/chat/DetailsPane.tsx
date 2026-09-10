@@ -1,3 +1,4 @@
+import { list as renderList } from 'effectweb';
 import type { ChatSummary } from '../../domain/models';
 import type { SharedMediaCounts, SharedMediaKind, TelegramGroupMember } from '../../telegram/types';
 import { peerRows } from '../collections';
@@ -20,6 +21,7 @@ import { Avatar } from '../shared/Avatar';
 import type { ContactDetailsSession } from './contactDetailsSession';
 interface DetailsPaneProps {
   chat: ChatSummary;
+  avatarIdentity: string;
   counts?: SharedMediaCounts | undefined;
   online: boolean;
   conversationReady: boolean;
@@ -84,7 +86,7 @@ export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
         <section class="flex flex-col items-center border-b border-line px-6 py-7 text-center">
           <div data-testid="details-avatar">
             <Avatar
-              identity={props.media.avatarIdentity(props.chat.id)}
+              identity={props.avatarIdentity}
               initials={props.chat.initials}
               color={props.chat.color}
               size="lg"
@@ -244,7 +246,7 @@ export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
             </header>
             {!props.details.membersLoading ? (
               <>
-                {peerRows(props.details.members).map((member) => (
+                {renderList(peerRows(props.details.members), (member) => (
                   <div class="group-member grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] px-2 py-2 hover:bg-[var(--surface-subtle)]">
                     <Avatar
                       identity={`${member.peer.id}:${member.avatarId ?? 'none'}`}

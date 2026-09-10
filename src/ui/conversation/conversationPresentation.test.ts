@@ -138,8 +138,7 @@ describe('cached conversation presentation', () => {
     const next = present(snapshot([{ ...first, text: 'Changed' }, reply]), peer.id);
     expect(next[1]!.message).not.toBe(initial[1]!.message);
     expect(next[1]!.message.replyTo).toBe('Changed');
-    const state = snapshot([first, reply]);
-    state.dialogs = [{ ...dialog, readOutboxMaxId: 2 }];
+    const state = { ...snapshot([first, reply]), dialogs: [{ ...dialog, readOutboxMaxId: 2 }] };
     expect(present(state, peer.id)[0]!.message.status).toBe('read');
   });
 });

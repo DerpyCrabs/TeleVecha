@@ -1,11 +1,13 @@
+import { list as renderList } from 'effectweb';
 import { Effect } from 'effect';
 import Crop from '@effectweb/lucide/icons/crop';
 import RotateCcw from '@effectweb/lucide/icons/rotate-ccw';
 import RotateCw from '@effectweb/lucide/icons/rotate-cw';
 import X from '@effectweb/lucide/icons/x';
-import { Portal, defineTasks, resourceError, domMount, sequence, view } from 'effectweb';
+import { Portal, defineTasks, resourceError, sequence, view } from 'effectweb';
 import { fromPromise } from 'effectweb/load';
 import { modalMount } from '../shared/modalMount';
+import { fileImageMount } from '../shared/fileImageMount';
 import type { CropAspect } from './imageTransforms';
 import { transformImageFile, type ImageRotation } from './imageTransforms';
 import type { StagedAttachment } from './outgoingAttachments';
@@ -20,13 +22,6 @@ const crops = [
   ['4:3', '4:3'],
   ['16:9', '16:9'],
 ] as const;
-function imageSource(file: File) {
-  return domMount<HTMLImageElement>((element) => {
-    const url = URL.createObjectURL(file);
-    element.src = url;
-    return () => URL.revokeObjectURL(url);
-  });
-}
 const editing = defineTasks({
   init: (_props: ImageAttachmentEditorProps) => ({
     rotation: 0 as ImageRotation,
@@ -84,7 +79,7 @@ export const ImageAttachmentEditor = editing.view(
               data-rotation={model.rotation}
               style={{ '--image-rotation': `${model.rotation}deg` }}
             >
-              <img use={imageSource(props.attachment.file)} alt="Image edit preview" />
+              <img use={fileImageMount(props.attachment.file)} alt="Image edit preview" />
             </div>
             <div class="image-editor-controls">
               <div class="image-editor-rotate" aria-label="Rotate image">
@@ -99,7 +94,7 @@ export const ImageAttachmentEditor = editing.view(
                 <span>
                   <Crop size={16} /> Crop
                 </span>
-                {sequence(crops).map((_item) => {
+                {renderList(sequence(crops), (_item) => {
                   const [value, label] = _item;
                   return (
                     <button

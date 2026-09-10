@@ -1,6 +1,6 @@
 import type { Snapshot } from 'effectweb';
 import { query } from 'effectweb/query';
-import type { Effect } from 'effect';
+import { Context, Effect } from 'effect';
 import type { EffectConversation } from '../../telegram/core/conversation';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
@@ -19,10 +19,14 @@ import type { Read, SessionContext } from 'effectweb/session';
 import { lifetime, queryResource } from 'effectweb/session';
 import { available, program } from 'effectweb';
 import { safeExternalUrl } from '../shared/safeUrl';
+export interface BotCommandSource {
+  getBotCommands(peer: TelegramPeer): Effect.Effect<TelegramBotCommand[], MessagingError>;
+}
+export const BotCommandSource = Context.Service<BotCommandSource>('ui/BotCommandSource');
 const botCommandsQuery = query({
   name: 'bot-commands',
-  key: (conversation: EffectConversation) => conversation.peerId,
-  load: (conversation: EffectConversation) => conversation.getBotCommands(),
+  load: (peer: TelegramPeer) =>
+    Effect.flatMap(BotCommandSource, (source) => source.getBotCommands(peer)),
 });
 interface PendingBotUrlAuth {
   peer: TelegramPeer;
@@ -55,7 +59,10 @@ interface BotSessionOptions {
     ): Effect.Effect<Effect.Effect<void>, MessagingError>;
   };
 }
-export function createBotSession(options: BotSessionOptions, context: SessionContext) {
+export function createBotSession(
+  options: BotSessionOptions,
+  context: SessionContext<BotCommandSource>,
+) {
   const scope = lifetime();
   type BotSessionModel = {
     commandsRequested: string;
@@ -191,7 +198,7 @@ export function createBotSession(options: BotSessionOptions, context: SessionCon
       state.send({ type: 'InlineSwitch', value: undefined });
       if (noticeTimer) clearTimeout(noticeTimer);
       if (conversationPeerId === peerId && options.activeDialog()?.peer.kind === 'group')
-        void loadCommands();
+        loadCommands().catch(() => undefined);
     }
     const dialog = options.activeDialog(),
       conversation = dialog && currentConversation(dialog.peer.id);
@@ -201,7 +208,7 @@ export function createBotSession(options: BotSessionOptions, context: SessionCon
         (dialog?.bot && state.model().commandsRequested === dialog.peer.id))
         ? conversation
         : undefined;
-    commandsResource.select(request || undefined);
+    commandsResource.select(request ? dialog?.peer : undefined);
   };
   scope.add(state.subscribe(refresh));
   scope.add(

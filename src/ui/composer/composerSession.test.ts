@@ -27,12 +27,16 @@ function taskScope() {
 it('publishes coherent composer states for chat changes, editing, restoration and reset', async () => {
   vi.stubGlobal('requestAnimationFrame', () => 1);
   vi.stubGlobal('cancelAnimationFrame', () => {});
-  const snapshot = initialEngineSnapshot();
-  snapshot.drafts.second = 'second draft';
-  snapshot.draftDetails.second = {
-    formats: [{ kind: 'bold', offset: 0, length: 6 }],
-    reply: { messageId: 4, preview: 'reply' },
-  };
+  const snapshot = {
+    ...initialEngineSnapshot(),
+    drafts: { second: 'second draft' },
+    draftDetails: {
+      second: {
+        formats: [{ kind: 'bold', offset: 0, length: 6 }],
+        reply: { messageId: 4, preview: 'reply' },
+      },
+    },
+  } satisfies ReturnType<typeof initialEngineSnapshot>;
   const tasks = taskScope();
   const session = createComposerSession({
     conversation: () => undefined,
@@ -104,10 +108,12 @@ it.each(['restore', 'new-reply', 'failed'] as const)(
   async (scenario) => {
     vi.stubGlobal('requestAnimationFrame', () => 1);
     vi.stubGlobal('cancelAnimationFrame', () => {});
-    const snapshot = initialEngineSnapshot();
-    snapshot.drafts.alice = 'reply draft';
     const reply = { messageId: 4, preview: 'reply', quoteText: 'quoted text' };
-    snapshot.draftDetails.alice = { formats: [], reply };
+    const snapshot = {
+      ...initialEngineSnapshot(),
+      drafts: { alice: 'reply draft' },
+      draftDetails: { alice: { formats: [], reply } },
+    };
     let complete!: (success: boolean) => void;
     // This workflow only touches typing, draft persistence and message editing.
     const conversation = {
@@ -183,8 +189,7 @@ function composerFixture() {
   vi.stubGlobal('requestAnimationFrame', () => 1);
   vi.stubGlobal('cancelAnimationFrame', () => {});
   const tasks = taskScope();
-  const snapshot = initialEngineSnapshot();
-  snapshot.online = true;
+  const snapshot = { ...initialEngineSnapshot(), online: true };
   let peerId = 'alice';
   const draft = vi.fn(
     (_peer: string, _value: string, _details?: Parameters<EffectConversation['setDraft']>[1]) =>

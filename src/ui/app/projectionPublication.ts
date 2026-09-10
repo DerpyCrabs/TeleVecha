@@ -1,3 +1,4 @@
+import type { Snapshot } from 'effectweb';
 import { shareValue } from 'effectweb/share';
 
 /** Own the notification boundary between independent sessions and the mounted app view. */
@@ -7,9 +8,9 @@ export function projectionPublication<Model>(options: {
   project: () => Model;
   afterPublish?: () => void;
 }) {
-  const listeners = new Set<(model: Model) => void>();
+  const listeners = new Set<(model: Snapshot<Model>) => void>();
   const subscriptions = new Set<() => void>();
-  let published: Model;
+  let published: Snapshot<Model>;
   let started = false;
   let disposed = false;
   let queued = false;
@@ -66,7 +67,8 @@ export function projectionPublication<Model>(options: {
       options.refresh();
       if (disposed) return;
       const version = revision;
-      published = options.project();
+      const initial = options.project();
+      published = shareValue<Model>(initial, initial);
       started = true;
       if (version !== revision) changed();
     },
@@ -74,7 +76,7 @@ export function projectionPublication<Model>(options: {
       if (!started) throw new Error('Start projection publication before reading its model');
       return published;
     },
-    subscribe(this: void, listener: (model: Model) => void) {
+    subscribe(this: void, listener: (model: Snapshot<Model>) => void) {
       if (disposed) return () => {};
       listeners.add(listener);
       return () => {

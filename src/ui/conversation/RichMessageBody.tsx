@@ -1,3 +1,4 @@
+import { list as renderList } from 'effectweb';
 import type { RichBlock, RichCaption, RichText } from '../../domain/richMessage';
 import { component, sequence, view } from 'effectweb';
 import { safeExternalUrl } from '../shared/safeUrl';
@@ -41,9 +42,12 @@ const RichInline = view<{ value: RichText }, never>((props, _send) => {
     <>{(value() as Extract<RichText, { kind: 'text' }>).text}</>
   ) : value().kind === 'concat' ? (
     <>
-      {sequence((value() as Extract<RichText, { kind: 'concat' }>).children).map((child) => (
-        <RichInline value={child} />
-      ))}
+      {renderList(
+        sequence((value() as Extract<RichText, { kind: 'concat' }>).children),
+        (child) => (
+          <RichInline value={child} />
+        ),
+      )}
     </>
   ) : value().kind === 'bold' ? (
     <strong>
@@ -158,7 +162,7 @@ const TextBlock = view<{ block: Extract<RichBlock, { kind: 'text' }> }, never>((
 });
 const RichList = view<{ block: Extract<RichBlock, { kind: 'list' }> }, never>((props, _send) => {
   const items = () =>
-    sequence(props.block.items).map((item) => (
+    renderList(sequence(props.block.items), (item) => (
       <li value={item.value}>
         {item.checkbox ? (
           <input
@@ -171,7 +175,7 @@ const RichList = view<{ block: Extract<RichBlock, { kind: 'list' }> }, never>((p
         {item.marker ? <span class="rich-list-marker">{item.marker}</span> : null}
         {item.text ? ((text) => <RichInline value={text} />)(item.text!) : null}
         {item.blocks
-          ? ((blocks) => sequence(blocks).map((block) => <RichBlockView block={block} />))(
+          ? ((blocks) => renderList(sequence(blocks), (block) => <RichBlockView block={block} />))(
               item.blocks!,
             )
           : null}
@@ -227,7 +231,7 @@ const RichBlockView = view<{ block: RichBlock }, never>((props, _send) => {
         const quote = block() as Extract<RichBlock, { kind: 'quote' }>;
         const content = (
           <>
-            {sequence(quote.blocks).map((child) => (
+            {renderList(sequence(quote.blocks), (child) => (
               <RichBlockView block={child} />
             ))}
             {quote.caption
@@ -258,7 +262,7 @@ const RichBlockView = view<{ block: RichBlock }, never>((props, _send) => {
             <summary>
               <RichInline value={details.title} />
             </summary>
-            {sequence(details.blocks).map((child) => (
+            {renderList(sequence(details.blocks), (child) => (
               <RichBlockView block={child} />
             ))}
           </details>
@@ -280,9 +284,9 @@ const RichBlockView = view<{ block: RichBlock }, never>((props, _send) => {
                   ))(table.title!)
                 : null}
               <tbody>
-                {sequence(table.rows).map((row) => (
+                {renderList(sequence(table.rows), (row) => (
                   <tr>
-                    {sequence(row).map((cell) =>
+                    {renderList(sequence(row), (cell) =>
                       cell.header ? (
                         <th
                           scope="col"
@@ -343,7 +347,7 @@ const RichBlockView = view<{ block: RichBlock }, never>((props, _send) => {
         return (
           <figure class={`rich-group rich-${group.mode}`}>
             <div>
-              {sequence(group.blocks).map((child) => (
+              {renderList(sequence(group.blocks), (child) => (
                 <RichBlockView block={child} />
               ))}
             </div>
@@ -374,7 +378,7 @@ export const RichMessageBody = view<{ blocks: RichBlock[]; rtl?: boolean | undef
   (props, _send) => {
     return (
       <section class="rich-message" dir={props.rtl ? 'rtl' : undefined}>
-        {sequence(props.blocks).map((block) => (
+        {renderList(sequence(props.blocks), (block) => (
           <RichBlockView block={block} />
         ))}
       </section>

@@ -233,9 +233,11 @@ describe('IndexedDbCacheStore', () => {
     expect(await run(store.loadMessages(peer.id))).toEqual([
       expect.objectContaining({
         groupedId: 'album-1',
-        media: expect.objectContaining({ kind: 'voice', duration: 9 }),
+        media: expect.objectContaining({ kind: 'voice', duration: 9 }) as unknown,
       }),
-      expect.objectContaining({ service: expect.objectContaining({ kind: 'message-pinned' }) }),
+      expect.objectContaining({
+        service: expect.objectContaining({ kind: 'message-pinned' }) as unknown,
+      }),
     ]);
   });
 

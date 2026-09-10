@@ -27,7 +27,7 @@ const main = Effect.scoped(
     });
     const environment = yield* makeDefaultAppEnvironment();
     const dispose = yield* Effect.sync(() => mountApp(root, environment));
-    yield* Effect.addFinalizer(() => Effect.sync(dispose));
+    yield* Effect.addFinalizer(dispose);
     return yield* Effect.never;
   }),
 ).pipe(Effect.provide(appRuntimeLayer));

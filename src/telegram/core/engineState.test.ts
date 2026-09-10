@@ -232,12 +232,14 @@ describe('EngineState', () => {
 });
 
 it('preserves unchanged dialog and message entities before projection across refetched edits and reorders', () => {
-  const previous = initialEngineSnapshot();
-  previous.messages = [
-    { id: 1, peerId: 'a', senderId: 'a', text: 'first', date: 1, outgoing: false },
-    { id: 1, peerId: 'b', senderId: 'b', text: 'second', date: 1, outgoing: false },
-    { id: 2, peerId: 'a', senderId: 'a', text: 'third', date: 1, outgoing: false },
-  ];
+  const previous = {
+    ...initialEngineSnapshot(),
+    messages: [
+      { id: 1, peerId: 'a', senderId: 'a', text: 'first', date: 1, outgoing: false },
+      { id: 1, peerId: 'b', senderId: 'b', text: 'second', date: 1, outgoing: false },
+      { id: 2, peerId: 'a', senderId: 'a', text: 'third', date: 1, outgoing: false },
+    ],
+  };
   const next = structuredClone(previous);
   next.messages.reverse();
   next.messages[1]!.text = 'edited';

@@ -853,7 +853,7 @@ function makeMessagingEngineModule(
       runLocalOperation(() => cacheStore.saveMetadata(key, value), `Caching metadata ${key}`),
     );
   });
-  function metadataIsFresh(savedAt: number, ttlMs = PEER_METADATA_CACHE_TTL_MS) {
+  function metadataIsFresh(savedAt: number, ttlMs: number = PEER_METADATA_CACHE_TTL_MS) {
     return Date.now() - savedAt < ttlMs;
   }
   function queryMetadataKey(
@@ -1243,7 +1243,7 @@ function makeMessagingEngineModule(
   )(function* (
     peerId: string,
     gap: TelegramHistoryGap,
-    currentView = projectConversationView(peerId),
+    currentView: ConversationViewSnapshot = projectConversationView(peerId),
   ) {
     const session = sessionScope;
     const accountId = activeAccountId;
@@ -1445,8 +1445,8 @@ function makeMessagingEngineModule(
   });
   const getGroupMembers = Effect.fn('MessagingEngine.getGroupMembers')(function* (
     peer: TelegramPeer,
-    limit = 50,
-    offset = 0,
+    limit: number = 50,
+    offset: number = 0,
   ) {
     if (peer.kind === 'user' || !telegramTransport.getGroupMembers) {
       return { members: [], totalCount: 0, hasMore: false } satisfies TelegramGroupMemberPage;
@@ -2131,7 +2131,7 @@ function makeMessagingEngineModule(
   );
   const retryConversationView = Effect.fn('MessagingEngine.retryConversationView')(function* (
     peerId: string,
-    currentView = projectConversationView(peerId),
+    currentView: ConversationViewSnapshot = projectConversationView(peerId),
   ) {
     const failedGap = histories.issue(peerId)?.gap;
     clearHistoryFailure(peerId);
@@ -2365,7 +2365,7 @@ function makeMessagingEngineModule(
   const sendAttachments = Effect.fn('MessagingEngine.sendAttachments')(function* (
     peer: TelegramPeer,
     attachments: Array<{ file: File; sendAs: OutgoingAttachmentMode }>,
-    caption = '',
+    caption: string = '',
     reply?: TelegramReplyTarget,
     formats?: TelegramTextFormat[],
   ) {
@@ -2903,7 +2903,7 @@ function makeMessagingEngineModule(
   });
   const startBot = Effect.fn('MessagingEngine.startBot')(function* (
     peer: TelegramPeer,
-    startParam = '',
+    startParam: string = '',
   ) {
     if (!telegramTransport.startBot) {
       yield* sendDraft(peer, startParam ? `/start ${startParam}` : '/start');
@@ -3307,8 +3307,8 @@ function makeMessagingEngineModule(
     return blob;
   });
   const reconcileStartup = Effect.fn('MessagingEngine.reconcileStartup')(function* (
-    showProgress = true,
-    session = sessionScope,
+    showProgress: boolean = true,
+    session: Scope.Closeable | undefined = sessionScope,
   ) {
     if (!isLifecycleCurrent(session)) return;
     if (showProgress) yield* patch({ phase: 'syncing', sync: 'recovering' });
@@ -3386,7 +3386,10 @@ function makeMessagingEngineModule(
     yield* patch({ phase: 'ready', sync: 'current', online: true });
   });
   const activateAuthorizedSession = Effect.fn('MessagingEngine.activateAuthorizedSession')(
-    function* (claimLegacyAccount = false, session = sessionScope) {
+    function* (
+      claimLegacyAccount: boolean = false,
+      session: Scope.Closeable | undefined = sessionScope,
+    ) {
       yield* engineTasks.cancelRetry('reconnect');
       if (!(yield* confirmAuthorizedAccount(claimLegacyAccount, session))) return;
       const accountId = activeAccountId;
@@ -3569,7 +3572,7 @@ function makeMessagingEngineModule(
     return true;
   });
   const refreshDialogHeads = Effect.fn('MessagingEngine.refreshDialogHeads')(function* (
-    session = sessionScope,
+    session: Scope.Closeable | undefined = sessionScope,
   ) {
     const previousDialogs = new Map(
       currentSnapshot().dialogs.map((dialog) => [
@@ -3606,7 +3609,7 @@ function makeMessagingEngineModule(
   });
   const refreshDialogHead = Effect.fn('MessagingEngine.refreshDialogHead')(function* (
     peerId: string,
-    removeIfMissing = false,
+    removeIfMissing: boolean = false,
     ignoredTopMessageIds?: ReadonlySet<number>,
   ) {
     const storedPeer = currentSnapshot().dialogs.find(({ peer }) => peer.id === peerId)?.peer;
@@ -3655,7 +3658,7 @@ function makeMessagingEngineModule(
   });
   const replaceWithLatestState = Effect.fn('MessagingEngine.replaceWithLatestState')(function* (
     cursor: import('../types').SyncCursor,
-    session = sessionScope,
+    session: Scope.Closeable | undefined = sessionScope,
   ) {
     const accountId = activeAccountId;
     const dialogVersions = new Map(
@@ -3732,7 +3735,7 @@ function makeMessagingEngineModule(
   });
   function enqueueUpdateBatch(
     batch: TransportUpdateBatch,
-    session = sessionScope,
+    session: Scope.Closeable | undefined = sessionScope,
     operation?: { accountId: string | undefined },
   ): Effect.Effect<void, unknown> {
     const processing = runSerialized('update', '', () =>
@@ -3819,8 +3822,8 @@ function makeMessagingEngineModule(
   );
   function enqueueSyntheticUpdates(
     updates: TransportUpdate[],
-    session = sessionScope,
-    publish = true,
+    session: Scope.Closeable | undefined = sessionScope,
+    publish: boolean = true,
     operation?: { accountId: string | undefined },
   ) {
     const processing = runSerialized('update', '', () => {
@@ -3842,7 +3845,7 @@ function makeMessagingEngineModule(
   }
   const applyLiveUpdate = Effect.fn('MessagingEngine.applyLiveUpdate')(function* (
     update: TransportUpdate,
-    session = sessionScope,
+    session: Scope.Closeable | undefined = sessionScope,
   ) {
     if (!isLifecycleCurrent(session)) return;
     if (update.type === 'connection-state') {
@@ -3928,7 +3931,7 @@ function makeMessagingEngineModule(
   });
   const recoverChannel = Effect.fn('MessagingEngine.recoverChannel')(function* (
     peerId: string,
-    knownTooLong = false,
+    knownTooLong: boolean = false,
   ) {
     return yield* resourceCache.load(`channel-recovery:${peerId}`, () => {
       return Effect.gen(function* () {
@@ -4599,8 +4602,8 @@ function makeMessagingEngineModule(
     pending: PendingSend,
     expectedText: string,
     expectedRevision: number,
-    session = sessionScope,
-    accountId = pending.accountId,
+    session: Scope.Closeable | undefined = sessionScope,
+    accountId: string | undefined = pending.accountId,
   ) {
     const peerId = pending.peer.id;
     const reservation = runSerialized('draftWrite', peerId, () =>
@@ -4632,8 +4635,8 @@ function makeMessagingEngineModule(
   const reserveDraftBatch = Effect.fn('MessagingEngine.reserveDraftBatch')(function* (
     pending: PendingSend[],
     reservation: { peerId: string; text: string; revision?: number },
-    session = sessionScope,
-    accountId = pending[0]?.accountId,
+    session: Scope.Closeable | undefined = sessionScope,
+    accountId: string | undefined = pending[0]?.accountId,
   ) {
     const write = runSerialized('draftWrite', reservation.peerId, () =>
       isPendingOperationCurrent(session, accountId)
@@ -5153,7 +5156,7 @@ function makeMessagingEngineModule(
     area: 'auth' | 'sync' | 'transport' | 'cache' | 'outbox',
     message: string,
     error: unknown,
-    fatal = true,
+    fatal: boolean = true,
   ) {
     const detail = errorMessage(error);
     reportDiagnostic({
@@ -5507,7 +5510,7 @@ function makeMessagingEngineModule(
     operation: () => Effect.Effect<Value, unknown>,
     durationMs: number,
     message: string,
-    name = 'operation',
+    name: string = 'operation',
   ) {
     return engineTasks.runNetwork(
       withOperationDeadline(name, Effect.suspend(operation), durationMs, message),

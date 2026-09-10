@@ -20,7 +20,7 @@ describe('acquireSingleTabLease', () => {
       _tag: 'Failure',
       failure: {
         _tag: 'TabLockUnsupportedError',
-        message: expect.stringContaining('safe single-tab sync'),
+        message: expect.stringContaining('safe single-tab sync') as unknown,
       },
     });
   });
@@ -78,7 +78,7 @@ describe('acquireSingleTabLease', () => {
       _tag: 'Failure',
       failure: {
         _tag: 'TabLockUnsupportedError',
-        message: expect.stringContaining('locks disabled'),
+        message: expect.stringContaining('locks disabled') as unknown,
       },
     });
     expect(request).toHaveBeenCalledOnce();

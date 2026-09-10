@@ -1,3 +1,4 @@
+import { commandSlot } from 'effectweb';
 import type { Snapshot } from 'effectweb';
 import { Effect, Fiber } from 'effect';
 import type { ChatMessage } from '../../domain/models';
@@ -14,8 +15,8 @@ import type { Read } from 'effectweb/session';
 import { modelOwner } from 'effectweb';
 import { stageAttachment, type StagedAttachment } from './outgoingAttachments';
 const DRAFT_WRITE_DELAY_MS = 120;
-const DRAFT_WRITE_TASK = 'composer:draft-write';
-const TYPING_TASK = 'composer:typing';
+const DRAFT_WRITE_TASK = commandSlot('composer:draft-write');
+const TYPING_TASK = commandSlot('composer:typing');
 interface ReplyTarget {
   messageId: number;
   preview: string;
@@ -149,6 +150,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
           }),
         ),
       ),
+      'replace',
     );
   };
   const cancelDraftWrite = () => {
@@ -195,6 +197,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
             }),
           ),
         ),
+        'replace',
       );
     }
   };

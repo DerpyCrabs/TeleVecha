@@ -1,3 +1,5 @@
+import { list as renderList } from 'effectweb';
+import { commandSlot } from 'effectweb';
 import { Effect } from 'effect';
 import type { TelegramSticker, TelegramTextFormat } from '../../telegram/types';
 import { idRows } from '../collections';
@@ -16,15 +18,7 @@ import Strikethrough from '@effectweb/lucide/icons/strikethrough';
 import Underline from '@effectweb/lucide/icons/underline';
 import X from '@effectweb/lucide/icons/x';
 import type { Command } from 'effectweb';
-import {
-  component,
-  domBinding,
-  domMount,
-  sequence,
-  view,
-  actionCommand,
-  patchModel,
-} from 'effectweb';
+import { component, domBinding, sequence, view, actionCommand, patchModel } from 'effectweb';
 import type { Send } from 'effectweb/program';
 import type { ComposerSession } from './composerSession';
 import type { ExpressionTab } from './ExpressionPicker';
@@ -32,6 +26,12 @@ import { ExpressionPicker } from './ExpressionPicker';
 import type { ExpressionSession } from './expressionSession';
 import { ImageAttachmentEditor } from './ImageAttachmentEditor';
 import { canTransformImage } from './outgoingAttachments';
+import { fileImageMount } from '../shared/fileImageMount';
+const commandExpressionVisibility = commandSlot('expression-visibility');
+const commandFocus = commandSlot('focus');
+const commandFormat = commandSlot('format');
+const commandInsert = commandSlot('insert');
+
 interface ChatComposerProps {
   conversationId: string;
   enabled: boolean;
@@ -50,7 +50,7 @@ interface ChatComposerProps {
 }
 const AttachmentThumbnail = view<{ file: File }, never>((props, _send) =>
   props.file.type.startsWith('image/') ? (
-    <img use={thumbnailMount(props.file)} alt="" />
+    <img use={fileImageMount(props.file)} alt="" />
   ) : (
     <FileText size={22} aria-hidden="true" />
   ),
@@ -80,13 +80,6 @@ type ChatComposerMessage =
         >
       >;
     };
-function thumbnailMount(file: File) {
-  return domMount<HTMLImageElement>((element) => {
-    const url = URL.createObjectURL(file);
-    element.src = url;
-    return () => URL.revokeObjectURL(url);
-  });
-}
 const FormattingIcon = view<{ kind: TelegramTextFormat['kind'] }, never>((props, _send) =>
   props.kind === 'bold' ? (
     <Bold size={15} />
@@ -122,10 +115,13 @@ function formatMenuPosition(x: number, y: number) {
   return { x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - 310) };
 }
 function visibilityCommand(props: ChatComposerProps, open: boolean): Command<ChatComposerMessage> {
-  return actionCommand('expression-visibility', () =>
-    Effect.sync(() => {
-      props.expressions.setVisible(open);
-    }),
+  return actionCommand(
+    commandExpressionVisibility,
+    () =>
+      Effect.sync(() => {
+        props.expressions.setVisible(open);
+      }),
+    'replace',
   );
 }
 function formatSelection(model: ChatComposerModel, kind: TelegramTextFormat['kind']) {
@@ -228,15 +224,18 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
           model: { ...model, expressionOpen: false, formatMenu: undefined },
           commands: [
             visibilityCommand(model.props, false),
-            actionCommand('focus', () =>
-              Effect.sync(() => {
-                if (message.restoreFocus)
-                  model.element
-                    ?.querySelector<HTMLButtonElement>(
-                      '[aria-label="Choose emoji, GIF, or sticker"]',
-                    )
-                    ?.focus();
-              }),
+            actionCommand(
+              commandFocus,
+              () =>
+                Effect.sync(() => {
+                  if (message.restoreFocus)
+                    model.element
+                      ?.querySelector<HTMLButtonElement>(
+                        '[aria-label="Choose emoji, GIF, or sticker"]',
+                      )
+                      ?.focus();
+                }),
+              'replace',
             ),
           ],
         };
@@ -244,14 +243,17 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
         return {
           model,
           commands: [
-            actionCommand('focus', () =>
-              Effect.sync(() => {
-                queueMicrotask(() =>
-                  model.element
-                    ?.querySelector<HTMLInputElement>('.expression-search input')
-                    ?.focus(),
-                );
-              }),
+            actionCommand(
+              commandFocus,
+              () =>
+                Effect.sync(() => {
+                  queueMicrotask(() =>
+                    model.element
+                      ?.querySelector<HTMLInputElement>('.expression-search input')
+                      ?.focus(),
+                  );
+                }),
+              'replace',
             ),
           ],
         };
@@ -259,10 +261,13 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
         return {
           model,
           commands: [
-            actionCommand('format', () =>
-              Effect.sync(() => {
-                formatSelection(model, message.kind);
-              }),
+            actionCommand(
+              commandFormat,
+              () =>
+                Effect.sync(() => {
+                  formatSelection(model, message.kind);
+                }),
+              'replace',
             ),
           ],
         };
@@ -271,10 +276,13 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
           model: { ...model, expressionOpen: false },
           commands: [
             visibilityCommand(model.props, false),
-            actionCommand('insert', () =>
-              Effect.sync(() => {
-                insertAtSelection(model, message.emoji);
-              }),
+            actionCommand(
+              commandInsert,
+              () =>
+                Effect.sync(() => {
+                  insertAtSelection(model, message.emoji);
+                }),
+              'replace',
             ),
           ],
         };
@@ -435,7 +443,7 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
                 </button>
               </div>
             ) : null}
-            {idRows(props.composer.attachments).map((attachment, index) => (
+            {renderList(idRows(props.composer.attachments), (attachment, index) => (
               <div
                 class="composer-attachment"
                 data-testid="composer-attachment"
@@ -560,29 +568,32 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
                     aria-label="Message formatting"
                     style={{ left: `${position.x}px`, top: `${position.y}px` }}
                   >
-                    {sequence([
-                      ['bold', 'Bold'],
-                      ['italic', 'Italic'],
-                      ['underline', 'Underline'],
-                      ['strike', 'Strikethrough'],
-                      ['code', 'Monospace'],
-                      ['spoiler', 'Spoiler'],
-                      ['blockquote', 'Quote'],
-                      ['textUrl', 'Create link'],
-                    ] as const).map((_item) => {
-                      const [kind, label] = _item;
-                      return (
-                        <button
-                          role="menuitem"
-                          onClick={() => {
-                            applyFormat(kind);
-                            send({ type: 'Fields', fields: { formatMenu: undefined } });
-                          }}
-                        >
-                          <FormattingIcon kind={kind} /> {label}
-                        </button>
-                      );
-                    })}
+                    {renderList(
+                      sequence([
+                        ['bold', 'Bold'],
+                        ['italic', 'Italic'],
+                        ['underline', 'Underline'],
+                        ['strike', 'Strikethrough'],
+                        ['code', 'Monospace'],
+                        ['spoiler', 'Spoiler'],
+                        ['blockquote', 'Quote'],
+                        ['textUrl', 'Create link'],
+                      ] as const),
+                      (_item) => {
+                        const [kind, label] = _item;
+                        return (
+                          <button
+                            role="menuitem"
+                            onClick={() => {
+                              applyFormat(kind);
+                              send({ type: 'Fields', fields: { formatMenu: undefined } });
+                            }}
+                          >
+                            <FormattingIcon kind={kind} /> {label}
+                          </button>
+                        );
+                      },
+                    )}
                   </div>
                 ))(model.formatMenu!)
               : null}

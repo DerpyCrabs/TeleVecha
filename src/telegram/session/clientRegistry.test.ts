@@ -31,7 +31,7 @@ describe('clientRegistry', () => {
   });
 });
 
-const message = (id: number, text = `message ${id}`) => ({
+const message = (id: number, text: string = `message ${id}`) => ({
   id,
   peerId: 'peer-1',
   senderId: 'self',

@@ -1,8 +1,11 @@
+import { commandSlot } from 'effectweb';
 import { effectCommand } from 'effectweb/program';
 import { Effect } from 'effect';
-import { component, domMount, view } from 'effectweb';
+import { component, domBinding, view } from 'effectweb';
 import type { Send, Transition } from 'effectweb/program';
 import { loadEffect } from 'effectweb/cache';
+const commandAvatar = commandSlot('avatar');
+
 const visibleAvatars = new Map<Element, () => void>();
 let avatarObserver: IntersectionObserver | undefined;
 function observeAvatar(element: Element, visible: () => void) {
@@ -55,7 +58,7 @@ function request(model: AvatarModel): Transition<AvatarModel, AvatarMessage> {
     model: { ...model, requested: key, source: undefined },
     commands: [
       effectCommand(
-        'avatar',
+        commandAvatar,
         () =>
           Effect.gen(function* () {
             const cached = yield* loadEffect(
@@ -71,6 +74,7 @@ function request(model: AvatarModel): Transition<AvatarModel, AvatarMessage> {
             return undefined;
           }),
         {
+          policy: 'replace',
           onSuccess: (source) => ({ type: 'Loaded', source }),
           onFailure: (): AvatarMessage => ({ type: 'Loaded', source: undefined }),
         },
@@ -84,8 +88,10 @@ const sizes = {
   md: 'size-12 text-sm',
   lg: 'size-20 text-xl',
 };
-const visibility = (send: Send<AvatarMessage>) =>
-  domMount<HTMLElement>((element) => observeAvatar(element, () => send({ type: 'Visible' })));
+function acquireVisibility(element: HTMLElement, input: () => Send<AvatarMessage>) {
+  return observeAvatar(element, () => input()({ type: 'Visible' }));
+}
+const visibility = (send: Send<AvatarMessage>) => domBinding(send, acquireVisibility);
 export const Avatar = component<AvatarProps, AvatarModel, AvatarMessage>({
   init: (props) => ({ props, visible: false, requested: '', source: undefined }),
   receive: (model, props) => request({ ...model, props }),

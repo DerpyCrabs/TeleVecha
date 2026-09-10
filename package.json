@@ -9,7 +9,7 @@
     "dev": "vp dev",
     "dev:e2e": "VITE_TELEVECHA_E2E=1 node scripts/playwright-server.mjs",
     "build": "vp build",
-    "check": "vp check",
+    "check": "tsc --noEmit && vp check",
     "fmt": "vp fmt",
     "check:e2e": "tsc --noEmit -p tsconfig.e2e.json",
     "fetch:telegram-tl": "node scripts/fetch-telegram-tl.mjs",
@@ -25,17 +25,17 @@
   },
   "dependencies": {
     "@effect/platform-browser": "4.0.0-rc.112",
-    "@effectweb/lucide": "0.2.2",
+    "@effectweb/lucide": "0.4.0",
     "@noble/ciphers": "^2.4.0",
     "effect": "4.0.0-rc.112",
-    "effectweb": "0.2.2",
+    "effectweb": "0.4.0",
     "fflate": "^0.8.3",
     "idb": "8.0.3",
     "lottie-web": "^5.13.0"
   },
   "devDependencies": {
     "@effect/tsgo": "0.32.1",
-    "@effectweb/compiler": "0.2.2",
+    "@effectweb/compiler": "0.4.0",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "^26.2.0",
@@ -43,12 +43,21 @@
     "@voidzero-dev/vite-plus-core": "0.2.9",
     "fake-indexeddb": "^6.2.5",
     "oxfmt": "0.62.0",
+    "oxlint": "1.77.0",
+    "oxlint-tsgolint": "7.0.2001",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vite-plus": "0.2.9"
   },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": "12.0.2",
+      "onFail": "download"
+    }
   },
   "engines": {
     "node": ">=22.14"

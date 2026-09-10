@@ -15,6 +15,7 @@ describe('coalescing mailbox', () => {
     run(
       Effect.gen(function* () {
         const release = yield* Deferred.make<void>();
+        const started = yield* Deferred.make<void>();
         const seen: number[] = [];
         const mailbox = yield* maxMailbox();
         yield* mailbox.offer('peer', 2);
@@ -23,14 +24,20 @@ describe('coalescing mailbox', () => {
           .flush('peer', (value) =>
             Effect.gen(function* () {
               seen.push(value);
-              if (seen.length === 1) yield* Deferred.await(release);
+              if (seen.length === 1) {
+                yield* Deferred.succeed(started, undefined);
+                yield* Deferred.await(release);
+              }
             }),
           )
           .pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+        // Let the synchronous fork register its fiber before the overlapping flush.
         yield* Effect.yieldNow;
         yield* mailbox.offer('peer', 4);
         yield* mailbox.offer('peer', 8);
         const same = yield* mailbox.flush('peer', () => Effect.void).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
         yield* Deferred.succeed(release, undefined);
         yield* Effect.all([Fiber.join(first), Fiber.join(same)]);
         expect(seen).toEqual([5, 8]);

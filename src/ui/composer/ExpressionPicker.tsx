@@ -1,3 +1,4 @@
+import { list as renderList } from 'effectweb';
 import type { Effect } from 'effect';
 import type { TelegramSticker, TelegramStickerPack } from '../../telegram/types';
 import { emojiRows } from '../collections';
@@ -40,7 +41,7 @@ export const ExpressionPicker = localComponent<ExpressionPickerProps, { query: s
     return (
       <div class="expression-picker" role="dialog" aria-label="Emoji, GIFs and stickers">
         <nav class="expression-tabs" aria-label="Picker type">
-          {sequence(['emoji', 'gifs', 'stickers'] as const).map((tab) => (
+          {renderList(sequence(['emoji', 'gifs', 'stickers'] as const), (tab) => (
             <button
               classList={{ active: props.tab === tab }}
               aria-pressed={props.tab === tab}
@@ -67,7 +68,7 @@ export const ExpressionPicker = localComponent<ExpressionPickerProps, { query: s
           {props.tab === 'emoji' ? (
             <div class="emoji-grid" aria-label="Emoji">
               {matchingEmoji!.length ? (
-                emojiRows(matchingEmoji).map((item) => (
+                renderList(emojiRows(matchingEmoji), (item) => (
                   <button
                     disabled={!props.canSend}
                     onClick={() => props.insertEmoji(item.value)}

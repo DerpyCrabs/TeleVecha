@@ -1,3 +1,4 @@
+import { commandSlot } from 'effectweb';
 import { effectCommand } from 'effectweb/program';
 import { cachedLoad } from 'effectweb/load';
 import { component, domBinding, view } from 'effectweb';
@@ -5,6 +6,8 @@ import type { Send, Transition } from 'effectweb/program';
 import type { UiLoad } from 'effectweb/cache';
 import { TgsPlayer } from './TgsPlayer';
 import { VisibilityVideo } from './VisibilityVideo';
+const commandAsset = commandSlot('asset');
+
 interface Props {
   identity: string;
   mimeType: string;
@@ -29,7 +32,8 @@ function request(model: Model): Transition<Model, Message> {
   return {
     model: { ...model, requested: props.identity, source: undefined },
     commands: [
-      effectCommand('asset', () => cachedLoad(props.cachedUrl, props.load), {
+      effectCommand(commandAsset, () => cachedLoad(props.cachedUrl, props.load), {
+        policy: 'replace',
         onSuccess: (source) => ({ type: 'Loaded', source }) as const,
         onFailure: () => ({ type: 'Loaded', source: undefined }) as const,
       }),

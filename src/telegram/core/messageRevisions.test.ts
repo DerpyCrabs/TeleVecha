@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createMessageRevisions } from './messageRevisions';
 import type { TelegramMessage } from '../types';
 
-const message = (id: number, text = `message-${id}`): TelegramMessage => ({
+const message = (id: number, text: string = `message-${id}`): TelegramMessage => ({
   id,
   peerId: 'peer',
   senderId: 'sender',

@@ -1,4 +1,4 @@
-import type { Effect } from 'effect';
+import { Context, Effect } from 'effect';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type { TelegramChatAppearance, TelegramDialog, TelegramPeer } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
@@ -8,24 +8,23 @@ import { available, query } from 'effectweb';
 import type { ThemePreferences } from './themePreferences';
 import { readableTextColor, telegramWallpaperBackground } from './themePreferences';
 import { tvbugResourceState, type TvBugChatAppearanceState } from '../../debug/tvbugUiState';
-interface ChatAppearanceSource {
+export interface ChatAppearanceSource {
   getChatAppearance(
     peer: TelegramPeer,
   ): Effect.Effect<TelegramChatAppearance | undefined, MessagingError>;
   downloadWallpaper(wallpaperId: string): Effect.Effect<Blob, MessagingError>;
 }
+export const ChatAppearanceSource =
+  Context.Service<ChatAppearanceSource>('ui/ChatAppearanceSource');
 export const chatAppearanceQuery = query({
   name: 'chat-appearance',
-  key: ({ peer }: { source: ChatAppearanceSource; peer: TelegramPeer }) =>
-    `${peer.kind}:${peer.id}:${peer.accessHash ?? ''}`,
-  load: ({ source, peer }: { source: ChatAppearanceSource; peer: TelegramPeer }) =>
-    source.getChatAppearance(peer),
+  load: (peer: TelegramPeer) =>
+    Effect.flatMap(ChatAppearanceSource, (source) => source.getChatAppearance(peer)),
 });
 const wallpaperBlobQuery = query({
   name: 'wallpaper-blob',
-  key: ({ id }: { source: ChatAppearanceSource; id: string }) => id,
-  load: ({ source, id }: { source: ChatAppearanceSource; id: string }) =>
-    source.downloadWallpaper(id),
+  load: (id: string) =>
+    Effect.flatMap(ChatAppearanceSource, (source) => source.downloadWallpaper(id)),
 });
 function themeSettings(
   chatAppearance: TelegramChatAppearance | undefined,
@@ -79,7 +78,7 @@ export function createChatAppearanceSession(
     online: Read<boolean>;
     preferences: Read<ThemePreferences>;
   },
-  context: SessionContext,
+  context: SessionContext<ChatAppearanceSource>,
 ) {
   const scope = lifetime();
   const appearanceResource = queryResource(context, chatAppearanceQuery);
@@ -156,9 +155,9 @@ export function createChatAppearanceSession(
     wasOnline = online;
     const dialog = options.activeDialog(),
       peer = dialog && !dialog.transient ? dialog.peer : undefined;
-    appearanceResource.select(peer ? { source: options.source, peer } : undefined);
+    appearanceResource.select(peer);
     const current = wallpaper();
-    assetResource.select(current?.hasFile ? { source: options.source, id: current.id } : undefined);
+    assetResource.select(current?.hasFile ? current.id : undefined);
     if (reconnected) {
       appearanceResource.refresh();
       assetResource.refresh();

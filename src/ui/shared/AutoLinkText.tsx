@@ -1,3 +1,4 @@
+import { list as renderList } from 'effectweb';
 import { sequence, view } from 'effectweb';
 import { safeExternalUrl } from './safeUrl';
 interface TextPart {
@@ -32,7 +33,7 @@ export function linkifyText(value: string): TextPart[] {
 export const AutoLinkText = view<{ text: string }, never>((props, _send) => {
   return (
     <span class="autolink-text">
-      {sequence(linkifyText(props.text)).map((part) =>
+      {renderList(sequence(linkifyText(props.text)), (part) =>
         part.href ? (
           <a href={part.href} target="_blank" rel="noopener noreferrer">
             {part.text}

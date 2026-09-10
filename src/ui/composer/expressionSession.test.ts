@@ -1,8 +1,9 @@
-import { Effect } from 'effect';
+import { Context, Effect } from 'effect';
+import { uiRuntime } from 'effectweb';
 import { expect, it, vi } from 'vitest';
 import type { TelegramResourceInvalidation } from '../../telegram/types';
 import { makeQueryCache } from 'effectweb/cache';
-import { createExpressionSession } from './expressionSession';
+import { createExpressionSession, ExpressionSource } from './expressionSession';
 
 it('shares catalog data across session recreation and invalidates the defined expression queries', () => {
   const listeners: Array<(event: TelegramResourceInvalidation) => void> = [];
@@ -28,7 +29,7 @@ it('shares catalog data across session recreation and invalidates the defined ex
     canSendGifs: () => true,
     clearReply() {},
   };
-  const cache = makeQueryCache();
+  const cache = makeQueryCache(uiRuntime(Context.make(ExpressionSource, source)));
   const context = { cache, changed() {} };
   const first = createExpressionSession(options, context);
   first.toggleStickers();

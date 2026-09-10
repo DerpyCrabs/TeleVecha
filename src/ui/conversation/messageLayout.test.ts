@@ -66,7 +66,7 @@ describe('layoutMessages', () => {
     expect(layouts[0]).toMatchObject({
       hide: false,
       caption: { body: 'Caption' },
-      className: expect.stringContaining('message-has-album'),
+      className: expect.stringContaining('message-has-album') as unknown,
     });
     expect(layouts[0]?.album).toHaveLength(2);
     expect(layouts[1]?.hide).toBe(true);

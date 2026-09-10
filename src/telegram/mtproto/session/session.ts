@@ -75,7 +75,7 @@ export const parseStoredSession = Effect.fn('mtproto.session.parse')(function* (
 export const createMtprotoSession = Effect.fn('mtproto.session.make')(function* (
   initial: StoredMtprotoSession | undefined,
   persistence: SessionPersistence,
-  defaultDcId = 2,
+  defaultDcId: number = 2,
 ) {
   if (!isDataCenterId(defaultDcId)) {
     return yield* Effect.fail(
@@ -121,7 +121,7 @@ export const createMtprotoSession = Effect.fn('mtproto.session.make')(function* 
           return key === undefined ? undefined : new Uint8Array(key);
         }),
       ),
-    setMainDc: (dcId: number, isTest = false) => {
+    setMainDc: (dcId: number, isTest: boolean | undefined = false) => {
       if (!isDataCenterId(dcId)) {
         return Effect.fail(createMtprotoError('configuration', 'Data-center ID must be positive.'));
       }

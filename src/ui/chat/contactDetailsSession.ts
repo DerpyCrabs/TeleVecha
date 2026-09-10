@@ -62,9 +62,8 @@ export function createContactDetailsSession(
   }).create({ peer: undefined, revision: 0 });
   scope.add(members.dispose);
   scope.add(members.subscribe(context.changed));
-  context.cache.registry.get(context.cache.generation);
   scope.add(
-    context.cache.registry.subscribe(context.cache.generation, () => {
+    context.cache.onReset(() => {
       members.receive({ peer: undefined, revision: memberRevision });
     }),
   );

@@ -25,7 +25,7 @@ export function createConversationHistorySession(options: ConversationHistoryOpt
     loadGeneration += 1;
     loadRunning = false;
   };
-  const loadOlder = async (scroller: HTMLDivElement, keepAtPresent = false) => {
+  const loadOlder = async (scroller: HTMLDivElement, keepAtPresent: boolean = false) => {
     const viewport = options.viewport();
     const beforeLoad = options.snapshot();
     if (

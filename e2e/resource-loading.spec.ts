@@ -12,7 +12,8 @@ test('loads only the Lucide icons used by the interface', async ({ page }) => {
       .filter(
         (name) =>
           name.includes('/@effectweb_lucide_icons_') ||
-          name.includes('/@effectweb/lucide/dist/icons/'),
+          name.includes('/@effectweb/lucide/dist/icons/') ||
+          name.includes('/EffectWeb/packages/lucide/dist/icons/'),
       ),
   );
 

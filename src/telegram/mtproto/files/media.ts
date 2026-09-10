@@ -185,7 +185,7 @@ function inputPeer(entity: TlObject): TlObject {
 export const downloadProfilePhoto = Effect.fn('mtproto.files.downloadProfilePhoto')(function* (
   rpc: FileRpc,
   entity: unknown,
-  big = false,
+  big: boolean = false,
 ) {
   if (!tagged(entity) || !tagged(entity.photo)) return undefined;
   const photo = entity.photo;

@@ -841,7 +841,7 @@ export function createTvBugSanitizer(options: TvBugSanitizerOptionsV2 = {}): TvB
       time = sanitizer.timeShifter;
       return sanitizer.sanitize();
     },
-    sanitizeValue: (value, context = 'value') =>
+    sanitizeValue: (value, context: string | undefined = 'value') =>
       sanitizeJsonValue(value, context, aliases, time, 0),
     alias(category, value) {
       if (!/^[a-z][a-z0-9-]{0,31}$/u.test(category)) {
@@ -1557,7 +1557,16 @@ function hydrateRichText(text: TvBugRichTextV2): RichText {
       return { kind: 'math', source: text.source.value };
     case 'date':
       return { kind: 'date', child: hydrateRichText(text.child), timestamp: text.timestamp };
-    default:
+    case 'bold':
+    case 'code':
+    case 'diff':
+    case 'italic':
+    case 'marked':
+    case 'spoiler':
+    case 'strike':
+    case 'subscript':
+    case 'superscript':
+    case 'underline':
       return {
         kind: text.kind,
         child: hydrateRichText(text.child),
@@ -1693,7 +1702,11 @@ class StateSanitizer {
 
   constructor(
     private readonly source: TvBugStateSourceV2,
-    private readonly aliases = createAliasBook(),
+    private readonly aliases: {
+      registerPeer: (rawId: string, kind?: TelegramPeer['kind']) => void;
+      peer(rawId: string, kind?: TelegramPeer['kind']): string;
+      get: (category: string, rawId: string) => string;
+    } = createAliasBook(),
     time?: TimeShifter,
   ) {
     const workspace = source.workspace;
@@ -2462,7 +2475,16 @@ class StateSanitizer {
           child: this.sanitizeRichText(text.child, depth + 1),
           timestamp: this.timeShifter.shiftSeconds(text.timestamp),
         };
-      default:
+      case 'bold':
+      case 'code':
+      case 'diff':
+      case 'italic':
+      case 'marked':
+      case 'spoiler':
+      case 'strike':
+      case 'subscript':
+      case 'superscript':
+      case 'underline':
         return {
           kind: text.kind,
           child: this.sanitizeRichText(text.child, depth + 1),

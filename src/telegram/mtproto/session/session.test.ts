@@ -95,7 +95,7 @@ describe('MTProto session persistence', () => {
   it('copies auth keys and clears durable state on delete', () =>
     run(
       Effect.gen(function* () {
-        const clear = vi.fn();
+        const clear = vi.fn<() => void>();
         const session = yield* createMtprotoSession(undefined, {
           load: Effect.succeed(undefined),
           save: () => Effect.void,

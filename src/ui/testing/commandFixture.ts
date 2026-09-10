@@ -1,8 +1,11 @@
+import { modelOwner, mountView } from 'effectweb';
+import { LinkPreview } from '../conversation/LinkPreview';
 import { Effect } from 'effect';
 import type { EngineSnapshot } from '../../telegram/types';
 import { AuthOverlay } from '../app/AuthOverlay';
 import { GifPicker } from '../composer/GifPicker';
 import { MediaAttachment } from '../media/MediaAttachment';
+// oxlint-disable-next-line no-restricted-imports -- Browser fixture mounts compiled components directly to test scope disposal.
 import { Scope } from 'effectweb/dom';
 
 /** Browser regression fixture for the actual authentication component and Effect command runtime. */
@@ -91,4 +94,40 @@ export function mountGifRetryFixture(parent: HTMLElement) {
   const scope = new Scope<typeof props, never>(props, () => {});
   GifPicker.build(scope, parent, null);
   return () => scope.dispose();
+}
+
+export function mountPreviewIdentityFixture(parent: HTMLElement) {
+  let releases = 0;
+  let starts = 0;
+  const props = {
+    preview: {
+      url: 'https://example.com/first',
+      title: 'First preview',
+      media: { kind: 'video' as const, name: 'preview.mp4', mimeType: 'video/mp4', size: 1 },
+    },
+    loadMedia: () =>
+      Effect.gen(function* () {
+        starts++;
+        return yield* Effect.never;
+      }).pipe(
+        Effect.ensuring(
+          Effect.promise(async () => {
+            await new Promise<void>((resolve) => setTimeout(resolve, 25));
+            releases++;
+          }),
+        ),
+      ),
+  };
+  const owner = modelOwner(props);
+  const unmount = mountView(parent, LinkPreview, owner.source);
+  return {
+    starts: () => starts,
+    releases: () => releases,
+    rename: () => owner.patch({ preview: { ...owner.read().preview, title: 'Updated preview' } }),
+    replace: () =>
+      owner.patch({ preview: { ...owner.read().preview, url: 'https://example.com/second' } }),
+    close: async () => {
+      await Effect.runPromise(unmount.close().pipe(Effect.onExit(() => owner.close())));
+    },
+  };
 }

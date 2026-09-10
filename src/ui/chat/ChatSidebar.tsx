@@ -1,3 +1,5 @@
+import { list as renderList } from 'effectweb';
+import { commandSlot } from 'effectweb';
 import type { Snapshot } from 'effectweb';
 import { effectCommand } from 'effectweb/program';
 import { cachedLoad } from 'effectweb/load';
@@ -19,13 +21,16 @@ import Search from '@effectweb/lucide/icons/search';
 import Settings from '@effectweb/lucide/icons/settings';
 import Trash2 from '@effectweb/lucide/icons/trash-2';
 import type { MediaAssets } from '../media/mediaAssets';
-import type { Command } from 'effectweb';
+import type { Command, CommandSlot } from 'effectweb';
 import { component, domBinding, sequence, view } from 'effectweb';
 import type { Send, Transition } from 'effectweb/program';
 import { loadEffect } from 'effectweb/cache';
 import { Avatar } from '../shared/Avatar';
 import type { ChatDirectory } from './chatDirectory';
 import { describeUnreadCount, formatUnreadCount, normalizeUnreadCount } from './unreadCount';
+const commandPeers = commandSlot('peers');
+const commandContextUser = commandSlot('context-user');
+
 type ChatFilter = 'all' | 'unread' | 'groups' | 'archived';
 const CHAT_ROW_HEIGHT = 64;
 const CHAT_LIST_OVERSCAN = 8;
@@ -95,7 +100,7 @@ type ChatSidebarMessage =
   | { type: 'ContextMenu'; value: { chatId: string; x: number; y: number } | undefined };
 function refreshSidebar(
   model: Snapshot<ChatSidebarModel>,
-  retry = false,
+  retry: boolean = false,
 ): Transition<ChatSidebarModel, ChatSidebarMessage> {
   const term = model.query.trim();
   const searchKey =
@@ -108,20 +113,21 @@ function refreshSidebar(
       ? model.contextMenu.chatId
       : '';
   const commands: Command<ChatSidebarMessage>[] = [],
-    cancel: string[] = [];
+    cancel: CommandSlot[] = [];
   let next = model;
   if (retry || searchKey !== model.searchKey) {
     next = { ...next, searchKey, peers: [], peersError: false, peersLoading: Boolean(searchKey) };
-    if (!searchKey) cancel.push('peers');
+    if (!searchKey) cancel.push(commandPeers);
     else
       commands.push(
         effectCommand(
-          'peers',
+          commandPeers,
           () =>
             Effect.sleep(retry ? 0 : 250).pipe(
               Effect.andThen(loadEffect(() => model.props.directory.search(term))),
             ),
           {
+            policy: 'replace',
             onSuccess: (values) => ({ type: 'Peers', values, error: false }) as const,
             onFailure: () => ({ type: 'Peers', values: [], error: true }) as const,
           },
@@ -130,17 +136,18 @@ function refreshSidebar(
   }
   if (userKey !== model.contextUserKey) {
     next = { ...next, contextUserKey: userKey, contextUser: undefined };
-    if (!userKey) cancel.push('context-user');
+    if (!userKey) cancel.push(commandContextUser);
     else
       commands.push(
         effectCommand(
-          'context-user',
+          commandContextUser,
           () =>
             cachedLoad(
               () => model.props.directory.cachedDetails(userKey),
               () => model.props.directory.details(userKey),
             ),
           {
+            policy: 'replace',
             onSuccess: (value) => ({ type: 'ContextUser', value }) as const,
             onFailure: () => ({ type: 'ContextUser', value: undefined }) as const,
           },
@@ -167,7 +174,7 @@ interface ListInput {
   filtered: ChatSummary[];
   send: Send<ChatSidebarMessage>;
 }
-function acquireList(element: HTMLDivElement, input: () => ListInput) {
+function acquireList(element: HTMLDivElement, input: () => Snapshot<ListInput>) {
   let previousQuery: string | undefined,
     previousFilter: ChatFilter | undefined,
     previousPeer: string | undefined;
@@ -390,7 +397,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarModel, ChatSid
           classList={{ hidden: compact() }}
           onWheel={scrollFilters}
         >
-          {sequence(['all', 'unread', 'groups', 'archived'] as const).map((value) => (
+          {renderList(sequence(['all', 'unread', 'groups', 'archived'] as const), (value) => (
             <button
               class="shrink-0 rounded-full px-3 py-1.5"
               classList={{
@@ -449,7 +456,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarModel, ChatSid
               style={{ height: `${virtualRange.start * CHAT_ROW_HEIGHT}px` }}
             />
           ) : null}
-          {idRows(virtualChats).map((chat, virtualIndex) => (
+          {renderList(idRows(virtualChats), (chat, virtualIndex) => (
             <a
               href={chatHref(chat.id)}
               role="button"
@@ -544,7 +551,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarModel, ChatSid
               <p class="mx-[0.7rem] mt-3 mb-1 text-xs font-bold tracking-[0.04em] text-accent uppercase">
                 Telegram
               </p>
-              {remotePeerRows(visiblePeerResults).map((result) => (
+              {renderList(remotePeerRows(visiblePeerResults), (result) => (
                 <button
                   class="chat-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
                   classList={{

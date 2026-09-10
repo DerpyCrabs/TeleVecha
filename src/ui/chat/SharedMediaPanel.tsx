@@ -1,8 +1,11 @@
+import { list as renderList } from 'effectweb';
+import { commandSlot } from 'effectweb';
 import { cachedLoad } from 'effectweb/load';
 import { actionCommand, effectCommand } from 'effectweb/program';
 import { Effect } from 'effect';
 import type {
   SharedMediaKind,
+  TelegramDialog,
   TelegramMessage,
   TelegramSearchPage,
   TelegramTransferProgress,
@@ -39,6 +42,10 @@ import {
   panelLoadMoreClass,
 } from '../shared/panelStyles';
 import { safeExternalUrl } from '../shared/safeUrl';
+import { messageCapabilities } from '../../telegram/core/chatPermissions';
+const commandViewer = commandSlot('viewer');
+const commandDownload = commandSlot('download');
+
 interface SharedMediaPanelProps {
   initialKind: SharedMediaKind;
   peerId: string;
@@ -55,9 +62,8 @@ interface SharedMediaPanelProps {
   cachedMediaPreview: (message: TelegramMessage) => string | undefined;
   openMessage: (message: TelegramMessage) => void;
   forwardMessage?: ((message: TelegramMessage) => void) | undefined;
-  canForwardMessage?: ((message: TelegramMessage) => boolean) | undefined;
+  dialogs: readonly TelegramDialog[];
   deleteMessage?: ((message: TelegramMessage) => void) | undefined;
-  canDeleteMessage?: ((message: TelegramMessage) => boolean) | undefined;
   close: () => void;
 }
 interface SharedMediaContentProps extends SharedMediaPanelProps {
@@ -110,14 +116,7 @@ const SharedMediaContent = component<
   SharedMediaContentMessage
 >({
   init: (props) => ({ props, viewer: undefined }),
-  receive: (model, props) => {
-    const changed =
-      model.props.peerId !== props.peerId || model.props.initialKind !== props.initialKind;
-    return {
-      model: { ...model, props, viewer: changed ? undefined : model.viewer },
-      ...(changed ? { cancel: ['viewer', 'download'] } : {}),
-    };
-  },
+  identity: (props) => JSON.stringify([props.peerId, props.initialKind]),
   update: (model, message) => {
     switch (message.type) {
       case 'Navigate': {
@@ -131,13 +130,14 @@ const SharedMediaContent = component<
           model: { ...model, viewer: { ...current, loading: true } },
           commands: [
             effectCommand(
-              'viewer',
+              commandViewer,
               () =>
                 cachedLoad(
                   () => model.props.cachedMedia(selected),
                   () => model.props.loadMedia(selected),
                 ),
               {
+                policy: 'replace',
                 onSuccess: (url): SharedMediaContentMessage => ({
                   type: 'Viewer',
                   value: {
@@ -159,11 +159,14 @@ const SharedMediaContent = component<
         return {
           model,
           commands: [
-            actionCommand('download', () =>
-              cachedLoad(
-                () => model.props.cachedMedia(item),
-                () => model.props.loadMedia(item),
-              ).pipe(Effect.tap((url) => Effect.sync(() => saveMediaUrl(url, name)))),
+            actionCommand(
+              commandDownload,
+              () =>
+                cachedLoad(
+                  () => model.props.cachedMedia(item),
+                  () => model.props.loadMedia(item),
+                ).pipe(Effect.tap((url) => Effect.sync(() => saveMediaUrl(url, name)))),
+              'replace',
             ),
           ],
         };
@@ -179,13 +182,14 @@ const SharedMediaContent = component<
           model,
           commands: [
             effectCommand(
-              'viewer',
+              commandViewer,
               () =>
                 cachedLoad(
                   () => model.props.cachedMedia(item),
                   () => model.props.loadMedia(item),
                 ),
               {
+                policy: 'replace',
                 onSuccess: (url): SharedMediaContentMessage => ({
                   type: 'Viewer',
                   value: {
@@ -205,13 +209,17 @@ const SharedMediaContent = component<
       }
       case 'Viewer':
         return {
-          cancel: message.value ? [] : ['viewer'],
+          cancel: message.value ? [] : [commandViewer],
           model: { ...model, viewer: message.value },
         };
     }
   },
   view: view((model, send) => {
     const props = model.props;
+    const capabilities = (message: TelegramMessage) => {
+      const dialog = props.dialogs.find((dialog) => dialog.peer.id === message.peerId);
+      return dialog ? messageCapabilities(dialog, message) : undefined;
+    };
     const items = () => props.items;
     const loading = () => props.loading;
     const loadingMore = () => props.loadingMore;
@@ -268,7 +276,7 @@ const SharedMediaContent = component<
               {!loading() ? (
                 <>
                   {items()!.length ? (
-                    telegramMessageRows(items()).map((message) =>
+                    renderList(telegramMessageRows(items()), (message) =>
                       visualKinds.has(props.initialKind) ? (
                         <article class="shared-media-tile relative min-h-36 overflow-hidden rounded-[0.65rem] bg-[#0e1115] [&_.media-attachment]:m-0 [&_.media-attachment]:h-full [&_.media-attachment]:min-h-36 [&_.media-attachment]:w-full [&_.media-attachment]:rounded-[inherit] [&_.media-visual]:h-full [&_.media-visual]:min-h-36 [&_.media-visual]:max-h-52 [&_.media-visual]:w-full [&_.media-visual]:rounded-[inherit] [&_.media-visual]:object-cover [&_img]:h-full [&_img]:min-h-36 [&_img]:max-h-52 [&_img]:w-full [&_img]:rounded-[inherit] [&_img]:object-cover [&_video]:h-full [&_video]:min-h-36 [&_video]:max-h-52 [&_video]:w-full [&_video]:rounded-[inherit] [&_video]:object-cover">
                           {message.media
@@ -300,7 +308,7 @@ const SharedMediaContent = component<
                             <Link size={18} />
                           </span>
                           <div class="grid min-w-0 gap-[0.18rem] [&_a]:truncate [&_a]:text-blue-300 [&_time]:text-[0.68rem] [&_time]:text-muted">
-                            {sequence(links(message.text)).map((url) => {
+                            {renderList(sequence(links(message.text)), (url) => {
                               const href = safeExternalUrl(url);
                               return href ? (
                                 <a href={href} target="_blank" rel="noopener noreferrer">
@@ -426,7 +434,7 @@ const SharedMediaContent = component<
                       forward={
                         message().protected ||
                         !props.forwardMessage ||
-                        (props.canForwardMessage && !props.canForwardMessage(message()))
+                        !capabilities(message())?.canForward
                           ? undefined
                           : () => {
                               const target = message();
@@ -435,8 +443,7 @@ const SharedMediaContent = component<
                             }
                       }
                       delete={
-                        props.deleteMessage &&
-                        (!props.canDeleteMessage || props.canDeleteMessage(message()))
+                        props.deleteMessage && capabilities(message())?.canDelete
                           ? () => {
                               const target = message();
                               send({ type: 'Viewer', value: undefined });
@@ -490,9 +497,8 @@ export const SharedMediaPanel = component({
         cachedMediaPreview={props.cachedMediaPreview}
         openMessage={props.openMessage}
         forwardMessage={props.forwardMessage}
-        canForwardMessage={props.canForwardMessage}
+        dialogs={props.dialogs}
         deleteMessage={props.deleteMessage}
-        canDeleteMessage={props.canDeleteMessage}
         close={props.close}
         items={page?.items ?? []}
         loading={model.result.waiting && !page}

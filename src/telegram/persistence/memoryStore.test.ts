@@ -13,7 +13,7 @@ import type {
 const peer: TelegramPeer = { id: 'peer-1', kind: 'user' };
 const secondPeer: TelegramPeer = { id: 'peer-2', kind: 'group' };
 
-function dialog(target: TelegramPeer, title: string, cacheEpoch = 1): CachedDialog {
+function dialog(target: TelegramPeer, title: string, cacheEpoch: number = 1): CachedDialog {
   return {
     peer: target,
     title,
@@ -30,7 +30,7 @@ function dialog(target: TelegramPeer, title: string, cacheEpoch = 1): CachedDial
   };
 }
 
-function message(target: TelegramPeer, id: number, cacheEpoch = 1): CachedMessage {
+function message(target: TelegramPeer, id: number, cacheEpoch: number = 1): CachedMessage {
   return {
     id,
     peerId: target.id,
@@ -42,7 +42,7 @@ function message(target: TelegramPeer, id: number, cacheEpoch = 1): CachedMessag
   };
 }
 
-function send(id: string, createdAt: number, target = peer): PendingSend {
+function send(id: string, createdAt: number, target: TelegramPeer = peer): PendingSend {
   return { id, peer: target, text: id, randomId: `random-${id}`, createdAt, attempts: 0 };
 }
 

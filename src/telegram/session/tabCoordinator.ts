@@ -249,7 +249,7 @@ type CoordinatorInternalEvent =
   | { readonly _tag: 'conversation'; readonly event: TelegramConversationEvent }
   | { readonly _tag: 'pagehide' };
 
-function isCrossTabValue(input: unknown, seen = new WeakSet<object>()): boolean {
+function isCrossTabValue(input: unknown, seen: WeakSet<object> = new WeakSet<object>()): boolean {
   if (
     input === null ||
     input === undefined ||
@@ -278,7 +278,7 @@ function isCrossTabValue(input: unknown, seen = new WeakSet<object>()): boolean 
     );
   }
   if (input instanceof Set) return [...input].every((value) => isCrossTabValue(value, seen));
-  const prototype = Object.getPrototypeOf(input);
+  const prototype: unknown = Object.getPrototypeOf(input);
   return (
     (prototype === Object.prototype || prototype === null) &&
     Object.values(input).every((value) => isCrossTabValue(value, seen))
@@ -1881,7 +1881,7 @@ function errorMessage(error: unknown) {
   }
   const dispatchPendingRequest = Effect.fn('TabCoordinator.dispatchPendingRequest')(function* (
     request: PendingRequest<RemoteMethod>,
-    retry = false,
+    retry: boolean = false,
   ) {
     if (!requestJournal.hasPending(request.id) || (request.sentTo && !retry)) return;
     if (activeOwner) {
@@ -1933,7 +1933,7 @@ function errorMessage(error: unknown) {
     );
   }
   const maintainPendingRequests = Effect.fn('TabCoordinator.maintainPendingRequests')(function* (
-    now = Date.now(),
+    now: number = Date.now(),
   ) {
     for (const [id, request] of requestJournal.pendingEntries()) {
       if (now - request.createdAt >= REQUEST_TIMEOUT_MS) {

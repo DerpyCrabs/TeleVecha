@@ -1,3 +1,5 @@
+import { list as renderList } from 'effectweb';
+import { commandSlot } from 'effectweb';
 import { effectCommand } from 'effectweb/program';
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
@@ -8,6 +10,8 @@ import { MediaAttachment } from '../media/MediaAttachment';
 import { MediaViewer } from '../media/MediaViewer';
 import { component, sequence, view } from 'effectweb';
 import { cachedLoad } from 'effectweb/load';
+const commandPreview = commandSlot('preview');
+
 interface MessageAlbumProps {
   messages: ChatMessage[];
   load: (
@@ -17,8 +21,7 @@ interface MessageAlbumProps {
   loadPreview?: ((message: ChatMessage) => Effect.Effect<string, unknown>) | undefined;
   cachedUrl: (message: ChatMessage) => string | undefined;
   cachedPreviewUrl?: ((message: ChatMessage) => string | undefined) | undefined;
-  revision?: ((message: ChatMessage) => string | number | undefined) | undefined;
-  progress?: ((message: ChatMessage) => number | undefined) | undefined;
+  revisions?: Readonly<Record<string, string | number | undefined>> | undefined;
   openActions: (message: ChatMessage, event: MouseEvent) => void;
   openPreview?: ((message: ChatMessage, preview: MediaPreview) => boolean | void) | undefined;
 }
@@ -59,7 +62,7 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
       case 'CloseViewer':
         return {
           model: { ...model, viewer: undefined, viewerLoading: false },
-          cancel: ['preview'],
+          cancel: [commandPreview],
         };
       case 'Navigate': {
         const selected = model.props.messages.filter(
@@ -74,13 +77,14 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
           model: { ...model, viewerLoading: true },
           commands: [
             effectCommand(
-              'preview',
+              commandPreview,
               () =>
                 cachedLoad(
                   () => model.props.cachedUrl(selected),
                   () => model.props.load(selected),
                 ),
               {
+                policy: 'replace',
                 onSuccess: (url) =>
                   ({
                     type: 'Viewer',
@@ -130,9 +134,9 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
         aria-label={`${props.messages.length} grouped media attachments`}
         data-album-size={props.messages.length}
       >
-        {sequence(rows).map((row) => (
+        {renderList(sequence(rows), (row) => (
           <div class="media-album-row">
-            {idRows(row).map((message) => (
+            {renderList(idRows(row), (message) => (
               <div
                 class="media-album-item"
                 data-message-id={message.id}
@@ -179,14 +183,14 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
                         ? () => props.loadPreview!(message)
                         : undefined
                     }
-                    revision={props.revision?.(message)}
+                    revision={props.revisions?.[message.id]}
                     protected={message.protected}
                     onOpenPreview={(preview) => openPreview(message, preview)}
                   />
                 ) : null}
-                {props.progress?.(message) !== undefined ? (
+                {message.uploadProgress !== undefined ? (
                   <span class="media-album-progress" role="status">
-                    {Math.round((props.progress?.(message) ?? 0) * 100)}%
+                    {Math.round((message.uploadProgress ?? 0) * 100)}%
                   </span>
                 ) : null}
               </div>

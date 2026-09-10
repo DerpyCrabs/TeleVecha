@@ -3,7 +3,7 @@ import type { TelegramMessage } from '../types';
 const messageKey = (peerId: string, messageId: number) => `${peerId}:${messageId}`;
 
 /** Rejects message data fetched before a newer edit or deletion was observed. */
-export function createMessageRevisions(capacity = 5_000) {
+export function createMessageRevisions(capacity: number = 5_000) {
   const mutations = new Map<string, number>();
   let revision = 0;
   let floor = 0;
@@ -32,8 +32,8 @@ export function createMessageRevisions(capacity = 5_000) {
     ) => messages.filter(({ id }) => accepted(peerId, id, requestRevision)),
     merge(
       peerId: string,
-      current: TelegramMessage[],
-      fetched: TelegramMessage[],
+      current: readonly TelegramMessage[],
+      fetched: readonly TelegramMessage[],
       requestRevision: number,
     ) {
       const merged = new Map(current.map((message) => [message.id, message]));

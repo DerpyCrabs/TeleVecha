@@ -1,3 +1,4 @@
+import { list as renderList } from 'effectweb';
 import type { Effect } from 'effect';
 import type { TelegramSticker } from '../../telegram/types';
 import { idRows } from '../collections';
@@ -55,7 +56,7 @@ export const GifPicker = resourceComponent<
     const props = model.props;
     const results = slot((gifs: readonly TelegramSticker[]) => {
       if (!gifs.length) return <p>No GIFs found</p>;
-      return idRows(gifs).map((gif) => (
+      return renderList(idRows(gifs), (gif) => (
         <GifOption
           gif={gif}
           load={() => props.load(gif)}

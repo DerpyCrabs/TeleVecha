@@ -143,7 +143,7 @@ export function makeConversation(host: ConversationHost, peer: TelegramPeer) {
     ) => host.editMessage(peer, messageId, text, formats, replacement),
     getBotCommands: () => host.getBotCommands(peer),
     searchGifs: (query: string) => host.searchGifs(peer, query),
-    startBot: (startParam = '') => host.startBot(peer, startParam),
+    startBot: (startParam: string = '') => host.startBot(peer, startParam),
     answerBotCallback: (messageId: number, data: number[]) =>
       host.answerBotCallback(peer, messageId, data),
     requestUrlAuth: (messageId: number, buttonId: number) =>

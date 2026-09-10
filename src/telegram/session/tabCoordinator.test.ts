@@ -120,7 +120,7 @@ class RecordingChannel {
   }
 }
 
-const installChannel = (owner = false) => {
+const installChannel = (owner: boolean = false) => {
   vi.stubGlobal('BroadcastChannel', RecordingChannel);
   vi.stubGlobal('window', {
     location: { search: '' },
@@ -139,6 +139,36 @@ const installChannel = (owner = false) => {
 };
 
 describe('tab coordinator request and hydration regressions', () => {
+  it('keeps a confirmed send visible in the selected conversation', () => {
+    installChannel(true);
+    return Effect.runPromise(
+      provideCoordinator(
+        Effect.gen(function* () {
+          const transport = yield* createFixtureTelegramTransport();
+          const engine = yield* makeMessagingEngine(transport, makeMemoryCacheStore(), {
+            manageTabLease: false,
+          });
+          const coordinator = yield* makeTabCoordinator({
+            key: 'visible-send',
+            loadBlob: () => Effect.succeed(undefined),
+            createOwner: () => Effect.succeed({ engine }),
+          });
+          yield* coordinator.start({ apiId: 1, apiHash: 'fixture' });
+          yield* Effect.yieldNow;
+          const conversation = yield* coordinator.client.openConversation('u:101');
+          yield* conversation.sendDraft('Confirmed message');
+          yield* Effect.yieldNow;
+          expect(coordinator.client.snapshot().pending).toEqual([]);
+          expect(coordinator.client.snapshot().messages).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ text: 'Confirmed message', outgoing: true }),
+            ]),
+          );
+        }),
+      ).pipe(Effect.provide(MessagingEngineLayer), Effect.provide(BrowserCrypto.layer)),
+    );
+  });
+
   it('executes a repeated request once while in flight and replays its completed response', () => {
     installChannel(true);
     return Effect.runPromise(
@@ -218,7 +248,7 @@ describe('tab coordinator request and hydration regressions', () => {
             _tag: 'Failure',
             failure: {
               _tag: 'MessagingError',
-              message: expect.stringContaining('closed during the command'),
+              message: expect.stringContaining('closed during the command') as unknown,
             },
           });
         }),

@@ -58,7 +58,7 @@ export const updateEvent = Object.assign(
 
 /** The socket reader must keep dispatching RPC replies even if update consumers
  * are busy. Bound its update backlog, but make every dropped range observable. */
-export const makeClientEventHub = (capacity = 256) =>
+export const makeClientEventHub = (capacity: number = 256) =>
   Effect.gen(function* () {
     let sequence = 0;
     let connection: ConnectionStateEvent | undefined;

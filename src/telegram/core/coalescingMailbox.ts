@@ -1,4 +1,4 @@
-import { Effect, Fiber, FiberMap } from 'effect';
+import { Effect, Fiber, FiberMap, Option, Semaphore } from 'effect';
 
 interface CoalescingMailboxOptions<Value> {
   readonly merge: (previous: Value, incoming: Value) => Value;
@@ -15,6 +15,7 @@ export const makeCoalescingMailbox = Effect.fn('engine.coalescingMailbox.make')(
 ) {
   const pending = new Map<string, Value>();
   const consumers = yield* FiberMap.make<string, void, unknown>();
+  const starting = yield* Semaphore.make(1);
 
   const offer = (key: string, value: Value) =>
     Effect.sync(() => {
@@ -42,7 +43,14 @@ export const makeCoalescingMailbox = Effect.fn('engine.coalescingMailbox.make')(
           Effect.andThen(Effect.suspend(() => drain)),
         );
       });
-      const fiber = yield* FiberMap.run(consumers, key, drain, { onlyIfMissing: true });
+      const fiber = yield* starting.withPermit(
+        Effect.suspend(() => {
+          const current = FiberMap.getUnsafe(consumers, key);
+          if (Option.isSome(current)) return Effect.succeed(current.value);
+          // Register ownership before a synchronous consumer can reenter flush.
+          return FiberMap.run(consumers, key, Effect.yieldNow.pipe(Effect.andThen(drain)));
+        }),
+      );
       yield* Fiber.join(fiber);
     });
 

@@ -1,3 +1,4 @@
+import { list as renderList } from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
 import Reply from '@effectweb/lucide/icons/reply';
@@ -59,7 +60,7 @@ export const MessageActions = view<MessageActionsProps, never>((props, _send) =>
   };
   return (
     <div class="message-reactions">
-      {reactionRows(props.message.reactions ?? []).map((reaction) => (
+      {renderList(reactionRows(props.message.reactions ?? []), (reaction) => (
         <button
           class="reaction"
           classList={{ chosen: reaction.chosen }}
@@ -101,7 +102,7 @@ export const MessageActions = view<MessageActionsProps, never>((props, _send) =>
           </button>
           {props.pickerOpen ? (
             <div class="reaction-picker" role="dialog" aria-label="Choose reaction">
-              {sequence(['👍', '❤️', '😂', '😮', '😢', '🔥']).map((emoji) => (
+              {renderList(sequence(['👍', '❤️', '😂', '😮', '😢', '🔥']), (emoji) => (
                 <button onClick={() => props.react(emoji)} aria-label={`React with ${emoji}`}>
                   {emoji}
                 </button>

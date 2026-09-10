@@ -1,3 +1,4 @@
+import { commandSlot } from 'effectweb';
 import { Cause, Effect, Queue, Stream } from 'effect';
 import { actionCommand } from 'effectweb/program';
 import type { ChatMessage } from '../../domain/models';
@@ -6,7 +7,7 @@ import Download from '@effectweb/lucide/icons/download';
 import FileText from '@effectweb/lucide/icons/file-text';
 import LoaderCircle from '@effectweb/lucide/icons/loader-circle';
 import X from '@effectweb/lucide/icons/x';
-import { component, domBinding, domMount, view } from 'effectweb';
+import { component, domBinding, view } from 'effectweb';
 import type { Send, Transition } from 'effectweb/program';
 import { loadEffect } from 'effectweb/cache';
 import { MediaViewer } from './MediaViewer';
@@ -18,6 +19,11 @@ import {
   formatMediaSize,
   mediaPresentation,
 } from './mediaPresentation';
+const commandDisplay = commandSlot('display');
+const commandOriginal = commandSlot('original');
+const commandDownload = commandSlot('download');
+const commandOpen = commandSlot('open');
+
 interface MediaAttachmentProps {
   media: NonNullable<ChatMessage['media']>;
   load: (progress?: TelegramTransferProgress) => Effect.Effect<string, unknown>;
@@ -118,7 +124,7 @@ function startDisplay(
   if (model.url || model.loading) return { model };
   return {
     model: { ...model, loading: true, error: '', downloadProgress: 0 },
-    commands: [{ slot: 'display', stream: transfer(model.props, true) }],
+    commands: [{ policy: 'replace', slot: commandDisplay, stream: transfer(model.props, true) }],
   };
 }
 function automatic(model: MediaAttachmentModel) {
@@ -154,13 +160,22 @@ function pause(video: HTMLVideoElement) {
 function play(video: HTMLVideoElement) {
   void video.play().catch(() => undefined);
 }
-function playbackMount(playing: boolean) {
-  return domMount<HTMLVideoElement>((video) => {
-    if (playing) play(video);
-    else pause(video);
-    return () => pause(video);
-  });
+function acquirePlayback(video: HTMLVideoElement, input: () => boolean) {
+  let playing = input();
+  if (playing) play(video);
+  else pause(video);
+  return {
+    update() {
+      const next = input();
+      if (next === playing) return;
+      playing = next;
+      if (playing) play(video);
+      else pause(video);
+    },
+    dispose: () => pause(video),
+  };
 }
+const playbackMount = (playing: boolean) => domBinding(playing, acquirePlayback);
 export const MediaAttachment = component<
   MediaAttachmentProps,
   MediaAttachmentModel,
@@ -198,7 +213,7 @@ export const MediaAttachment = component<
         }
       : { ...model, props };
     const transition = automatic(next);
-    return changed ? { ...transition, cancel: ['display', 'original'] } : transition;
+    return changed ? { ...transition, cancel: [commandDisplay, commandOriginal] } : transition;
   },
   update: (model, message) => {
     switch (message.type) {
@@ -207,7 +222,7 @@ export const MediaAttachment = component<
       case 'Cancel':
         return {
           model: { ...model, loading: false, downloadProgress: undefined },
-          cancel: ['display', 'original'],
+          cancel: [commandDisplay, commandOriginal],
         };
       case 'StopHover':
         return { model: { ...model, inlineVideoPlaying: false } };
@@ -237,7 +252,8 @@ export const MediaAttachment = component<
           },
           commands: [
             {
-              slot: 'original',
+              policy: 'replace',
+              slot: commandOriginal,
               stream: transfer(model.props, false, message.purpose, message.origin),
             },
           ],
@@ -251,10 +267,13 @@ export const MediaAttachment = component<
           return {
             model: next,
             commands: [
-              actionCommand('download', () =>
-                Effect.sync(() => {
-                  if (!props.protected) saveMediaUrl(message.url, props.media.name);
-                }),
+              actionCommand(
+                commandDownload,
+                () =>
+                  Effect.sync(() => {
+                    if (!props.protected) saveMediaUrl(message.url, props.media.name);
+                  }),
+                'replace',
               ),
             ],
           };
@@ -270,7 +289,8 @@ export const MediaAttachment = component<
           model: next,
           commands: [
             {
-              slot: 'open',
+              policy: 'replace',
+              slot: commandOpen,
               effect: Effect.sync((): MediaAttachmentMessage => ({
                 type: 'PreviewOpened',
                 standalone:

@@ -1,4 +1,4 @@
-import type { Effect } from 'effect';
+import { Context, Effect } from 'effect';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type { TelegramWallpaper } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
@@ -13,22 +13,22 @@ import {
   readThemePreferences,
   saveThemePreferences,
 } from './themePreferences';
-interface AppearanceSource {
+export interface AppearanceSource {
   getWallpapers(): Effect.Effect<TelegramWallpaper[], MessagingError>;
   downloadWallpaper(wallpaperId: string): Effect.Effect<Blob, MessagingError>;
 }
 
+export const AppearanceSource = Context.Service<AppearanceSource>('ui/AppearanceSource');
 const wallpaperCatalog = query({
   name: 'wallpapers',
-  key: (_source: AppearanceSource) => 'catalog',
-  load: (source: AppearanceSource) => source.getWallpapers(),
+  load: () => Effect.flatMap(AppearanceSource, (source) => source.getWallpapers()),
 });
 
 /** Owns application-wide appearance persistence and wallpaper object URLs. */
 export function createAppearanceSession(
   source: AppearanceSource,
   runEffect: UiEffectRunner,
-  context: SessionContext,
+  context: SessionContext<AppearanceSource>,
 ) {
   const scope = lifetime();
   type AppearanceSessionModel = {
@@ -79,7 +79,7 @@ export function createAppearanceSession(
     },
   });
   const catalog = queryResource(context, wallpaperCatalog);
-  const refresh = () => catalog.select(state.model().catalogRequested ? source : undefined);
+  const refresh = () => catalog.select(state.model().catalogRequested ? true : undefined);
   scope.add(catalog.dispose);
   scope.add(state.subscribe(refresh));
   const telegramWallpapers = () => available(catalog.read()) ?? [];
@@ -135,7 +135,8 @@ export function createAppearanceSession(
   const selectWallpaper = (wallpaper: ThemePreferences['wallpaper']) => {
     const next = { ...state.model().appearance, wallpaper };
     commit(next);
-    if (wallpaper === 'custom' || wallpaper === 'telegram') void loadStoredWallpaper(next);
+    if (wallpaper === 'custom' || wallpaper === 'telegram')
+      loadStoredWallpaper(next).catch(() => undefined);
   };
   const selectTelegramWallpaper = async (wallpaper: TelegramWallpaper) => {
     if (state.model().wallpaperBusy) return;
@@ -196,7 +197,7 @@ export function createAppearanceSession(
       preferences.wallpaper === 'custom' ||
       (preferences.wallpaper === 'telegram' && preferences.telegramWallpaper?.hasFile)
     ) {
-      void loadStoredWallpaper(preferences);
+      loadStoredWallpaper(preferences).catch(() => undefined);
     }
   })();
   scope.add(() => {

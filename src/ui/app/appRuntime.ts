@@ -94,16 +94,22 @@ export const subscribeAtUi = <Error>(
   let release: Effect.Effect<void> | undefined;
   let disposed = false;
   const finalize = (finalizer: Effect.Effect<void>) =>
-    runEffect(Effect.exit(finalizer)).then(() => undefined);
-  void runEffect(Effect.exit(acquire)).then((result) => {
-    if (Exit.isFailure(result)) return;
-    const nextRelease = result.value;
-    if (disposed) void finalize(nextRelease);
-    else release = nextRelease;
-  });
+    runEffect(Effect.exit(finalizer)).then(
+      () => undefined,
+      () => undefined,
+    );
+  runEffect(Effect.exit(acquire))
+    .then((result) => {
+      if (Exit.isFailure(result)) return;
+      const nextRelease = result.value;
+      if (disposed) return finalize(nextRelease);
+      else release = nextRelease;
+      return undefined;
+    })
+    .catch(() => undefined);
   return () => {
     disposed = true;
-    if (release) void finalize(release);
+    if (release) finalize(release).catch(() => undefined);
   };
 };
 
@@ -224,7 +230,7 @@ export const appRuntimeLayer = Layer.mergeAll(
 );
 
 export const makeDefaultAppEnvironment = Effect.fn('AppEnvironment.make')(function* (
-  search = window.location.search,
+  search: string = window.location.search,
 ) {
   const tasks = yield* FiberSet.make();
   const runEffect = yield* FiberSet.runtimePromise(tasks)();

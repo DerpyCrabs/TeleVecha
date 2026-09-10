@@ -1,3 +1,4 @@
+import { commandSlot } from 'effectweb';
 import { Effect } from 'effect';
 import type { Read } from 'effectweb/session';
 import { program } from 'effectweb';
@@ -11,6 +12,8 @@ import {
   initialConversationViewportState,
   transitionConversationViewport,
 } from './conversationViewportMachine';
+const commandDom = commandSlot('dom');
+
 interface ConversationMessage {
   id: string;
   outgoing: boolean;
@@ -57,11 +60,14 @@ export function createConversationViewport(options: ConversationViewportOptions)
       return {
         model,
         commands: [
-          actionCommand('dom', () =>
-            Effect.sync(() => {
-              applyEffects(next.effects, input.scroller);
-              options.reportVisibility();
-            }),
+          actionCommand(
+            commandDom,
+            () =>
+              Effect.sync(() => {
+                applyEffects(next.effects, input.scroller);
+                options.reportVisibility();
+              }),
+            'replace',
           ),
         ],
       };
@@ -136,7 +142,10 @@ export function createConversationViewport(options: ConversationViewportOptions)
       }
     }
   };
-  function dispatch(event: ConversationViewportEvent, scroller = options.scroller()) {
+  function dispatch(
+    event: ConversationViewportEvent,
+    scroller: HTMLDivElement | undefined = options.scroller(),
+  ) {
     source.send({ type: 'Viewport', event, scroller });
   }
   let wasEmpty = false;
@@ -359,7 +368,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
     captureAnchor: () => {
       dispatch({ type: 'reading-anchor-requested' });
     },
-    updateJump: (scroller: HTMLDivElement, allowFollowing = false) => {
+    updateJump: (scroller: HTMLDivElement, allowFollowing: boolean = false) => {
       if (allowFollowing && atPresent(scroller)) dispatch({ type: 'present-visible' }, scroller);
       options.reportVisibility();
     },

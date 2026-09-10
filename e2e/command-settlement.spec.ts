@@ -55,3 +55,42 @@ test('the real GIF retry button runs its cold Effect on every accepted click', a
   await retry.click();
   await expect(page.locator('body')).toHaveAttribute('data-gif-attempts', '2');
 });
+
+test('video preview identity preserves the current instance and replaces its entire lifetime', async ({
+  page,
+}) => {
+  await page.goto('/e2e/fixtures/index.html');
+  const result = await page.evaluate(async () => {
+    const path = '/src/ui/testing/commandFixture.ts';
+    const { mountPreviewIdentityFixture } = (await import(
+      path
+    )) as typeof import('../src/ui/testing/commandFixture');
+    const fixture = mountPreviewIdentityFixture(document.body);
+    const first = document.querySelector<HTMLButtonElement>('.link-preview-play')!;
+    first.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.rename();
+    const preserved = first === document.querySelector('.link-preview-play') && first.disabled;
+    fixture.replace();
+    const second = document.querySelector<HTMLButtonElement>('.link-preview-play')!;
+    const replaced = second !== first && !first.isConnected && !second.disabled;
+    second.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const starts = fixture.starts();
+    await fixture.close();
+    return {
+      preserved,
+      replaced,
+      starts,
+      releases: fixture.releases(),
+      removed: !second.isConnected,
+    };
+  });
+  expect(result).toEqual({
+    preserved: true,
+    replaced: true,
+    starts: 2,
+    releases: 2,
+    removed: true,
+  });
+});

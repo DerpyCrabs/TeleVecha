@@ -143,7 +143,7 @@ function defaultIdentity(): MtprotoClientIdentity {
 
 const endpoint = Effect.fn('mtproto.client.endpoint')(function* (
   dcId: number,
-  dedicatedMedia = false,
+  dedicatedMedia: boolean = false,
 ) {
   if (!Number.isSafeInteger(dcId) || dcId < 1 || dcId > MAX_DC_ID) {
     return yield* Effect.fail(
@@ -580,9 +580,9 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
       >,
     downloadFile: (location, downloadOptions) =>
       downloadTelegramFile(fileRpc, location, downloadOptions),
-    downloadMedia: (value, downloadOptions = {}) =>
+    downloadMedia: (value, downloadOptions: DownloadMediaOptions | undefined = {}) =>
       downloadTelegramMedia(fileRpc, value, downloadOptions),
-    downloadProfilePhoto: (entity, big = false) =>
+    downloadProfilePhoto: (entity, big: boolean | undefined = false) =>
       downloadTelegramProfilePhoto(fileRpc, entity, big),
     events: Stream.fromPubSub(eventHub),
   };

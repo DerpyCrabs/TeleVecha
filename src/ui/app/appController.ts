@@ -1,4 +1,5 @@
-import { Effect } from 'effect';
+import { Context, Effect } from 'effect';
+import { uiRuntime } from 'effectweb';
 import * as Atom from 'effect/unstable/reactivity/Atom';
 import { messageTextForClipboard } from '../../domain/messageText';
 import type { ChatMessage, ChatSummary } from '../../domain/models';
@@ -21,12 +22,12 @@ import type {
   TelegramMessage,
   TelegramPeerSearchResult,
 } from '../../telegram/types';
-import { createBotSession } from '../bots/botSession';
+import { createBotSession, BotCommandSource } from '../bots/botSession';
 import { createReplyKeyboardSession } from '../bots/replyKeyboardSession';
 import { createChatDirectory } from '../chat/chatDirectory';
 import { createContactDetailsSession } from '../chat/contactDetailsSession';
 import { createComposerSession } from '../composer/composerSession';
-import { createExpressionSession } from '../composer/expressionSession';
+import { createExpressionSession, ExpressionSource } from '../composer/expressionSession';
 import { createConversationHeaderSession } from '../conversation/conversationHeaderSession';
 import { createConversationHistorySession } from '../conversation/conversationHistorySession';
 import {
@@ -45,13 +46,16 @@ import { domMount, program } from 'effectweb';
 import { makeQueryCache } from 'effectweb/cache';
 import { projectionPublication } from './projectionPublication';
 import { modalVisible, subscribeModalVisibility } from '../shared/focusScope';
-import { createAppearanceSession } from '../theme/appearanceSession';
-import { createChatAppearanceSession, chatAppearanceQuery } from '../theme/chatAppearanceSession';
+import { createAppearanceSession, AppearanceSource } from '../theme/appearanceSession';
+import {
+  createChatAppearanceSession,
+  chatAppearanceQuery,
+  ChatAppearanceSource,
+} from '../theme/chatAppearanceSession';
 import type { AppEnvironment } from './appRuntime';
 import { subscribeAtUi } from './appRuntime';
 import { createDrawerFocusSession } from './drawerFocusSession';
 import { retainPeerValue } from './retainedPeerValues';
-import type { SessionContext } from 'effectweb/session';
 import { lifetime, projectionCache, sessionGroup } from 'effectweb/session';
 import { createSidebarLayout } from './sidebarLayout';
 function whenChanged<A>(read: () => A, run: (value: A) => void) {
@@ -175,8 +179,15 @@ export function createAppController(props: AppProps) {
   });
   const changed = publication.changed;
   publication.watch(state);
-  const model = makeQueryCache();
-  const context: SessionContext = { cache: model, changed };
+  const queryRuntime = uiRuntime(
+    Context.make(ExpressionSource, engine).pipe(
+      Context.add(AppearanceSource, engine),
+      Context.add(ChatAppearanceSource, engine),
+      Context.add(BotCommandSource, engine),
+    ),
+  );
+  const model = makeQueryCache(queryRuntime);
+  const context = { cache: model, changed };
   const presentConversation = createConversationPresenter();
   const presentDialog = createDialogPresenter();
   const sidebarLayout = createSidebarLayout({
@@ -239,7 +250,7 @@ export function createAppController(props: AppProps) {
     state.send({ type: 'Changed', changes: { settingsOpen: true } });
     if (!telegramWallpapers().length && !appearanceCatalogLoading()) {
       // Loading the export UI must not become part of the bug being exported.
-      void appearanceSession.loadCatalog();
+      runInBackground(appearanceSession.loadCatalog());
     }
   };
   const online = () => {
@@ -297,7 +308,7 @@ export function createAppController(props: AppProps) {
         .snapshot.dialogs.reduce((total, dialog) => total + Math.max(0, dialog.unreadCount), 0);
       const update =
         unread > 0 ? badgeNavigator.setAppBadge?.(unread) : badgeNavigator.clearAppBadge?.();
-      if (update) runInBackground(update);
+      if (update !== undefined) runInBackground(update);
     },
   );
   const activeChat = selectors.select(() => {
@@ -1134,7 +1145,6 @@ export function createAppController(props: AppProps) {
       engine.subscribeResources((event) => {
         if (!mounted) return;
         if (event.kind === 'peer-metadata') {
-          model.invalidate(event.peerId ? `user-details:${event.peerId}` : 'user-details:');
           model.invalidateQuery(chatAppearanceQuery);
         }
       }),
@@ -1527,6 +1537,7 @@ export function createAppController(props: AppProps) {
     sidebarLayout,
     mediaAssets,
     chatDirectory,
+    deleteChat: chatDirectory.delete,
     setDeleteChatTarget: (
       value:
         | TelegramDialog
@@ -1775,7 +1786,16 @@ export function createAppController(props: AppProps) {
     reconcileReplyKeyboard();
     updateConversationVisibility();
   }
+  const mediaRevisions = selectors.select(() =>
+    Object.fromEntries(
+      [...state.model().snapshot.messages, ...renderedMessages()].map((message) => [
+        String(message.id),
+        mediaAssetFor(message.id)?.revision,
+      ]),
+    ),
+  );
   const project = () => ({
+    mediaRevisions: mediaRevisions(),
     ...actions,
     detailsOpen: detailsOpen(),
     mobileSidebarOpen: mobileSidebarOpen(),

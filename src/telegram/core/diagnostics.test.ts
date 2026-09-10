@@ -17,7 +17,7 @@ describe('diagnostics', () => {
         level: 'info',
         area: 'sync',
         message: 'Caught up.',
-        time: expect.any(String),
+        time: expect.any(String) as unknown,
       }),
     ]);
     consoleInfo.mockRestore();

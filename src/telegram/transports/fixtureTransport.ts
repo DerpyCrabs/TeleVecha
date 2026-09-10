@@ -898,7 +898,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
     function searchMessages(
       query: string,
       peer?: TelegramPeer,
-      limit = 50,
+      limit: number = 50,
       offset?: TelegramSearchOffset,
     ) {
       return Effect.sync(() => {
@@ -913,7 +913,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
     }
     const searchPeers = Effect.fn('FixtureTransport.searchPeers')(function* (
       query: string,
-      limit = 50,
+      limit: number = 50,
     ) {
       stats.searchPeers += 1;
       if (scenario === 'peer-search-fails')
@@ -1121,7 +1121,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         stats.deleteContact += 1;
       });
     }
-    function getGroupMembers(peer: TelegramPeer, limit = 50, offset = 0) {
+    function getGroupMembers(peer: TelegramPeer, limit: number = 50, offset: number = 0) {
       return Effect.sync(() => {
         if (peer.kind === 'user') return { members: [], totalCount: 0, hasMore: false };
         const allMembers = [

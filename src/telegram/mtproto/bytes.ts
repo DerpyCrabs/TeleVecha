@@ -57,12 +57,12 @@ export function utf8Bytes(value: string) {
   return new TextEncoder().encode(value);
 }
 
-export function readInt32Le(bytes: Uint8Array, offset = 0) {
+export function readInt32Le(bytes: Uint8Array, offset: number = 0) {
   requireRange(bytes, offset, 4);
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getInt32(offset, true);
 }
 
-export function readUint32Le(bytes: Uint8Array, offset = 0) {
+export function readUint32Le(bytes: Uint8Array, offset: number = 0) {
   requireRange(bytes, offset, 4);
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(offset, true);
 }

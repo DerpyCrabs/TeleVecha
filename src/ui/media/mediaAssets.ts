@@ -43,7 +43,7 @@ export function createMediaAssets(
     peer: TelegramPeer,
     hasAvatar: boolean,
     avatarId: string | undefined,
-    cachedOnly = false,
+    cachedOnly: boolean = false,
   ) =>
     Effect.suspend(() => {
       if (!hasAvatar) return Effect.succeed(undefined);
@@ -117,7 +117,7 @@ export function createMediaAssets(
 
   return {
     loadPeerAvatar,
-    loadAvatar(peerId: string, cachedOnly = false) {
+    loadAvatar(peerId: string, cachedOnly: boolean = false) {
       const dialog = dialogs().find(({ peer }) => peer.id === peerId);
       return dialog
         ? loadPeerAvatar(dialog.peer, dialog.hasAvatar, dialog.avatarId, cachedOnly)
@@ -165,7 +165,7 @@ export function createMediaAssets(
     dispose() {
       for (const url of avatarUrls.values()) URL.revokeObjectURL(url);
       avatarUrls.clear();
-      for (const key of activeLoadKeys) void runSharedEffect.cancel(key);
+      for (const key of activeLoadKeys) runSharedEffect.cancel(key).catch(() => undefined);
       activeLoadKeys.clear();
       customEmojiAssets.clear();
       clearAssetUrls();

@@ -1,9 +1,12 @@
+import { commandSlot } from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
 import { available, component, resourceComponent, view } from 'effectweb';
 import { effectCommand } from 'effectweb/program';
 import { loadEffect } from 'effectweb/cache';
 import { safeExternalUrl } from '../shared/safeUrl';
+const commandMedia = commandSlot('media');
+
 interface LinkPreviewProps {
   preview: NonNullable<ChatMessage['linkPreview']>;
   loadPhoto?: (() => Effect.Effect<string, unknown>) | undefined;
@@ -28,10 +31,7 @@ type PreviewVideoMessage =
   | { type: 'Failed' };
 const PreviewVideo = component<PreviewVideoProps, PreviewVideoModel, PreviewVideoMessage>({
   init: (props) => ({ props, source: undefined, loading: false, failed: false }),
-  receive: (model, props) =>
-    model.props.identity === props.identity
-      ? { model: { ...model, props } }
-      : { model: { props, source: undefined, loading: false, failed: false }, cancel: ['media'] },
+  identity: (props) => props.identity,
   update: (model, message) => {
     switch (message.type) {
       case 'Play':
@@ -40,9 +40,10 @@ const PreviewVideo = component<PreviewVideoProps, PreviewVideoModel, PreviewVide
           model: { ...model, source: undefined, loading: true, failed: false },
           commands: [
             effectCommand(
-              'media',
+              commandMedia,
               () => model.props.load?.() ?? Effect.fail(new Error('Video unavailable')),
               {
+                policy: 'replace',
                 onSuccess: (source) => ({ type: 'Loaded', source }) as const,
                 onFailure: () => ({ type: 'Failed' }) as const,
               },

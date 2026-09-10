@@ -6,6 +6,7 @@ import { MessagingError } from '../telegram/core/messagingError';
 import { conversationViewSnapshot } from '../telegram/core/engineState';
 import type {
   EngineSnapshot,
+  ConversationViewSnapshot,
   SharedMediaCounts,
   SharedMediaKind,
   TelegramMessage,
@@ -190,7 +191,7 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
       },
       openMessageInConversationView(
         message: TelegramMessage,
-        currentView = conversationViewSnapshot(snapshot),
+        currentView: ConversationViewSnapshot = conversationViewSnapshot(snapshot),
       ) {
         const messages = histories[message.peerId] ?? [];
         return Effect.succeed({
@@ -198,17 +199,23 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
           found: messages.some(({ id }) => id === message.id),
         });
       },
-      loadOlderConversationView(_peerId: string, currentView = conversationViewSnapshot(snapshot)) {
+      loadOlderConversationView(
+        _peerId: string,
+        currentView: ConversationViewSnapshot = conversationViewSnapshot(snapshot),
+      ) {
         return Effect.succeed(currentView);
       },
       loadHistoryGapConversationView(
         _peerId: string,
         _gap: unknown,
-        currentView = conversationViewSnapshot(snapshot),
+        currentView: ConversationViewSnapshot = conversationViewSnapshot(snapshot),
       ) {
         return Effect.succeed(currentView);
       },
-      retryConversationView(_peerId: string, currentView = conversationViewSnapshot(snapshot)) {
+      retryConversationView(
+        _peerId: string,
+        currentView: ConversationViewSnapshot = conversationViewSnapshot(snapshot),
+      ) {
         return Effect.succeed(currentView);
       },
       loadConversationSharedMediaCounts: () => Effect.succeed(undefined),
@@ -470,7 +477,7 @@ function optionalString(record: Record<string, unknown>, key: string) {
   return typeof value === 'string' ? { [key]: value } : {};
 }
 
-function placeholderForMessage(message: TelegramMessage, preview = false) {
+function placeholderForMessage(message: TelegramMessage, preview: boolean = false) {
   const media = message.media ?? message.linkPreview?.media;
   return createTvBugPlaceholder({
     byteSize: preview ? 4_096 : (media?.size ?? 4_096),

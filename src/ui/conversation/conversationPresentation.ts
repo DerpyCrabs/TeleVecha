@@ -14,7 +14,7 @@ function pendingMessage(
   id: string,
   randomId: string,
   attachment?: PendingAttachment,
-  index = 0,
+  index: number = 0,
 ): KeyedMessageView {
   const first = index === 0;
   const media = send.sticker

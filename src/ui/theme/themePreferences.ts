@@ -118,7 +118,7 @@ export function readableTextColor(background: string) {
   return luminance > 0.46 ? '#18212b' : '#f2f6fa';
 }
 
-export function telegramWallpaperBackground(colors: readonly string[], rotation = 135) {
+export function telegramWallpaperBackground(colors: readonly string[], rotation: number = 135) {
   if (colors.length === 0) return '';
   if (colors.length === 1) return colors[0]!;
   if (colors.length === 2) {
@@ -230,7 +230,7 @@ export function normalizeThemePreferences(value: unknown): ThemePreferences {
 export function readThemePreferences(storage: Pick<Storage, 'getItem'> = localStorage) {
   try {
     const stored = storage.getItem(THEME_STORAGE_KEY);
-    const parsed = stored ? JSON.parse(stored) : undefined;
+    const parsed: unknown = stored ? JSON.parse(stored) : undefined;
     const normalized = normalizeThemePreferences(parsed);
     if (
       parsed &&

@@ -1,3 +1,4 @@
+import { list as renderList } from 'effectweb';
 import type { TelegramBotButton, TelegramBotKeyboard } from '../../telegram/types';
 import { sequence, view } from 'effectweb';
 interface BotKeyboardProps {
@@ -15,9 +16,9 @@ export const BotKeyboard = view<BotKeyboardProps, never>((props, _send) => {
       aria-label={props.label}
       data-testid={`${props.keyboard.kind}-bot-keyboard`}
     >
-      {sequence(props.keyboard.rows).map((row, rowIndex) => (
+      {renderList(sequence(props.keyboard.rows), (row, rowIndex) => (
         <div class="bot-keyboard-row">
-          {sequence(row).map((button, buttonIndex) => {
+          {renderList(sequence(row), (button, buttonIndex) => {
             const key = () => `${rowIndex}:${buttonIndex}`;
             return (
               <button

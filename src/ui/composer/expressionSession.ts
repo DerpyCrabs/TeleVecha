@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Context, Effect } from 'effect';
 import type { EffectConversation } from '../../telegram/core/conversation';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
@@ -13,7 +13,7 @@ import type { Read, SessionContext } from 'effectweb/session';
 import { lifetime, queryResource } from 'effectweb/session';
 import { query } from 'effectweb/query';
 import { available, program, resourceError } from 'effectweb';
-interface ExpressionSource {
+export interface ExpressionSource {
   getRecentStickers(): Effect.Effect<TelegramSticker[], MessagingError>;
   getStickerPacks(): Effect.Effect<TelegramStickerPack[], MessagingError>;
   getSavedGifs(): Effect.Effect<TelegramSticker[], MessagingError>;
@@ -22,25 +22,27 @@ interface ExpressionSource {
   ): Effect.Effect<Effect.Effect<void>, MessagingError>;
 }
 
+export const ExpressionSource = Context.Service<ExpressionSource>('ui/ExpressionSource');
+
 // Catalogs have no entity parameters. Their source supplies operations, while the cache owns
 // account identity; recreating a session or its callbacks does not create another catalog.
 export const stickerCatalog = query({
   name: 'expressions:stickers',
-  key: (_source: ExpressionSource) => 'catalog',
-  load: (source: ExpressionSource) =>
-    Effect.all([source.getRecentStickers(), source.getStickerPacks()], {
-      concurrency: 'unbounded',
-    }).pipe(
-      Effect.map(([recent, installed]) => [
-        ...(recent.length ? [{ id: 'recent', title: 'Recent', stickers: recent }] : []),
-        ...installed,
-      ]),
+  load: () =>
+    Effect.flatMap(ExpressionSource, (source) =>
+      Effect.all([source.getRecentStickers(), source.getStickerPacks()], {
+        concurrency: 'unbounded',
+      }).pipe(
+        Effect.map(([recent, installed]) => [
+          ...(recent.length ? [{ id: 'recent', title: 'Recent', stickers: recent }] : []),
+          ...installed,
+        ]),
+      ),
     ),
 });
 export const gifCatalog = query({
   name: 'expressions:gifs',
-  key: (_source: ExpressionSource) => 'catalog',
-  load: (source: ExpressionSource) => source.getSavedGifs(),
+  load: () => Effect.flatMap(ExpressionSource, (source) => source.getSavedGifs()),
 });
 
 /** Owns expression catalogs, picker exclusivity, invalidation, and sends. */
@@ -54,7 +56,7 @@ export function createExpressionSession(
     canSendGifs: Read<boolean>;
     clearReply: () => void;
   },
-  context: SessionContext,
+  context: SessionContext<ExpressionSource>,
 ) {
   const scope = lifetime();
   type Model = { stickerOpen: boolean; gifOpen: boolean; visible: boolean };
@@ -79,8 +81,8 @@ export function createExpressionSession(
   const stickers = queryResource(context, stickerCatalog);
   const savedGifs = queryResource(context, gifCatalog);
   const refresh = () => {
-    stickers.select(state.model().stickerOpen ? options.source : undefined);
-    savedGifs.select(state.model().gifOpen ? options.source : undefined);
+    stickers.select(state.model().stickerOpen ? true : undefined);
+    savedGifs.select(state.model().gifOpen ? true : undefined);
   };
   scope.add(state.subscribe(refresh));
   scope.add(stickers.dispose);
