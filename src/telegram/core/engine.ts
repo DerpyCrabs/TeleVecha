@@ -3420,14 +3420,15 @@ function makeMessagingEngineModule(
       yield* flushOutbox();
     },
   );
-  function cachedChannelNeedsRepair(dialog: TelegramDialog, messages: readonly TelegramMessage[]) {
-    if (dialog.peer.kind !== 'channel' || messages.length === 0) return false;
-    if (
-      dialog.topMessageId !== undefined &&
-      !messages.some(({ id }) => id === dialog.topMessageId)
-    ) {
+  function cachedHistoryNeedsRepair(dialog: TelegramDialog, messages: readonly TelegramMessage[]) {
+    if (messages.length === 0) return false;
+    // A current update cursor does not guarantee that this peer's cached
+    // history contains the latest dialog head, including sends from other devices.
+    if (dialog.topMessageId > 0 && !messages.some(({ id }) => id === dialog.topMessageId)) {
       return true;
     }
+    // Only channels have per-peer consecutive message IDs for album repair.
+    if (dialog.peer.kind !== 'channel') return false;
     const albums = new Map<string, number[]>();
     for (const message of messages) {
       if (!message.groupedId) continue;
@@ -3443,7 +3444,7 @@ function makeMessagingEngineModule(
   }
   const scheduleCachedHistoryRepair = Effect.fn('MessagingEngine.scheduleCachedHistoryRepair')(
     function* (dialog: TelegramDialog, messages: readonly TelegramMessage[]) {
-      if (!currentSnapshot().online || !cachedChannelNeedsRepair(dialog, messages)) return;
+      if (!currentSnapshot().online || !cachedHistoryNeedsRepair(dialog, messages)) return;
       const peerId = dialog.peer.id;
       const session = sessionScope;
       const accountId = activeAccountId;

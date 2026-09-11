@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { EngineStateLayer } from '../core/engineState';
 import { CoordinatorTasksLayer } from './coordinatorTasks';
 import { makeTabCoordinator } from './tabCoordinator';
+import type { TelegramMessage } from '../types';
 
 const provideCoordinator = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.scoped(effect).pipe(Effect.provide(Layer.merge(EngineStateLayer, CoordinatorTasksLayer)));
@@ -36,6 +37,120 @@ const installChannel = () => {
     },
   });
 };
+
+it.each(['u:101', 'g:303', 'c:202'])(
+  'repairs an open cached conversation when reconnect discovers a newer head for %s',
+  (peerId) => {
+    installChannel();
+    return Effect.runPromise(
+      provideCoordinator(
+        Effect.gen(function* () {
+          const original = yield* createFixtureTelegramTransport();
+          const store = makeMemoryCacheStore();
+          let remoteMessages: TelegramMessage[] = [];
+          const engine = yield* makeMessagingEngine(
+            {
+              ...original,
+              getDialogs: () =>
+                original
+                  .getDialogs()
+                  .pipe(
+                    Effect.map((page) => ({
+                      ...page,
+                      dialogs: page.dialogs.map((dialog) =>
+                        dialog.peer.id === peerId && remoteMessages.length > 0
+                          ? {
+                              ...dialog,
+                              topMessage: remoteMessages.at(-1)!,
+                              topMessageId: remoteMessages.at(-1)!.id,
+                            }
+                          : dialog,
+                      ),
+                    })),
+                  ),
+              getHistory: (...args) =>
+                original
+                  .getHistory(...args)
+                  .pipe(
+                    Effect.map((page) => ({
+                      ...page,
+                      messages:
+                        args[0].id === peerId
+                          ? [...page.messages, ...remoteMessages]
+                          : page.messages,
+                    })),
+                  ),
+            },
+            store,
+            { manageTabLease: false },
+          );
+          const coordinator = yield* makeTabCoordinator({
+            key: `reconnect-missing-head:${peerId}`,
+            loadBlob: () => Effect.succeed(undefined),
+            createOwner: () => Effect.succeed({ engine }),
+          });
+          yield* coordinator.start({ apiId: 1, apiHash: 'fixture' });
+          yield* Effect.yieldNow;
+          yield* coordinator.client.openConversation(peerId);
+          yield* Effect.yieldNow;
+          const before = coordinator.client.snapshot().messages;
+          const last = before.at(-1)!;
+          expect(last).toBeDefined();
+
+          window.__televechaFixture?.emit({ type: 'connection-state', connected: false });
+          yield* Effect.promise(() =>
+            expect.poll(() => coordinator.client.snapshot().online).toBe(false),
+          );
+          remoteMessages = [
+            {
+              ...last,
+              id: last.id + 1,
+              senderId: 'self',
+              text: 'Sent from another device while disconnected',
+              date: last.date + 1,
+              outgoing: true,
+              ...(peerId.startsWith('c:') ? {} : { groupedId: 'remote-album' }),
+            },
+            {
+              ...last,
+              id: last.id + 3,
+              senderId: 'self',
+              text: 'Another message sent from the other device',
+              date: last.date + 2,
+              outgoing: true,
+              ...(peerId.startsWith('c:') ? {} : { groupedId: 'remote-album' }),
+            },
+          ];
+          // Match the tvbug: the cursor is current and the refreshed dialog has
+          // a newer head, but the cached conversation still ends before it.
+          yield* engine.retrySync();
+          yield* Effect.promise(() =>
+            expect
+              .poll(() => coordinator.client.snapshot())
+              .toMatchObject({ online: true, sync: 'current' }),
+          );
+          expect(
+            coordinator.client.snapshot().dialogs.find(({ peer }) => peer.id === peerId)
+              ?.topMessageId,
+          ).toBe(remoteMessages.at(-1)!.id);
+          yield* Effect.promise(() =>
+            expect
+              .poll(() => coordinator.client.snapshot().messages)
+              .toEqual([...before, ...remoteMessages]),
+          );
+          expect(yield* store.loadMessage(peerId, remoteMessages[0]!.id)).toMatchObject(
+            remoteMessages[0]!,
+          );
+          expect(window.__televechaFixture?.stats.getHistory).toBe(2);
+          yield* coordinator.client.openConversation(peerId);
+          yield* Effect.yieldNow;
+          // Private/group message IDs need not be consecutive, even in albums.
+          expect(window.__televechaFixture?.stats.getHistory).toBe(2);
+        }),
+      ).pipe(Effect.provide(MessagingEngineLayer), Effect.provide(BrowserCrypto.layer)),
+    );
+  },
+);
 
 it('retains a confirmed send when refresh metadata resolves after the history snapshot', () => {
   installChannel();

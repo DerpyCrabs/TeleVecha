@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { fixtureStats } from './helpers';
+import { chatButton, fixtureStats } from './helpers';
 
 const CACHE_SCENARIO = 'held-connect+multiple-pins';
 const CACHE_PATH = `/?scenario=${encodeURIComponent(CACHE_SCENARIO)}&chat=u%3A101`;
@@ -69,6 +69,53 @@ test('restores pinned messages from cache before Telegram reconnects', async ({ 
     page.getByRole('button', { name: /Pinned message 1 of 2.*Fixture message 79/ }),
   ).toBeVisible();
   expect((await fixtureStats(page))?.getPinnedMessages).toBe(0);
+});
+
+test('repairs cached private-chat history behind the dialog head after reconnect', async ({
+  page,
+}) => {
+  await page.goto(CACHE_PATH);
+  await releaseConnectionAndWaitUntilReady(page);
+  const scroller = page.getByTestId('message-scroller');
+  await expect(scroller).toContainText('Newest message from fixture');
+  await expect.poll(() => fixtureStats(page).then((stats) => stats?.getPinnedMessages)).toBe(1);
+
+  // Recreate the tvbug's persisted state: Telegram's current dialog points to
+  // an outgoing message absent from the cached conversation history.
+  await page.evaluate(async (scenario) => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(`televecha-e2e-${scenario}`);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction('messages', 'readwrite');
+        transaction.objectStore('messages').delete(['u:101', 79]);
+        transaction.objectStore('messages').delete(['u:101', 80]);
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = () => reject(transaction.error);
+      });
+    } finally {
+      database.close();
+    }
+  }, CACHE_SCENARIO);
+
+  await page.reload();
+  await waitForCachedWorkspace(page);
+  await expect(scroller.locator('article.message').last()).toHaveAttribute('data-message-id', '78');
+  await expect(chatButton(page, /Alice Fixture/)).toContainText('Newest message from fixture');
+  const retained = scroller.locator('article[data-message-id="78"]');
+  await retained.evaluate((element) => {
+    element.dataset.beforeRepair = 'preserved';
+  });
+
+  await releaseConnectionAndWaitUntilReady(page);
+  await expect(scroller).toContainText('Newest message from fixture');
+  await expect(scroller.locator('article[data-message-id="79"]')).toHaveCount(1);
+  await expect(scroller.locator('article[data-message-id="80"]')).toHaveCount(1);
+  await expect(retained).toHaveAttribute('data-before-repair', 'preserved');
+  expect((await fixtureStats(page))?.getHistory).toBe(1);
 });
 
 test('restores an assigned chat background from cache before Telegram reconnects', async ({
