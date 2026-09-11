@@ -950,6 +950,7 @@ function makeMessagingEngineModule(
     }
     if (
       pinnedMessageCache.isFresh(dialog.peer.id, PEER_METADATA_CACHE_TTL_MS) ||
+      !pinnedMessageCache.canRefresh(dialog.peer.id) ||
       !currentSnapshot().online
     ) {
       return cached?.value ?? [];
@@ -970,12 +971,15 @@ function makeMessagingEngineModule(
     }).pipe(
       Effect.catch((error) =>
         Effect.gen(function* () {
-          if (isOperationCurrent(session, accountId)) {
-            yield* fail(
+          if (
+            isOperationCurrent(session, accountId) &&
+            pinnedMessageCache.version(dialog.peer.id) === version
+          ) {
+            pinnedMessageCache.deferRefresh(dialog.peer.id);
+            yield* reportFailure(
               'sync',
               `Could not load pinned messages for ${dialog.title}.`,
               error,
-              false,
             );
           }
           return undefined;
@@ -1438,7 +1442,7 @@ function makeMessagingEngineModule(
             isOperationCurrent(session, accountId) &&
             capturedMetadataGeneration === metadataGeneration &&
             resourceCache.version(resourceKey) === resourceVersion
-              ? fail('sync', 'Could not load user details.', error, false)
+              ? reportFailure('sync', 'Could not load user details.', error)
               : Effect.void,
           ),
         ),
@@ -2917,7 +2921,7 @@ function makeMessagingEngineModule(
           Effect.tapError((error) =>
             isOperationCurrent(session, accountId) &&
             capturedMetadataGeneration === metadataGeneration
-              ? fail('sync', "Could not load this bot's commands.", error, false)
+              ? reportFailure('sync', "Could not load this bot's commands.", error)
               : Effect.void,
           ),
         ),

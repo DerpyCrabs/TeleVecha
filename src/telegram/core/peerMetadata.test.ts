@@ -64,6 +64,44 @@ describe('peer metadata', () => {
       ),
     ));
 
+  it('backs off failed refreshes per peer and resets after a success or invalidation', () =>
+    run(
+      Effect.scoped(
+        Effect.gen(function* () {
+          let now = 0;
+          const requests = yield* makeResourceCache();
+          const metadata = makePeerMetadata<string, Error>('test', requests, {
+            load: () => Effect.succeed(undefined),
+            save: () => Effect.void,
+            remove: () => Effect.void,
+            onFailure: () => Effect.void,
+            now: () => now,
+          });
+          yield* metadata.remember('u:1', 'cached');
+          for (const delay of [30_000, 60_000, 120_000, 240_000, 300_000, 300_000]) {
+            metadata.deferRefresh('u:1');
+            expect(metadata.canRefresh('u:1')).toBe(false);
+            expect(metadata.canRefresh('u:2')).toBe(true);
+            expect(metadata.current('u:1')?.value).toBe('cached');
+            now += delay - 1;
+            expect(metadata.canRefresh('u:1')).toBe(false);
+            now += 1;
+            expect(metadata.canRefresh('u:1')).toBe(true);
+          }
+          yield* metadata.remember('u:1', 'fresh');
+          metadata.deferRefresh('u:1');
+          now += 30_000;
+          expect(metadata.canRefresh('u:1')).toBe(true);
+          metadata.deferRefresh('u:1');
+          yield* metadata.bump('u:1');
+          expect(metadata.canRefresh('u:1')).toBe(true);
+          metadata.deferRefresh('u:1');
+          yield* metadata.clear;
+          expect(metadata.canRefresh('u:1')).toBe(true);
+        }),
+      ),
+    ));
+
   it('keeps the in-memory value available when persistence fails', () =>
     run(
       Effect.scoped(

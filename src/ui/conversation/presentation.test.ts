@@ -55,6 +55,26 @@ describe('presentation', () => {
     });
   });
 
+  it('summarizes voice replies with the author and duration instead of a generated filename', () => {
+    const reply = message({
+      id: 2,
+      text: '',
+      senderName: 'Alice',
+      media: { kind: 'voice', name: 'voice-839284922.ogg', mimeType: 'audio/ogg', duration: 58 },
+    });
+    expect(presentMessage(message({ replyToId: 2 }), 0, reply)).toMatchObject({
+      replyTo: 'Voice message · 0:58',
+      replyAuthor: 'Alice',
+      replyToId: 2,
+    });
+    expect(
+      presentMessage(message({ replyToId: 2, replyQuote: 'Quoted words' }), 0, reply).replyTo,
+    ).toBe('Quoted words');
+    expect(
+      presentMessage(message({ replyToId: 2 }), 0, { ...reply, outgoing: true }).replyAuthor,
+    ).toBe('You');
+  });
+
   it('presents media and outgoing delivery state without claiming the dialog is empty', () => {
     const dialog: TelegramDialog = {
       peer,

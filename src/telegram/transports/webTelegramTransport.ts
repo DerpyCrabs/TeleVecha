@@ -2,6 +2,7 @@ import { Crypto, Effect, Result, FiberMap, PubSub, ScopedRef, Semaphore, Stream 
 import * as Socket from 'effect/unstable/socket/Socket';
 import { telegramPeerColor } from '../../domain/peerColor';
 import { gunzipSync } from 'fflate';
+import { decodeVoiceWaveform } from '../voiceWaveform';
 import type { RichBlock, RichCaption, RichText } from '../../domain/richMessage';
 import { reportDiagnostic } from '../core/diagnostics';
 import type { TransportSessionStorage } from '../persistence/store';
@@ -3698,6 +3699,9 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
           ? { duration: videoAttribute.duration }
           : {}),
       cacheKey: `document:${document.id}`,
+      ...(voice && audioAttribute?.waveform
+        ? { waveform: decodeVoiceWaveform(audioAttribute.waveform) }
+        : {}),
       ...(media.spoiler ? { spoiler: true } : {}),
     };
   }

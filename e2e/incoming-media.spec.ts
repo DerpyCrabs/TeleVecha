@@ -132,7 +132,7 @@ test('renders voice notes, rectangular video messages, service events, and album
   });
 
   const voice = page.locator('article[data-message-id="81"]');
-  await expect(voice.locator('audio[controls]')).toBeVisible();
+  await expect(voice.getByRole('button', { name: 'Play voice message' })).toBeVisible();
   await expect(voice).toHaveAttribute('data-media-kind', 'voice');
 
   const videoMessage = page.locator('article[data-message-id="82"]');
@@ -215,8 +215,16 @@ test('renders voice notes, rectangular video messages, service events, and album
   await page.keyboard.press('Shift+F10');
   await page.getByRole('menuitem', { name: 'Reply' }).click();
   await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
-  await expect(page.getByTestId('composer-reply')).toContainText('album-two.jpg');
-  await expect(page.getByTestId('composer-reply')).not.toContainText('album-one.jpg');
+  await expect(page.getByTestId('composer-reply')).toContainText('Photo');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          [...window.__televechaRuntimes!.values()][0]!.engine.snapshot().draftDetails['u:101']
+            ?.reply?.messageId,
+      ),
+    )
+    .toBe(84);
 
   const service = page.locator('article[data-message-id="86"]');
   await expect(service).toHaveClass(/message-service/u);

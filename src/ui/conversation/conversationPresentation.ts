@@ -1,7 +1,7 @@
 import type { Snapshot } from 'effectweb';
 import type { ChatMessage } from '../../domain/models';
 import type { EngineSnapshot, PendingAttachment, PendingSend } from '../../telegram/types';
-import { presentMessage, presentPendingAttachment } from './presentation';
+import { presentMessage, presentPendingAttachment, presentReply } from './presentation';
 
 export interface KeyedMessageView {
   key: string;
@@ -58,11 +58,11 @@ function pendingMessage(
     ...(media ? { media } : {}),
     ...(send.album ? { groupedId: `pending:${send.id}` } : {}),
     ...(first && send.reply
-      ? {
-          replyTo:
-            send.reply.quoteText || messagesById.get(send.reply.messageId)?.text || 'Message',
-          replyToId: send.reply.messageId,
-        }
+      ? presentReply(
+          send.reply.messageId,
+          send.reply.quoteText,
+          messagesById.get(send.reply.messageId),
+        )
       : {}),
   };
   return { key: `${send.peer.id}:random:${randomId}`, message: value };

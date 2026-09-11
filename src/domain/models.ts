@@ -84,6 +84,7 @@ export interface ChatMessage {
       }
     | undefined;
   replyTo?: string | undefined;
+  replyAuthor?: string | undefined;
   replyToId?: number | undefined;
   replyMedia?: ChatMessage['media'] | undefined;
   replyMediaPeerId?: string | undefined;
@@ -162,6 +163,7 @@ export interface ChatMessage {
         width?: number | undefined;
         height?: number | undefined;
         duration?: number | undefined;
+        waveform?: readonly number[] | undefined;
         cacheKey?: string | undefined;
         spoiler?: boolean | undefined;
       }

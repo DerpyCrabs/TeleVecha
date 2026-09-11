@@ -670,7 +670,9 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                               }}
                               aria-label={`Jump to replied message ${message.replyToId ?? ''}`}
                             >
-                              {message.replyMedia && message.replyToId ? (
+                              {message.replyMedia &&
+                              message.replyToId &&
+                              mediaPresentation(message.replyMedia).preview ? (
                                 <span class="reply-media-preview">
                                   <MediaAttachment
                                     media={message.replyMedia!}
@@ -703,7 +705,16 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   />
                                 </span>
                               ) : null}
-                              <span>{message.replyTo}</span>
+                              <span class="message-reply-copy">
+                                <strong>
+                                  {snapshot.dialogs.find(
+                                    ({ peer }) => peer.id === message.replyAuthor,
+                                  )?.title ||
+                                    message.replyAuthor ||
+                                    'Reply'}
+                                </strong>
+                                <span>{message.replyTo}</span>
+                              </span>
                             </button>
                           ) : null}
                           {layout.album.length > 1 ? (

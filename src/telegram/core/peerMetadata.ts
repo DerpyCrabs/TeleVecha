@@ -14,6 +14,8 @@ interface PeerMetadataOptions<Value, Error> {
 interface PeerMetadataEntry<Value> {
   version: number;
   loaded: boolean;
+  failures: number;
+  retryAt: number;
   value?: TimedCacheValue<Value> | undefined;
 }
 
@@ -32,7 +34,12 @@ export function makePeerMetadata<Value, Error>(
   const entry = (peerId: string) => {
     const existing = entries.get(peerId);
     if (existing) return existing;
-    const created: PeerMetadataEntry<Value> = { version: 0, loaded: false };
+    const created: PeerMetadataEntry<Value> = {
+      version: 0,
+      loaded: false,
+      failures: 0,
+      retryAt: 0,
+    };
     entries.set(peerId, created);
     return created;
   };
@@ -72,6 +79,8 @@ export function makePeerMetadata<Value, Error>(
   const remember = (peerId: string, value: Value) => {
     const current = entry(peerId);
     current.loaded = true;
+    current.failures = 0;
+    current.retryAt = 0;
     current.value = { value, savedAt: now() };
     return options
       .save(peerId, value)
@@ -82,6 +91,8 @@ export function makePeerMetadata<Value, Error>(
     const current = entry(peerId);
     const previousVersion = current.version;
     current.version += 1;
+    current.failures = 0;
+    current.retryAt = 0;
     yield* requests.invalidate(
       `peer-metadata:${namespace}:version:${peerId}`,
       cacheKey(peerId),
@@ -94,6 +105,8 @@ export function makePeerMetadata<Value, Error>(
     const current = entry(peerId);
     const previousVersion = current.version;
     current.version += 1;
+    current.failures = 0;
+    current.retryAt = 0;
     current.loaded = true;
     current.value = undefined;
     yield* requests.invalidate(
@@ -119,6 +132,12 @@ export function makePeerMetadata<Value, Error>(
     bump,
     forget,
     invalidate,
+    canRefresh: (peerId: string) => now() >= entry(peerId).retryAt,
+    deferRefresh: (peerId: string) => {
+      const current = entry(peerId);
+      current.failures = Math.min(current.failures + 1, 5);
+      current.retryAt = now() + Math.min(300_000, 30_000 * 2 ** (current.failures - 1));
+    },
     isFresh: (peerId: string, ttlMs: number) => {
       const value = entry(peerId).value;
       return Boolean(value && now() - value.savedAt < ttlMs);

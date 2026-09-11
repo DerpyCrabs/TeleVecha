@@ -12,6 +12,7 @@ import type { Send, Transition } from 'effectweb/program';
 import { loadEffect } from 'effectweb/cache';
 import { MediaViewer } from './MediaViewer';
 import { TgsPlayer } from './TgsPlayer';
+import { VoicePlayer } from './VoicePlayer';
 import { saveMediaUrl } from './mediaActions';
 import {
   describeMedia,
@@ -408,18 +409,20 @@ export const MediaAttachment = component<
         >
           <LoaderCircle class="animate-spin" size={20} />
         </span>
-        <button
-          class="media-load-error"
-          hidden={!model.error || Boolean(props.decorative) || Boolean(model.url)}
-          onClick={(event) => {
-            event.stopPropagation();
-            load();
-          }}
-          aria-label={`Retry loading ${props.media.name}`}
-        >
-          <span>{model.error}</span>
-          <strong>Retry</strong>
-        </button>
+        {!props.decorative ? (
+          <button
+            class="media-load-error"
+            hidden={!model.error || Boolean(props.decorative) || Boolean(model.url)}
+            onClick={(event) => {
+              event.stopPropagation();
+              load();
+            }}
+            aria-label={`Retry loading ${props.media.name}`}
+          >
+            <span>{model.error}</span>
+            <strong>Retry</strong>
+          </button>
+        ) : null}
         <span
           class="media-load-error"
           hidden={!model.error || !props.decorative || Boolean(model.url)}
@@ -567,18 +570,15 @@ export const MediaAttachment = component<
           </div>
         ) : null}
         {isVoice ? (
-          <div class="media-audio">
-            <audio
-              src={model.url || undefined}
-              controls
-              preload="metadata"
-              aria-label={`Voice message ${props.media.name}`}
-              onPlaying={() => props.onPlaybackStarted?.()}
-              hidden={!model.url}
-              onClick={(event) => event.stopPropagation()}
-            />
-            {loadFallback('voice message')}
-          </div>
+          <VoicePlayer
+            source={model.url}
+            duration={props.media.duration}
+            waveform={props.media.waveform}
+            loading={model.loading}
+            error={model.error}
+            load={load}
+            onPlaybackStarted={props.onPlaybackStarted}
+          />
         ) : null}
         {isTgs ? (
           <div class="media-visual">

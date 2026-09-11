@@ -148,8 +148,7 @@ export function layoutMessages(
         return 'min(24rem, 100%)';
       }
       if (isImageDocument(message)) return 'min(16.75rem, 100%)';
-      // Native audio controls have a percentage width; give the bubble a definite
-      // width so captionless voice notes cannot shrink to the timestamp's width.
+      // Keep the voice waveform usable even when the message has no caption.
       if (message.media?.kind === 'voice') return 'min(20rem, 100%)';
       if (!isVisualMedia(message) || message.status === 'failed') {
         return undefined;

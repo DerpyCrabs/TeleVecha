@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatSummary } from '../../domain/models';
 import { richBlocksToPlainText } from '../../domain/messageText';
+import { formatMediaDuration } from '../media/mediaPresentation';
 import type {
   PendingAttachment,
   PendingSend,
@@ -13,7 +14,7 @@ function formatMessageTime(timestamp: number) {
   );
 }
 
-function mediaPreview(media: NonNullable<ChatMessage['media']>) {
+export function mediaPreview(media: NonNullable<ChatMessage['media']>, withDuration = false) {
   const labels: Record<NonNullable<TelegramMessage['media']>['kind'], string> = {
     photo: 'Photo',
     video: 'Video',
@@ -23,7 +24,34 @@ function mediaPreview(media: NonNullable<ChatMessage['media']>) {
     sticker: 'Sticker',
     file: media.name || 'File',
   };
-  return labels[media.kind];
+  const duration =
+    withDuration && ['voice', 'round-video', 'video'].includes(media.kind)
+      ? formatMediaDuration(media.duration)
+      : '';
+  return [labels[media.kind], duration].filter(Boolean).join(' · ');
+}
+
+export function presentReply(replyToId?: number, quote?: string, repliedMessage?: TelegramMessage) {
+  return {
+    replyTo:
+      quote ||
+      (repliedMessage
+        ? repliedMessage.text ||
+          (repliedMessage.media
+            ? mediaPreview(repliedMessage.media, true)
+            : dialogMessagePreview(repliedMessage))
+        : replyToId
+          ? 'Message'
+          : undefined),
+    replyAuthor: repliedMessage
+      ? repliedMessage.outgoing
+        ? 'You'
+        : repliedMessage.senderName || repliedMessage.senderId
+      : undefined,
+    replyToId,
+    replyMedia: repliedMessage?.media,
+    replyMediaPeerId: repliedMessage?.peerId,
+  };
 }
 
 export function dialogMessagePreview(message: TelegramMessage) {
@@ -157,9 +185,6 @@ export function presentMessage(
     linkPreview: message.linkPreview,
     formats: message.formats,
     richMessage: message.richMessage,
-    replyTo: message.replyQuote || repliedMessage?.text || repliedMessage?.media?.name || undefined,
-    replyToId: message.replyToId,
-    replyMedia: repliedMessage?.media,
-    replyMediaPeerId: repliedMessage?.peerId,
+    ...presentReply(message.replyToId, message.replyQuote, repliedMessage),
   };
 }

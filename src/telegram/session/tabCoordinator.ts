@@ -436,6 +436,7 @@ const MediaSchema = Schema.Struct({
   width: Schema.optional(Schema.Number),
   height: Schema.optional(Schema.Number),
   duration: Schema.optional(Schema.Number),
+  waveform: Schema.optional(Schema.Array(Schema.Number)),
   cacheKey: Schema.optional(Schema.String),
   spoiler: Schema.optional(Schema.Boolean),
 });
@@ -1478,6 +1479,32 @@ function errorMessage(error: unknown) {
       else yield* queueState(clientId);
     }
   });
+  const refreshClientConversationMetadata = Effect.fn(
+    'TabCoordinator.refreshClientConversationMetadata',
+  )(function* (
+    clientId: string,
+    peerId: string,
+    engine: NonNullable<typeof activeOwner>['engine'],
+  ) {
+    // Pins publish conversation events as cached and remote values arrive. Those
+    // events also enter any pending history load's journal.
+    yield* fork(engine.loadConversationPinnedMessages(peerId).pipe(Effect.ignore));
+    yield* fork(
+      engine.loadConversationSharedMediaCounts(peerId).pipe(
+        Effect.flatMap((sharedMediaCounts) => {
+          const current = clientRegistry.snapshot(clientId);
+          if (
+            sharedMediaCounts === undefined ||
+            current?.activePeerId !== peerId ||
+            activeOwner?.engine !== engine
+          )
+            return Effect.void;
+          return publishClientSnapshot(clientId, { ...current, sharedMediaCounts });
+        }),
+        Effect.ignore,
+      ),
+    );
+  });
   const reloadClientConversationViews = Effect.fn('TabCoordinator.reloadClientConversationViews')(
     function* (onlyPeerId?: string) {
       const engine = activeOwner?.engine;
@@ -1495,26 +1522,21 @@ function errorMessage(error: unknown) {
           });
         }
         const request = clientRegistry.beginConversationLoad(clientId, peerId);
+        yield* refreshClientConversationMetadata(clientId, peerId, engine);
         yield* fork(
-          Effect.all([
-            engine.loadConversationView(peerId),
-            engine.loadConversationPinnedMessages(peerId),
-            engine.loadConversationSharedMediaCounts(peerId),
-          ]).pipe(
+          engine.loadConversationView(peerId).pipe(
             Effect.matchEffect({
-              onSuccess: ([conversation, pinnedMessages, sharedMediaCounts]) =>
+              onSuccess: (conversation) =>
                 Effect.suspend(() => {
                   const current = clientRegistry.snapshot(clientId);
                   if (!request.current() || !current || activeOwner?.engine !== engine)
                     return Effect.void;
                   const next = request.complete({
                     ...conversation,
-                    pinnedMessages,
-                    ...(sharedMediaCounts !== undefined
-                      ? { sharedMediaCounts }
-                      : current.sharedMediaCounts !== undefined
-                        ? { sharedMediaCounts: current.sharedMediaCounts }
-                        : {}),
+                    pinnedMessages: current.pinnedMessages,
+                    ...(current.sharedMediaCounts !== undefined
+                      ? { sharedMediaCounts: current.sharedMediaCounts }
+                      : {}),
                   });
                   return next
                     ? publishClientSnapshot(
@@ -1742,28 +1764,7 @@ function errorMessage(error: unknown) {
         () => engine.loadConversationView(peerId),
       );
       if (!request.current() || activeOwner?.engine !== engine) return true;
-      // Metadata outlives the initial view load, so it needs its own live-change journal.
-      const metadata = clientRegistry.beginConversationLoad(clientId, peerId);
-      yield* fork(
-        Effect.all([
-          engine.loadConversationPinnedMessages(peerId),
-          engine.loadConversationSharedMediaCounts(peerId),
-        ]).pipe(
-          Effect.flatMap(([pinnedMessages, sharedMediaCounts]) => {
-            const current = clientRegistry.snapshot(clientId);
-            if (!metadata.current() || !current || activeOwner?.engine !== engine)
-              return Effect.void;
-            const next = metadata.complete({
-              ...current,
-              pinnedMessages,
-              ...(sharedMediaCounts !== undefined ? { sharedMediaCounts } : {}),
-            });
-            return next ? publishClientSnapshot(clientId, { ...current, ...next }) : Effect.void;
-          }),
-          Effect.ensuring(Effect.sync(() => metadata.cancel())),
-          Effect.ignore,
-        ),
-      );
+      yield* refreshClientConversationMetadata(clientId, peerId, engine);
       yield* fork(applyVisibility(peerId).pipe(Effect.ignore));
       return true;
     }

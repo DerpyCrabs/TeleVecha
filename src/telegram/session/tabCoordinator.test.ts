@@ -169,6 +169,69 @@ describe('tab coordinator request and hydration regressions', () => {
     );
   });
 
+  it('publishes history reloads and shared-media counts while pinned messages are still loading', () => {
+    installChannel(true);
+    return Effect.runPromise(
+      provideCoordinator(
+        Effect.gen(function* () {
+          const transport = yield* createFixtureTelegramTransport();
+          const engine = yield* makeMessagingEngine(
+            { ...transport, getPinnedMessages: () => Effect.never },
+            makeMemoryCacheStore(),
+            { manageTabLease: false },
+          );
+          let listener: Parameters<typeof engine.subscribeConversationEvents>[0] | undefined;
+          let reloaded = false;
+          const coordinator = yield* makeTabCoordinator({
+            key: 'held-pinned-reload',
+            loadBlob: () => Effect.succeed(undefined),
+            createOwner: () =>
+              Effect.succeed({
+                engine: {
+                  ...engine,
+                  subscribeConversationEvents: (next) => {
+                    listener = next;
+                    return engine.subscribeConversationEvents(next);
+                  },
+                  loadConversationView: (peerId) =>
+                    engine
+                      .loadConversationView(peerId)
+                      .pipe(
+                        Effect.map((view) => ({
+                          ...view,
+                          messages: reloaded
+                            ? view.messages.map((message) =>
+                                message.id === 80
+                                  ? { ...message, text: 'Reloaded history' }
+                                  : message,
+                              )
+                            : view.messages,
+                        })),
+                      ),
+                },
+              }),
+          });
+          yield* coordinator.start({ apiId: 1, apiHash: 'fixture' });
+          yield* Effect.yieldNow;
+          yield* coordinator.client.openConversation('u:101');
+          yield* Effect.yieldNow;
+          expect(coordinator.client.snapshot().sharedMediaCounts).toBeDefined();
+          const published = yield* Deferred.make<void>();
+          const unsubscribe = yield* coordinator.client.subscribe((snapshot) => {
+            if (snapshot.messages.at(-1)?.text === 'Reloaded history')
+              Deferred.doneUnsafe(published, Effect.void);
+          });
+          reloaded = true;
+          listener!({ type: 'history-reset', peerId: 'u:101' });
+          yield* Deferred.await(published).pipe(Effect.timeout('1 second'));
+          expect(coordinator.client.snapshot().loadingMessages).toBe(false);
+          expect(coordinator.client.snapshot().messages.at(-1)?.text).toBe('Reloaded history');
+          yield* unsubscribe;
+        }),
+      ).pipe(Effect.provide(MessagingEngineLayer), Effect.provide(BrowserCrypto.layer)),
+    );
+  });
+
   it('executes a repeated request once while in flight and replays its completed response', () => {
     installChannel(true);
     return Effect.runPromise(

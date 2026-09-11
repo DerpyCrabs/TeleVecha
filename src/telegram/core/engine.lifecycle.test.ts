@@ -236,6 +236,48 @@ describe('MessagingEngine lifecycle regressions', () => {
       }),
     ));
 
+  it('keeps cached pins and a healthy chat when background pinned loading times out, without retrying on every visit', () =>
+    run(
+      Effect.gen(function* () {
+        const original = yield* createFixtureTelegramTransport();
+        const cachedPin = {
+          id: 79,
+          peerId: 'u:101',
+          senderId: 'u:101',
+          text: 'Cached pin',
+          date: 1,
+          outgoing: false,
+        };
+        const getPinnedMessages = vi.fn(() => Effect.never);
+        const store = makeMemoryCacheStore();
+        const engine = yield* makeMessagingEngine(
+          { ...original, getPinnedMessages },
+          {
+            ...store,
+            loadPinnedMessages: () => Effect.succeed({ value: [cachedPin], savedAt: 0 }),
+          },
+          { manageTabLease: false },
+        );
+        yield* engine.start(credentials);
+        yield* engine.loadConversationView('u:101');
+        const loading = yield* engine
+          .loadConversationPinnedMessages('u:101')
+          .pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        expect(getPinnedMessages).toHaveBeenCalledOnce();
+        expect((yield* engine.loadConversationView('u:101')).messages.length).toBeGreaterThan(0);
+        yield* TestClock.adjust('15 seconds');
+        expect(yield* Fiber.join(loading)).toEqual([cachedPin]);
+        expect(engine.snapshot()).toMatchObject({ phase: 'ready', online: true, sync: 'current' });
+        expect(engine.snapshot().operationError).toBeUndefined();
+        for (let visit = 0; visit < 3; visit++) {
+          expect(yield* engine.loadConversationPinnedMessages('u:101')).toEqual([cachedPin]);
+        }
+        expect(getPinnedMessages).toHaveBeenCalledOnce();
+        yield* engine.stop();
+      }).pipe(Effect.provide(TestClock.layer())),
+    ));
+
   it('automatically reconnects after a live sync failure and survives a failed catch-up attempt', () =>
     run(
       Effect.gen(function* () {

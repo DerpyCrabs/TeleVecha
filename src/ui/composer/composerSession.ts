@@ -15,6 +15,7 @@ import type { Read } from 'effectweb/session';
 import { modelOwner } from 'effectweb';
 import { stageAttachment, type StagedAttachment } from './outgoingAttachments';
 import { prepareAttachment } from './attachmentMetadata';
+import { mediaPreview } from '../conversation/presentation';
 const DRAFT_WRITE_DELAY_MS = 120;
 const DRAFT_WRITE_TASK = commandSlot('composer:draft-write');
 const TYPING_TASK = commandSlot('composer:typing');
@@ -406,7 +407,9 @@ export function createComposerSession(options: ComposerSessionOptions) {
     owner.patch({
       reply: {
         messageId: Number(message.id),
-        preview: selectionInside ? selected : message.body || message.media?.name || 'Message',
+        preview: selectionInside
+          ? selected
+          : message.body || (message.media ? mediaPreview(message.media, true) : 'Message'),
         ...(selectionInside ? { quoteText: selected } : {}),
       },
     });

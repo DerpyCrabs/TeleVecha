@@ -394,6 +394,7 @@ export interface TelegramMedia {
   width?: number | undefined;
   height?: number | undefined;
   duration?: number | undefined;
+  waveform?: readonly number[] | undefined;
   cacheKey?: string | undefined;
   spoiler?: boolean | undefined;
 }

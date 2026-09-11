@@ -1085,8 +1085,11 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       };
     }
     function getPinnedMessages(peer: TelegramPeer) {
-      return Effect.sync(() => {
+      return Effect.gen(function* () {
         stats.getPinnedMessages += 1;
+        if (hasScenario('held-pins')) return yield* Effect.never;
+        if (hasScenario('failed-pins'))
+          return yield* Effect.fail(createMtprotoError('transport', 'Pinned messages unavailable'));
         if (hasScenario('multiple-pins') && peer.id === peers[0]?.id) {
           const history = messages.get(peer.id) ?? [];
           return [79, 5]

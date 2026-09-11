@@ -44,7 +44,10 @@ for (const kind of ['voice', 'round-video'] as const) {
     const player = second.locator(
       'article[data-message-id="81"] audio, article[data-message-id="81"] video',
     );
-    await expect(player).toBeVisible();
+    await expect(player).toBeAttached();
+    if (kind === 'voice')
+      await expect(second.getByRole('button', { name: 'Play voice message' })).toBeVisible();
+    else await expect(player).toBeVisible();
     await expect
       .poll(() => player.evaluate((element: HTMLMediaElement) => element.readyState))
       .toBeGreaterThanOrEqual(2);
@@ -93,7 +96,7 @@ for (const device of [
       hasTouch: device.isMobile,
     });
 
-    test('keeps captionless voice controls wide enough to play and pause', async ({ page }) => {
+    test('plays, seeks, and changes speed in compact voice messages', async ({ page }) => {
       await page.goto('/');
       if (device.isMobile) await page.getByRole('button', { name: 'Open chat list' }).click();
       await page
@@ -127,21 +130,51 @@ for (const device of [
                 name: `voice-${index}.ogg`,
                 mimeType: 'audio/ogg',
                 duration: 58,
+                waveform: Array.from(
+                  { length: 100 },
+                  (_, i) => 3 + Math.round(Math.abs(Math.sin(i * 0.8) * Math.cos(i * 0.17)) * 28),
+                ),
               },
             },
           });
         }
       });
 
+      await page.evaluate(() =>
+        window.__televechaFixture!.emit({
+          type: 'new-message',
+          pts: 13,
+          ptsCount: 1,
+          message: {
+            id: 83,
+            peerId: 'u:101',
+            senderId: 'self',
+            text: 'On my way',
+            date: Math.floor(Date.now() / 1000) + 2,
+            outgoing: true,
+            replyToId: 81,
+          },
+        }),
+      );
+      const reply = page.locator('article[data-message-id="83"] .message-reply');
+      await expect(reply).toContainText('Alice Fixture');
+      await expect(reply).toContainText('Voice message · 0:58');
+      await expect(reply).not.toContainText('.ogg');
+      await expect(reply.locator('audio, video, button, input')).toHaveCount(0);
+      await reply.click();
+      await expect(page.locator('article[data-message-id="81"]')).toBeInViewport();
+
       expect(
         await page.evaluate(() => window.__televechaFixture?.stats.readMessageContents),
       ).toEqual([]);
       for (const id of [81, 82]) {
         const message = page.locator(`article[data-message-id="${id}"]`);
-        const audio = message.locator('audio[controls]');
-        await audio.scrollIntoViewIfNeeded();
-        await expect(audio).toBeVisible();
-        const bounds = await audio.evaluate((element) => {
+        const audio = message.locator('audio[data-voice-audio]');
+        const player = message.locator('.voice-player');
+        await player.scrollIntoViewIfNeeded();
+        await expect(player).toBeVisible();
+        await expect(audio).toBeHidden();
+        const bounds = await player.evaluate((element) => {
           const audio = element.getBoundingClientRect();
           const bubble = element.closest('article')!.getBoundingClientRect();
           return {
@@ -151,7 +184,7 @@ for (const device of [
           };
         });
         expect(bounds.width).toBeGreaterThanOrEqual(280);
-        expect(bounds.width / bounds.height).toBeGreaterThan(5);
+        expect(bounds.height).toBeLessThanOrEqual(60);
         expect(bounds.contained).toBe(true);
         await expect
           .poll(() => audio.evaluate((element: HTMLAudioElement) => element.readyState))
@@ -166,7 +199,7 @@ for (const device of [
         await audio.evaluate((element: HTMLAudioElement) => {
           element.muted = true;
         });
-        await audio.click({ position: { x: 25, y: bounds.height / 2 } });
+        await message.getByRole('button', { name: 'Play voice message' }).click();
         await expect
           .poll(() => audio.evaluate((element: HTMLAudioElement) => !element.paused))
           .toBe(true);
@@ -176,10 +209,18 @@ for (const device of [
         await expect
           .poll(() => page.evaluate(() => window.__televechaFixture?.stats.readMessageContents))
           .toEqual([{ peerId: 'u:101', messageIds: [81] }]);
-        await audio.click({ position: { x: 25, y: bounds.height / 2 } });
+        await message.getByRole('button', { name: 'Pause voice message' }).click();
         await expect
           .poll(() => audio.evaluate((element: HTMLAudioElement) => element.paused))
           .toBe(true);
+        await message.getByRole('slider', { name: 'Seek voice message' }).fill('29');
+        await expect
+          .poll(() => audio.evaluate((element: HTMLAudioElement) => element.currentTime))
+          .toBeCloseTo(29, 0);
+        await message.getByRole('button', { name: 'Playback speed 1x', exact: true }).click();
+        await expect
+          .poll(() => audio.evaluate((element: HTMLAudioElement) => element.playbackRate))
+          .toBe(1.5);
         await audio.evaluate(async (element: HTMLAudioElement) => {
           await element.play();
           element.pause();
@@ -190,6 +231,8 @@ for (const device of [
           await page.evaluate(() => window.__televechaFixture?.stats.readMessageContents),
         ).toEqual([{ peerId: 'u:101', messageIds: [81] }]);
       }
+      await page.locator('article[data-message-id="83"]').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: test.info().outputPath('voice-replies.png') });
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
