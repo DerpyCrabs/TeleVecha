@@ -18,6 +18,7 @@ import type {
   TelegramPeer,
   TelegramPeerSearchResult,
   TelegramReplyTarget,
+  TelegramReactionPerson,
   TelegramSearchOffset,
   TelegramSticker,
   TelegramTextFormat,
@@ -1825,11 +1826,23 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
           .get(peer.id)
           ?.find(({ id }) => id === messageId)
           ?.reactions?.find((item) => item.emoji === emoji);
-        const people = [
-          ...(reaction?.chosen ? [{ id: 'self', name: 'You' }] : []),
+        const people: TelegramReactionPerson[] = [
+          ...(reaction?.chosen ? [{ id: 'u:999', name: 'You' }] : []),
           { id: 'u:101', name: 'Alice Fixture' },
           { id: 'u:102', name: 'Bob Fixture' },
-        ].slice(0, reaction?.count ?? 0);
+        ]
+          .slice(0, reaction?.count ?? 0)
+          .map((person) => ({
+            ...person,
+            peer: { id: person.id, kind: 'user', accessHash: person.id.slice(2) },
+            initials: person.name
+              .split(' ')
+              .map((part) => part[0])
+              .join(''),
+            color: '#6650d8',
+            hasAvatar: person.id !== 'u:999',
+            ...(person.id !== 'u:999' ? { avatarId: `fixture-${person.id}` } : {}),
+          }));
         return { people, count: reaction?.count ?? 0 };
       });
     }

@@ -884,6 +884,14 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   ? engine.getReactionPeople(peer, Number(message.id), emoji)
                                   : Effect.fail(new Error('Reaction details are unavailable.'));
                               }}
+                              loadReactionAvatar={(person, cachedOnly) =>
+                                mediaAssets.loadPeerAvatar(
+                                  person.peer,
+                                  person.hasAvatar,
+                                  person.avatarId,
+                                  cachedOnly || !online,
+                                )
+                              }
                               reply={(article) => composer.beginReply(message, article)}
                               loadCustomEmoji={(documentId) =>
                                 mediaAssets.loadCustomEmoji(documentId)

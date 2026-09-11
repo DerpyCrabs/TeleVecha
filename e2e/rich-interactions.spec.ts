@@ -33,6 +33,17 @@ test('shows the people behind a reaction on hover and keyboard focus', async ({ 
   const tooltip = page.getByRole('tooltip');
   await expect(tooltip).toContainText('Alice Fixture');
   await expect(tooltip).toContainText('Bob Fixture');
+  const aliceAvatar = tooltip
+    .locator('.reaction-person', { hasText: 'Alice Fixture' })
+    .locator('img');
+  const bobAvatar = tooltip.locator('.reaction-person', { hasText: 'Bob Fixture' }).locator('img');
+  await expect(aliceAvatar).toBeVisible();
+  await expect(bobAvatar).toBeVisible();
+  await expect(bobAvatar).toHaveJSProperty('naturalWidth', 96);
+  const sources = await tooltip
+    .locator('img')
+    .evaluateAll((images) => images.map((image) => image.getAttribute('src')));
+  const downloads = (await fixtureStats(page))?.downloadAvatar;
   await expect(tooltip).toBeInViewport({ ratio: 1 });
   await expect(reaction).toContainText('2');
   expect((await fixtureStats(page))?.setReaction).toBe(0);
@@ -42,6 +53,14 @@ test('shows the people behind a reaction on hover and keyboard focus', async ({ 
   await expect(tooltip).toHaveCount(0);
   await reaction.focus();
   await expect(tooltip).toContainText('Alice Fixture');
+  await expect(aliceAvatar).toBeVisible();
+  await expect(bobAvatar).toBeVisible();
+  expect(
+    await tooltip
+      .locator('img')
+      .evaluateAll((images) => images.map((image) => image.getAttribute('src'))),
+  ).toEqual(sources);
+  expect((await fixtureStats(page))?.downloadAvatar).toBe(downloads);
   await reaction.press('Escape');
   await expect(tooltip).toHaveCount(0);
 });

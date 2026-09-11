@@ -343,8 +343,18 @@ export interface TelegramDraftDetails {
   reply?: TelegramReplyTarget & { preview: string };
 }
 
+export interface TelegramReactionPerson {
+  id: string;
+  peer: TelegramPeer;
+  name: string;
+  initials: string;
+  color: string;
+  hasAvatar: boolean;
+  avatarId?: string | undefined;
+}
+
 export interface TelegramReactionPeople {
-  people: { id: string; name: string }[];
+  people: TelegramReactionPerson[];
   count: number;
   anonymous?: boolean | undefined;
 }

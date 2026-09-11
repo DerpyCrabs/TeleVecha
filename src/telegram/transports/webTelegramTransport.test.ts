@@ -112,14 +112,30 @@ describe('web Telegram transport', () => {
               42,
               emoji,
             );
-            expect(result).toEqual({
+            expect(result).toMatchObject({
               people: [
-                { id: 'u:1', name: 'Alice Example' },
-                { id: 'u:2', name: 'You' },
-                { id: 'c:3', name: 'Team' },
+                {
+                  id: 'u:1',
+                  name: 'Alice Example',
+                  peer: { id: 'u:1', kind: 'user', accessHash: '101' },
+                  initials: 'AE',
+                  hasAvatar: true,
+                  avatarId: '11',
+                  color: expect.any(String) as unknown,
+                },
+                { id: 'u:2', name: 'You', initials: 'M', hasAvatar: false },
+                {
+                  id: 'c:3',
+                  name: 'Team',
+                  peer: { id: 'c:3', kind: 'channel', accessHash: '303' },
+                  initials: 'T',
+                  hasAvatar: true,
+                  avatarId: '33',
+                },
               ],
               count: 3,
             });
+            expect(result.people[1]?.avatarId).toBeUndefined();
           }),
         () =>
           Effect.succeed(
@@ -155,14 +171,21 @@ describe('web Telegram transport', () => {
                       }),
                     ],
                     users: [
-                      Api.User({ id: 1n, firstName: 'Alice', lastName: 'Example' }),
+                      Api.User({
+                        id: 1n,
+                        accessHash: 101n,
+                        firstName: 'Alice',
+                        lastName: 'Example',
+                        photo: Api.UserProfilePhoto({ photoId: 11n, dcId: 2 }),
+                      }),
                       Api.User({ id: 2n, self: true, firstName: 'Me' }),
                     ],
                     chats: [
                       Api.Channel({
                         id: 3n,
                         title: 'Team',
-                        photo: createTl('chatPhotoEmpty'),
+                        accessHash: 303n,
+                        photo: Api.ChatPhoto({ photoId: 33n, dcId: 2 }),
                         date: 1,
                       }),
                     ],

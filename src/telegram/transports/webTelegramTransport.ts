@@ -1846,14 +1846,17 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     rememberEntities(result.users, result.chats);
     return {
       people: result.reactions.flatMap((reaction) => {
-        const id = toPeerId(reaction.peerId);
-        if (!id) return [];
-        const entity = state.entities.get(id);
+        const peer = mapPeer(reaction.peerId, state.entities);
+        if (!peer) return [];
+        const entity = state.entities.get(peer.id);
+        const title = entityTitle(entity) || 'Deleted account';
         return [
           {
-            id,
-            name:
-              Api.User.is(entity) && entity.self ? 'You' : entityTitle(entity) || 'Deleted account',
+            id: peer.id,
+            peer,
+            name: Api.User.is(entity) && entity.self ? 'You' : title,
+            initials: initials(title),
+            ...peerAvatar(peer.id, entity),
           },
         ];
       }),
@@ -2513,7 +2516,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     if (!name) return undefined;
     const messageId = header.channelPost ?? header.savedFromMsgId;
     const entity = peerId ? state.entities.get(peerId) : undefined;
-    const avatar = peerId ? forwardedAvatar(peerId, entity) : undefined;
+    const avatar = peerId ? peerAvatar(peerId, entity) : undefined;
     return {
       name,
       ...(peerId ? { peerId } : {}),
@@ -2521,7 +2524,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       ...avatar,
     };
   }
-  function forwardedAvatar(peerId: string, entity: Tl.TypeUser | Tl.TypeChat | undefined) {
+  function peerAvatar(peerId: string, entity: Tl.TypeUser | Tl.TypeChat | undefined) {
     const photo = Api.User.is(entity)
       ? Api.UserProfilePhoto.is(entity.photo)
         ? entity.photo

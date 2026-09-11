@@ -1,11 +1,12 @@
 import { list as renderList } from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
-import type { TelegramReactionPeople } from '../../telegram/types';
+import type { TelegramReactionPeople, TelegramReactionPerson } from '../../telegram/types';
 import Reply from '@effectweb/lucide/icons/reply';
 import SmilePlus from '@effectweb/lucide/icons/smile-plus';
 import { TgsPlayer } from '../media/TgsPlayer';
 import { VisibilityVideo } from '../media/VisibilityVideo';
+import { Avatar } from '../shared/Avatar';
 import { available, collection, component, resourceComponent, sequence, view } from 'effectweb';
 const reactionRows = collection<NonNullable<ChatMessage['reactions']>[number]>(
   (reaction) => reaction.customEmojiId ?? reaction.emoji,
@@ -20,6 +21,10 @@ interface MessageActionsProps {
   setPickerOpen: (open: boolean) => void;
   react: (emoji: string) => void;
   loadReactionPeople: (emoji: string) => Effect.Effect<TelegramReactionPeople, unknown>;
+  loadReactionAvatar: (
+    person: TelegramReactionPerson,
+    cachedOnly: boolean,
+  ) => Effect.Effect<string | undefined, unknown>;
   reply: (article: HTMLElement) => void;
   loadCustomEmoji?: ((documentId: string) => Effect.Effect<CustomEmojiAsset, unknown>) | undefined;
 }
@@ -54,9 +59,13 @@ const CustomReaction = resourceComponent<
     );
   }),
 });
-const peopleRows = collection<{ id: string; name: string }>((person) => person.id).from;
+const peopleRows = collection<TelegramReactionPerson>((person) => person.id).from;
 const ReactionPeople = resourceComponent<
-  { identity: string; load: () => Effect.Effect<TelegramReactionPeople, unknown> },
+  {
+    identity: string;
+    load: () => Effect.Effect<TelegramReactionPeople, unknown>;
+    loadAvatar: MessageActionsProps['loadReactionAvatar'];
+  },
   TelegramReactionPeople | undefined
 >({
   request: (props) => ({
@@ -75,7 +84,27 @@ const ReactionPeople = resourceComponent<
                 ) : page.people.length ? (
                   <>
                     {renderList(peopleRows(page.people), (person) => (
-                      <span>{person.name}</span>
+                      <span class="reaction-person">
+                        <span class="reaction-person-avatar" aria-hidden="true">
+                          <Avatar
+                            identity={`${person.id}:${person.avatarId ?? 'none'}`}
+                            initials={person.initials}
+                            color={person.color}
+                            size="sm"
+                            loadCached={
+                              person.hasAvatar
+                                ? () => model.props.loadAvatar(person, true)
+                                : undefined
+                            }
+                            load={
+                              person.hasAvatar
+                                ? () => model.props.loadAvatar(person, false)
+                                : undefined
+                            }
+                          />
+                        </span>
+                        <span>{person.name}</span>
+                      </span>
                     ))}
                     {page.count > page.people.length ? (
                       <small>and {page.count - page.people.length} more</small>
@@ -98,6 +127,7 @@ interface ReactionButtonProps {
   reaction: NonNullable<ChatMessage['reactions']>[number];
   react: MessageActionsProps['react'];
   load: MessageActionsProps['loadReactionPeople'];
+  loadAvatar: MessageActionsProps['loadReactionAvatar'];
   loadCustomEmoji: MessageActionsProps['loadCustomEmoji'];
 }
 const ReactionButton = component<
@@ -180,6 +210,7 @@ const ReactionButton = component<
             <ReactionPeople
               identity={`${props.message.peerId}:${props.message.id}:${reaction.emoji}:${reaction.count}:${reaction.chosen}`}
               load={() => props.load(reaction.emoji)}
+              loadAvatar={props.loadAvatar}
             />
           </span>
         ) : null}
@@ -201,6 +232,7 @@ export const MessageActions = view<MessageActionsProps, never>((props, _send) =>
           reaction={reaction}
           react={props.react}
           load={props.loadReactionPeople}
+          loadAvatar={props.loadReactionAvatar}
           loadCustomEmoji={props.loadCustomEmoji}
         />
       ))}

@@ -1646,6 +1646,20 @@
 .reaction-people-content small {
   color: var(--muted);
 }
+.reaction-person {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.reaction-person-avatar {
+  flex-shrink: 0;
+}
+.reaction-person-avatar [data-avatar-identity] {
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 0.55rem;
+}
 .reaction.chosen {
   border-color: color-mix(in srgb, var(--accent) 70%, transparent);
   background: var(--accent-soft);
