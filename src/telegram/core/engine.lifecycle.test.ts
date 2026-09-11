@@ -1,5 +1,6 @@
 import { BrowserCrypto } from '@effect/platform-browser';
 import { Deferred, Effect, Fiber, Stream } from 'effect';
+import { TestClock } from 'effect/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createMtprotoError } from '../mtproto/errors';
@@ -27,6 +28,92 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('MessagingEngine lifecycle regressions', () => {
+  it('automatically reconnects after a live sync failure and survives a failed catch-up attempt', () =>
+    run(
+      Effect.gen(function* () {
+        const original = yield* createFixtureTelegramTransport();
+        let failures = 0;
+        let connects = 0;
+        const engine = yield* makeMessagingEngine(
+          {
+            ...original,
+            connect: () =>
+              Effect.gen(function* () {
+                connects += 1;
+                yield* original.connect(credentials);
+              }),
+            getDifference: (...args: Parameters<typeof original.getDifference>) =>
+              failures-- > 0
+                ? Effect.fail(createMtprotoError('transport', 'Temporary sync failure'))
+                : original.getDifference(...args),
+          },
+          makeMemoryCacheStore(),
+          { manageTabLease: false },
+        );
+        yield* engine.start(credentials);
+        failures = 2;
+        window.__televechaFixture?.emit({ type: 'too-long' });
+        yield* Effect.yieldNow;
+        expect(engine.snapshot()).toMatchObject({ phase: 'ready', online: false });
+        yield* engine.sendDraft({ id: 'u:101', kind: 'user' }, 'Queued during sync failure');
+        expect(engine.snapshot().pending).toHaveLength(1);
+        expect(window.__televechaFixture?.stats.sendText).toBe(0);
+        yield* TestClock.adjust('1 second');
+        expect(connects).toBe(2);
+        expect(engine.snapshot().online).toBe(false);
+        yield* TestClock.adjust('2 seconds');
+        expect(connects).toBe(3);
+        expect(engine.snapshot()).toMatchObject({ phase: 'ready', online: true, sync: 'current' });
+        expect(engine.snapshot().pending).toHaveLength(0);
+        expect(window.__televechaFixture?.stats.sendText).toBe(1);
+        yield* TestClock.adjust('30 seconds');
+        expect(connects).toBe(3);
+        yield* engine.stop();
+      }).pipe(Effect.provide(TestClock.layer())),
+    ));
+
+  it('disposes a failed reconnect client before the next automatic attempt', () =>
+    run(
+      Effect.gen(function* () {
+        const original = yield* createFixtureTelegramTransport();
+        let client: 'healthy' | 'failed' | undefined;
+        let connects = 0;
+        const engine = yield* makeMessagingEngine(
+          {
+            ...original,
+            connect: () =>
+              Effect.gen(function* () {
+                if (client) return;
+                connects += 1;
+                client = connects === 2 ? 'failed' : 'healthy';
+                yield* original.connect(credentials);
+              }),
+            disconnect: () =>
+              Effect.gen(function* () {
+                client = undefined;
+                yield* original.disconnect();
+              }),
+            isAuthorized: () =>
+              client === 'failed'
+                ? Effect.fail(createMtprotoError('transport', 'Failed connection'))
+                : original.isAuthorized(),
+          },
+          makeMemoryCacheStore(),
+          { manageTabLease: false },
+        );
+        yield* engine.start(credentials);
+        window.__televechaFixture?.emit({ type: 'connection-state', connected: false });
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust('1 second');
+        expect(engine.snapshot().online).toBe(false);
+        expect(client).toBeUndefined();
+        yield* TestClock.adjust('2 seconds');
+        expect(connects).toBe(3);
+        expect(engine.snapshot().online).toBe(true);
+        yield* engine.stop();
+      }).pipe(Effect.provide(TestClock.layer())),
+    ));
+
   it('joins overlapping starts and retry without invalidating readiness', () =>
     run(
       Effect.gen(function* () {

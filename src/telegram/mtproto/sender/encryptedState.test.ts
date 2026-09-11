@@ -218,4 +218,50 @@ describe('encrypted MTProto message state', () => {
 
     await expect(Effect.runPromise(state.decrypt(first))).rejects.toThrow('replayed');
   });
+
+  it('identifies authenticated duplicates without accepting corrupted packets', async () => {
+    const key = authKey();
+    const crypto = cryptoDouble();
+    const session = bytesToBigInt(new Uint8Array(8).fill(1), { littleEndian: true, signed: true });
+    const state = await makeState(
+      { authKey: key, now: () => 1_700_000_000_000, serverSalt: 5n },
+      crypto,
+    );
+    const packet = await incomingPacket({
+      authKey: key,
+      crypto,
+      serverSalt: 5n,
+      sessionId: session,
+      messageId: (1_700_000_000n << 32n) | 1n,
+    });
+    expect((await Effect.runPromise(state.decrypt(packet))).duplicate).toBe(false);
+    expect((await Effect.runPromise(state.decrypt(packet))).duplicate).toBe(true);
+    const corrupted = packet.slice();
+    corrupted[8] = corrupted[8]! ^ 1;
+    await expect(Effect.runPromise(state.decrypt(corrupted))).rejects.toThrow();
+  });
+
+  it('keeps its session and monotonic IDs through one-second pong clock jitter', async () => {
+    const state = await makeState({ authKey: authKey(), now: () => 1_700_000_000_950 });
+    const first = state.prepare(Uint8Array.of(1, 2, 3, 4), true);
+    let previous = first;
+    for (const seconds of [1_699_999_999n, 1_700_000_000n, 1_699_999_999n]) {
+      expect(await Effect.runPromise(state.updateTimeOffset((seconds << 32n) | 1n))).toBe(false);
+      const next = state.prepare(Uint8Array.of(1, 2, 3, 4), true);
+      expect(next.messageId).toBeGreaterThan(previous.messageId);
+      expect(next.sequenceNumber).toBe(previous.sequenceNumber + 2);
+      previous = next;
+    }
+  });
+
+  it('resets a session when corrected time puts sent IDs outside the future window', async () => {
+    const state = await makeState({ authKey: authKey(), now: () => 1_700_000_000_950 });
+    const first = state.prepare(Uint8Array.of(1, 2, 3, 4), true);
+    expect(await Effect.runPromise(state.updateTimeOffset((1_699_999_960n << 32n) | 1n))).toBe(
+      true,
+    );
+    const next = state.prepare(Uint8Array.of(1, 2, 3, 4), true);
+    expect(next.sequenceNumber).toBe(1);
+    expect(next.messageId).toBeLessThan(first.messageId);
+  });
 });

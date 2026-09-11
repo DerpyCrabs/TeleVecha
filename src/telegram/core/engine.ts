@@ -548,6 +548,7 @@ function makeMessagingEngineModule(
               online: false,
               error: `Could not connect to Telegram. ${errorMessage(error)}`,
             });
+            yield* scheduleReconnect();
           } else {
             yield* fail('transport', 'Could not start TeleVecha.', error);
           }
@@ -592,10 +593,8 @@ function makeMessagingEngineModule(
             Effect.gen(function* () {
               if (!isLifecycleCurrent(session)) return;
               yield* renewAccountReady();
-              if (currentSnapshot().online) {
-                yield* disconnectTransport();
-                yield* patch({ online: false });
-              }
+              yield* disconnectTransport().pipe(Effect.ignore);
+              yield* patch({ online: false });
               if (currentSnapshot().dialogs.length > 0 || hasReachedReady) {
                 yield* patch({
                   phase: 'ready',
@@ -3390,7 +3389,6 @@ function makeMessagingEngineModule(
       claimLegacyAccount: boolean = false,
       session: Scope.Closeable | undefined = sessionScope,
     ) {
-      yield* engineTasks.cancelRetry('reconnect');
       if (!(yield* confirmAuthorizedAccount(claimLegacyAccount, session))) return;
       const accountId = activeAccountId;
       if (!isOperationCurrent(session, accountId)) return;
@@ -5180,6 +5178,7 @@ function makeMessagingEngineModule(
         operationError: undefined,
         error: `${message} ${detail}`,
       });
+      if (area === 'sync' || area === 'transport') yield* scheduleReconnect();
       return;
     }
     if (fatal) {
@@ -5238,15 +5237,24 @@ function makeMessagingEngineModule(
     yield* disconnectTransport().pipe(Effect.ignore);
     yield* scheduleReconnect();
   });
-  function scheduleReconnect(): Effect.Effect<void, unknown> {
+  function scheduleReconnect(): Effect.Effect<void> {
     if (quiescing || !activeCredentials) return Effect.void;
     const session = sessionScope;
     return engineTasks.retry(
       'reconnect',
       Effect.gen(function* () {
-        if (!isLifecycleCurrent(session) || currentSnapshot().online) return false;
+        if (
+          !isLifecycleCurrent(session) ||
+          currentSnapshot().online ||
+          currentSnapshot().phase === 'unauthorized'
+        )
+          return false;
         yield* retrySync();
-        return isLifecycleCurrent(session) && !currentSnapshot().online;
+        return (
+          isLifecycleCurrent(session) &&
+          !currentSnapshot().online &&
+          currentSnapshot().phase !== 'unauthorized'
+        );
       }),
     );
   }

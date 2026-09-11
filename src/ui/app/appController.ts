@@ -1503,6 +1503,7 @@ export function createAppController(props: AppProps) {
     if (
       current.phase === 'connecting' ||
       current.phase === 'syncing' ||
+      (!current.online && current.sync === 'recovering') ||
       state.model().syncRetrying
     ) {
       return 'Reconnecting…';

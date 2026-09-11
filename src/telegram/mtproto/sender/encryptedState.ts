@@ -39,6 +39,7 @@ export interface DecryptedMessage {
   timeInvalid: boolean;
   serverSalt: bigint;
   saltInvalid: boolean;
+  duplicate: boolean;
 }
 
 export interface EncryptedMessageState {
@@ -122,11 +123,9 @@ export const createEncryptedMessageState = Effect.fn('mtproto.sender.encryptedSt
     };
 
     const rememberRemoteMessage = (messageId: bigint) => {
+      if (remoteMessageSet.has(messageId)) return true;
       const retainedFloor = remoteMessageIds[0];
-      if (
-        remoteMessageSet.has(messageId) ||
-        (retainedFloor !== undefined && messageId < retainedFloor)
-      ) {
+      if (retainedFloor !== undefined && messageId < retainedFloor) {
         throw createMtprotoError('protocol', 'Telegram replayed an encrypted message.');
       }
       let start = 0;
@@ -138,12 +137,14 @@ export const createEncryptedMessageState = Effect.fn('mtproto.sender.encryptedSt
       }
       remoteMessageSet.add(messageId);
       remoteMessageIds.splice(start, 0, messageId);
-      if (remoteMessageIds.length <= MAX_REMOTE_MESSAGE_IDS) return;
-      const removed = remoteMessageIds.splice(
-        0,
-        remoteMessageIds.length - MAX_REMOTE_MESSAGE_IDS / 2,
-      );
-      for (const id of removed) remoteMessageSet.delete(id);
+      if (remoteMessageIds.length > MAX_REMOTE_MESSAGE_IDS) {
+        const removed = remoteMessageIds.splice(
+          0,
+          remoteMessageIds.length - MAX_REMOTE_MESSAGE_IDS / 2,
+        );
+        for (const id of removed) remoteMessageSet.delete(id);
+      }
+      return false;
     };
 
     const resetSession = Effect.fn('mtproto.sender.resetSession')(function* () {
@@ -319,7 +320,7 @@ export const createEncryptedMessageState = Effect.fn('mtproto.sender.encryptedSt
           localSeconds - serverSeconds > MAX_PAST_SECONDS ||
           serverSeconds - localSeconds > MAX_FUTURE_SECONDS;
         const saltInvalid = !isServerSaltValid(receivedSalt, serverSeconds);
-        yield* Effect.try({
+        const duplicate = yield* Effect.try({
           try: () => rememberRemoteMessage(messageId),
           catch: (cause) =>
             createMtprotoError('protocol', 'Telegram replayed an encrypted message.', { cause }),
@@ -332,6 +333,7 @@ export const createEncryptedMessageState = Effect.fn('mtproto.sender.encryptedSt
           timeInvalid,
           serverSalt: receivedSalt,
           saltInvalid,
+          duplicate,
         };
       },
     );
@@ -392,10 +394,14 @@ export const createEncryptedMessageState = Effect.fn('mtproto.sender.encryptedSt
     )(function* (serverMessageId) {
       const next = Number(serverMessageId >> 32n) - Math.floor(now() / 1_000);
       if (next === timeOffset) return false;
-      const movedBackwards = next < timeOffset;
       timeOffset = next;
-      if (movedBackwards) yield* resetSession();
-      return movedBackwards;
+      // Second-rounded pong timestamps routinely move the estimate back by one
+      // second. Keep the session and monotonic IDs unless they would now fall
+      // outside Telegram's accepted future window.
+      const mustReset =
+        lastMessageId > BigInt(Math.floor(now() / 1_000) + next + MAX_FUTURE_SECONDS) << 32n;
+      if (mustReset) yield* resetSession();
+      return mustReset;
     });
 
     return {

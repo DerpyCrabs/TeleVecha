@@ -7,7 +7,6 @@ import {
   Result,
   Fiber,
   Queue,
-  Schedule,
   Stream,
   SubscriptionRef,
 } from 'effect';
@@ -218,6 +217,7 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
   let lastSessionFirstMessageId: bigint | undefined;
   let lastSessionUniqueId: bigint | undefined;
   let terminalError: unknown;
+  let reconnectFailures = 0;
 
   const resetIncomingTracking = () => {
     incomingMessageIds.length = 0;
@@ -619,6 +619,7 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
       left.messageId < right.messageId ? -1 : left.messageId > right.messageId ? 1 : 0,
     );
     const packetIds = new Set<bigint>();
+    const duplicates = new Set<bigint>();
     for (const item of packet) {
       const serverSeconds = Number(item.messageId >> 32n);
       if (
@@ -630,12 +631,17 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
         throw createMtprotoError('protocol', 'Telegram sent an invalid inner message header.');
       }
       validateContentRelatedness(item);
-      if (
-        incomingMessages.has(item.messageId) ||
-        copiedMessages.has(item.messageId) ||
-        packetIds.has(item.messageId)
-      ) {
+      if (packetIds.has(item.messageId)) {
         throw createMtprotoError('protocol', 'Telegram replayed an inner message.');
+      }
+      const known = incomingMessages.get(item.messageId) ?? copiedMessages.get(item.messageId);
+      if (known) {
+        if (known.sequenceNumber !== item.sequenceNumber) {
+          throw createMtprotoError('protocol', 'Telegram changed a repeated message sequence.');
+        }
+        duplicates.add(item.messageId);
+        packetIds.add(item.messageId);
+        continue;
       }
       if (retainedFloor !== undefined && item.messageId < retainedFloor) {
         throw createMtprotoError('protocol', 'Telegram replayed an expired inner message.');
@@ -646,7 +652,7 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
     const sequenceByMessageId = new Map(
       packet.map((item) => [item.messageId, item.sequenceNumber] as const),
     );
-    const orderedIds = [...incomingMessageIds, ...packetIds].sort((left, right) =>
+    const orderedIds = [...new Set([...incomingMessageIds, ...packetIds])].sort((left, right) =>
       left < right ? -1 : left > right ? 1 : 0,
     );
     for (let index = 1; index < orderedIds.length; index += 1) {
@@ -662,6 +668,13 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
 
     incomingMessageIds.splice(0, incomingMessageIds.length, ...orderedIds);
     for (const item of packet) {
+      if (duplicates.has(item.messageId)) {
+        incomingMessages.set(
+          item.messageId,
+          incomingMessages.get(item.messageId) ?? copiedMessages.get(item.messageId)!,
+        );
+        continue;
+      }
       incomingMessages.set(item.messageId, {
         acknowledged: false,
         contentRelated: (item.sequenceNumber & 1) === 1,
@@ -671,6 +684,7 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
     while (incomingMessageIds.length > MAX_INCOMING_MESSAGE_HISTORY) {
       incomingMessages.delete(incomingMessageIds.shift()!);
     }
+    return duplicates;
   };
 
   const isResponseMessageId = (message: IncomingMessage) => (message.messageId & 3n) === 1n;
@@ -844,9 +858,10 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
     skipTimeValidation: boolean,
     copyDepth: number,
     timeCorrections?: ReadonlySet<string>,
+    duplicates?: ReadonlySet<bigint>,
   ) {
     for (const inner of containerMessages(message)) {
-      yield* processMessage(inner, skipTimeValidation, copyDepth, timeCorrections);
+      yield* processMessage(inner, skipTimeValidation, copyDepth, timeCorrections, duplicates);
     }
   });
 
@@ -855,13 +870,19 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
     skipTimeValidation?: boolean,
     copyDepth?: number,
     timeCorrections?: ReadonlySet<string>,
+    duplicates?: ReadonlySet<bigint>,
   ) => Effect.Effect<void, MtprotoError> = Effect.fn('mtproto.sender.processMessage')(function* (
     message: IncomingMessage,
     skipTimeValidation: boolean | undefined = false,
     copyDepth: number | undefined = 0,
     timeCorrections?: ReadonlySet<string>,
+    duplicates?: ReadonlySet<bigint>,
   ) {
     if ((message.sequenceNumber & 1) === 1) pendingAcks.add(message.messageId);
+    if (duplicates?.has(message.messageId)) {
+      scheduleFlush();
+      return;
+    }
     const wasGzip = message.body.length >= 4 && readUint32Le(message.body) === GZIP_PACKED_ID;
     const body = unpackGzipBody(message.body);
     const constructorId = readUint32Le(body);
@@ -876,7 +897,13 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
       if (wasGzip) {
         throw createMtprotoError('protocol', 'Telegram gzip-wrapped a message container.');
       }
-      yield* processContainer({ ...message, body }, skipTimeValidation, copyDepth, timeCorrections);
+      yield* processContainer(
+        { ...message, body },
+        skipTimeValidation,
+        copyDepth,
+        timeCorrections,
+        duplicates,
+      );
       scheduleFlush();
       return;
     }
@@ -1186,11 +1213,21 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
       serverSalt = message.serverSalt;
       sourceState.setServerSalt(message.serverSalt);
     }
-    yield* Effect.try({
+    if (message.duplicate) {
+      // Authenticate and validate the envelope above, but never apply a known
+      // message twice. Re-ack its contents in case the previous ack was lost.
+      for (const item of packetMessages(incoming)) {
+        if ((item.sequenceNumber & 1) === 1) pendingAcks.add(item.messageId);
+      }
+      scheduleFlush();
+      return;
+    }
+    const duplicates = yield* Effect.try({
       try: () => rememberIncomingPacket(incoming, canCorrectTime),
       catch: senderError,
     });
-    yield* processMessage(incoming, canCorrectTime, 0, timeCorrections);
+    yield* processMessage(incoming, canCorrectTime, 0, timeCorrections, duplicates);
+    if (pendingAcks.size > 0) scheduleFlush();
   });
 
   const publishConnectionState = (value: boolean) =>
@@ -1218,6 +1255,11 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
         const receiver = yield* options.connection.packets(Stream.fromQueue(outgoingPackets)).pipe(
           Stream.runForEach((packet) =>
             processPacket(packet).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  reconnectFailures = 0;
+                }),
+              ),
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
                   ? Effect.failCause(cause)
@@ -1255,16 +1297,27 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
         connected = true;
         yield* publishConnectionState(true);
         scheduleFlush();
-        return yield* receiverCompletion;
+        // A WebSocket can stay open after its route has stopped delivering
+        // packets. A missed pong must close this attempt and restart it.
+        return yield* Effect.raceFirst(receiverCompletion, ping);
       }),
     );
 
-  const supervisor = runConnection().pipe(
-    Effect.ensuring(disconnectAttempt()),
-    Effect.retry({
-      schedule: Schedule.exponential(options.reconnect?.delayMs ?? 1_000),
-      times: options.reconnect?.retries ?? 5,
-    }),
+  const supervisor = Effect.gen(function* () {
+    while (true) {
+      const result = yield* runConnection().pipe(
+        Effect.ensuring(disconnectAttempt()),
+        Effect.result,
+      );
+      if (Result.isSuccess(result)) return;
+      if (terminalError !== undefined || reconnectFailures >= (options.reconnect?.retries ?? 5)) {
+        return yield* Effect.fail(result.failure);
+      }
+      const delay = Math.min(10_000, (options.reconnect?.delayMs ?? 250) * 2 ** reconnectFailures);
+      reconnectFailures += 1;
+      yield* Effect.sleep(delay);
+    }
+  }).pipe(
     Effect.tapError((error) =>
       Effect.gen(function* () {
         terminalError = error;
@@ -1274,13 +1327,6 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
       }),
     ),
   );
-  yield* supervisor.pipe(Effect.forkScoped({ startImmediately: true }));
-
-  yield* Stream.fromQueue(flushSignals).pipe(
-    Stream.runForEach(() => drain()),
-    Effect.forkScoped({ startImmediately: true }),
-  );
-
   const invoke: MtprotoSender['invoke'] = <Result = unknown>(request: TlObject) =>
     Effect.gen(function* () {
       if (terminalError !== undefined) return yield* Effect.fail(senderError(terminalError));
@@ -1322,10 +1368,14 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
         duration: PING_TIMEOUT_MS,
         orElse: () => Effect.fail(createMtprotoError('transport', 'Telegram ping timed out.')),
       }),
-      Effect.ignore,
     );
   }).pipe(Effect.delay(PING_INTERVAL_MS), Effect.forever);
-  yield* ping.pipe(Effect.forkScoped);
+
+  yield* supervisor.pipe(Effect.forkScoped({ startImmediately: true }));
+  yield* Stream.fromQueue(flushSignals).pipe(
+    Stream.runForEach(() => drain()),
+    Effect.forkScoped({ startImmediately: true }),
+  );
 
   yield* SubscriptionRef.changes(connectedState).pipe(
     Stream.filter(Boolean),
