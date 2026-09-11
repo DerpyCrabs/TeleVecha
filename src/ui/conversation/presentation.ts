@@ -52,7 +52,15 @@ export function presentPendingAttachment(
           : attachment.mimeType.startsWith('video/')
             ? 'video'
             : 'file';
-  return { kind, name: attachment.name, mimeType: attachment.mimeType, size: attachment.blob.size };
+  return {
+    kind,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    size: attachment.blob.size,
+    width: attachment.width,
+    height: attachment.height,
+    duration: attachment.duration,
+  };
 }
 
 function pendingSendPreview(send: PendingSend) {

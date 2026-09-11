@@ -28,6 +28,7 @@ import type {
 } from '../types';
 import { gzipSync, strToU8 } from 'fflate';
 import { createMtprotoError, type MtprotoError } from '../mtproto/errors';
+import { readVideoPreview } from '../localMedia';
 
 const cursor: SyncCursor = { pts: 10, qts: 0, date: 1_700_000_000, seq: 1 };
 const peers: TelegramPeer[] = [
@@ -289,6 +290,7 @@ interface FixtureStats {
   lastSendRandomId?: string;
   sendFile: number;
   sendAlbum: number;
+  readMessageContents: { peerId: string; messageIds: number[] }[];
   readHistory: number;
   readHistoryPeers: string[];
   getReadOutboxMaxId: number;
@@ -402,6 +404,29 @@ function fixtureDialog(peer: TelegramPeer, title: string, color: string): Telegr
     hasAvatar: true,
     avatarId: `fixture-${peer.id}`,
   };
+}
+
+function fixtureVoiceBlob(duration: number = 2) {
+  const sampleRate = 8_000;
+  const samples = Math.round(Math.max(1, Math.min(120, duration)) * sampleRate);
+  const bytes = new Uint8Array(44 + samples);
+  bytes.fill(128, 44); // Unsigned 8-bit PCM silence.
+  const view = new DataView(bytes.buffer);
+  const text = (offset: number, value: string) =>
+    bytes.set(new TextEncoder().encode(value), offset);
+  text(0, 'RIFF');
+  view.setUint32(4, 36 + samples, true);
+  text(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  text(36, 'data');
+  view.setUint32(40, samples, true);
+  return new Blob([bytes], { type: 'audio/wav' });
 }
 
 function fixtureTgsBlob() {
@@ -553,6 +578,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       sendText: 0,
       sendFile: 0,
       sendAlbum: 0,
+      readMessageContents: [],
       readHistory: 0,
       readHistoryPeers: [],
       getReadOutboxMaxId: 0,
@@ -1261,6 +1287,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         options.reply,
         options.formats,
       );
+      const dimensions = yield* fixtureMediaDimensions(file);
       return {
         message: {
           ...result.message,
@@ -1271,6 +1298,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
             name: file.name,
             mimeType: file.type || 'application/octet-stream',
             size: file.size,
+            ...dimensions,
           },
         },
       };
@@ -1300,6 +1328,9 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       const history = messages.get(peer.id) ?? [];
       const firstId = (history.at(-1)?.id ?? 0) + 1;
       const groupedId = `fixture-album-${attachments[0]!.randomId}`;
+      const dimensions = yield* Effect.forEach(attachments, ({ file }) =>
+        fixtureMediaDimensions(file),
+      );
       const sent = attachments.map(({ file, randomId, sendAs }, index): TelegramMessage => ({
         id: firstId + index,
         peerId: peer.id,
@@ -1324,6 +1355,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
           name: file.name,
           mimeType: file.type || 'application/octet-stream',
           size: file.size,
+          ...dimensions[index],
         },
       }));
       messages.set(peer.id, [...history, ...sent]);
@@ -1366,6 +1398,8 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         return yield* Effect.never;
       }
       const media = message.media ?? message.linkPreview?.media;
+      if (media?.kind === 'voice') return fixtureVoiceBlob(media.duration);
+      if (media?.kind === 'round-video') return fixtureMp4Blob();
       if (media?.mimeType === 'application/x-tgsticker') return fixtureTgsBlob();
       if (message.linkPreview?.media && !options?.preview) {
         return fixtureMp4Blob();
@@ -1898,6 +1932,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       const message = messages.get(peer.id)?.find(({ id }) => id === messageId);
       if (!message)
         return yield* Effect.fail(createMtprotoError('transport', 'Fixture message was not found'));
+      const dimensions = replacement ? yield* fixtureMediaDimensions(replacement.file) : undefined;
       const edited: TelegramMessage = {
         ...message,
         text,
@@ -1912,6 +1947,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
                 name: replacement.file.name,
                 mimeType: replacement.file.type || 'application/octet-stream',
                 size: replacement.file.size,
+                ...dimensions,
               },
             }
           : {}),
@@ -1923,6 +1959,25 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       );
       return { message: edited };
     });
+    function fixtureMediaDimensions(file: File) {
+      if (file.type.startsWith('video/') && typeof document !== 'undefined') {
+        return Effect.tryPromise((signal) => readVideoPreview(file, signal)).pipe(
+          Effect.map(({ width, height, duration }) => ({ width, height, duration })),
+          Effect.catch(() => Effect.succeed(undefined)),
+        );
+      }
+      if (!file.type.startsWith('image/') || typeof createImageBitmap !== 'function') {
+        return Effect.succeed(undefined);
+      }
+      return Effect.tryPromise(async () => {
+        const image = await createImageBitmap(file);
+        try {
+          return { width: image.width, height: image.height };
+        } finally {
+          image.close();
+        }
+      }).pipe(Effect.catch(() => Effect.succeed(undefined)));
+    }
     function fixtureMediaKind(file: File, sendAs: OutgoingAttachmentMode) {
       if (sendAs === 'file') return 'file';
       if (file.type === 'image/gif') return 'animation';
@@ -2035,6 +2090,11 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       getDialogs,
       getHistory,
       getHistoryAround,
+      readMessageContents: (peer, messageIds) =>
+        Effect.sync(() => {
+          stats.readMessageContents.push({ peerId: peer.id, messageIds: [...messageIds] });
+          return {};
+        }),
       readHistory,
       getReadOutboxMaxId,
       getSharedMediaCounts,

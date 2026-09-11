@@ -16,6 +16,8 @@ import { AccountState, AccountStateLayer } from './engineState';
 import { EngineTasks, EngineTasksLayer, type EngineSerialLane } from './engineTasks';
 import { createMessageRevisions } from './messageRevisions';
 import { telegramMediaAssetKey } from './mediaAssetKey';
+import { pendingMediaForMessage } from '../pendingMedia';
+import { canReuseUploadedMedia } from '../localMedia';
 import {
   parseChatAppearanceCache,
   parseStickerListCache,
@@ -40,6 +42,7 @@ import type {
   ConversationViewSnapshot,
   EditMediaOptions,
   OutgoingAttachmentMode,
+  OutgoingAttachment,
   PendingSend,
   SharedMediaCounts,
   SharedMediaKind,
@@ -2363,7 +2366,7 @@ function makeMessagingEngineModule(
   });
   const sendAttachments = Effect.fn('MessagingEngine.sendAttachments')(function* (
     peer: TelegramPeer,
-    attachments: Array<{ file: File; sendAs: OutgoingAttachmentMode }>,
+    attachments: OutgoingAttachment[],
     caption: string = '',
     reply?: TelegramReplyTarget,
     formats?: TelegramTextFormat[],
@@ -2389,7 +2392,14 @@ function makeMessagingEngineModule(
     const createdAt = Date.now();
     const accountId = activeAccountId ?? cachedAccountId;
     const draftVersion = versions.current('draft', peer.id);
-    const appendSingle = ({ file, sendAs }: (typeof attachments)[number]) =>
+    const appendSingle = ({
+      file,
+      sendAs,
+      width,
+      height,
+      duration,
+      preview,
+    }: (typeof attachments)[number]) =>
       Effect.gen(function* () {
         const isFirst = pending.length === 0;
         const id = yield* randomUuid();
@@ -2411,6 +2421,10 @@ function makeMessagingEngineModule(
               mimeType: file.type || 'application/octet-stream',
               asSticker: isStickerFile(file, sendAs),
               sendAs,
+              width,
+              height,
+              duration,
+              preview,
             },
           }),
         );
@@ -2419,17 +2433,23 @@ function makeMessagingEngineModule(
       Effect.gen(function* () {
         const isFirst = pending.length === 0;
         const id = yield* randomUuid();
-        const albumAttachments = yield* Effect.forEach(items, ({ file }) =>
-          randomId().pipe(
-            Effect.map((generatedRandomId) => ({
-              blob: file,
-              name: file.name,
-              mimeType: file.type || 'application/octet-stream',
-              asSticker: false,
-              sendAs: 'media' as const,
-              randomId: generatedRandomId,
-            })),
-          ),
+        const albumAttachments = yield* Effect.forEach(
+          items,
+          ({ file, width, height, duration, preview }) =>
+            randomId().pipe(
+              Effect.map((generatedRandomId) => ({
+                blob: file,
+                name: file.name,
+                mimeType: file.type || 'application/octet-stream',
+                asSticker: false,
+                sendAs: 'media' as const,
+                randomId: generatedRandomId,
+                width,
+                height,
+                duration,
+                preview,
+              })),
+            ),
         );
         pending.push(
           sendQueue.create({
@@ -2503,6 +2523,10 @@ function makeMessagingEngineModule(
     let cached: Blob | undefined;
     yield* Effect.gen(function* () {
       cached = yield* cacheStore.loadBlob(cacheKey);
+      // Image documents can use their cached original as a thumbnail as well.
+      if (!cached && options?.preview && message.media?.mimeType.startsWith('image/')) {
+        cached = yield* cacheStore.loadBlob(mediaAssetKey(message));
+      }
     }).pipe(
       Effect.catch((error) =>
         reportFailure('cache', 'Could not read cached media; downloading it again.', error),
@@ -3240,6 +3264,9 @@ function makeMessagingEngineModule(
           ) {
             return result.message;
           }
+          if (replacement) {
+            yield* cacheUploadedMedia(result.message, replacement.file, replacement.preview);
+          }
           yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
           if (
             !isOperationCurrent(session, accountId) ||
@@ -3895,6 +3922,11 @@ function makeMessagingEngineModule(
   const applyChannelUpdate = Effect.fn('MessagingEngine.applyChannelUpdate')(function* (
     update: Extract<TransportUpdate, { pts: number }>,
   ) {
+    if (update.type === 'read-message-contents') {
+      // Content receipts carry no channel PTS and must not trigger recovery.
+      yield* applyUpdate(update, true);
+      return;
+    }
     const peerId = updatePeerId(update);
     if (!peerId) {
       yield* applyUpdate(update, true);
@@ -4040,6 +4072,58 @@ function makeMessagingEngineModule(
     publish: boolean,
   ) {
     if (update.type === 'too-long' || update.type === 'channel-too-long') return;
+    if (update.type === 'read-message-contents') {
+      const session = sessionScope;
+      const accountId = activeAccountId;
+      return yield* queueDialogStateOperation(() =>
+        Effect.gen(function* () {
+          if (!isOperationCurrent(session, accountId)) return;
+          const peerIds = update.peerId
+            ? [update.peerId]
+            : [
+                ...new Set([
+                  ...(yield* cacheStore.findMessagePeers(update.messageIds)),
+                  ...histories.peerIds(),
+                ]),
+              ].filter((peerId) => !isChannelPeerId(peerId));
+          if (!isOperationCurrent(session, accountId)) return;
+          for (const peerId of peerIds) {
+            for (const messageId of update.messageIds) {
+              const stored = yield* cacheStore.loadMessage(peerId, messageId);
+              if (!isOperationCurrent(session, accountId)) return;
+              const previous =
+                histories.loaded(peerId)?.messages.find(({ id }) => id === messageId) ?? stored;
+              if (!previous || previous.mediaUnread === false) continue;
+              messageRevisions.record(peerId, messageId);
+              const message = { ...previous, mediaUnread: false, cacheEpoch: currentCacheEpoch };
+              yield* cacheStore.putMessage(message);
+              if (!isOperationCurrent(session, accountId)) return;
+              histories.updateLoaded(peerId, (history) => ({
+                ...history,
+                messages: history.messages.map((candidate) =>
+                  candidate.id === messageId ? message : candidate,
+                ),
+              }));
+              const dialog = currentSnapshot().dialogs.find(
+                ({ peer, topMessageId }) => peer.id === peerId && topMessageId === messageId,
+              );
+              if (dialog) {
+                const changed = { ...dialog, topMessage: message };
+                versions.next('dialog', peerId);
+                yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
+                if (!isOperationCurrent(session, accountId)) return;
+                yield* patch({
+                  dialogs: currentSnapshot().dialogs.map((candidate) =>
+                    candidate.peer.id === peerId ? changed : candidate,
+                  ),
+                });
+              }
+              if (publish) yield* publishConversationEvent({ type: 'message-upsert', message });
+            }
+          }
+        }),
+      );
+    }
     let messageUpdate:
       | Extract<TransportUpdate, { type: 'new-message' | 'edit-message' }>
       | undefined;
@@ -4093,6 +4177,12 @@ function makeMessagingEngineModule(
       }
       if (messageUpdate.type === 'edit-message') {
         yield* invalidateEditedMedia(existingMessage, message);
+      }
+      const upload = pendingMediaForMessage(currentSnapshot().pending, message);
+      if (upload) {
+        // Keep the uploaded media available before publishing the confirmation or
+        // removing its outbox record, including when the server echo arrives first.
+        yield* cacheUploadedMedia(message, upload.attachment.blob, upload.attachment.preview);
       }
       const isNewMessage = messageUpdate.type === 'new-message' && !existingMessage;
       messageRevisions.record(message.peerId, message.id);
@@ -5090,6 +5180,52 @@ function makeMessagingEngineModule(
       .flush(peerId, (pending) => flushInboxRead(peerId, pending))
       .pipe(Effect.ignore, Effect.ensuring(Effect.sync(() => inboxReadInFlight.delete(peerId))));
   });
+  const markMediaRead = Effect.fn('MessagingEngine.markMediaRead')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+  ) {
+    const session = sessionScope;
+    const accountId = activeAccountId;
+    if (!Number.isSafeInteger(messageId) || messageId <= 0) return;
+    return yield* queueMutation(`media-read:${peer.id}:${messageId}`, () =>
+      Effect.gen(function* () {
+        if (!isOperationCurrent(session, accountId) || !currentSnapshot().online) return;
+        const source =
+          histories.loaded(peer.id)?.messages.find(({ id }) => id === messageId) ??
+          (yield* cacheStore.loadMessage(peer.id, messageId));
+        if (!isOperationCurrent(session, accountId)) return;
+        if (
+          !source ||
+          source.outgoing ||
+          source.mediaUnread === false ||
+          (source.media?.kind !== 'voice' && source.media?.kind !== 'round-video')
+        )
+          return;
+        const result = yield* runTelegramOperation(
+          () => telegramTransport.readMessageContents(peer, [messageId]),
+          'Marking voice or video message as listened',
+        );
+        if (!isOperationCurrent(session, accountId)) return;
+        yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+        // Also apply the acknowledged receipt when its PTS was already consumed
+        // by a live update, or the channel RPC returned only Bool.
+        yield* enqueueSyntheticUpdates(
+          [
+            {
+              type: 'read-message-contents',
+              peerId: peer.id,
+              messageIds: [messageId],
+              pts: 0,
+              ptsCount: 0,
+            },
+          ],
+          session,
+          true,
+          { accountId },
+        );
+      }),
+    );
+  });
   const flushInboxRead = Effect.fn('MessagingEngine.flushInboxRead')(function* (
     peerId: string,
     maxMessageId: number,
@@ -5454,6 +5590,20 @@ function makeMessagingEngineModule(
       ? isOperationCurrent(session, operation.accountId)
       : isLifecycleCurrent(session);
   }
+  const cacheUploadedMedia = Effect.fn('MessagingEngine.cacheUploadedMedia')(function* (
+    message: TelegramMessage,
+    blob: Blob,
+    preview?: Blob,
+  ) {
+    if (!canReuseUploadedMedia(message.media, blob)) return;
+    const key = mediaAssetKey(message);
+    yield* Effect.all([
+      cacheStore.saveBlob(key, blob),
+      ...(preview ? [cacheStore.saveBlob(`preview:${key}`, preview)] : []),
+    ]).pipe(
+      Effect.catch((error) => reportFailure('cache', 'Could not cache the uploaded media.', error)),
+    );
+  });
   const invalidateEditedMedia = Effect.fn('MessagingEngine.invalidateEditedMedia')(function* (
     previous: TelegramMessage | undefined,
     next: TelegramMessage,
@@ -5561,6 +5711,7 @@ function makeMessagingEngineModule(
     setActiveConversationVisibility: setActiveConversationVisibility,
     refreshReadReceipt: refreshReadReceipt,
     retryMarkRead: retryMarkRead,
+    markMediaRead,
     refreshUpdates: refreshUpdates,
     subscribe: subscribe,
     subscribeResources: subscribeResources,

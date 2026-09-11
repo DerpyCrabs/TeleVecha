@@ -75,6 +75,15 @@ function outputMimeType(file: File) {
   return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png';
 }
 
+export async function readImageDimensions(file: File) {
+  const decoded = await decodeImage(file);
+  try {
+    return { width: decoded.width, height: decoded.height };
+  } finally {
+    decoded.close();
+  }
+}
+
 function outputName(file: File, mimeType: string) {
   const extension = mimeType === 'image/jpeg' ? 'jpg' : (mimeType.split('/')[1] ?? 'png');
   return file.name.replace(/(?:\.[^.]+)?$/, `.${extension}`);

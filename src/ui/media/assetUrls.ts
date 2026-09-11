@@ -14,6 +14,17 @@ export function cachedAssetUrl(key: string) {
   return url;
 }
 
+/** Moves an upload's URL to its confirmed media key without revoking the mounted image. */
+export function moveAssetUrl(from: string, to: string) {
+  const current = cachedAssetUrl(to);
+  if (current) return current;
+  const url = assets.get(from);
+  if (!url) return undefined;
+  assets.delete(from);
+  assets.set(to, url);
+  return url;
+}
+
 function activeObjectUrls() {
   if (typeof document === 'undefined') return new Set<string>();
   const active = new Set<string>();

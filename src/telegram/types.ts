@@ -127,6 +127,7 @@ export interface TelegramMessage {
   text: string;
   date: number;
   outgoing: boolean;
+  mediaUnread?: boolean | undefined;
   protected?: boolean | undefined;
   editedAt?: number | undefined;
   replyToId?: number | undefined;
@@ -407,6 +408,14 @@ export interface TelegramDownloadOptions {
 }
 
 export type TransportUpdate =
+  | {
+      type: 'read-message-contents';
+      peerId?: string | undefined;
+      messageIds: number[];
+      pts: number;
+      ptsCount: number;
+      channelScoped?: boolean | undefined;
+    }
   | { type: 'message-id-assigned'; messageId: number; randomId: string }
   | {
       type: 'new-message';
@@ -632,6 +641,10 @@ export interface TelegramTransport {
     limit: number,
   ): TransportEffect<HistoryAroundPage>;
   readHistory(peer: TelegramPeer, maxMessageId: number): TransportEffect<TransportMutationResult>;
+  readMessageContents(
+    peer: TelegramPeer,
+    messageIds: number[],
+  ): TransportEffect<TransportMutationResult>;
   getReadOutboxMaxId?(peer: TelegramPeer): TransportEffect<number>;
   getSharedMediaCounts(peer: TelegramPeer): TransportEffect<SharedMediaCounts>;
   getSharedMedia(
@@ -787,12 +800,21 @@ export interface SendAlbumOptions {
   onProgress?: TelegramTransportProgress | undefined;
 }
 
-export interface EditMediaOptions {
+export type EditMediaOptions = OutgoingAttachment;
+
+export interface LocalMediaMetadata {
+  width?: number | undefined;
+  height?: number | undefined;
+  duration?: number | undefined;
+  preview?: Blob | undefined;
+}
+
+export interface OutgoingAttachment extends LocalMediaMetadata {
   file: File;
   sendAs: OutgoingAttachmentMode;
 }
 
-export interface PendingAttachment {
+export interface PendingAttachment extends LocalMediaMetadata {
   blob: Blob;
   name: string;
   mimeType: string;

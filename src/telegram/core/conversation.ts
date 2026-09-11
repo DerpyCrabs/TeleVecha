@@ -18,11 +18,12 @@ import type {
   TelegramUrlAuthAcceptOptions,
   TelegramUrlAuthResult,
   SharedMediaKind,
+  OutgoingAttachment,
 } from '../types';
 import { Effect } from 'effect';
 import { MessagingError } from './messagingError';
 
-type Attachment = { file: File; sendAs: 'media' | 'file' };
+type Attachment = OutgoingAttachment;
 type Operation<Value> = Effect.Effect<Value, MessagingError>;
 
 export interface ConversationHost {

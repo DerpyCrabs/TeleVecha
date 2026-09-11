@@ -60,6 +60,117 @@ const withTransport = <A, E>(
   );
 
 describe('web Telegram transport', () => {
+  it.each([
+    { id: 'u:1', kind: 'user' as const },
+    { id: 'g:2', kind: 'group' as const },
+    { id: 'c:3', kind: 'channel' as const, accessHash: '33' },
+  ])('sends content receipts through the correct $kind RPC and preserves PTS', (peer) => {
+    const invoke = vi.fn((request: unknown) => {
+      if (Api.channels.ReadMessageContents.is(request)) return Effect.succeed(true);
+      if (Api.messages.ReadMessageContents.is(request))
+        return Effect.succeed(Api.messages.AffectedMessages({ pts: 12, ptsCount: 2 }));
+      return Effect.fail(createMtprotoError('protocol', 'Unexpected RPC'));
+    });
+    return Effect.runPromise(
+      withTransport(
+        (target) =>
+          Effect.gen(function* () {
+            yield* target.connect({ apiId: 1, apiHash: 'hash' });
+            const result = yield* target.readMessageContents(peer, [81, 82]);
+            expect(invoke).toHaveBeenCalledOnce();
+            if (peer.kind === 'channel') {
+              expect(invoke).toHaveBeenCalledWith(
+                Api.channels.ReadMessageContents({
+                  channel: Api.InputChannel({ channelId: 3n, accessHash: 33n }),
+                  id: [81, 82],
+                }),
+              );
+              expect(result).toEqual({});
+            } else {
+              expect(invoke).toHaveBeenCalledWith(
+                Api.messages.ReadMessageContents({ id: [81, 82] }),
+              );
+              expect(result.updateBatches).toEqual([
+                {
+                  updates: [
+                    {
+                      type: 'read-message-contents',
+                      peerId: peer.id,
+                      messageIds: [81, 82],
+                      pts: 12,
+                      ptsCount: 2,
+                    },
+                  ],
+                },
+              ]);
+            }
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it('maps unread media and content receipts from other Telegram devices', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        providePlatform(
+          Effect.gen(function* () {
+            const events = yield* PubSub.sliding<MtprotoClientEvent>(8);
+            const target = yield* createWebTelegramTransport(makeMemoryCacheStore(), {
+              createClient: () =>
+                Effect.succeed(clientDouble({ events: Stream.fromPubSub(events) })),
+            });
+            yield* target.connect({ apiId: 1, apiHash: 'hash' });
+            const received = yield* target.updates.pipe(
+              Stream.runHead,
+              Effect.forkChild({ startImmediately: true }),
+            );
+            yield* PubSub.publish(
+              events,
+              updateEvent(
+                Api.Updates({
+                  users: [],
+                  chats: [],
+                  date: 10,
+                  seq: 1,
+                  updates: [
+                    Api.UpdateNewMessage({
+                      message: Api.Message({
+                        id: 81,
+                        peerId: Api.PeerUser({ userId: 1n }),
+                        date: 10,
+                        message: '',
+                        mediaUnread: true,
+                      }),
+                      pts: 10,
+                      ptsCount: 1,
+                    }),
+                    Api.UpdateReadMessagesContents({ messages: [81], pts: 11, ptsCount: 1 }),
+                    Api.UpdateChannelReadMessagesContents({ channelId: 3n, messages: [81] }),
+                  ],
+                }),
+              ),
+            );
+            const batch = yield* Fiber.join(received);
+            expect(batch._tag).toBe('Some');
+            if (batch._tag !== 'Some') return;
+            expect(batch.value.updates).toMatchObject([
+              { type: 'new-message', message: { id: 81, mediaUnread: true } },
+              { type: 'read-message-contents', messageIds: [81], pts: 11, ptsCount: 1 },
+              {
+                type: 'read-message-contents',
+                peerId: 'c:3',
+                messageIds: [81],
+                pts: 0,
+                ptsCount: 0,
+                channelScoped: true,
+              },
+            ]);
+          }),
+        ),
+      ),
+    ));
+
   it('exposes only the transport contract', () =>
     Effect.runPromise(
       withTransport((target) =>

@@ -35,6 +35,7 @@ export declare namespace Tl {
     | Tl.channels.GetParticipants
     | Tl.channels.LeaveChannel
     | Tl.channels.ReadHistory
+    | Tl.channels.ReadMessageContents
     | Tl.contacts.AddContact
     | Tl.contacts.Block
     | Tl.contacts.DeleteContacts
@@ -67,6 +68,7 @@ export declare namespace Tl {
     | Tl.messages.GetSearchCounters
     | Tl.messages.GetStickerSet
     | Tl.messages.ReadHistory
+    | Tl.messages.ReadMessageContents
     | Tl.messages.RequestUrlAuth
     | Tl.messages.Search
     | Tl.messages.SearchGlobal
@@ -7669,6 +7671,13 @@ export declare namespace Tl {
       channel: Tl.TypeInputChannel;
       maxId: number;
     }>;
+    export type ReadMessageContents = TlObject<'channels.readMessageContents'> &
+      ReadMessageContentsFields &
+      TlRequest<boolean>;
+    export type ReadMessageContentsFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+      id: readonly number[];
+    }>;
     export type TypeChannelParticipant = Tl.channels.ChannelParticipant;
     export type TypeChannelParticipants =
       | Tl.channels.ChannelParticipants
@@ -8120,6 +8129,12 @@ export declare namespace Tl {
     export type ReadHistoryFields = Readonly<{
       peer: Tl.TypeInputPeer;
       maxId: number;
+    }>;
+    export type ReadMessageContents = TlObject<'messages.readMessageContents'> &
+      ReadMessageContentsFields &
+      TlRequest<Tl.messages.TypeAffectedMessages>;
+    export type ReadMessageContentsFields = Readonly<{
+      id: readonly number[];
     }>;
     export type RecentStickers = TlObject<'messages.recentStickers'> & RecentStickersFields;
     export type RecentStickersFields = Readonly<{

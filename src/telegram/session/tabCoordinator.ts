@@ -37,7 +37,7 @@ import type {
   TelegramResourceInvalidation,
 } from '../types';
 
-const PROTOCOL_VERSION = 7;
+const PROTOCOL_VERSION = 8;
 const OWNER_HEARTBEAT_MS = 2_000;
 const OWNER_TIMEOUT_MS = 7_000;
 const REQUEST_RETRY_MS = 2_000;
@@ -86,6 +86,8 @@ const invokeEngineCommand = (
       return engine.refreshReadReceipt(
         ...(args as Parameters<MessagingEngine['refreshReadReceipt']>),
       );
+    case 'markMediaRead':
+      return engine.markMediaRead(...(args as Parameters<MessagingEngine['markMediaRead']>));
     case 'retryMarkRead':
       return engine.retryMarkRead(...(args as Parameters<MessagingEngine['retryMarkRead']>));
     case 'clearOperationError':
@@ -517,6 +519,7 @@ const MessageSchema = Schema.Struct({
   text: Schema.String,
   date: Schema.Number,
   outgoing: Schema.Boolean,
+  mediaUnread: Schema.optional(Schema.Boolean),
   protected: Schema.optional(Schema.Boolean),
   editedAt: Schema.optional(Schema.Number),
   replyToId: Schema.optional(Schema.Number),
@@ -715,6 +718,7 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   retrySync: { readiness: 'startup' },
   refreshUpdates: { readiness: 'account', coalesce: true },
   refreshReadReceipt: { readiness: 'account', coalesce: true },
+  markMediaRead: { readiness: 'account', concurrent: true, coalesce: true },
   retryMarkRead: { readiness: 'workspace' },
   clearOperationError: { readiness: 'workspace' },
   requestCode: { readiness: 'startup' },
@@ -1030,6 +1034,7 @@ function errorMessage(error: unknown) {
     refreshUpdates: remote('refreshUpdates'),
     refreshReadReceipt: remote('refreshReadReceipt'),
     retryMarkRead: remote('retryMarkRead'),
+    markMediaRead: remote('markMediaRead'),
     requestCode: remote('requestCode'),
     submitCode: remote('submitCode'),
     submitPassword: remote('submitPassword'),

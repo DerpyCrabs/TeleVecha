@@ -228,6 +228,7 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
       retrySync: () => Effect.void,
       refreshUpdates: () => Effect.void,
       refreshReadReceipt: () => Effect.void,
+      markMediaRead: () => Effect.void,
       retryMarkRead: () => Effect.void,
       clearOperationError: () => Effect.void,
       requestCode: () => Effect.void,

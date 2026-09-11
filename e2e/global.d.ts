@@ -32,6 +32,7 @@ interface Window {
       lastSendRandomId?: string;
       sendFile: number;
       sendAlbum: number;
+      readMessageContents: { peerId: string; messageIds: number[] }[];
       readHistory: number;
       readHistoryPeers: string[];
       getReadOutboxMaxId: number;

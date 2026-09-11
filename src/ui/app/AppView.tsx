@@ -242,9 +242,12 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
   };
   const mediaPreviewAssetFor = (messageId: string | number): MediaAsset | undefined => {
     const source = mediaSourceFor(messageId);
-    return source?.media && mediaPresentation(source.media).preview
-      ? mediaAssets.messagePreview(source)
-      : mediaAssetFor(messageId);
+    if (source?.media && mediaPresentation(source.media).preview)
+      return mediaAssets.messagePreview(source);
+    const pending = pendingAttachmentForMessage(String(messageId));
+    if (pending?.preview)
+      return mediaAssets.pendingPreview(activeChatId, String(messageId), pending.preview);
+    return pending?.mimeType.startsWith('video/') ? undefined : mediaAssetFor(messageId);
   };
   const gapBefore = (message: ChatMessage) =>
     Number.isSafeInteger(Number(message.id))
@@ -740,6 +743,19 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                     uploadFailed={message.status === 'failed'}
                                     protected={message.protected}
                                     revision={model.mediaRevisions[message.id]}
+                                    messageKey={`${activeChatId}:${message.id}`}
+                                    onPlaybackStarted={() => {
+                                      const dialog = dialogForPeer(message.peerId);
+                                      if (dialog)
+                                        runInBackground(
+                                          model.runEffect(
+                                            model.engine.markMediaRead(
+                                              dialog.peer,
+                                              Number(message.id),
+                                            ),
+                                          ),
+                                        );
+                                    }}
                                     cachedUrl={() => mediaAssetFor(message.id)?.cached()}
                                     cachedPreviewUrl={() =>
                                       mediaPreviewAssetFor(message.id)?.cached()

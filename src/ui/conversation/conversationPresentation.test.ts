@@ -84,6 +84,8 @@ describe('presentConversation', () => {
       asSticker: false,
       sendAs: 'media' as const,
       randomId,
+      width: randomId === 'one' ? 600 : 400,
+      height: randomId === 'one' ? 400 : 600,
     });
     const result = presentConversation(
       snapshot(
@@ -104,10 +106,46 @@ describe('presentConversation', () => {
     ]);
     expect(result.map(({ message }) => message.body)).toEqual(['Queued', '']);
     expect(result.map(({ message }) => message.uploadProgress)).toEqual([1, 0.25]);
+    expect(result.map(({ message }) => [message.media?.width, message.media?.height])).toEqual([
+      [600, 400],
+      [400, 600],
+    ]);
   });
 
   it('returns no messages for an inactive peer', () => {
     expect(presentConversation(snapshot(), 'user:2')).toEqual([]);
+  });
+
+  it('keeps the complete local album until all of its messages are confirmed', () => {
+    const attachments = ['one', 'two'].map((randomId) => ({
+      blob: new Blob([randomId]),
+      name: `${randomId}.png`,
+      mimeType: 'image/png',
+      asSticker: false,
+      sendAs: 'media' as const,
+      randomId,
+    }));
+    const send = queued({ album: { attachments } });
+    const confirmed: TelegramMessage[] = attachments.map((attachment, index) => ({
+      id: index + 5,
+      peerId: peer.id,
+      senderId: 'self',
+      outgoing: true,
+      text: index === 0 ? send.text : '',
+      date: 1_700_000_001,
+      randomId: attachment.randomId,
+      groupedId: 'server-album',
+      media: { kind: 'photo', name: attachment.name, mimeType: attachment.mimeType },
+    }));
+    const before = presentConversation(snapshot([], [send]), peer.id);
+    for (const message of confirmed) {
+      const partial = presentConversation(snapshot([message], [send]), peer.id);
+      expect(partial).toEqual(before);
+    }
+    const after = presentConversation(snapshot(confirmed, [send]), peer.id);
+    expect(after.map(({ key }) => key)).toEqual(before.map(({ key }) => key));
+    expect(after.map(({ message }) => message.groupedId)).toEqual(['server-album', 'server-album']);
+    expect(after.map(({ message }) => message.status)).toEqual(['sent', 'sent']);
   });
 });
 

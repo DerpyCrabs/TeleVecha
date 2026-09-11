@@ -198,14 +198,17 @@ function composerFixture() {
   const send = vi.fn(
     (_peer: string, _body: string) => Effect.void as Effect.Effect<void, MessagingError>,
   );
-  const upload = vi.fn(() => Effect.void as Effect.Effect<void, MessagingError>);
+  const upload = vi.fn(
+    (_attachments: Parameters<EffectConversation['sendAttachments']>[0]) =>
+      Effect.void as Effect.Effect<void, MessagingError>,
+  );
   const typing = vi.fn((_peer: string, _action?: string) => Effect.void);
   const conversation = (id: string) =>
     ({
       peerId: id,
       setDraft: (text, details) => draft(id, text, details),
       sendDraft: (text) => send(id, text),
-      sendAttachments: () => upload(),
+      sendAttachments: (attachments) => upload(attachments),
       setTyping: (action) => Effect.suspend(() => typing(id, action)),
     }) satisfies Pick<
       EffectConversation,
@@ -435,7 +438,7 @@ it.each(['failure', 'shutdown'] as const)('settles uploads on %s', async (scenar
   upload.mockReturnValue(request.effect);
   session.attach([new File(['photo'], 'photo.png', { type: 'image/png' })]);
   session.send();
-  expect(request.pending()).toBe(1);
+  await vi.waitFor(() => expect(request.pending()).toBe(1));
   expect(typing).toHaveBeenCalledWith('alice', 'uploading');
   if (scenario === 'failure') {
     request.fail(offline());
@@ -447,6 +450,41 @@ it.each(['failure', 'shutdown'] as const)('settles uploads on %s', async (scenar
     await tasks.close();
     expect(request.canceled()).toBe(1);
   }
+});
+
+it('passes decoded image dimensions to the outbox and releases the bitmap', async () => {
+  const { session, tasks, upload } = composerFixture();
+  const close = vi.fn();
+  const decode = vi.fn(async () => ({ width: 600, height: 400, close }));
+  vi.stubGlobal('window', { createImageBitmap: decode });
+  vi.stubGlobal('createImageBitmap', decode);
+  const file = new File(['photo'], 'photo.png', { type: 'image/png' });
+  session.attach([file]);
+  session.send();
+  await tasks.idle();
+  expect(upload).toHaveBeenCalledExactlyOnceWith([
+    { file, sendAs: 'media', width: 600, height: 400 },
+  ]);
+  expect(close).toHaveBeenCalledOnce();
+});
+
+it('cancels before uploading if shutdown happens while reading image dimensions', async () => {
+  const { session, tasks, upload } = composerFixture();
+  let finish!: (value: { width: number; height: number; close(): void }) => void;
+  const decode = () =>
+    new Promise<{ width: number; height: number; close(): void }>((resolve) => {
+      finish = resolve;
+    });
+  vi.stubGlobal('window', { createImageBitmap: decode });
+  vi.stubGlobal('createImageBitmap', decode);
+  session.attach([new File(['photo'], 'photo.png', { type: 'image/png' })]);
+  session.send();
+  session.dispose();
+  await tasks.close();
+  const close = vi.fn();
+  finish({ width: 600, height: 400, close });
+  await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(upload).not.toHaveBeenCalled();
 });
 
 it('restores the draft when persistence fails before the send can be accepted', async () => {
@@ -486,6 +524,7 @@ it('restores a failed upload without waiting for the typing cleanup request', as
   );
   session.attach([new File(['photo'], 'photo.png', { type: 'image/png' })]);
   session.send();
+  await vi.waitFor(() => expect(request.pending()).toBe(1));
   request.fail(offline());
   await vi.waitFor(() => expect(session.model().attachments).toHaveLength(1));
   expect(cleanup.pending()).toBe(1);

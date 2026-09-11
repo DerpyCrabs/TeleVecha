@@ -144,6 +144,148 @@ test('shows a local image preview while a single upload is pending', async ({ pa
   await expect(pending.locator('.media-upload-status')).toHaveCount(0);
 });
 
+for (const shape of ['landscape', 'portrait', 'album'] as const) {
+  test(`preserves the ${shape} preview dimensions and local image through confirmation`, async ({
+    page,
+  }) => {
+    const sizes =
+      shape === 'album'
+        ? [
+            [600, 400],
+            [400, 600],
+          ]
+        : shape === 'landscape'
+          ? [[600, 400]]
+          : [[400, 600]];
+    const files = await page.evaluate(
+      (sizes) =>
+        sizes.map(([width, height], index) => {
+          const canvas = document.createElement('canvas');
+          canvas.width = width!;
+          canvas.height = height!;
+          const context = canvas.getContext('2d')!;
+          context.fillStyle = index === 0 ? '#f4ac45' : '#3c9e9b';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.fillStyle = '#17212b';
+          context.fillRect(20, 20, 80, 80);
+          return { name: `handoff-${index}.png`, data: canvas.toDataURL().split(',')[1]! };
+        }),
+      sizes,
+    );
+    await page.evaluate(() => window.__televechaFixture?.holdNextUpload());
+    await page
+      .locator('input[type="file"]')
+      .setInputFiles(
+        files.map(({ name, data }) => ({
+          name,
+          mimeType: 'image/png',
+          buffer: Buffer.from(data, 'base64'),
+        })),
+      );
+    await page.getByRole('textbox', { name: 'Message' }).fill('Image handoff');
+    await page.getByRole('button', { name: 'Send message' }).click();
+    const message = page.locator('article').filter({ hasText: 'Image handoff' });
+    await expect(message.locator('.media-upload-status')).toHaveCount(files.length);
+    const images = message.locator('.media-visual > img');
+    await expect(images).toHaveCount(files.length);
+    await expect
+      .poll(() =>
+        images.evaluateAll((elements) =>
+          elements.every((element) => {
+            const image = element as HTMLImageElement;
+            return image.complete && image.naturalWidth > 0 && !image.hidden;
+          }),
+        ),
+      )
+      .toBe(true);
+    const before = await images.evaluateAll((elements) =>
+      elements.map((element) => {
+        const image = element as HTMLImageElement;
+        const { width, height } = image.getBoundingClientRect();
+        return { src: image.src, width, height };
+      }),
+    );
+    if (shape !== 'album') {
+      expect(before[0]!.width / before[0]!.height).toBeCloseTo(sizes[0]![0]! / sizes[0]![1]!, 2);
+    }
+
+    const transition = await page.evaluate(async (before) => {
+      let frames = 0;
+      let settledFrames = 0;
+      const problems: string[] = [];
+      window.__televechaFixture?.releaseUpload();
+      return await new Promise<{ frames: number; problems: string[] }>((resolve) => {
+        const inspect = () => {
+          frames += 1;
+          before.forEach((expected, index) => {
+            const image = document.querySelector<HTMLImageElement>(
+              `article img[alt="handoff-${index}.png"]`,
+            );
+            if (!image || image.hidden || !image.complete || !image.naturalWidth) {
+              problems.push(`frame ${frames}: image ${index} missing`);
+              return;
+            }
+            const { width, height } = image.getBoundingClientRect();
+            if (image.src !== expected.src)
+              problems.push(`frame ${frames}: image ${index} replaced`);
+            if (Math.abs(width - expected.width) > 1 || Math.abs(height - expected.height) > 1) {
+              problems.push(`frame ${frames}: image ${index} resized to ${width}x${height}`);
+            }
+            if (image.closest('.media-attachment')?.querySelector('.media-loading:not([hidden])')) {
+              problems.push(`frame ${frames}: image ${index} loading`);
+            }
+          });
+          const pending = [...(window.__televechaRuntimes?.values() ?? [])][0]?.engine.snapshot()
+            .pending;
+          if (pending?.length === 0) settledFrames += 1;
+          if (settledFrames >= 20 || frames >= 300) {
+            if (settledFrames === 0) problems.push('Upload never confirmed');
+            resolve({ frames, problems });
+          } else requestAnimationFrame(inspect);
+        };
+        requestAnimationFrame(inspect);
+      });
+    }, before);
+    expect(transition.problems).toEqual([]);
+    expect(transition.frames).toBeGreaterThanOrEqual(20);
+    await expect(message.locator('.media-upload-status')).toHaveCount(0);
+    expect(
+      (await fixtureStats(page))?.downloadMediaRequests.filter(({ name }) =>
+        name?.startsWith('handoff-'),
+      ),
+    ).toEqual([]);
+
+    await page.reload();
+    await expect(message).toBeVisible();
+    await expect
+      .poll(() =>
+        images.evaluateAll(
+          (elements, count) =>
+            elements.length === count &&
+            elements.every((element) => {
+              const image = element as HTMLImageElement;
+              return image.complete && image.naturalWidth > 0 && !image.hidden;
+            }),
+          files.length,
+        ),
+      )
+      .toBe(true);
+    expect(
+      await images.evaluateAll((elements) =>
+        elements.map((element) => {
+          const image = element as HTMLImageElement;
+          return [image.naturalWidth, image.naturalHeight];
+        }),
+      ),
+    ).toEqual(sizes);
+    expect(
+      (await fixtureStats(page))?.downloadMediaRequests.filter(({ name }) =>
+        name?.startsWith('handoff-'),
+      ),
+    ).toEqual([]);
+  });
+}
+
 test('crops and rotates a staged image before sending', async ({ page }) => {
   await page.locator('input[type="file"]').setInputFiles(imagePath);
   const attachment = page.getByTestId('composer-attachment');
@@ -213,7 +355,6 @@ test('replaces media while editing an outgoing message', async ({ page }) => {
   const originalSource = await message
     .getByRole('img', { name: 'fixture.jpg' })
     .getAttribute('src');
-  const downloadsBefore = (await fixtureStats(page))?.downloadMedia ?? 0;
   await message.locator('.message-copy').click({ button: 'right' });
   await page
     .getByRole('menu', { name: 'Message actions' })
@@ -232,9 +373,11 @@ test('replaces media while editing an outgoing message', async ({ page }) => {
   const replacement = message.getByRole('img', { name: 'outgoing-media.png' });
   await expect(replacement).toBeVisible();
   await expect.poll(() => replacement.getAttribute('src')).not.toBe(originalSource);
-  await expect
-    .poll(async () => (await fixtureStats(page))?.downloadMedia ?? 0)
-    .toBeGreaterThan(downloadsBefore);
+  expect(
+    (await fixtureStats(page))?.downloadMediaRequests.filter(
+      ({ name }) => name === 'outgoing-media.png',
+    ),
+  ).toEqual([]);
 });
 
 test('does not overwrite a newer draft when a slow edit finishes', async ({ page }) => {

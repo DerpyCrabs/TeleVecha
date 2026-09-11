@@ -16,6 +16,7 @@ export const messagingCapabilities = [
   'refreshUpdates',
   'refreshReadReceipt',
   'retryMarkRead',
+  'markMediaRead',
   'clearOperationError',
   'requestCode',
   'submitCode',

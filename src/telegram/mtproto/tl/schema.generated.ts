@@ -11695,6 +11695,39 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 3937786936,
+    name: 'channels.readMessageContents',
+    typeName: 'channels.ReadMessageContents',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+      {
+        name: 'id',
+        wireName: 'id',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'primitive',
+            name: 'int',
+          },
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
     id: 4103516358,
     name: 'channels.sendAsPeers',
     typeName: 'channels.SendAsPeers',
@@ -46580,6 +46613,31 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         type: {
           kind: 'primitive',
           name: 'int',
+        },
+      },
+    ],
+  },
+  {
+    id: 916930423,
+    name: 'messages.readMessageContents',
+    typeName: 'messages.ReadMessageContents',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.AffectedMessages',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'id',
+        wireName: 'id',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'primitive',
+            name: 'int',
+          },
+          bare: false,
         },
       },
     ],

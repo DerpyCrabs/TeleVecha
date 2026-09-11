@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Effect } from 'effect';
 
-import { cachedAssetUrl, clearAssetUrls, loadAssetUrl, rememberAssetUrl } from './assetUrls';
+import {
+  cachedAssetUrl,
+  clearAssetUrls,
+  loadAssetUrl,
+  moveAssetUrl,
+  rememberAssetUrl,
+} from './assetUrls';
 
 describe('asset URL loading', () => {
   beforeEach(() => {
@@ -33,6 +39,20 @@ describe('asset URL loading', () => {
     await expect(Effect.runPromise(loadAssetUrl('test:retry', load))).rejects.toThrow('failed');
     await expect(Effect.runPromise(loadAssetUrl('test:retry', load))).resolves.toMatch(/^blob:/u);
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('transfers an upload URL without revoking it and releases it once on disposal', () => {
+    const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    const url = rememberAssetUrl('pending:1', new Blob(['image']));
+
+    expect(moveAssetUrl('pending:1', 'confirmed:1')).toBe(url);
+    expect(cachedAssetUrl('pending:1')).toBeUndefined();
+    expect(cachedAssetUrl('confirmed:1')).toBe(url);
+    expect(moveAssetUrl('pending:1', 'confirmed:1')).toBe(url);
+    expect(revoke).not.toHaveBeenCalled();
+
+    clearAssetUrls();
+    expect(revoke).toHaveBeenCalledExactlyOnceWith(url);
   });
 
   it('does not revoke a newly allocated URL when every cached URL is mounted', () => {

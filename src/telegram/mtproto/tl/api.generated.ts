@@ -694,6 +694,10 @@ const $ThemeSettings = createTlFactory<Tl.ThemeSettings, Tl.ThemeSettingsFields>
 const $UpdateBotCommands = createTlFactory<Tl.UpdateBotCommands, Tl.UpdateBotCommandsFields>(
   'updateBotCommands',
 );
+const $UpdateChannelReadMessagesContents = createTlFactory<
+  Tl.UpdateChannelReadMessagesContents,
+  Tl.UpdateChannelReadMessagesContentsFields
+>('updateChannelReadMessagesContents');
 const $UpdateChannelTooLong = createTlFactory<
   Tl.UpdateChannelTooLong,
   Tl.UpdateChannelTooLongFields
@@ -792,6 +796,10 @@ const $UpdateReadHistoryOutbox = createTlFactory<
   Tl.UpdateReadHistoryOutbox,
   Tl.UpdateReadHistoryOutboxFields
 >('updateReadHistoryOutbox');
+const $UpdateReadMessagesContents = createTlFactory<
+  Tl.UpdateReadMessagesContents,
+  Tl.UpdateReadMessagesContentsFields
+>('updateReadMessagesContents');
 const $UpdateRecentStickers = createTlFactory<
   Tl.UpdateRecentStickers,
   Tl.UpdateRecentStickersFields
@@ -963,6 +971,10 @@ const $channels_ReadHistory = createTlFactory<
   Tl.channels.ReadHistory,
   Tl.channels.ReadHistoryFields
 >('channels.readHistory');
+const $channels_ReadMessageContents = createTlFactory<
+  Tl.channels.ReadMessageContents,
+  Tl.channels.ReadMessageContentsFields
+>('channels.readMessageContents');
 const $contacts_AddContact = createTlFactory<Tl.contacts.AddContact, Tl.contacts.AddContactFields>(
   'contacts.addContact',
 );
@@ -1120,6 +1132,10 @@ const $messages_ReadHistory = createTlFactory<
   Tl.messages.ReadHistory,
   Tl.messages.ReadHistoryFields
 >('messages.readHistory');
+const $messages_ReadMessageContents = createTlFactory<
+  Tl.messages.ReadMessageContents,
+  Tl.messages.ReadMessageContentsFields
+>('messages.readMessageContents');
 const $messages_RecentStickers = createTlFactory<
   Tl.messages.RecentStickers,
   Tl.messages.RecentStickersFields
@@ -1482,6 +1498,7 @@ export const Api = Object.freeze({
   Theme: $Theme,
   ThemeSettings: $ThemeSettings,
   UpdateBotCommands: $UpdateBotCommands,
+  UpdateChannelReadMessagesContents: $UpdateChannelReadMessagesContents,
   UpdateChannelTooLong: $UpdateChannelTooLong,
   UpdateChannelUserTyping: $UpdateChannelUserTyping,
   UpdateChannelWebPage: $UpdateChannelWebPage,
@@ -1509,6 +1526,7 @@ export const Api = Object.freeze({
   UpdateReadChannelOutbox: $UpdateReadChannelOutbox,
   UpdateReadHistoryInbox: $UpdateReadHistoryInbox,
   UpdateReadHistoryOutbox: $UpdateReadHistoryOutbox,
+  UpdateReadMessagesContents: $UpdateReadMessagesContents,
   UpdateRecentStickers: $UpdateRecentStickers,
   Updates: $Updates,
   UpdateSavedGifs: $UpdateSavedGifs,
@@ -1570,6 +1588,7 @@ export const Api = Object.freeze({
     GetParticipants: $channels_GetParticipants,
     LeaveChannel: $channels_LeaveChannel,
     ReadHistory: $channels_ReadHistory,
+    ReadMessageContents: $channels_ReadMessageContents,
   }),
   contacts: Object.freeze({
     AddContact: $contacts_AddContact,
@@ -1620,6 +1639,7 @@ export const Api = Object.freeze({
     MessagesSlice: $messages_MessagesSlice,
     PeerDialogs: $messages_PeerDialogs,
     ReadHistory: $messages_ReadHistory,
+    ReadMessageContents: $messages_ReadMessageContents,
     RecentStickers: $messages_RecentStickers,
     RequestUrlAuth: $messages_RequestUrlAuth,
     SavedGifs: $messages_SavedGifs,

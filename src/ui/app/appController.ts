@@ -954,9 +954,16 @@ export function createAppController(props: AppProps) {
   };
   const mediaPreviewAssetFor = (messageId: string | number): MediaAsset | undefined => {
     const source = mediaSourceFor(messageId);
-    return source?.media && mediaPresentation(source.media).preview
-      ? mediaAssets.messagePreview(source)
-      : mediaAssetFor(messageId);
+    if (source?.media && mediaPresentation(source.media).preview)
+      return mediaAssets.messagePreview(source);
+    const pending = pendingAttachmentForMessage(String(messageId));
+    if (pending?.preview)
+      return mediaAssets.pendingPreview(
+        state.model().activeChatId,
+        String(messageId),
+        pending.preview,
+      );
+    return pending?.mimeType.startsWith('video/') ? undefined : mediaAssetFor(messageId);
   };
   const imageViewerMessages = () =>
     renderedMessages().filter(
@@ -1165,6 +1172,7 @@ export function createAppController(props: AppProps) {
         if (next.phase === 'unauthorized') wasUnauthorized = true;
         if (authenticated) wasUnauthorized = false;
         Atom.batch(() => {
+          mediaAssets.confirmUploads(state.model().snapshot.pending, next.messages);
           state.send({ type: 'Changed', changes: { snapshot: next } });
           if (clearedAccount) mediaAssets.dispose();
           if (clearedAccount || authenticated) model.resetResources();

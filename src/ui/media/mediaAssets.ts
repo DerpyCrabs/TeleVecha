@@ -8,8 +8,16 @@ import type {
   TelegramPeer,
   TelegramSticker,
   TelegramTransferProgress,
+  PendingSend,
 } from '../../telegram/types';
-import { cachedAssetUrl, clearAssetUrls, loadAssetUrl, rememberAssetUrl } from './assetUrls';
+import { pendingMediaForMessage } from '../../telegram/pendingMedia';
+import {
+  cachedAssetUrl,
+  clearAssetUrls,
+  loadAssetUrl,
+  moveAssetUrl,
+  rememberAssetUrl,
+} from './assetUrls';
 import type { UiSharedEffectRunner } from '../app/appRuntime';
 
 const MAX_AVATAR_URLS = 256;
@@ -116,6 +124,23 @@ export function createMediaAssets(
     asset(`sticker:${value.id}`, () => engine.downloadSticker(value));
 
   return {
+    confirmUploads(pending: readonly PendingSend[], messages: readonly TelegramMessage[]) {
+      if (pending.length === 0) return;
+      for (const message of messages) {
+        const upload = pendingMediaForMessage(pending, message);
+        if (!upload) continue;
+        const key = engine.mediaAssetKey(message);
+        if (!moveAssetUrl(`pending-media:${message.peerId}:${upload.messageId}`, key)) {
+          rememberAssetUrl(key, upload.attachment.blob);
+        }
+        if (
+          upload.attachment.preview &&
+          !moveAssetUrl(`pending-preview:${message.peerId}:${upload.messageId}`, `preview:${key}`)
+        ) {
+          rememberAssetUrl(`preview:${key}`, upload.attachment.preview);
+        }
+      }
+    },
     loadPeerAvatar,
     loadAvatar(peerId: string, cachedOnly: boolean = false) {
       const dialog = dialogs().find(({ peer }) => peer.id === peerId);
@@ -130,8 +155,22 @@ export function createMediaAssets(
     message,
     messagePreview(value: TelegramMessage) {
       const revision = `preview:${engine.mediaAssetKey(value)}`;
-      return asset(revision, () => engine.downloadMedia(value, { preview: true }));
+      const preview = asset(revision, () => engine.downloadMedia(value, { preview: true }));
+      const cached = () =>
+        preview.cached() ??
+        (value.media?.mimeType.startsWith('image/') ? message(value).cached() : undefined);
+      return {
+        ...preview,
+        cached,
+        load: () =>
+          Effect.suspend(() => {
+            const url = cached();
+            return url ? Effect.succeed(url) : preview.load();
+          }),
+      };
     },
+    pendingPreview: (peerId: string, messageId: string, preview: Blob) =>
+      asset(`pending-preview:${peerId}:${messageId}`, () => Effect.succeed(preview)),
     pending: (peerId: string, messageId: string, blob: Blob) =>
       asset(`pending-media:${peerId}:${messageId}`, () => Effect.succeed(blob)),
     sticker,

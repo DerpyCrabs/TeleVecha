@@ -747,6 +747,35 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       ],
     };
   });
+  const readMessageContents = Effect.fn('WebTelegramTransport.readMessageContents')(function* (
+    peer: TelegramPeer,
+    messageIds: number[],
+  ): Effect.fn.Return<TransportMutationResult, MtprotoError> {
+    if (peer.kind === 'channel') {
+      yield* (yield* getClient).invoke(
+        Api.channels.ReadMessageContents({ channel: inputChannel(peer), id: messageIds }),
+      );
+      return {};
+    }
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.ReadMessageContents({ id: messageIds }),
+    );
+    return {
+      updateBatches: [
+        {
+          updates: [
+            {
+              type: 'read-message-contents',
+              peerId: peer.id,
+              messageIds,
+              pts: result.pts,
+              ptsCount: result.ptsCount,
+            },
+          ],
+        },
+      ],
+    };
+  });
   const getReadOutboxMaxId = Effect.fn('WebTelegramTransport.getReadOutboxMaxId')(function* (
     peer: TelegramPeer,
   ) {
@@ -1999,6 +2028,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
               text: raw.message,
               date: raw.date,
               outgoing: Boolean(raw.out),
+              mediaUnread: Boolean(raw.mediaUnread),
               replyToId: Api.MessageReplyHeader.is(raw.replyTo)
                 ? raw.replyTo.replyToMsgId
                 : undefined,
@@ -2029,6 +2059,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
               text: raw.message,
               date: raw.date,
               outgoing: Boolean(raw.out),
+              mediaUnread: Boolean(raw.mediaUnread),
               replyToId: Api.MessageReplyHeader.is(raw.replyTo)
                 ? raw.replyTo.replyToMsgId
                 : undefined,
@@ -2176,6 +2207,28 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
             },
           ]
         : [];
+    }
+    if (Api.UpdateReadMessagesContents.is(update)) {
+      return [
+        {
+          type: 'read-message-contents',
+          messageIds: [...update.messages],
+          pts: update.pts,
+          ptsCount: update.ptsCount,
+        },
+      ];
+    }
+    if (Api.UpdateChannelReadMessagesContents.is(update)) {
+      return [
+        {
+          type: 'read-message-contents',
+          peerId: `c:${update.channelId}`,
+          messageIds: [...update.messages],
+          pts: 0,
+          ptsCount: 0,
+          channelScoped: true,
+        },
+      ];
     }
     if (Api.UpdateReadHistoryOutbox.is(update)) {
       const peerId = toPeerId(update.peer);
@@ -2422,6 +2475,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         text: service.text,
         date: message.date,
         outgoing: Boolean(message.out),
+        mediaUnread: Boolean(message.mediaUnread),
         replyToId: Api.MessageReplyHeader.is(message.replyTo)
           ? message.replyTo.replyToMsgId
           : undefined,
@@ -2477,6 +2531,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       text: message.message,
       date: message.date,
       outgoing: Boolean(message.out),
+      mediaUnread: Boolean(message.mediaUnread),
       protected: Boolean(
         message.noforwards ||
         ((Api.Chat.is(peerEntity) || Api.Channel.is(peerEntity)) && peerEntity.noforwards),
@@ -4348,6 +4403,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     getHistory,
     getHistoryAround,
     readHistory,
+    readMessageContents,
     getReadOutboxMaxId,
     getSharedMediaCounts,
     getSharedMedia,

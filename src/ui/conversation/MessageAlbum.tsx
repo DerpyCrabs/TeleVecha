@@ -186,6 +186,7 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
                         : undefined
                     }
                     revision={props.revisions?.[message.id]}
+                    messageKey={`${message.peerId}:${message.id}`}
                     protected={message.protected}
                     onOpenPreview={(preview) => openPreview(message, preview)}
                   />

@@ -98,22 +98,36 @@ export function presentConversation(
       .map(({ randomId }) => randomId)
       .filter((randomId): randomId is string => Boolean(randomId)),
   );
-  const current = snapshot.messages.map((message) => ({
-    key: message.randomId
-      ? `${message.peerId}:random:${message.randomId}`
-      : `${message.peerId}:${message.id}`,
-    message: project(
-      message,
-      readOutboxMaxId,
-      message.replyToId ? messagesById.get(message.replyToId) : undefined,
-    ),
-  }));
+  // Telegram can confirm album items in separate updates. Keep the complete local
+  // group until every item is present so it never collapses into individual images.
+  const incompleteAlbumIds = new Set(
+    snapshot.pending
+      .filter(
+        (send) =>
+          send.peer.id === peerId &&
+          send.album?.attachments.some(({ randomId }) => !confirmedRandomIds.has(randomId)),
+      )
+      .flatMap((send) => send.album!.attachments.map(({ randomId }) => randomId)),
+  );
+  const current = snapshot.messages
+    .filter((message) => !message.randomId || !incompleteAlbumIds.has(message.randomId))
+    .map((message) => ({
+      key: message.randomId
+        ? `${message.peerId}:random:${message.randomId}`
+        : `${message.peerId}:${message.id}`,
+      message: project(
+        message,
+        readOutboxMaxId,
+        message.replyToId ? messagesById.get(message.replyToId) : undefined,
+      ),
+    }));
   const pending = snapshot.pending
     .filter((send) => send.peer.id === peerId)
     .flatMap((send): KeyedMessageView[] => {
       if (send.album) {
         return send.album.attachments.flatMap((attachment, index) =>
-          confirmedRandomIds.has(attachment.randomId)
+          confirmedRandomIds.has(attachment.randomId) &&
+          !incompleteAlbumIds.has(attachment.randomId)
             ? []
             : [
                 pendingMessage(

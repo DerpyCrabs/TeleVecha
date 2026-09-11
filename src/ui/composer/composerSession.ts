@@ -14,6 +14,7 @@ import type { UiTaskRunner } from '../app/appRuntime';
 import type { Read } from 'effectweb/session';
 import { modelOwner } from 'effectweb';
 import { stageAttachment, type StagedAttachment } from './outgoingAttachments';
+import { prepareAttachment } from './attachmentMetadata';
 const DRAFT_WRITE_DELAY_MS = 120;
 const DRAFT_WRITE_TASK = commandSlot('composer:draft-write');
 const TYPING_TASK = commandSlot('composer:typing');
@@ -298,12 +299,14 @@ export function createComposerSession(options: ComposerSessionOptions) {
     yield* Effect.gen(function* () {
       yield* pendingDraft;
       if (capturedEditing) {
-        const replacement = capturedAttachments[0];
+        const replacement = capturedAttachments[0]
+          ? yield* prepareAttachment(capturedAttachments[0])
+          : undefined;
         yield* conversation.editMessage(
           Number(capturedEditing.id),
           body,
           capturedFormats,
-          replacement ? { file: replacement.file, sendAs: replacement.sendAs } : undefined,
+          replacement,
         );
         const restore =
           capturedRestore?.peerId === peerId
@@ -323,14 +326,16 @@ export function createComposerSession(options: ComposerSessionOptions) {
       }
       if (capturedAttachments.length > 0) {
         signalTyping(conversation.setTyping('uploading'));
-        yield* conversation
-          .sendAttachments(
-            capturedAttachments.map(({ file, sendAs }) => ({ file, sendAs })),
-            body,
-            telegramReply,
-            capturedFormats,
-          )
-          .pipe(Effect.ensuring(Effect.sync(() => signalTyping(conversation.setTyping()))));
+        yield* Effect.forEach(
+          capturedAttachments,
+          ({ file, sendAs }) => prepareAttachment({ file, sendAs }),
+          { concurrency: 4 },
+        ).pipe(
+          Effect.flatMap((attachments) =>
+            conversation.sendAttachments(attachments, body, telegramReply, capturedFormats),
+          ),
+          Effect.ensuring(Effect.sync(() => signalTyping(conversation.setTyping()))),
+        );
       } else {
         yield* conversation.sendDraft(body, telegramReply, capturedFormats);
       }

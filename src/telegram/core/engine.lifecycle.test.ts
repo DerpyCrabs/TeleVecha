@@ -7,6 +7,7 @@ import { createMtprotoError } from '../mtproto/errors';
 import { makeMemoryCacheStore } from '../persistence/memoryStore';
 import { createFixtureTelegramTransport } from '../transports/fixtureTransport';
 import { makeMessagingEngine, MessagingEngineLayer } from './engine';
+import { telegramMediaAssetKey } from './mediaAssetKey';
 
 const credentials = { apiId: 1, apiHash: 'fixture' };
 const run = <A, E>(
@@ -28,6 +29,213 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('MessagingEngine lifecycle regressions', () => {
+  it.each([
+    { count: 1, mimeType: 'image/png', sendAs: 'media' as const },
+    { count: 2, mimeType: 'image/png', sendAs: 'media' as const },
+    { count: 1, mimeType: 'image/png', sendAs: 'file' as const },
+    { count: 1, mimeType: 'video/webm', sendAs: 'media' as const },
+    { count: 2, mimeType: 'video/webm', sendAs: 'media' as const },
+  ])(
+    'caches originals and previews before publishing confirmation: %j',
+    ({ count, mimeType, sendAs }) =>
+      run(
+        Effect.gen(function* () {
+          const original = yield* createFixtureTelegramTransport();
+          const store = makeMemoryCacheStore();
+          const cachedKeys = new Set<string>();
+          const namePrefix = `upload-${count}-${mimeType.replace('/', '-')}-${sendAs}-`;
+          const publishedWithCache: boolean[] = [];
+          const downloadMedia = vi.fn(original.downloadMedia);
+          const engine = yield* makeMessagingEngine(
+            { ...original, downloadMedia },
+            {
+              ...store,
+              saveBlob: (key, blob) =>
+                store.saveBlob(key, blob).pipe(
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      cachedKeys.add(key);
+                    }),
+                  ),
+                ),
+            },
+            { manageTabLease: false },
+          );
+          yield* engine.start(credentials);
+          const peer = { id: 'u:101', kind: 'user' as const };
+          yield* engine.loadConversationView(peer.id);
+          const unsubscribe = yield* engine.subscribeConversationEvents((event) => {
+            if (
+              event.type === 'message-upsert' &&
+              event.message.media?.name.startsWith(namePrefix)
+            ) {
+              const key = telegramMediaAssetKey(event.message);
+              publishedWithCache.push(
+                cachedKeys.has(key) &&
+                  (mimeType.startsWith('image/') || cachedKeys.has(`preview:${key}`)),
+              );
+            }
+          });
+          const attachments = Array.from({ length: count }, (_, index) => ({
+            file: new File([`original media ${index}`], `${namePrefix}${index}`, {
+              type: mimeType,
+            }),
+            ...(mimeType.startsWith('video/')
+              ? { preview: new Blob([`thumbnail ${index}`], { type: 'image/jpeg' }) }
+              : {}),
+            sendAs,
+            width: 600,
+            height: 400,
+          }));
+          yield* engine.sendAttachments(peer, attachments, 'Local upload');
+          yield* Effect.yieldNow;
+          expect(publishedWithCache).toHaveLength(count);
+          expect(publishedWithCache.every(Boolean)).toBe(true);
+          expect((yield* store.loadWorkspace()).pending).toEqual([]);
+          const uploaded = (yield* engine.loadConversationView(peer.id)).messages.filter(
+            (message) => message.media?.name.startsWith(namePrefix),
+          );
+          expect(uploaded).toHaveLength(count);
+          for (const [index, message] of uploaded.entries()) {
+            const blob = yield* engine.downloadMedia(message);
+            expect(yield* Effect.promise(() => blob.text())).toBe(`original media ${index}`);
+            const preview = yield* engine.downloadMedia(message, { preview: true });
+            expect(yield* Effect.promise(() => preview.text())).toBe(
+              mimeType.startsWith('video/') ? `thumbnail ${index}` : `original media ${index}`,
+            );
+          }
+          expect(downloadMedia).not.toHaveBeenCalled();
+          yield* unsubscribe;
+          yield* engine.stop();
+        }),
+      ),
+  );
+
+  it.each([false, true])(
+    'caches replacement media before its edit update (envelope: %s)',
+    (envelope) =>
+      run(
+        Effect.gen(function* () {
+          const original = yield* createFixtureTelegramTransport();
+          const store = makeMemoryCacheStore();
+          const cachedKeys = new Set<string>();
+          const publishedWithCache: boolean[] = [];
+          const downloadMedia = vi.fn(original.downloadMedia);
+          const engine = yield* makeMessagingEngine(
+            {
+              ...original,
+              downloadMedia,
+              editMessage: (...args: Parameters<typeof original.editMessage>) =>
+                original
+                  .editMessage(...args)
+                  .pipe(
+                    Effect.map((result) => ({
+                      ...result,
+                      ...(envelope
+                        ? {
+                            updateBatches: [
+                              {
+                                updates: [
+                                  {
+                                    type: 'edit-message' as const,
+                                    message: result.message,
+                                    pts: 0,
+                                    ptsCount: 0,
+                                  },
+                                ],
+                              },
+                            ],
+                          }
+                        : {}),
+                    })),
+                  ),
+            },
+            {
+              ...store,
+              saveBlob: (key, blob) =>
+                store.saveBlob(key, blob).pipe(
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      cachedKeys.add(key);
+                    }),
+                  ),
+                ),
+            },
+            { manageTabLease: false },
+          );
+          yield* engine.start(credentials);
+          const peer = { id: 'u:101', kind: 'user' as const };
+          const before = (yield* engine.loadConversationView(peer.id)).messages.find(
+            ({ id }) => id === 78,
+          )!;
+          yield* store.saveBlob(telegramMediaAssetKey(before), new Blob(['old image']));
+          const unsubscribe = yield* engine.subscribeConversationEvents((event) => {
+            if (event.type === 'message-upsert' && event.message.id === 78) {
+              publishedWithCache.push(cachedKeys.has(telegramMediaAssetKey(event.message)));
+            }
+          });
+          const replacement = new File(['replacement image'], `replacement-${envelope}.png`, {
+            type: 'image/png',
+          });
+          yield* engine.editMessage(peer, 78, 'Replaced', undefined, {
+            file: replacement,
+            sendAs: 'media',
+          });
+          yield* Effect.yieldNow;
+          expect(publishedWithCache.length).toBeGreaterThan(0);
+          expect(publishedWithCache.every(Boolean)).toBe(true);
+          const message = (yield* engine.loadConversationView(peer.id)).messages.find(
+            ({ id }) => id === 78,
+          )!;
+          const full = yield* engine.downloadMedia(message);
+          const preview = yield* engine.downloadMedia(message, { preview: true });
+          expect(yield* Effect.promise(() => full.text())).toBe('replacement image');
+          expect(yield* Effect.promise(() => preview.text())).toBe('replacement image');
+          expect(yield* store.loadBlob(telegramMediaAssetKey(before))).toBeUndefined();
+          expect(downloadMedia).not.toHaveBeenCalled();
+          yield* unsubscribe;
+          yield* engine.stop();
+        }),
+      ),
+  );
+
+  it('leaves the original cached image intact when replacing it fails', () =>
+    run(
+      Effect.gen(function* () {
+        const original = yield* createFixtureTelegramTransport();
+        const store = makeMemoryCacheStore();
+        const engine = yield* makeMessagingEngine(
+          {
+            ...original,
+            editMessage: () => Effect.fail(createMtprotoError('rpc', 'Edit rejected')),
+          },
+          store,
+          { manageTabLease: false },
+        );
+        yield* engine.start(credentials);
+        const peer = { id: 'u:101', kind: 'user' as const };
+        const before = (yield* engine.loadConversationView(peer.id)).messages.find(
+          ({ id }) => id === 78,
+        )!;
+        const key = telegramMediaAssetKey(before);
+        yield* store.saveBlob(key, new Blob(['old image']));
+        const result = yield* engine
+          .editMessage(peer, 78, 'Replacement', undefined, {
+            file: new File(['new image'], 'replacement.png', { type: 'image/png' }),
+            sendAs: 'media',
+          })
+          .pipe(Effect.result);
+        expect(result._tag).toBe('Failure');
+        const after = (yield* engine.loadConversationView(peer.id)).messages.find(
+          ({ id }) => id === 78,
+        )!;
+        expect(after).toEqual(before);
+        const blob = yield* store.loadBlob(key);
+        expect(yield* Effect.promise(() => blob!.text())).toBe('old image');
+        yield* engine.stop();
+      }),
+    ));
+
   it('automatically reconnects after a live sync failure and survives a failed catch-up attempt', () =>
     run(
       Effect.gen(function* () {

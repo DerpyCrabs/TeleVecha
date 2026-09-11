@@ -35,7 +35,9 @@ interface MediaAttachmentProps {
   compact?: boolean | undefined;
   decorative?: boolean | undefined;
   revision?: string | number | undefined;
+  messageKey?: string | undefined;
   onOpenPreview?: ((preview: MediaPreview) => boolean | void) | undefined;
+  onPlaybackStarted?: (() => void) | undefined;
   protected?: boolean | undefined;
 }
 export interface MediaPreview {
@@ -48,6 +50,7 @@ type MediaAttachmentModel = {
   identity: string;
   props: MediaAttachmentProps;
   url: string;
+  previousImageUrl: string;
   loading: boolean;
   error: string;
   standalonePreview: MediaPreview | undefined;
@@ -77,6 +80,11 @@ type Purpose = 'preview' | 'download' | 'hover';
 function identity(props: MediaAttachmentProps) {
   return `${props.revision ?? ''}:${props.media.cacheKey ?? ''}:${props.media.kind}:${props.media.name}:${props.media.mimeType}`;
 }
+function cachedDisplayUrl(props: MediaAttachmentProps) {
+  return props.loadPreview && mediaPresentation(props.media).display !== 'image'
+    ? (props.cachedPreviewUrl?.() ?? '')
+    : (props.cachedUrl?.() ?? '');
+}
 function transfer(
   props: MediaAttachmentProps,
   display: boolean,
@@ -104,6 +112,19 @@ function transfer(
             ? props.loadPreview!()
             : props.load(progress);
       }).pipe(
+        Effect.flatMap((url) => {
+          const presentation = mediaPresentation(props.media);
+          const image =
+            presentation.display === 'image' || presentation.preview === 'image' || lightweight;
+          return display && image
+            ? Effect.tryPromise(async () => {
+                const image = new Image();
+                image.src = url;
+                await image.decode();
+                return url;
+              })
+            : Effect.succeed(url);
+        }),
         Effect.matchCause({
           onSuccess: (url): MediaAttachmentMessage =>
             display
@@ -186,7 +207,8 @@ export const MediaAttachment = component<
   init: (props) => ({
     props,
     identity: identity(props),
-    url: '',
+    url: cachedDisplayUrl(props),
+    previousImageUrl: '',
     loading: false,
     error: '',
     standalonePreview: undefined,
@@ -204,7 +226,16 @@ export const MediaAttachment = component<
           ...model,
           props,
           identity: key,
-          url: '',
+          url: cachedDisplayUrl(props),
+          previousImageUrl:
+            props.messageKey !== undefined &&
+            props.messageKey === model.props.messageKey &&
+            mediaPresentation(props.media).display === 'image' &&
+            mediaPresentation(model.props.media).display === 'image' &&
+            (!model.props.media.spoiler || model.spoilerRevealed) &&
+            !props.media.spoiler
+              ? model.url || model.previousImageUrl
+              : '',
           error: '',
           loading: false,
           downloadProgress: undefined,
@@ -306,13 +337,25 @@ export const MediaAttachment = component<
       }
       case 'Url':
         return {
-          model: { ...model, url: message.value, loading: false, downloadProgress: undefined },
+          model: {
+            ...model,
+            url: message.value,
+            previousImageUrl: '',
+            loading: false,
+            downloadProgress: undefined,
+          },
         };
       case 'Loading':
         return { model: { ...model, loading: message.value } };
       case 'Error':
         return {
-          model: { ...model, error: message.value, loading: false, downloadProgress: undefined },
+          model: {
+            ...model,
+            error: message.value,
+            previousImageUrl: '',
+            loading: false,
+            downloadProgress: undefined,
+          },
         };
       case 'StandalonePreview':
         return { model: { ...model, standalonePreview: message.value } };
@@ -339,6 +382,7 @@ export const MediaAttachment = component<
     const isVoice = presentation.display === 'voice';
     const isTgs = presentation.display === 'tgs';
     const isInlinePlayer = isRoundVideo || isVoice;
+    const displayUrl = model.url || (isImage ? model.previousImageUrl : '');
     const previewKind = presentation.preview;
     const previewEnabled =
       Boolean(model.url && previewKind && !props.decorative) &&
@@ -353,12 +397,12 @@ export const MediaAttachment = component<
       <>
         <span
           class="media-placeholder"
-          hidden={model.nearViewport || Boolean(model.error) || Boolean(model.url)}
+          hidden={model.nearViewport || Boolean(model.error) || Boolean(displayUrl)}
           aria-hidden="true"
         />
         <span
           class="media-loading"
-          hidden={!model.nearViewport || Boolean(model.error) || Boolean(model.url)}
+          hidden={!model.nearViewport || Boolean(model.error) || Boolean(displayUrl)}
           aria-live="polite"
           aria-label={`Loading ${kind}`}
         >
@@ -387,7 +431,7 @@ export const MediaAttachment = component<
     return (
       <div
         use={visibilityMount(send)}
-        class={`media-attachment media-${props.media.kind}${props.compact ? ' media-compact' : ''}${model.url ? ' media-loaded' : ''}`}
+        class={`media-attachment media-${props.media.kind}${props.compact ? ' media-compact' : ''}${displayUrl ? ' media-loaded' : ''}`}
       >
         {isImage ? (
           <div
@@ -411,10 +455,10 @@ export const MediaAttachment = component<
             }}
           >
             <img
-              src={model.url || undefined}
+              src={displayUrl || undefined}
               alt={props.decorative ? '' : props.media.name}
               loading="lazy"
-              hidden={!model.url}
+              hidden={!displayUrl}
             />
             {loadFallback('image')}
           </div>
@@ -515,6 +559,7 @@ export const MediaAttachment = component<
               playsinline
               preload="metadata"
               aria-label={`Video message ${props.media.name}`}
+              onPlaying={() => props.onPlaybackStarted?.()}
               hidden={!model.url}
               onClick={(event) => event.stopPropagation()}
             />
@@ -528,6 +573,7 @@ export const MediaAttachment = component<
               controls
               preload="metadata"
               aria-label={`Voice message ${props.media.name}`}
+              onPlaying={() => props.onPlaybackStarted?.()}
               hidden={!model.url}
               onClick={(event) => event.stopPropagation()}
             />
