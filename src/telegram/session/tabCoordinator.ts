@@ -148,6 +148,10 @@ const invokeEngineCommand = (
       return engine.editMessage(...(args as Parameters<MessagingEngine['editMessage']>));
     case 'deleteMessage':
       return engine.deleteMessage(...(args as Parameters<MessagingEngine['deleteMessage']>));
+    case 'getReactionPeople':
+      return engine.getReactionPeople(
+        ...(args as Parameters<MessagingEngine['getReactionPeople']>),
+      );
     case 'toggleReaction':
       return engine.toggleReaction(...(args as Parameters<MessagingEngine['toggleReaction']>));
     case 'retryPendingSend':
@@ -735,6 +739,7 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   forwardMessage: { readiness: 'workspace', concurrent: true, surfaceError: true },
   editMessage: { readiness: 'account', concurrent: true, surfaceError: true },
   deleteMessage: { readiness: 'account', concurrent: true, surfaceError: true },
+  getReactionPeople: { readiness: 'account', concurrent: true, coalesce: true },
   toggleReaction: { readiness: 'account', concurrent: true, surfaceError: true },
   retryPendingSend: { readiness: 'workspace', surfaceError: true },
   cancelPendingSend: { readiness: 'workspace', surfaceError: true },
@@ -1045,6 +1050,7 @@ function errorMessage(error: unknown) {
     forwardMessage: remote('forwardMessage'),
     editMessage: remote('editMessage'),
     deleteMessage: remote('deleteMessage'),
+    getReactionPeople: remote('getReactionPeople'),
     toggleReaction: remote('toggleReaction'),
     retryPendingSend: remote('retryPendingSend'),
     cancelPendingSend: remote('cancelPendingSend'),

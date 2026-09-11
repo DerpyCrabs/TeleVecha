@@ -38,7 +38,15 @@ function pendingMessage(
     date: Math.floor(send.createdAt / 1000),
     outgoing: true,
     status: send.lastError ? 'failed' : 'sending',
-    ...(attachment ? { uploadProgress: send.uploadProgress ?? 0 } : {}),
+    ...(attachment
+      ? {
+          // Album uploads advance sequentially in equal per-attachment slots.
+          uploadProgress: Math.max(
+            0,
+            Math.min(1, (send.uploadProgress ?? 0) * (send.album?.attachments.length ?? 1) - index),
+          ),
+        }
+      : {}),
     ...(first
       ? {
           formats: send.formats?.filter(({ kind }) => kind !== 'textUrl'),

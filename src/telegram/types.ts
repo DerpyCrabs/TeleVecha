@@ -343,6 +343,12 @@ export interface TelegramDraftDetails {
   reply?: TelegramReplyTarget & { preview: string };
 }
 
+export interface TelegramReactionPeople {
+  people: { id: string; name: string }[];
+  count: number;
+  anonymous?: boolean | undefined;
+}
+
 export interface TelegramReaction {
   emoji: string;
   customEmojiId?: string | undefined;
@@ -715,6 +721,11 @@ export interface TelegramTransport {
     randomId: string,
     reply?: TelegramReplyTarget,
   ): TransportEffect<SendTextResult>;
+  getReactionPeople?(
+    peer: TelegramPeer,
+    messageId: number,
+    emoji: string,
+  ): TransportEffect<TelegramReactionPeople>;
   setReaction(
     peer: TelegramPeer,
     messageId: number,

@@ -30,6 +30,7 @@ import type {
   TelegramPeer,
   TelegramPeerSearchResult,
   TelegramReaction,
+  TelegramReactionPeople,
   TelegramReplyTarget,
   TelegramSearchOffset,
   TelegramSearchPage,
@@ -1816,6 +1817,48 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       );
     const sentMessage = { ...message, randomId };
     return { message: sentMessage, updateBatches: toUpdateBatches(result, [sentMessage]) };
+  });
+  const getReactionPeople = Effect.fn('WebTelegramTransport.getReactionPeople')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+    emoji: string,
+  ): Effect.fn.Return<TelegramReactionPeople, MtprotoError> {
+    const customEmojiId = emoji.startsWith('custom:') ? emoji.slice('custom:'.length) : undefined;
+    const result = yield* (yield* getClient)
+      .invoke(
+        Api.messages.GetMessageReactionsList({
+          peer: toInputPeer(peer),
+          id: messageId,
+          reaction: customEmojiId
+            ? Api.ReactionCustomEmoji({ documentId: BigInt(customEmojiId) })
+            : Api.ReactionEmoji({ emoticon: emoji }),
+          limit: 50,
+        }),
+      )
+      .pipe(
+        Effect.catch((error) =>
+          telegramRpcErrorMessage(error) === 'BROADCAST_FORBIDDEN'
+            ? Effect.succeed(undefined)
+            : Effect.fail(error),
+        ),
+      );
+    if (!result) return { people: [], count: 0, anonymous: true };
+    rememberEntities(result.users, result.chats);
+    return {
+      people: result.reactions.flatMap((reaction) => {
+        const id = toPeerId(reaction.peerId);
+        if (!id) return [];
+        const entity = state.entities.get(id);
+        return [
+          {
+            id,
+            name:
+              Api.User.is(entity) && entity.self ? 'You' : entityTitle(entity) || 'Deleted account',
+          },
+        ];
+      }),
+      count: result.count,
+    };
   });
   const setReaction = Effect.fn('WebTelegramTransport.setReaction')(function* (
     peer: TelegramPeer,
@@ -4339,6 +4382,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     requestUrlAuth,
     acceptUrlAuth,
     sendSticker,
+    getReactionPeople,
     setReaction,
     deleteMessages,
     editMessage,

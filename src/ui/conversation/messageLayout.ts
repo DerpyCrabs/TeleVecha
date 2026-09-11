@@ -113,8 +113,7 @@ export function layoutMessages(
       album.find((albumMessage) => albumMessage.forwardedFrom)?.forwardedFrom;
     const messageAuthor = sameSender(previousVisible(index), message) ? '' : author(message);
     const mediaOnly = Boolean(
-      ((album.length > 1 && album.every(({ uploadProgress }) => uploadProgress === undefined)) ||
-        (isVisualMedia(message) && message.uploadProgress === undefined)) &&
+      (album.length > 1 || isVisualMedia(message)) &&
       !caption.body.trim() &&
       !messageAuthor &&
       !forwardedFrom &&
@@ -141,25 +140,15 @@ export function layoutMessages(
         message.replyTo ||
         message.botKeyboard ||
         message.reactions?.length) &&
-      (album.length > 1
-        ? album.every(({ uploadProgress }) => uploadProgress === undefined)
-        : message.uploadProgress === undefined) &&
       message.status !== 'failed' &&
       !message.linkPreview,
     );
     const mediaWidth = (() => {
       if (album.length > 1) {
-        return album.every(({ uploadProgress }) => uploadProgress === undefined) &&
-          message.status !== 'failed'
-          ? 'min(24rem, 100%)'
-          : undefined;
+        return 'min(24rem, 100%)';
       }
       if (isImageDocument(message)) return 'min(16.75rem, 100%)';
-      if (
-        !isVisualMedia(message) ||
-        message.uploadProgress !== undefined ||
-        message.status === 'failed'
-      ) {
+      if (!isVisualMedia(message) || message.status === 'failed') {
         return undefined;
       }
       const width = message.media?.width;

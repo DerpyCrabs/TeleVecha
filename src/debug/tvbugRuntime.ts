@@ -250,6 +250,10 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
           }),
         ),
       deleteMessage: () => Effect.succeed(false),
+      getReactionPeople: () =>
+        Effect.fail(
+          new MessagingError({ message: 'Reaction details are unavailable in a bug report.' }),
+        ),
       toggleReaction: () => Effect.void,
       retryPendingSend: () => Effect.void,
       cancelPendingSend: () => Effect.succeed(false),

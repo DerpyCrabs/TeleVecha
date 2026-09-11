@@ -1069,6 +1069,10 @@ const $messages_GetInlineBotResults = createTlFactory<
   Tl.messages.GetInlineBotResults,
   Tl.messages.GetInlineBotResultsFields
 >('messages.getInlineBotResults');
+const $messages_GetMessageReactionsList = createTlFactory<
+  Tl.messages.GetMessageReactionsList,
+  Tl.messages.GetMessageReactionsListFields
+>('messages.getMessageReactionsList');
 const $messages_GetMessages = createTlFactory<
   Tl.messages.GetMessages,
   Tl.messages.GetMessagesFields
@@ -1603,6 +1607,7 @@ export const Api = Object.freeze({
     GetFullChat: $messages_GetFullChat,
     GetHistory: $messages_GetHistory,
     GetInlineBotResults: $messages_GetInlineBotResults,
+    GetMessageReactionsList: $messages_GetMessageReactionsList,
     GetMessages: $messages_GetMessages,
     GetPeerDialogs: $messages_GetPeerDialogs,
     GetPinnedDialogs: $messages_GetPinnedDialogs,

@@ -41,6 +41,7 @@ export const messagingCapabilities = [
   'editMessage',
   'deleteMessage',
   'toggleReaction',
+  'getReactionPeople',
   'retryPendingSend',
   'cancelPendingSend',
   'retryOutbox',

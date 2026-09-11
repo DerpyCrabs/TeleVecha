@@ -101,6 +101,109 @@ describe('web Telegram transport', () => {
     );
   });
 
+  it.each(['👍', 'custom:99'])('loads named reactors filtered by %s', (emoji) =>
+    Effect.runPromise(
+      withTransport(
+        (target) =>
+          Effect.gen(function* () {
+            yield* target.connect({ apiId: 1, apiHash: 'hash' });
+            const result = yield* target.getReactionPeople!(
+              { id: 'g:1', kind: 'group' },
+              42,
+              emoji,
+            );
+            expect(result).toEqual({
+              people: [
+                { id: 'u:1', name: 'Alice Example' },
+                { id: 'u:2', name: 'You' },
+                { id: 'c:3', name: 'Team' },
+              ],
+              count: 3,
+            });
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({
+              invoke: ((request: unknown) => {
+                if (!Api.messages.GetMessageReactionsList.is(request))
+                  return Effect.fail(createMtprotoError('protocol', 'Unexpected RPC'));
+                expect(request.id).toBe(42);
+                expect(request.limit).toBe(50);
+                expect(request.reaction).toMatchObject(
+                  emoji === '👍'
+                    ? { _: 'reactionEmoji', emoticon: '👍' }
+                    : { _: 'reactionCustomEmoji', documentId: 99n },
+                );
+                return Effect.succeed(
+                  createTl('messages.messageReactionsList', {
+                    count: 3,
+                    reactions: [
+                      createTl('messagePeerReaction', {
+                        peerId: Api.PeerUser({ userId: 1n }),
+                        date: 1,
+                        reaction: request.reaction,
+                      }),
+                      createTl('messagePeerReaction', {
+                        peerId: Api.PeerUser({ userId: 2n }),
+                        date: 1,
+                        reaction: request.reaction,
+                      }),
+                      createTl('messagePeerReaction', {
+                        peerId: Api.PeerChannel({ channelId: 3n }),
+                        date: 1,
+                        reaction: request.reaction,
+                      }),
+                    ],
+                    users: [
+                      Api.User({ id: 1n, firstName: 'Alice', lastName: 'Example' }),
+                      Api.User({ id: 2n, self: true, firstName: 'Me' }),
+                    ],
+                    chats: [
+                      Api.Channel({
+                        id: 3n,
+                        title: 'Team',
+                        photo: createTl('chatPhotoEmpty'),
+                        date: 1,
+                      }),
+                    ],
+                  }),
+                );
+              }) as MtprotoClient['invoke'],
+            }),
+          ),
+      ),
+    ),
+  );
+
+  it('reports broadcast reactions as anonymous', () =>
+    Effect.runPromise(
+      withTransport(
+        (target) =>
+          Effect.gen(function* () {
+            yield* target.connect({ apiId: 1, apiHash: 'hash' });
+            expect(
+              yield* target.getReactionPeople!(
+                { id: 'c:1', kind: 'channel', accessHash: '1' },
+                42,
+                '👍',
+              ),
+            ).toEqual({ people: [], count: 0, anonymous: true });
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({
+              invoke: (() =>
+                Effect.fail(
+                  createMtprotoError('rpc', 'BROADCAST_FORBIDDEN', {
+                    code: 403,
+                    details: { errorMessage: 'BROADCAST_FORBIDDEN' },
+                  }),
+                )) as MtprotoClient['invoke'],
+            }),
+          ),
+      ),
+    ));
+
   it('returns the raw Telegram user id for the authorized account', () =>
     Effect.runPromise(
       withTransport(

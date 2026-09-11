@@ -239,17 +239,21 @@ export const MediaViewer = component<MediaViewerProps, MediaViewerModel, MediaVi
                 src={props.url}
                 alt={props.name}
                 data-zoom={String(model.zoom)}
+                draggable={false}
+                onDragStart={(event) => event.preventDefault()}
                 classList={{ 'media-viewer-origin': Boolean(props.origin) }}
                 style={{
                   transform: `translate(${model.pan.x}px, ${model.pan.y}px) scale(${model.zoom})`,
-                  cursor: model.zoom > 1 ? 'grab' : 'zoom-in',
+                  cursor: model.dragging ? 'grabbing' : model.zoom > 1 ? 'grab' : 'zoom-in',
+                  transition: model.dragging ? 'none' : undefined,
                 }}
                 onDblClick={(event) => {
                   event.stopPropagation();
                   setZoomLevel(model.zoom > 1 ? 1 : 2);
                 }}
                 onPointerDown={(event) => {
-                  if (model.zoom <= 1) return;
+                  if (model.zoom <= 1 || event.button !== 0 || model.dragging) return;
+                  event.preventDefault();
                   event.stopPropagation();
                   send({
                     type: 'Dragging',
@@ -274,8 +278,21 @@ export const MediaViewer = component<MediaViewerProps, MediaViewerModel, MediaVi
                     },
                   });
                 }}
-                onPointerUp={() => send({ type: 'Dragging', value: undefined })}
-                onPointerCancel={() => send({ type: 'Dragging', value: undefined })}
+                onPointerUp={(event) => {
+                  if (model.dragging?.pointerId !== event.pointerId) return;
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                  }
+                  send({ type: 'Dragging', value: undefined });
+                }}
+                onLostPointerCapture={(event) => {
+                  if (model.dragging?.pointerId === event.pointerId)
+                    send({ type: 'Dragging', value: undefined });
+                }}
+                onPointerCancel={(event) => {
+                  if (model.dragging?.pointerId === event.pointerId)
+                    send({ type: 'Dragging', value: undefined });
+                }}
               />
             ) : (
               <video

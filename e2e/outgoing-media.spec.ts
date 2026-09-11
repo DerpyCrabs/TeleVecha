@@ -105,13 +105,16 @@ test('renders a staged album as one group while its upload is pending', async ({
   const album = page.locator('.media-album').last();
   await expect(album).toBeVisible();
   await expect(album).toHaveAttribute('data-album-size', '2');
-  await expect(album.locator('xpath=ancestor::article')).not.toHaveClass(/message-media-surface/u);
+  await expect(album.locator('xpath=ancestor::article')).toHaveClass(/message-media-surface/u);
   await expect(album.locator('.media-album-item')).toHaveCount(2);
   await expect(album.getByRole('img', { name: 'outgoing-media.png' })).toHaveCount(2);
-  await expect(album.getByRole('status').filter({ hasText: '25%' })).toHaveCount(2);
+  await expect(album.locator('.media-album-item').nth(0).getByRole('status')).toContainText('50%');
+  await expect(album.locator('.media-album-item').nth(1).getByRole('status')).toContainText('0%');
+  await expect(album.locator('.media-attachment > .media-upload-status')).toHaveCount(2);
 
   await page.evaluate(() => window.__televechaFixture?.releaseUpload());
   await expect.poll(async () => (await fixtureStats(page))?.sendAlbum).toBe(1);
+  await expect(album.getByRole('status')).toHaveCount(0);
 });
 
 test('shows a local image preview while a single upload is pending', async ({ page }) => {
@@ -121,10 +124,24 @@ test('shows a local image preview while a single upload is pending', async ({ pa
 
   const pending = page.locator('article[data-media-kind="photo"]').last();
   await expect(pending.getByRole('img', { name: 'outgoing-media.png' })).toBeVisible();
-  await expect(pending.getByText('25%')).toBeVisible();
+  await expect(pending).toHaveClass(/message-media-surface/u);
+  await expect(pending.locator('.media-attachment > .media-upload-status')).toContainText('25%');
+  const contained = await pending.evaluate((element) => {
+    const image = element.querySelector('img')!.getBoundingClientRect();
+    const status = element.querySelector('.media-upload-status')!.getBoundingClientRect();
+    return (
+      status.left >= image.left &&
+      status.right <= image.right &&
+      status.top >= image.top &&
+      status.bottom <= image.bottom
+    );
+  });
+  expect(contained).toBe(true);
+  await expect(pending.locator('.upload-progress')).toHaveCount(0);
 
   await page.evaluate(() => window.__televechaFixture?.releaseUpload());
   await expect.poll(async () => (await fixtureStats(page))?.sendFile).toBe(1);
+  await expect(pending.locator('.media-upload-status')).toHaveCount(0);
 });
 
 test('crops and rotates a staged image before sending', async ({ page }) => {

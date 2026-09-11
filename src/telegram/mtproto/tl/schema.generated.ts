@@ -45313,6 +45313,78 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 1176190792,
+    name: 'messages.getMessageReactionsList',
+    typeName: 'messages.GetMessageReactionsList',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.MessageReactionsList',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'id',
+        wireName: 'id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'reaction',
+        wireName: 'reaction',
+        type: {
+          kind: 'object',
+          name: 'Reaction',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'offset',
+        wireName: 'offset',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
     id: 1673946374,
     name: 'messages.getMessages',
     typeName: 'messages.GetMessages',

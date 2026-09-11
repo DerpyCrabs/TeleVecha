@@ -58,6 +58,7 @@ export declare namespace Tl {
     | Tl.messages.GetFullChat
     | Tl.messages.GetHistory
     | Tl.messages.GetInlineBotResults
+    | Tl.messages.GetMessageReactionsList
     | Tl.messages.GetMessages
     | Tl.messages.GetPeerDialogs
     | Tl.messages.GetPinnedDialogs
@@ -8015,6 +8016,16 @@ export declare namespace Tl {
       query: string;
       offset: string;
     }>;
+    export type GetMessageReactionsList = TlObject<'messages.getMessageReactionsList'> &
+      GetMessageReactionsListFields &
+      TlRequest<Tl.messages.TypeMessageReactionsList>;
+    export type GetMessageReactionsListFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      id: number;
+      reaction?: Tl.TypeReaction;
+      offset?: string;
+      limit: number;
+    }>;
     export type GetMessages = TlObject<'messages.getMessages'> &
       GetMessagesFields &
       TlRequest<Tl.messages.TypeMessages>;
@@ -8061,6 +8072,15 @@ export declare namespace Tl {
     export type GetStickerSetFields = Readonly<{
       stickerset: Tl.TypeInputStickerSet;
       hash: number;
+    }>;
+    export type MessageReactionsList = TlObject<'messages.messageReactionsList'> &
+      MessageReactionsListFields;
+    export type MessageReactionsListFields = Readonly<{
+      count: number;
+      reactions: readonly Tl.TypeMessagePeerReaction[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+      nextOffset?: string;
     }>;
     export type Messages = TlObject<'messages.messages'> & MessagesFields;
     export type MessagesFields = Readonly<{
@@ -8321,6 +8341,7 @@ export declare namespace Tl {
       | Tl.messages.EmojiGameDiceInfo
       | Tl.messages.EmojiGameUnavailable;
     export type TypeEmojiGameOutcome = Tl.messages.EmojiGameOutcome;
+    export type TypeMessageReactionsList = Tl.messages.MessageReactionsList;
     export type TypeMessages =
       | Tl.messages.ChannelMessages
       | Tl.messages.Messages

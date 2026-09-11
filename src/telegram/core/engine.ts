@@ -3043,6 +3043,19 @@ function makeMessagingEngineModule(
     });
     yield* enqueuePending(pending);
   });
+  const getReactionPeople = Effect.fn('MessagingEngine.getReactionPeople')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+    emoji: string,
+  ) {
+    if (!telegramTransport.getReactionPeople) {
+      return yield* Effect.fail(new Error('Reaction details are unavailable.'));
+    }
+    return yield* runTelegramOperation(
+      () => telegramTransport.getReactionPeople!(peer, messageId, emoji),
+      'Loading reaction details',
+    );
+  });
   const toggleReaction = Effect.fn('MessagingEngine.toggleReaction')(function* (
     peer: TelegramPeer,
     messageId: number,
@@ -5606,6 +5619,7 @@ function makeMessagingEngineModule(
     requestUrlAuth: requestUrlAuth,
     acceptUrlAuth: acceptUrlAuth,
     sendSticker: sendSticker,
+    getReactionPeople,
     toggleReaction: toggleReaction,
     deleteMessage: deleteMessage,
     editMessage: editMessage,

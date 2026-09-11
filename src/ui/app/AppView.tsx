@@ -736,6 +736,8 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 <>
                                   <MediaAttachment
                                     media={media}
+                                    uploadProgress={message.uploadProgress}
+                                    uploadFailed={message.status === 'failed'}
                                     protected={message.protected}
                                     revision={model.mediaRevisions[message.id]}
                                     cachedUrl={() => mediaAssetFor(message.id)?.cached()}
@@ -762,23 +764,6 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                     }}
                                     onOpenPreview={(preview) => openImageViewer(message, preview)}
                                   />
-                                  {message.uploadProgress !== undefined ? (
-                                    <div class="upload-progress">
-                                      <span>{media.name}</span>
-                                      <strong>
-                                        {message.status === 'failed'
-                                          ? 'Upload failed'
-                                          : `${Math.round((message.uploadProgress ?? 0) * 100)}%`}
-                                      </strong>
-                                      <div>
-                                        <i
-                                          style={{
-                                            width: `${Math.round((message.uploadProgress ?? 0) * 100)}%`,
-                                          }}
-                                        />
-                                      </div>
-                                    </div>
-                                  ) : null}
                                 </>
                               ))(layout.media!)
                             : null}
@@ -891,6 +876,14 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 setReactionPickerMessageId(open ? message.id : '')
                               }
                               react={(emoji) => runInBackground(reactToMessage(message.id, emoji))}
+                              loadReactionPeople={(emoji) => {
+                                const peer = snapshot.dialogs.find(
+                                  ({ peer }) => peer.id === message.peerId,
+                                )?.peer;
+                                return peer
+                                  ? engine.getReactionPeople(peer, Number(message.id), emoji)
+                                  : Effect.fail(new Error('Reaction details are unavailable.'));
+                              }}
                               reply={(article) => composer.beginReply(message, article)}
                               loadCustomEmoji={(documentId) =>
                                 mediaAssets.loadCustomEmoji(documentId)

@@ -25,6 +25,27 @@ async function openStickers(page: import('@playwright/test').Page) {
   return expressionPicker.getByLabel('Stickers');
 }
 
+test('shows the people behind a reaction on hover and keyboard focus', async ({ page }) => {
+  const reaction = page
+    .locator('article[data-message-id="79"]')
+    .getByRole('button', { name: 'Add 👍 reaction' });
+  await reaction.hover();
+  const tooltip = page.getByRole('tooltip');
+  await expect(tooltip).toContainText('Alice Fixture');
+  await expect(tooltip).toContainText('Bob Fixture');
+  await expect(tooltip).toBeInViewport({ ratio: 1 });
+  await expect(reaction).toContainText('2');
+  expect((await fixtureStats(page))?.setReaction).toBe(0);
+  await tooltip.hover();
+  await expect(tooltip).toBeVisible();
+  await page.getByRole('textbox', { name: 'Message' }).hover();
+  await expect(tooltip).toHaveCount(0);
+  await reaction.focus();
+  await expect(tooltip).toContainText('Alice Fixture');
+  await reaction.press('Escape');
+  await expect(tooltip).toHaveCount(0);
+});
+
 test('adds and removes a Telegram reaction optimistically', async ({ page }) => {
   const message = page.locator('article[data-message-id="79"]');
   await message.getByRole('button', { name: 'Add 👍 reaction' }).click();

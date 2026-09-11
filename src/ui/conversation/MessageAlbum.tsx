@@ -174,6 +174,8 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
                 {message.media ? (
                   <MediaAttachment
                     media={message.media}
+                    uploadProgress={message.uploadProgress}
+                    uploadFailed={message.status === 'failed'}
                     cachedUrl={() => props.cachedUrl(message)}
                     cachedPreviewUrl={() => props.cachedPreviewUrl?.(message)}
                     load={(progress) => props.load(message, progress)}
@@ -187,11 +189,6 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
                     protected={message.protected}
                     onOpenPreview={(preview) => openPreview(message, preview)}
                   />
-                ) : null}
-                {message.uploadProgress !== undefined ? (
-                  <span class="media-album-progress" role="status">
-                    {Math.round((message.uploadProgress ?? 0) * 100)}%
-                  </span>
                 ) : null}
               </div>
             ))}

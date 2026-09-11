@@ -86,7 +86,15 @@ describe('presentConversation', () => {
       randomId,
     });
     const result = presentConversation(
-      snapshot([], [queued({ album: { attachments: [attachment('one'), attachment('two')] } })]),
+      snapshot(
+        [],
+        [
+          queued({
+            uploadProgress: 0.625,
+            album: { attachments: [attachment('one'), attachment('two')] },
+          }),
+        ],
+      ),
       peer.id,
     );
 
@@ -95,6 +103,7 @@ describe('presentConversation', () => {
       'pending:pending-1',
     ]);
     expect(result.map(({ message }) => message.body)).toEqual(['Queued', '']);
+    expect(result.map(({ message }) => message.uploadProgress)).toEqual([1, 0.25]);
   });
 
   it('returns no messages for an inactive peer', () => {

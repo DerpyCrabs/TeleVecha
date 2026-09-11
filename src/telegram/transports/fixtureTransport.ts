@@ -1819,6 +1819,20 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         };
       });
     }
+    function getReactionPeople(peer: TelegramPeer, messageId: number, emoji: string) {
+      return Effect.sync(() => {
+        const reaction = messages
+          .get(peer.id)
+          ?.find(({ id }) => id === messageId)
+          ?.reactions?.find((item) => item.emoji === emoji);
+        const people = [
+          ...(reaction?.chosen ? [{ id: 'self', name: 'You' }] : []),
+          { id: 'u:101', name: 'Alice Fixture' },
+          { id: 'u:102', name: 'Bob Fixture' },
+        ].slice(0, reaction?.count ?? 0);
+        return { people, count: reaction?.count ?? 0 };
+      });
+    }
     function setReaction(peer: TelegramPeer, messageId: number, emoji?: string) {
       return Effect.sync(() => {
         stats.setReaction += 1;
@@ -2047,6 +2061,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       requestUrlAuth,
       acceptUrlAuth,
       sendSticker,
+      getReactionPeople,
       setReaction,
       deleteMessages,
       editMessage,

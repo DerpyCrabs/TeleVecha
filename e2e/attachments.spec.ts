@@ -68,6 +68,60 @@ test('opens image documents from a file card and keeps download separate', async
   expect((await fixtureStats(page))?.downloadMedia).toBe(downloadsBefore + 1);
 });
 
+test('keeps dragging a zoomed long image across updates and outside the image area', async ({
+  page,
+}) => {
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 81,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: '',
+        date: Math.floor(Date.now() / 1000),
+        outgoing: false,
+        media: { kind: 'photo', name: 'long.png', mimeType: 'image/png', width: 200, height: 2000 },
+      },
+    }),
+  );
+  await page.getByRole('button', { name: 'Open long.png fullscreen preview' }).click();
+  const viewer = page.getByRole('dialog', { name: 'Media preview: long.png' });
+  const image = viewer.getByRole('img');
+  await viewer.getByRole('button', { name: 'Zoom in' }).click();
+  await expect(image).toHaveAttribute('data-zoom', '2');
+  await expect(image).toHaveAttribute('draggable', 'false');
+  const area = await viewer.locator('.media-viewer-content').boundingBox();
+  const x = area!.x + area!.width / 2;
+  const y = area!.y + area!.height / 2;
+  const pan = () =>
+    image.evaluate((element) => {
+      const transform = new DOMMatrix(getComputedStyle(element).transform);
+      return { x: Math.round(transform.m41), y: Math.round(transform.m42) };
+    });
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await expect(image).toHaveCSS('cursor', 'grabbing');
+  await expect(image).toHaveCSS('transition-duration', '0s');
+  await page.mouse.move(x + 150, y + 100, { steps: 20 });
+  await expect.poll(pan).toEqual({ x: 150, y: 100 });
+  await page.mouse.move(x, 10, { steps: 20 });
+  await expect.poll(pan).toEqual({ x: 0, y: Math.round(10 - y) });
+  await page.mouse.move(x - 120, y - 80, { steps: 20 });
+  await expect.poll(pan).toEqual({ x: -120, y: -80 });
+  await page.mouse.up();
+  await expect(image).toHaveCSS('cursor', 'grab');
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 60, y + 40, { steps: 10 });
+  await expect.poll(pan).toEqual({ x: -60, y: -40 });
+  await page.mouse.up();
+  await viewer.getByRole('button', { name: 'Zoom out' }).click();
+  await expect.poll(pan).toEqual({ x: 0, y: 0 });
+});
+
 test('offers image viewer actions, zoom, and adjacent-message navigation', async ({ page }) => {
   await page.evaluate(() => {
     for (const [id, name] of [

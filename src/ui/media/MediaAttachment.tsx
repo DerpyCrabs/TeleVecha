@@ -30,6 +30,8 @@ interface MediaAttachmentProps {
   loadPreview?: (() => Effect.Effect<string, unknown>) | undefined;
   cachedUrl?: (() => string | undefined) | undefined;
   cachedPreviewUrl?: (() => string | undefined) | undefined;
+  uploadProgress?: number | undefined;
+  uploadFailed?: boolean | undefined;
   compact?: boolean | undefined;
   decorative?: boolean | undefined;
   revision?: string | number | undefined;
@@ -625,6 +627,34 @@ export const MediaAttachment = component<
           >
             Reveal spoiler
           </button>
+        ) : null}
+        {props.uploadProgress !== undefined ? (
+          <div
+            class="media-upload-status"
+            classList={{
+              'media-upload-details': (!isImage && !isVideo) || props.media.kind === 'sticker',
+            }}
+            role="status"
+            aria-label={`${props.media.name}: ${props.uploadFailed ? 'Upload failed' : props.uploadProgress >= 1 ? 'Sending' : 'Uploading'}`}
+          >
+            {(!isImage && !isVideo) || props.media.kind === 'sticker' ? (
+              <small>{props.media.name}</small>
+            ) : null}
+            <span>
+              {props.uploadFailed
+                ? 'Upload failed'
+                : props.uploadProgress >= 1
+                  ? 'Sending…'
+                  : `${Math.round((props.uploadProgress ?? 0) * 100)}%`}
+            </span>
+            {!props.uploadFailed ? (
+              <progress
+                max={1}
+                value={props.uploadProgress}
+                aria-label={`Upload progress for ${props.media.name}`}
+              />
+            ) : null}
+          </div>
         ) : null}
         {model.standalonePreview
           ? ((preview) => (
