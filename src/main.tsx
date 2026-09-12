@@ -26,8 +26,7 @@ const main = Effect.scoped(
       applyThemePreferences(readThemePreferences());
     });
     const environment = yield* makeDefaultAppEnvironment();
-    const dispose = yield* Effect.sync(() => mountApp(root, environment));
-    yield* Effect.addFinalizer(dispose);
+    yield* mountApp(root, environment);
     return yield* Effect.never;
   }),
 ).pipe(Effect.provide(appRuntimeLayer));

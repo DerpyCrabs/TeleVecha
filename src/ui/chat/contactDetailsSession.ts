@@ -8,7 +8,7 @@ import type {
   TelegramPeer,
   TelegramResourceInvalidation,
 } from '../../telegram/types';
-import type { UiEffectRunner } from '../app/appRuntime';
+import type { UiEffectRunner, UiTaskRunner } from '../app/appRuntime';
 import { subscribeAtUi } from '../app/appRuntime';
 import type { Read, SessionContext } from 'effectweb/session';
 import { lifetime } from 'effectweb/session';
@@ -35,6 +35,7 @@ export function createContactDetailsSession(
   options: {
     source: ContactDetailsSource;
     runEffect: UiEffectRunner;
+    runTask: UiTaskRunner;
     dialog: Read<TelegramDialog | undefined>;
     detailsOpen: Read<boolean>;
   },
@@ -81,7 +82,7 @@ export function createContactDetailsSession(
   };
   scope.add(
     subscribeAtUi(
-      options.runEffect,
+      options.runTask,
       options.source.subscribeResources((event) => {
         if (event.kind === 'group-members' && event.peerId === options.dialog()?.peer.id) {
           memberRevision++;

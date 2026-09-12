@@ -163,7 +163,6 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
   const debugReportError = model.debugReportError;
   const setSettingsOpen = model.setSettingsOpen;
   const clearCache = model.clearCache;
-  const environment = model.environment;
   const downloadDebugReport = model.downloadDebugReport;
   const logOut = model.logOut;
   const appearance = model.appearance;
@@ -1326,7 +1325,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             close={() => !loggingOut && !clearingCache && setSettingsOpen(false)}
             clearCache={() => void clearCache()}
             downloadDebugReport={
-              environment.runtime.debugReports ? () => void downloadDebugReport() : undefined
+              model.debugReportsAvailable ? () => void downloadDebugReport() : undefined
             }
             logOut={() => void logOut()}
             appearance={appearance}

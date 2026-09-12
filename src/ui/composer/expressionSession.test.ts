@@ -23,6 +23,7 @@ it('shares catalog data across session recreation and invalidates the defined ex
   const options = {
     source,
     runEffect: Effect.runPromise,
+    runTask: Effect.runFork,
     conversation: () => undefined,
     reply: () => undefined,
     canSendStickers: () => true,

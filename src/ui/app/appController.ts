@@ -1,5 +1,5 @@
-import { Context, Effect } from 'effect';
-import { uiRuntime } from 'effectweb';
+import { Effect } from 'effect';
+import { makeUiRuntime, makeProgram, projectionSource } from 'effectweb';
 import * as Atom from 'effect/unstable/reactivity/Atom';
 import { messageTextForClipboard } from '../../domain/messageText';
 import type { ChatMessage, ChatSummary } from '../../domain/models';
@@ -42,9 +42,9 @@ import type { MediaAsset } from '../media/mediaAssets';
 import { createMediaAssets } from '../media/mediaAssets';
 import type { MediaPreview } from '../media/MediaAttachment';
 import { mediaPresentation } from '../media/mediaPresentation';
-import { domMount, program } from 'effectweb';
+import { domMount } from 'effectweb';
 import { makeQueryCache } from 'effectweb/cache';
-import { projectionPublication } from './projectionPublication';
+import { shareValue } from 'effectweb/share';
 import { modalVisible, subscribeModalVisibility } from '../shared/focusScope';
 import { createAppearanceSession, AppearanceSource } from '../theme/appearanceSession';
 import {
@@ -88,12 +88,13 @@ function runInBackground(task: Promise<unknown>) {
 interface AppProps {
   environment: AppEnvironment;
 }
-export function createAppController(props: AppProps) {
+export const createAppController = Effect.fn('createAppController')(function* (props: AppProps) {
   const environment = props.environment;
   const { credentials, configurationError } = environment;
   const { engine, runEffect, runTask, runSharedEffect } = environment.runtime;
   const scope = lifetime();
-  const state = program<AppControllerModel, AppControllerMessage>({
+  yield* Effect.addFinalizer(() => Effect.sync(() => scope.dispose()));
+  const state = yield* makeProgram<AppControllerModel, AppControllerMessage>({
     initial: {
       snapshot: engine.snapshot(),
       authOpen: engine.snapshot().phase !== 'ready',
@@ -171,7 +172,8 @@ export function createAppController(props: AppProps) {
     | { type: 'ConversationClosed' };
   let initialUrlPeerId = new URL(window.location.href).searchParams.get('chat') ?? undefined;
   const selectors = projectionCache();
-  const publication = projectionPublication<ReturnType<typeof project>>({
+  const publication = projectionSource<ReturnType<typeof project>>({
+    reconcile: shareValue,
     invalidate: selectors.invalidate,
     refresh: () => refresh(),
     project: () => project(),
@@ -179,12 +181,13 @@ export function createAppController(props: AppProps) {
   });
   const changed = publication.changed;
   publication.watch(state);
-  const queryRuntime = uiRuntime(
-    Context.make(ExpressionSource, engine).pipe(
-      Context.add(AppearanceSource, engine),
-      Context.add(ChatAppearanceSource, engine),
-      Context.add(BotCommandSource, engine),
-    ),
+  const queryRuntime = yield* makeUiRuntime<
+    ExpressionSource | AppearanceSource | ChatAppearanceSource | BotCommandSource
+  >().pipe(
+    Effect.provideService(ExpressionSource, engine),
+    Effect.provideService(AppearanceSource, engine),
+    Effect.provideService(ChatAppearanceSource, engine),
+    Effect.provideService(BotCommandSource, engine),
   );
   const model = makeQueryCache(queryRuntime);
   const context = { cache: model, changed };
@@ -468,6 +471,7 @@ export function createAppController(props: AppProps) {
     {
       source: engine,
       runEffect,
+      runTask,
       conversation: () => state.model().activeConversation,
       reply: () => composer.model().reply,
       canSendStickers,
@@ -492,7 +496,7 @@ export function createAppController(props: AppProps) {
     });
   };
   const contactDetails = createContactDetailsSession(
-    { source: engine, runEffect, dialog: activeDialog, detailsOpen },
+    { source: engine, runEffect, runTask, dialog: activeDialog, detailsOpen },
     context,
   );
   const replyKeyboard = createReplyKeyboardSession({
@@ -730,6 +734,7 @@ export function createAppController(props: AppProps) {
     {
       conversation: () => state.model().activeConversation,
       runEffect,
+      runTask,
       snapshot: () => state.model().snapshot,
       activePeerId: () => state.model().activeChatId,
       activeDialog,
@@ -1148,7 +1153,7 @@ export function createAppController(props: AppProps) {
     let mounted = true;
     let wasUnauthorized = false;
     const unsubscribeResources = subscribeAtUi(
-      runEffect,
+      runTask,
       engine.subscribeResources((event) => {
         if (!mounted) return;
         if (event.kind === 'peer-metadata') {
@@ -1157,7 +1162,7 @@ export function createAppController(props: AppProps) {
       }),
     );
     const unsubscribe = subscribeAtUi(
-      runEffect,
+      runTask,
       engine.subscribe((next) => {
         if (!mounted) return;
         environment.runtime.debugReports?.recordRuntime?.({
@@ -1711,7 +1716,7 @@ export function createAppController(props: AppProps) {
         },
       }),
     clearCache,
-    environment,
+    debugReportsAvailable: Boolean(environment.runtime.debugReports),
     downloadDebugReport,
     logOut,
     selectTheme,
@@ -1884,7 +1889,6 @@ export function createAppController(props: AppProps) {
   publication.start();
   return {
     model: publication.model,
-    send: (_message: never) => {},
     subscribe: publication.subscribe,
     dispose: () => {
       if (publication.disposed) return;
@@ -1895,8 +1899,10 @@ export function createAppController(props: AppProps) {
       }
     },
   };
-}
-export type AppViewModel = ReturnType<ReturnType<typeof createAppController>['model']>;
+});
+export type AppViewModel = ReturnType<
+  Effect.Success<ReturnType<typeof createAppController>>['model']
+>;
 
 export type RenderedMessage = KeyedMessageView & {
   readonly layout: ReturnType<typeof layoutMessages>[number];

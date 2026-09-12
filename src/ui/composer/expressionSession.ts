@@ -7,7 +7,7 @@ import type {
   TelegramSticker,
   TelegramStickerPack,
 } from '../../telegram/types';
-import type { UiEffectRunner } from '../app/appRuntime';
+import type { UiEffectRunner, UiTaskRunner } from '../app/appRuntime';
 import { subscribeAtUi } from '../app/appRuntime';
 import type { Read, SessionContext } from 'effectweb/session';
 import { lifetime, queryResource } from 'effectweb/session';
@@ -50,6 +50,7 @@ export function createExpressionSession(
   options: {
     source: ExpressionSource;
     runEffect: UiEffectRunner;
+    runTask: UiTaskRunner;
     conversation: Read<EffectConversation | undefined>;
     reply: Read<TelegramReplyTarget | undefined>;
     canSendStickers: Read<boolean>;
@@ -89,7 +90,7 @@ export function createExpressionSession(
   scope.add(savedGifs.dispose);
   scope.add(
     subscribeAtUi(
-      options.runEffect,
+      options.runTask,
       options.source.subscribeResources(({ kind }) => {
         if (kind === 'expressions') {
           context.cache.invalidateQuery(stickerCatalog);

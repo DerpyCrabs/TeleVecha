@@ -13,7 +13,7 @@ import type {
   TelegramUrlAuthAcceptOptions,
   TelegramUrlAuthResult,
 } from '../../telegram/types';
-import type { UiEffectRunner } from '../app/appRuntime';
+import type { UiEffectRunner, UiTaskRunner } from '../app/appRuntime';
 import { subscribeAtUi } from '../app/appRuntime';
 import type { Read, SessionContext } from 'effectweb/session';
 import { lifetime, queryResource } from 'effectweb/session';
@@ -45,6 +45,7 @@ interface PendingInlineSwitch {
 interface BotSessionOptions {
   conversation: Read<EffectConversation | undefined>;
   runEffect: UiEffectRunner;
+  runTask: UiTaskRunner;
   snapshot: Read<Snapshot<EngineSnapshot>>;
   activePeerId: Read<string>;
   activeDialog: Read<TelegramDialog | undefined>;
@@ -213,7 +214,7 @@ export function createBotSession(
   scope.add(state.subscribe(refresh));
   scope.add(
     subscribeAtUi(
-      options.runEffect,
+      options.runTask,
       options.resources.subscribeResources((event) => {
         if (
           event.kind !== 'bot-commands' ||

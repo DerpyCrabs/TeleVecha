@@ -46,6 +46,7 @@ it('clears member pages synchronously on cache reset and cancels their pending c
         subscribeResources: () => Effect.succeed(Effect.void),
       },
       runEffect: Effect.runPromise,
+      runTask: Effect.runFork,
       dialog: () => dialog,
       detailsOpen: () => true,
     },

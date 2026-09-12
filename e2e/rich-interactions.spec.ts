@@ -332,7 +332,9 @@ test('sends a whole-message reply and renders its reply preview', async ({ page 
   await page.getByRole('textbox', { name: 'Message' }).fill('Reply body');
   await page.getByRole('button', { name: 'Send message' }).click();
   const reply = page.locator('article.message').last();
-  await expect(reply.getByRole('button', { name: /Jump/ })).toHaveText('Fixture message 79');
+  const preview = reply.getByRole('button', { name: /Jump/ });
+  await expect(preview.locator('.message-reply-copy > strong')).toHaveText('Alice Fixture');
+  await expect(preview.locator('.message-reply-copy > span')).toHaveText('Fixture message 79');
   await expect(reply).toHaveClass(/message-inline-time/u);
   const inlineTime = await reply.evaluate((element) => {
     const body = element.querySelector<HTMLElement>('.message-body')!;
@@ -458,9 +460,9 @@ test('replies with the selected part of a message as a Telegram quote', async ({
 
   await page.getByRole('textbox', { name: 'Message' }).fill('Quoted reply');
   await page.getByRole('button', { name: 'Send message' }).click();
-  await expect(
-    page.locator('article.message').last().getByRole('button', { name: /Jump/ }),
-  ).toHaveText('bold italic');
+  const preview = page.locator('article.message').last().getByRole('button', { name: /Jump/ });
+  await expect(preview.locator('.message-reply-copy > strong')).toHaveText('You');
+  await expect(preview.locator('.message-reply-copy > span')).toHaveText('bold italic');
 });
 
 test('renders mentions, links, previews, wrapping, formatting, and spoilers', async ({ page }) => {
@@ -501,7 +503,12 @@ test('renders mentions, links, previews, wrapping, formatting, and spoilers', as
     'rgb(139, 144, 154)',
   );
   const renderedReply = page.locator('article[data-message-id="77"] .message-reply');
-  await expect(renderedReply).toHaveCSS('border-left-width', '0px');
+  await expect(renderedReply).toHaveCSS('border-left-width', '3px');
+  await expect(renderedReply).toHaveCSS('border-left-style', 'solid');
+  const authorColor = await renderedReply
+    .locator('.message-reply-copy > strong')
+    .evaluate((element) => getComputedStyle(element).color);
+  await expect(renderedReply).toHaveCSS('border-left-color', authorColor);
   await expect(renderedReply).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   await expect(message.locator('.bold')).toHaveCSS('font-weight', '700');
   await expect(message.locator('.italic')).toHaveCSS('font-style', 'italic');

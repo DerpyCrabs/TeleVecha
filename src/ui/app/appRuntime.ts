@@ -1,5 +1,5 @@
 import { BrowserCrypto, BrowserSocket } from '@effect/platform-browser';
-import { Crypto, Effect, Exit, Fiber, FiberSet, Layer } from 'effect';
+import { Cause, Crypto, Effect, Fiber, FiberSet, Layer } from 'effect';
 import * as Socket from 'effect/unstable/socket/Socket';
 
 import { createBrowserDebugReportRecorder } from '../../debug/tvbugReports';
@@ -87,29 +87,23 @@ export interface AppEnvironment {
   tvbug?: boolean | undefined;
 }
 
+/** The application owns subscription acquisition, cancellation, and async release. */
 export const subscribeAtUi = <Error>(
-  runEffect: UiEffectRunner,
+  runTask: UiTaskRunner,
   acquire: Effect.Effect<Effect.Effect<void>, Error>,
 ) => {
-  let release: Effect.Effect<void> | undefined;
-  let disposed = false;
-  const finalize = (finalizer: Effect.Effect<void>) =>
-    runEffect(Effect.exit(finalizer)).then(
-      () => undefined,
-      () => undefined,
-    );
-  runEffect(Effect.exit(acquire))
-    .then((result) => {
-      if (Exit.isFailure(result)) return;
-      const nextRelease = result.value;
-      if (disposed) return finalize(nextRelease);
-      else release = nextRelease;
-      return undefined;
-    })
-    .catch(() => undefined);
+  const fiber = runTask(
+    Effect.scoped(
+      Effect.acquireRelease(acquire, (release) => release).pipe(
+        Effect.andThen(Effect.never),
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logError(cause),
+        ),
+      ),
+    ),
+  );
   return () => {
-    disposed = true;
-    if (release) finalize(release).catch(() => undefined);
+    runTask(Fiber.interrupt(fiber));
   };
 };
 
