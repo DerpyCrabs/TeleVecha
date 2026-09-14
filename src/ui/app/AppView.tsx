@@ -821,6 +821,38 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   : undefined
                               }
                             />
+                            {!message.service && Number.isSafeInteger(Number(message.id)) ? (
+                              <MessageActions
+                                message={message}
+                                pickerOpen={reactionPickerMessageId === message.id}
+                                setPickerOpen={(open) =>
+                                  setReactionPickerMessageId(open ? message.id : '')
+                                }
+                                react={(emoji) =>
+                                  runInBackground(reactToMessage(message.id, emoji))
+                                }
+                                loadReactionPeople={(emoji) => {
+                                  const peer = snapshot.dialogs.find(
+                                    ({ peer }) => peer.id === message.peerId,
+                                  )?.peer;
+                                  return peer
+                                    ? engine.getReactionPeople(peer, Number(message.id), emoji)
+                                    : Effect.fail(new Error('Reaction details are unavailable.'));
+                                }}
+                                loadReactionAvatar={(person, cachedOnly) =>
+                                  mediaAssets.loadPeerAvatar(
+                                    person.peer,
+                                    person.hasAvatar,
+                                    person.avatarId,
+                                    cachedOnly || !online,
+                                  )
+                                }
+                                reply={(article) => composer.beginReply(message, article)}
+                                loadCustomEmoji={(documentId) =>
+                                  mediaAssets.loadCustomEmoji(documentId)
+                                }
+                              />
+                            ) : null}
                             <footer
                               aria-label={
                                 message.outgoing
@@ -894,36 +926,6 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 </div>
                               ))(pendingSendForMessage(message.id)!)
                             : null}
-                          {!message.service && Number.isSafeInteger(Number(message.id)) ? (
-                            <MessageActions
-                              message={message}
-                              pickerOpen={reactionPickerMessageId === message.id}
-                              setPickerOpen={(open) =>
-                                setReactionPickerMessageId(open ? message.id : '')
-                              }
-                              react={(emoji) => runInBackground(reactToMessage(message.id, emoji))}
-                              loadReactionPeople={(emoji) => {
-                                const peer = snapshot.dialogs.find(
-                                  ({ peer }) => peer.id === message.peerId,
-                                )?.peer;
-                                return peer
-                                  ? engine.getReactionPeople(peer, Number(message.id), emoji)
-                                  : Effect.fail(new Error('Reaction details are unavailable.'));
-                              }}
-                              loadReactionAvatar={(person, cachedOnly) =>
-                                mediaAssets.loadPeerAvatar(
-                                  person.peer,
-                                  person.hasAvatar,
-                                  person.avatarId,
-                                  cachedOnly || !online,
-                                )
-                              }
-                              reply={(article) => composer.beginReply(message, article)}
-                              loadCustomEmoji={(documentId) =>
-                                mediaAssets.loadCustomEmoji(documentId)
-                              }
-                            />
-                          ) : null}
                         </article>
                       </div>
                     );

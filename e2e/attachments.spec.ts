@@ -7,6 +7,88 @@ test.beforeEach(async ({ page }) => {
   await selectAlice(page);
 });
 
+for (const reactionCount of [1, 5, 7]) {
+  test(`lays out ${reactionCount} image document reactions before the timestamp`, async ({
+    page,
+  }) => {
+    await page.evaluate(
+      (count) =>
+        window.__televechaFixture?.emit({
+          type: 'new-message',
+          pts: 11,
+          ptsCount: 1,
+          message: {
+            id: 81,
+            peerId: 'u:101',
+            senderId: 'self',
+            text: 'вроде неплохо, но пока не проверял нормально',
+            date: 1_700_002_000,
+            editedAt: 1_700_002_001,
+            outgoing: true,
+            media: { kind: 'file', name: 'image.png', mimeType: 'image/png', size: 400_384 },
+            reactions: ['🔥', '👍', '❤️', '🎉', '😁', '🤔', '👀']
+              .slice(0, count)
+              .map((emoji) => ({ emoji, count: 1, chosen: false })),
+          },
+        }),
+      reactionCount,
+    );
+    const message = page.locator('article[data-message-id="81"]');
+    await expect(message.locator('.reaction')).toHaveCount(reactionCount);
+    await expect(message.locator('.reaction').first()).toBeVisible();
+
+    for (const width of [1326, 390]) {
+      await page.setViewportSize({ width, height: 784 });
+      const geometry = await message.evaluate((element) => {
+        const body = element.querySelector('.message-body')!.getBoundingClientRect();
+        const reaction = element.querySelector('.reaction')!.getBoundingClientRect();
+        const footer = element.querySelector('footer')!.getBoundingClientRect();
+        const buttons = [...element.querySelectorAll('.reaction')].map((button) =>
+          button.getBoundingClientRect(),
+        );
+        const gap = parseFloat(getComputedStyle(element.querySelector('.message-copy')!).columnGap);
+        // Telegram Desktop fills reaction rows first, then reserves time after the last button.
+        let left = body.left;
+        let top = reaction.top;
+        const placements = buttons.map((button) => {
+          if (left > body.left && left + button.width > body.right) {
+            left = body.left;
+            top += button.height + gap;
+          }
+          const delta = { x: button.left - left, y: button.top - top };
+          left += button.width + gap;
+          return delta;
+        });
+        const last = buttons.at(-1)!;
+        const timeFits = last.right + gap + footer.width <= body.right;
+        return {
+          captionGap: reaction.top - body.bottom,
+          leftDelta: reaction.left - body.left,
+          placements,
+          timeFits,
+          bottomDelta: last.bottom - footer.bottom,
+          timeGap: footer.top - last.bottom,
+          separation: footer.left - last.right,
+        };
+      });
+      expect(geometry.captionGap).toBeGreaterThanOrEqual(0);
+      expect(geometry.captionGap).toBeLessThanOrEqual(6);
+      expect(geometry.leftDelta).toBeCloseTo(0, 0);
+      for (const placement of geometry.placements) {
+        expect(placement.x).toBeCloseTo(0, 0);
+        expect(placement.y).toBeCloseTo(0, 0);
+      }
+      if (geometry.timeFits) {
+        expect(geometry.bottomDelta).toBeCloseTo(0, 0);
+        expect(geometry.separation).toBeGreaterThan(0);
+      } else {
+        expect(geometry.timeGap).toBeGreaterThanOrEqual(0);
+        expect(geometry.timeGap).toBeLessThanOrEqual(6);
+      }
+    }
+  });
+}
+
 test('opens image documents from a file card and keeps download separate', async ({ page }) => {
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
