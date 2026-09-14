@@ -1015,6 +1015,11 @@
 .message-image-document > .message-copy {
   padding: 0 0.6875rem 8px;
 }
+.message-image-document > .message-reactions:has(.reaction) {
+  margin-right: 0.6875rem;
+  margin-bottom: 0.4rem;
+  margin-left: 0.6875rem;
+}
 .message-media-surface > .message-copy > .message-body:empty {
   display: none;
 }
