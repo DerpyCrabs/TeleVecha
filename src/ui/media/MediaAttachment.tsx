@@ -458,6 +458,7 @@ export const MediaAttachment = component<
             }}
           >
             <img
+              draggable={false}
               src={displayUrl || undefined}
               alt={props.decorative ? '' : props.media.name}
               loading="lazy"
@@ -494,6 +495,7 @@ export const MediaAttachment = component<
             {props.loadPreview ? (
               <>
                 <img
+                  draggable={false}
                   src={model.url || undefined}
                   alt={props.media.name}
                   loading="lazy"
@@ -592,7 +594,7 @@ export const MediaAttachment = component<
               <>
                 <span class="media-file-thumbnail media-file-image-thumbnail" aria-hidden="true">
                   {model.url ? (
-                    <img src={model.url} alt="" />
+                    <img draggable={false} src={model.url} alt="" />
                   ) : model.loading ? (
                     <LoaderCircle class="animate-spin" size={20} />
                   ) : (

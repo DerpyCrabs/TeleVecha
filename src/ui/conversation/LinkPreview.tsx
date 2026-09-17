@@ -87,7 +87,7 @@ const PreviewVideo = component<PreviewVideoProps, PreviewVideoModel, PreviewVide
           aria-label={model.loading ? 'Loading video' : model.failed ? 'Retry video' : 'Play video'}
           onClick={() => send({ type: 'Play' })}
         >
-          {model.props.poster ? <img src={model.props.poster} alt="" /> : null}
+          {model.props.poster ? <img draggable={false} src={model.props.poster} alt="" /> : null}
           <span>
             {model.loading ? 'Loading…' : model.failed ? 'Video unavailable · Retry' : '▶'}
           </span>
@@ -130,7 +130,7 @@ export const LinkPreview = resourceComponent<LinkPreviewProps, string | undefine
       <>
         {props.preview.hasPhoto ? (
           <span class="link-preview-photo" aria-hidden="true">
-            <img src={photo()} alt="" classList={{ loaded: Boolean(photo()) }} />
+            <img draggable={false} src={photo()} alt="" classList={{ loaded: Boolean(photo()) }} />
           </span>
         ) : null}
         {copy()}
@@ -149,7 +149,7 @@ export const LinkPreview = resourceComponent<LinkPreviewProps, string | undefine
           />
           {href()
             ? ((url) => (
-                <a href={url} target="_blank" rel="noopener noreferrer">
+                <a draggable={false} href={url} target="_blank" rel="noopener noreferrer">
                   {copy()}
                 </a>
               ))(href()!)
@@ -159,6 +159,7 @@ export const LinkPreview = resourceComponent<LinkPreviewProps, string | undefine
     ) : href() ? (
       ((url) => (
         <a
+          draggable={false}
           class="link-preview"
           classList={{
             'link-preview-large': usesLargePhoto(),

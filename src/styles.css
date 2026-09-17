@@ -185,3 +185,24 @@ textarea {
 button {
   cursor: pointer;
 }
+
+/* Navigation and action labels are controls; message and profile copy stays selectable. */
+.chat-row,
+.chat-filters button,
+.detail-row,
+.icon-button,
+.composer-icon-button,
+.message-context-menu button,
+.chat-context-menu button,
+.composer-format-menu button,
+.reaction,
+.reaction-picker button,
+.reply-message,
+.add-reaction,
+.expression-picker button,
+.voice-play,
+.voice-speed,
+.pinned-message-navigation button,
+.chat-unread-badge {
+  user-select: none;
+}

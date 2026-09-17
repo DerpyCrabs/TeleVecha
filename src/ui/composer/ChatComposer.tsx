@@ -50,7 +50,7 @@ interface ChatComposerProps {
 }
 const AttachmentThumbnail = view<{ file: File }, never>((props, _send) =>
   props.file.type.startsWith('image/') ? (
-    <img use={fileImageMount(props.file)} alt="" />
+    <img draggable={false} use={fileImageMount(props.file)} alt="" />
   ) : (
     <FileText size={22} aria-hidden="true" />
   ),

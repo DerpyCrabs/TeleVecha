@@ -7,6 +7,41 @@ test.beforeEach(async ({ page }) => {
   await selectAlice(page);
 });
 
+test('media and link thumbnails do not start native drags while message text stays selectable', async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    document.addEventListener('dragstart', (event) => {
+      document.documentElement.setAttribute('data-native-drag-started', 'true');
+      event.preventDefault();
+    });
+  });
+  for (const thumbnail of [
+    page.getByRole('img', { name: 'fixture.jpg', exact: true }),
+    page.locator('article[data-message-id="71"] .link-preview img'),
+  ]) {
+    await expect(thumbnail).toBeVisible();
+    await thumbnail.scrollIntoViewIfNeeded();
+    const bounds = await thumbnail.boundingBox();
+    if (!bounds) throw new Error('Thumbnail is not visible');
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 12, y, { steps: 5 });
+    // Release outside the thumbnail to avoid activating its normal click action.
+    await page.mouse.move(1, 1);
+    await page.mouse.up();
+    await expect(page.locator('html')).not.toHaveAttribute('data-native-drag-started', 'true');
+  }
+  const body = page.locator('article[data-message-id="79"] .message-body');
+  await body.click({ clickCount: 3 });
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString().trim()))
+    .toContain((await body.innerText()).trim());
+  await expect(page.locator('.chat-row').first()).toHaveCSS('user-select', 'none');
+});
+
 test('shows a forwarded source and opens its original post', async ({ page }) => {
   const forwarded = page
     .locator('article[data-message-id="73"]')

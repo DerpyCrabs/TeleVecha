@@ -52,7 +52,7 @@ const CustomReaction = resourceComponent<
         ) : loaded.mimeType.startsWith('video/') ? (
           <VisibilityVideo source={loaded.url} label="Custom emoji reaction" />
         ) : (
-          <img src={loaded.url} alt="" />
+          <img draggable={false} src={loaded.url} alt="" />
         ))(asset()!)
     ) : (
       <span class="custom-reaction-placeholder" />

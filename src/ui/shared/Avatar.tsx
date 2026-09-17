@@ -112,7 +112,12 @@ export const Avatar = component<AvatarProps, AvatarModel, AvatarMessage>({
         >
           {props.initials}
           {model.source ? (
-            <img class="absolute inset-0 size-full object-cover" src={model.source} alt="" />
+            <img
+              class="absolute inset-0 size-full object-cover"
+              src={model.source}
+              alt=""
+              draggable={false}
+            />
           ) : null}
         </div>
         {props.online ? (

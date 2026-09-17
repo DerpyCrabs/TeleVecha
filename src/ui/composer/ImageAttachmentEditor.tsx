@@ -79,7 +79,11 @@ export const ImageAttachmentEditor = editing.view(
               data-rotation={model.rotation}
               style={{ '--image-rotation': `${model.rotation}deg` }}
             >
-              <img use={fileImageMount(props.attachment.file)} alt="Image edit preview" />
+              <img
+                draggable={false}
+                use={fileImageMount(props.attachment.file)}
+                alt="Image edit preview"
+              />
             </div>
             <div class="image-editor-controls">
               <div class="image-editor-rotate" aria-label="Rotate image">

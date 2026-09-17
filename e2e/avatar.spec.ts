@@ -1,4 +1,49 @@
 import { expect, test } from '@playwright/test';
+import { chatButton, openReady, selectAlice } from './helpers';
+
+test('moving the pointer while pressing a compact chat avatar does not start a native drag', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('televecha:left-sidebar-width', '72');
+  });
+  await openReady(page);
+  await selectAlice(page);
+  const release = chatButton(page, /Release Channel/);
+  const avatar = release.locator('img');
+  await expect(avatar).toBeVisible();
+  await release.evaluate((element) => {
+    element.addEventListener('dragstart', (event) => {
+      element.setAttribute('data-native-drag-started', 'true');
+      // Record the regression without entering the platform drag loop in the test.
+      event.preventDefault();
+    });
+  });
+  const bounds = await avatar.boundingBox();
+  if (!bounds) throw new Error('Chat avatar is not visible');
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width / 2 + 12, bounds.y + bounds.height / 2, {
+    steps: 5,
+  });
+  await page.mouse.up();
+  await expect(release).not.toHaveAttribute('data-native-drag-started', 'true');
+  await release.click();
+  await expect(page.getByTestId('conversation-header')).toContainText('Release Channel');
+  await selectAlice(page);
+  await page.getByRole('textbox', { name: 'Message' }).fill('Still interactive');
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Still interactive');
+  const scroller = page.getByTestId('message-scroller');
+  await scroller.hover();
+  await page.mouse.wheel(0, -200);
+  await expect
+    .poll(() =>
+      scroller.evaluate(
+        (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+      ),
+    )
+    .toBeGreaterThan(100);
+});
 
 test('clears reused avatars immediately when the next chat avatar stalls and fails', async ({
   page,

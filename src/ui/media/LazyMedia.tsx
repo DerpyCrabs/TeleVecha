@@ -92,7 +92,7 @@ export const LazyMedia = component<Props, Model, Message>({
         ) : model.props.mimeType.startsWith('video/') ? (
           <VisibilityVideo source={model.source} label={model.props.label} />
         ) : (
-          <img src={model.source} alt="" />
+          <img draggable={false} src={model.source} alt="" />
         )
       ) : (
         <span class={model.props.placeholder === 'GIF' ? 'gif-placeholder' : 'sticker-placeholder'}>

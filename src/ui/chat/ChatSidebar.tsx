@@ -459,6 +459,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarModel, ChatSid
           {renderList(idRows(virtualChats), (chat, virtualIndex) => (
             <a
               href={chatHref(chat.id)}
+              draggable={false}
               role="button"
               class="chat-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
               classList={{
