@@ -60,6 +60,56 @@ const withTransport = <A, E>(
   );
 
 describe('web Telegram transport', () => {
+  it.each(['MESSAGE_NOT_MODIFIED', 'MESSAGE_EDIT_TIME_EXPIRED', 'CHAT_WRITE_FORBIDDEN'])(
+    'handles an edit response without hiding real failures: %s',
+    (code) => {
+      const error = createMtprotoError('rpc', `${code} (messages.editMessage)`, {
+        code: 400,
+        details: { errorMessage: code },
+      });
+      const invoke = vi.fn((request: unknown) => {
+        if (Api.messages.EditMessage.is(request)) return Effect.fail(error);
+        if (Api.messages.GetHistory.is(request))
+          return Effect.succeed(
+            Api.messages.Messages({
+              messages: [
+                Api.Message({
+                  id: 42,
+                  peerId: Api.PeerUser({ userId: 1n }),
+                  date: 100,
+                  message: 'ну как дешевая',
+                  out: true,
+                }),
+              ],
+              users: [],
+              chats: [],
+              topics: [],
+            }),
+          );
+        return Effect.fail(createMtprotoError('protocol', 'Unexpected RPC'));
+      });
+      return Effect.runPromise(
+        withTransport(
+          (target) =>
+            Effect.gen(function* () {
+              yield* target.connect({ apiId: 1, apiHash: 'hash' });
+              const edit = target.editMessage({ id: 'u:1', kind: 'user' }, 42, 'ну как дешевая');
+              if (code === 'MESSAGE_NOT_MODIFIED') {
+                const result = yield* edit;
+                expect(result.message).toMatchObject({ id: 42, text: 'ну как дешевая' });
+                expect(result.updateBatches).toEqual([]);
+                expect(invoke).toHaveBeenCalledTimes(2);
+              } else {
+                expect(yield* edit.pipe(Effect.flip)).toBe(error);
+                expect(invoke).toHaveBeenCalledOnce();
+              }
+            }),
+          () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+        ),
+      );
+    },
+  );
+
   it.each([
     { id: 'u:1', kind: 'user' as const },
     { id: 'g:2', kind: 'group' as const },

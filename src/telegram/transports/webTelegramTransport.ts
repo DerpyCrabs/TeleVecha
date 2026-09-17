@@ -1962,19 +1962,29 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     const media = replacement
       ? yield* uploadInputMedia(replacement.file, replacement.sendAs, false, undefined)
       : undefined;
-    const result = yield* (yield* getClient).invoke(
-      Api.messages.EditMessage({
-        peer: toInputPeer(peer),
-        id: messageId,
-        message: text,
-        ...(formats?.length ? { entities: inputEntities(formats) } : {}),
-        ...(media ? { media } : {}),
-      }),
-    );
-    const message = messagesFromUpdates(result)
+    const result = yield* (yield* getClient)
+      .invoke(
+        Api.messages.EditMessage({
+          peer: toInputPeer(peer),
+          id: messageId,
+          message: text,
+          ...(formats?.length ? { entities: inputEntities(formats) } : {}),
+          ...(media ? { media } : {}),
+        }),
+      )
+      .pipe(
+        Effect.catch((error) =>
+          // The requested content is already on the server, including when an
+          // earlier edit succeeded but its response never reached this client.
+          telegramRpcErrorMessage(error) === 'MESSAGE_NOT_MODIFIED'
+            ? Effect.succeed(undefined)
+            : Effect.fail(error),
+        ),
+      );
+    const message = (result ? messagesFromUpdates(result) : [])
       .map((candidate) => mapMessage(candidate))
       .find((candidate): candidate is TelegramMessage => Boolean(candidate));
-    const updateBatches = toUpdateBatches(result);
+    const updateBatches = result ? toUpdateBatches(result) : [];
     if (message) return { message, updateBatches };
     const history = yield* getHistoryAround(peer, messageId, 3);
     const fallback = history.messages.find(({ id }) => id === messageId);
