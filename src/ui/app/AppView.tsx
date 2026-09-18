@@ -39,6 +39,7 @@ import Pin from '@effectweb/lucide/icons/pin';
 import Reply from '@effectweb/lucide/icons/reply';
 import Search from '@effectweb/lucide/icons/search';
 import Trash2 from '@effectweb/lucide/icons/trash-2';
+import X from '@effectweb/lucide/icons/x';
 import { MediaAttachment } from '../media/MediaAttachment';
 import { MediaViewer } from '../media/MediaViewer';
 import { saveMediaUrl } from '../media/mediaActions';
@@ -366,6 +367,60 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             </nav>
           </header>
 
+          {model.selectedMessages.length ? (
+            <div class="message-selection-toolbar" role="toolbar" aria-label="Selected messages">
+              <button
+                class="icon-button message-selection-cancel"
+                aria-label="Cancel selection"
+                disabled={model.selectionBusy}
+                onClick={model.clearMessageSelection}
+              >
+                <X size={20} />
+              </button>
+              <strong role="status">
+                {model.selectedMessages.length} selected
+                {model.selectedMessages.length === 100 ? ' (maximum)' : ''}
+              </strong>
+              <button
+                class="message-selection-action"
+                disabled={
+                  model.selectionBusy ||
+                  !model.selectedMessages.every(
+                    (message) => messageCapabilitiesForUi(message).canForward,
+                  )
+                }
+                aria-label="Forward selected"
+                title="Forward selected"
+                onClick={() => model.setSelectionAction('forward')}
+              >
+                <Forward size={20} /> <span>Forward</span>
+              </button>
+              <button
+                class="message-selection-action message-selection-delete"
+                disabled={
+                  model.selectionBusy ||
+                  !(
+                    model.selectedMessages.every(
+                      (message) =>
+                        messageCapabilitiesForUi(message).canDelete &&
+                        messageCapabilitiesForUi(message).canDeleteForMe,
+                    ) ||
+                    model.selectedMessages.every(
+                      (message) =>
+                        messageCapabilitiesForUi(message).canDelete &&
+                        messageCapabilitiesForUi(message).canDeleteForEveryone,
+                    )
+                  )
+                }
+                aria-label="Delete selected"
+                title="Delete selected"
+                onClick={() => model.setSelectionAction('delete')}
+              >
+                <Trash2 size={20} /> <span>Delete</span>
+              </button>
+            </div>
+          ) : null}
+
           {snapshot.operationError
             ? ((message) => (
                 <div class="sync-state-banner operation-state-banner" role="alert">
@@ -451,6 +506,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
               use={model.dom.messageScroller}
               class={`message-scroller scroll-area relative h-full min-h-0 overflow-y-auto overscroll-contain px-5${activeChat.kind === 'channel' ? ' channel-messages' : ''}`}
               data-testid="message-scroller"
+              data-selection-active={model.selectedMessages.length > 0 ? 'true' : undefined}
             >
               <div
                 use={model.dom.messageContent}
@@ -539,13 +595,38 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                           </div>
                         ) : null}
                         <article
-                          class={layout.className}
+                          class={`${layout.className}${model.selectedMessages.some(({ id }) => id === message.id) ? ' message-selected' : ''}`}
+                          data-selection-active={
+                            model.selectedMessages.length > 0 ? 'true' : undefined
+                          }
                           style={{ width: layout.width }}
                           data-message-id={message.id}
                           data-media-kind={message.media?.kind}
                           aria-label={message.service?.text}
                           onContextMenu={(event) => openMessageActions(message, event)}
                         >
+                          {model.selectedMessages.length &&
+                          !message.service &&
+                          Number(message.id) > 0 ? (
+                            <button
+                              class="message-selection-check"
+                              role="checkbox"
+                              aria-checked={model.selectedMessages.some(
+                                ({ id }) => id === message.id,
+                              )}
+                              aria-label={`Select message ${message.id}`}
+                              onKeyDown={(event) => {
+                                if (event.key === ' ' || event.key === 'Enter') {
+                                  event.preventDefault();
+                                  model.selectMessage(message, event.shiftKey);
+                                }
+                              }}
+                            >
+                              {model.selectedMessages.some(({ id }) => id === message.id) ? (
+                                <Check size={16} />
+                              ) : null}
+                            </button>
+                          ) : null}
                           {layout.showSenderAvatar ? (
                             <span class="message-sender-avatar" aria-hidden="true">
                               <Avatar
@@ -980,6 +1061,9 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                               >
                                 <Reply size={15} /> Reply
                               </button>
+                              <button role="menuitem" onClick={() => model.selectMessage(target)}>
+                                <CheckCheck size={15} /> Select
+                              </button>
                               {target.media && !target.protected ? (
                                 <button
                                   role="menuitem"
@@ -1207,6 +1291,36 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             })(mediaViewer!)
           : null}
 
+        {model.selectionAction === 'forward' ? (
+          <ForwardMessageDialog
+            chats={visibleChats}
+            title={`Forward ${model.selectedMessages.length} messages to`}
+            label="Forward selected messages"
+            close={() => model.setSelectionAction(undefined)}
+            search={(query) => engine.searchPeers(query)}
+            forward={(peerId, result) =>
+              runInBackground(model.actOnSelection('forward', false, peerId, result))
+            }
+          />
+        ) : null}
+        {model.selectionAction === 'delete' ? (
+          <DeleteMessageDialog
+            count={model.selectedMessages.length}
+            busy={model.selectionBusy}
+            canDeleteForMe={model.selectedMessages.every(
+              (message) =>
+                messageCapabilitiesForUi(message).canDelete &&
+                messageCapabilitiesForUi(message).canDeleteForMe,
+            )}
+            canDeleteForEveryone={model.selectedMessages.every(
+              (message) =>
+                messageCapabilitiesForUi(message).canDelete &&
+                messageCapabilitiesForUi(message).canDeleteForEveryone,
+            )}
+            close={() => model.setSelectionAction(undefined)}
+            confirm={(revoke) => runInBackground(model.actOnSelection('delete', revoke))}
+          />
+        ) : null}
         {forwardingMessage ? (
           <ForwardMessageDialog
             chats={visibleChats}
@@ -1279,8 +1393,14 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
         {deleteTarget
           ? ((message) => (
               <DeleteMessageDialog
-                canDeleteForMe={messageCapabilitiesForUi(message).canDeleteForMe}
-                canDeleteForEveryone={messageCapabilitiesForUi(message).canDeleteForEveryone}
+                canDeleteForMe={
+                  messageCapabilitiesForUi(message).canDelete &&
+                  messageCapabilitiesForUi(message).canDeleteForMe
+                }
+                canDeleteForEveryone={
+                  messageCapabilitiesForUi(message).canDelete &&
+                  messageCapabilitiesForUi(message).canDeleteForEveryone
+                }
                 close={() => setDeleteTarget(undefined)}
                 confirm={(revoke) => {
                   const messageId = message.id;

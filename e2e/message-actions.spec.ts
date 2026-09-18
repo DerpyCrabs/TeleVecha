@@ -87,3 +87,136 @@ test('offers delete-for-me separately from revoke-for-everyone', async ({ page }
   await expect(message).toHaveCount(0);
   expect((await fixtureStats(page))?.deleteMessages).toBe(1);
 });
+
+test('selects a range, toggles messages, and cancels with Escape', async ({ page }) => {
+  await page.locator('article[data-message-id="80"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Select', exact: true }).click();
+  const toolbar = page.getByRole('toolbar', { name: 'Selected messages' });
+  await expect(toolbar).toContainText('1 selected');
+  await page.locator('article[data-message-id="78"]').click({ modifiers: ['Shift'] });
+  await expect(toolbar).toContainText('3 selected');
+  await page.getByRole('checkbox', { name: 'Select message 79', exact: true }).click();
+  await expect(toolbar).toContainText('2 selected');
+  await expect(
+    page.getByRole('checkbox', { name: 'Select message 79', exact: true }),
+  ).not.toBeChecked();
+  await page.keyboard.press('Escape');
+  await expect(toolbar).toHaveCount(0);
+  await page.locator('article[data-message-id="80"]').click({ modifiers: ['Control'] });
+  await expect(toolbar).toContainText('1 selected');
+  await page.getByRole('button', { name: 'Cancel selection' }).click();
+  await expect(toolbar).toHaveCount(0);
+});
+
+test('deletes selected messages after confirmation and retains unselected messages', async ({
+  page,
+}) => {
+  await page.locator('article[data-message-id="80"]').click({ modifiers: ['Control'] });
+  await page.locator('article[data-message-id="79"]').click();
+  await page.getByRole('button', { name: 'Delete selected' }).click();
+  let dialog = page.getByRole('dialog', { name: 'Delete 2 messages' });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('toolbar', { name: 'Selected messages' })).toContainText(
+    '2 selected',
+  );
+  await page.getByRole('button', { name: 'Delete selected' }).click();
+  dialog = page.getByRole('dialog', { name: 'Delete 2 messages' });
+  await dialog.getByRole('button', { name: 'Delete for me', exact: true }).click();
+  await expect(page.locator('article[data-message-id="80"]')).toHaveCount(0);
+  await expect(page.locator('article[data-message-id="79"]')).toHaveCount(0);
+  await expect(page.locator('article[data-message-id="78"]')).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Selected messages' })).toHaveCount(0);
+});
+
+test('forwards selected messages in chronological order and clears selection on chat change', async ({
+  page,
+}) => {
+  await page.locator('article[data-message-id="80"]').click({ modifiers: ['Control'] });
+  await page.locator('article[data-message-id="79"]').click();
+  await page.getByRole('button', { name: 'Forward selected' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Forward selected messages' });
+  await dialog.getByRole('button', { name: 'Alice Fixture', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(async () => (await fixtureStats(page))?.forwardMessage).toBe(2);
+  await expect(page.locator('article[data-message-id="81"]')).toContainText('Fixture message 79');
+  await expect(page.locator('article[data-message-id="82"]')).toContainText(
+    'Newest message from fixture',
+  );
+  await expect(page.getByRole('toolbar', { name: 'Selected messages' })).toHaveCount(0);
+  await page.locator('article[data-message-id="80"]').click({ modifiers: ['Control'] });
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Release Channel/ })
+    .click();
+  await expect(page.getByRole('toolbar', { name: 'Selected messages' })).toHaveCount(0);
+});
+
+test('selection intercepts media clicks and disables forwarding protected messages', async ({
+  page,
+}) => {
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 81,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: 'Protected selection',
+        date: 1_700_002_000,
+        outgoing: false,
+        protected: true,
+      },
+    }),
+  );
+  await page.locator('article[data-message-id="81"]').click({ modifiers: ['Control'] });
+  await expect(page.getByRole('button', { name: 'Forward selected' })).toBeDisabled();
+  await page.getByRole('img', { name: 'fixture.jpg', exact: true }).click();
+  await expect(page.getByRole('toolbar', { name: 'Selected messages' })).toContainText(
+    '2 selected',
+  );
+  await expect(page.getByRole('dialog', { name: /Media preview:/ })).toHaveCount(0);
+  await page.locator('article[data-message-id="81"]').click();
+  await expect(page.getByRole('button', { name: 'Forward selected' })).toBeEnabled();
+});
+
+test('selects album members together', async ({ page }) => {
+  await page.evaluate(() => {
+    for (const id of [81, 82])
+      window.__televechaFixture?.emit({
+        type: 'new-message',
+        pts: id - 70,
+        ptsCount: 1,
+        message: {
+          id,
+          peerId: 'u:101',
+          senderId: 'u:101',
+          text: '',
+          date: 1_700_002_000,
+          outgoing: false,
+          groupedId: 'selection-album',
+          media: {
+            kind: 'photo',
+            name: `selection-${id}.jpg`,
+            mimeType: 'image/jpeg',
+            width: 200,
+            height: 200,
+          },
+        },
+      });
+  });
+  const album = page.locator('article[data-message-id="81"]');
+  await expect(album.locator('.media-album-item')).toHaveCount(2);
+  await album.click({ modifiers: ['Control'] });
+  await expect(page.getByRole('toolbar', { name: 'Selected messages' })).toContainText(
+    '2 selected',
+  );
+  await expect(
+    page.getByRole('checkbox', { name: 'Select message 81', exact: true }),
+  ).toBeChecked();
+  await album.click();
+  await expect(page.getByRole('toolbar', { name: 'Selected messages' })).toHaveCount(0);
+});

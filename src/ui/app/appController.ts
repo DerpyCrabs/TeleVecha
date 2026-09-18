@@ -110,6 +110,10 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       debugReportError: '',
       clipboardError: '',
       settingsOpen: false,
+      selectedMessageIds: [],
+      selectionAnchor: undefined,
+      selectionAction: undefined,
+      selectionBusy: false,
       pendingActionId: '',
       reactionPickerMessageId: '',
       messageContextMenu: undefined,
@@ -124,6 +128,9 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       const changes: Partial<AppControllerModel> =
         message.type === 'ConversationClosed'
           ? {
+              selectedMessageIds: [],
+              selectionAnchor: undefined,
+              selectionAction: undefined,
               activeChatId: 'empty',
               activeConversation: undefined,
               initialUnreadAfterId: undefined,
@@ -155,6 +162,10 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     debugReportError: string;
     clipboardError: string;
     settingsOpen: boolean;
+    selectedMessageIds: string[];
+    selectionAnchor: string | undefined;
+    selectionAction: 'forward' | 'delete' | undefined;
+    selectionBusy: boolean;
     pendingActionId: string;
     reactionPickerMessageId: string;
     messageContextMenu: { messageId: string; x: number; y: number } | undefined;
@@ -482,6 +493,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   );
   const expressionPickerVisible = () => expressions.model().visible;
   const closeConversationOverlays = () => {
+    clearMessageSelection();
     expressions.close();
     state.send({
       type: 'Changed',
@@ -1061,6 +1073,12 @@ export const createAppController = Effect.fn('createAppController')(function* (p
         bot.closeMenu();
         return;
       }
+      if (state.model().selectionAction || state.model().deleteTarget || modalVisible()) return;
+      if (state.model().selectedMessageIds.length) {
+        event.preventDefault();
+        if (!state.model().selectionBusy) clearMessageSelection();
+        return;
+      }
       if (mobileSidebarOpen() && viewportWidth() <= 650) {
         event.preventDefault();
         setMobileSidebarOpen(false);
@@ -1263,6 +1281,133 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       if (badgeNavigator.clearAppBadge) runInBackground(badgeNavigator.clearAppBadge());
       if (!import.meta.hot) runInBackground(runEffect(engine.stop()));
     });
+  };
+  const selectableMessage = (message: ChatMessage) =>
+    !message.service && Number.isSafeInteger(Number(message.id)) && Number(message.id) > 0;
+  const selectedMessages = () =>
+    activeMessages().filter(
+      (message) =>
+        state.model().selectedMessageIds.includes(message.id) && selectableMessage(message),
+    );
+  const clearMessageSelection = () =>
+    state.send({
+      type: 'Changed',
+      changes: { selectedMessageIds: [], selectionAnchor: undefined, selectionAction: undefined },
+    });
+  const selectMessage = (message: ChatMessage, range = false) => {
+    if (!selectableMessage(message) || state.model().selectionBusy) return;
+    const messages = activeMessages();
+    const selected = new Set(selectedMessages().map(({ id }) => id));
+    const anchor = messages.findIndex(({ id }) => id === state.model().selectionAnchor);
+    const index = messages.findIndex(({ id }) => id === message.id);
+    const rangeMessages =
+      range && anchor >= 0 && index >= 0
+        ? messages.slice(Math.min(anchor, index), Math.max(anchor, index) + 1)
+        : message.groupedId
+          ? messages.filter((candidate) => candidate.groupedId === message.groupedId)
+          : [message];
+    const groups = new Set(rangeMessages.map(({ groupedId }) => groupedId).filter(Boolean));
+    const candidates = messages.filter(
+      (candidate) =>
+        rangeMessages.includes(candidate) ||
+        (candidate.groupedId && groups.has(candidate.groupedId)),
+    );
+    const remove = selected.has(message.id);
+    for (const candidate of candidates.filter(selectableMessage)) {
+      if (remove) selected.delete(candidate.id);
+      else if (selected.size < 100) selected.add(candidate.id);
+    }
+    state.send({
+      type: 'Changed',
+      changes: {
+        selectedMessageIds: [...selected],
+        selectionAnchor: message.id,
+        messageContextMenu: undefined,
+        reactionPickerMessageId: '',
+      },
+    });
+  };
+  const selectionPointerDown = (event: Event) => {
+    if (!(event instanceof PointerEvent) || event.button !== 0) return;
+    if (!selectedMessages().length && !event.ctrlKey && !event.metaKey) return;
+    if (!(event.target instanceof Element) || !event.target.closest('article.message')) return;
+    event.stopImmediatePropagation();
+  };
+  const selectionClick = (event: Event) => {
+    if (!(event instanceof MouseEvent)) return;
+    if (!selectedMessages().length && !event.ctrlKey && !event.metaKey) return;
+    const element =
+      event.target instanceof Element ? event.target.closest<HTMLElement>('article.message') : null;
+    const message = activeMessages().find(({ id }) => id === element?.dataset.messageId);
+    if (!message || !selectableMessage(message)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    selectMessage(message, event.shiftKey);
+  };
+  const setSelectionAction = (selectionAction: 'forward' | 'delete' | undefined) => {
+    if (!state.model().selectionBusy) state.send({ type: 'Changed', changes: { selectionAction } });
+  };
+  const actOnSelection = async (
+    action: 'forward' | 'delete',
+    revoke = false,
+    targetPeerId?: string,
+    result?: TelegramPeerSearchResult,
+  ) => {
+    if (state.model().selectionBusy) return;
+    const conversation = state.model().activeConversation;
+    const messages = selectedMessages()
+      .slice()
+      .sort((a, b) => Number(a.id) - Number(b.id));
+    if (!conversation || !messages.length) return;
+    const allowed = messages.every((message) => {
+      const capabilities = messageCapabilitiesForUi(message);
+      return action === 'forward'
+        ? capabilities.canForward
+        : capabilities.canDelete &&
+            (revoke ? capabilities.canDeleteForEveryone : capabilities.canDeleteForMe);
+    });
+    if (!allowed) return;
+    const to =
+      result?.peer ??
+      state.model().snapshot.dialogs.find(({ peer }) => peer.id === targetPeerId)?.peer;
+    if (action === 'forward' && !to) return;
+    state.send({ type: 'Changed', changes: { selectionBusy: true } });
+    try {
+      if (action === 'forward' && to) {
+        if (result && !state.model().snapshot.dialogs.some(({ peer }) => peer.id === to.id)) {
+          await runEffect(engine.addPeer(result));
+        }
+        const dialog = state.model().snapshot.dialogs.find(({ peer }) => peer.id === to.id);
+        if (
+          messages.some(
+            (message) =>
+              (dialog && !canSendMessageToDialog(dialog, message)) ||
+              (result?.permissions && !canSendMessageToPermissions(result.permissions, message)),
+          )
+        )
+          return;
+      }
+      for (const message of messages) {
+        if (state.model().activeConversation !== conversation) break;
+        if (action === 'forward' && to)
+          await runEffect(conversation.forwardTo(to, Number(message.id)));
+        else {
+          const deleted = await runEffect(conversation.deleteMessage(Number(message.id), revoke));
+          if (!deleted) break;
+        }
+        state.send({
+          type: 'Changed',
+          changes: {
+            selectedMessageIds: state.model().selectedMessageIds.filter((id) => id !== message.id),
+          },
+        });
+      }
+    } finally {
+      state.send({
+        type: 'Changed',
+        changes: { selectionBusy: false, selectionAction: undefined },
+      });
+    }
   };
   const reactToMessage = async (messageId: string, emoji: string) => {
     const id = Number(messageId);
@@ -1593,6 +1738,10 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     retryConversation,
     history,
     openMessageActions,
+    selectMessage,
+    clearMessageSelection,
+    setSelectionAction,
+    actOnSelection,
     selectChat,
     scrollToReply,
     mediaAssetFor,
@@ -1751,7 +1900,11 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     }),
     messageScroller: domMount((element) => {
       messageScroller = element as HTMLDivElement;
+      element.addEventListener('click', selectionClick, true);
+      element.addEventListener('pointerdown', selectionPointerDown, true);
       return () => {
+        element.removeEventListener('click', selectionClick, true);
+        element.removeEventListener('pointerdown', selectionPointerDown, true);
         messageScroller = undefined;
       };
     }),
@@ -1851,6 +2004,9 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     canSendStickers: canSendStickers(),
     canSendGifs: canSendGifs(),
     mediaViewer: state.model().mediaViewer,
+    selectedMessages: selectedMessages(),
+    selectionAction: state.model().selectionAction,
+    selectionBusy: state.model().selectionBusy,
     forwardingMessage: state.model().forwardingMessage,
     searchOpen: state.model().searchOpen,
     sharedMediaKind: state.model().sharedMediaKind,

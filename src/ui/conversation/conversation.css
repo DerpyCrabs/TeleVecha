@@ -1827,3 +1827,99 @@
   padding-top: 0.4rem;
   color: #fecaca;
 }
+
+.message-selection-toolbar {
+  container: message-selection / inline-size;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 3.5rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.message-selection-toolbar strong {
+  flex: 1;
+  min-width: 0;
+  margin-left: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.message-selection-cancel {
+  flex: 0 0 2.25rem;
+  padding: 0;
+}
+.message-selection-action {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 2.25rem;
+  min-width: 2.25rem;
+  padding: 0 0.625rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.message-selection-action:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.message-selection-delete:hover:not(:disabled) {
+  color: #f87171;
+}
+.message-selection-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+@container message-selection (max-width: 26rem) {
+  .message-selection-action {
+    padding: 0;
+  }
+  .message-selection-action span {
+    display: none;
+  }
+}
+article.message[data-selection-active] {
+  cursor: pointer;
+  user-select: none;
+}
+article.message.message-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.message-selection-check {
+  position: absolute;
+  left: -2rem;
+  top: 0.4rem;
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  border: 2px solid var(--muted);
+  background: var(--panel);
+  color: var(--text);
+  z-index: 2;
+}
+.message-selection-check[aria-checked='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+article.message[data-selection-active] .message-sender-avatar {
+  visibility: hidden;
+}
+
+.message-scroller[data-selection-active] {
+  padding-left: 3rem;
+}
+.message-scroller.channel-messages[data-selection-active] {
+  padding-left: 3.5rem;
+}

@@ -2,6 +2,8 @@ import { view } from 'effectweb';
 import { Dialog } from '../shared/Dialog';
 export const DeleteMessageDialog = view<
   {
+    count?: number;
+    busy?: boolean;
     canDeleteForMe: boolean;
     canDeleteForEveryone: boolean;
     close: () => void;
@@ -11,7 +13,7 @@ export const DeleteMessageDialog = view<
 >((props, _send) => {
   return (
     <Dialog
-      title="Delete message"
+      title={props.count ? `Delete ${props.count} messages` : 'Delete message'}
       onClose={props.close}
       closeLabel="Cancel deletion"
       class="delete-dialog flex w-[min(22rem,calc(100vw-2rem))] max-h-[min(42rem,calc(100dvh-2rem))] flex-col overflow-hidden rounded-2xl border border-[var(--line-strong)] bg-panel pb-[0.7rem] shadow-[0_24px_80px_var(--shadow)]"
@@ -20,6 +22,7 @@ export const DeleteMessageDialog = view<
       {props.canDeleteForMe ? (
         <button
           class="mx-[0.7rem] my-[0.2rem] rounded-[0.6rem] border-0 bg-[#20232a] p-[0.7rem] text-ink"
+          disabled={props.busy}
           onClick={() => props.confirm(false)}
         >
           Delete for me
@@ -28,6 +31,7 @@ export const DeleteMessageDialog = view<
       {props.canDeleteForEveryone ? (
         <button
           class="danger mx-[0.7rem] my-[0.2rem] rounded-[0.6rem] border-0 bg-[#20232a] p-[0.7rem] text-red-300"
+          disabled={props.busy}
           onClick={() => props.confirm(true)}
         >
           Delete for everyone
