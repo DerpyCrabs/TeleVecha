@@ -2,7 +2,7 @@
   position: absolute;
   z-index: 15;
   right: -0.5rem;
-  bottom: -2.9rem;
+  bottom: calc(100% + 0.45rem);
   display: flex;
   gap: 0.12rem;
   border: 1px solid var(--line);
@@ -10,6 +10,10 @@
   background: #191c22;
   padding: 0.3rem;
   box-shadow: 0 12px 30px rgb(0 0 0 / 0.35);
+}
+.reaction-picker.below {
+  bottom: auto;
+  top: calc(100% + 0.45rem);
 }
 .message-context-menu,
 .chat-context-menu {

@@ -7,7 +7,15 @@ import SmilePlus from '@effectweb/lucide/icons/smile-plus';
 import { TgsPlayer } from '../media/TgsPlayer';
 import { VisibilityVideo } from '../media/VisibilityVideo';
 import { Avatar } from '../shared/Avatar';
-import { available, collection, component, resourceComponent, sequence, view } from 'effectweb';
+import {
+  available,
+  collection,
+  component,
+  domMount,
+  resourceComponent,
+  sequence,
+  view,
+} from 'effectweb';
 const reactionRows = collection<NonNullable<ChatMessage['reactions']>[number]>(
   (reaction) => reaction.customEmojiId ?? reaction.emoji,
 ).from;
@@ -60,6 +68,15 @@ const CustomReaction = resourceComponent<
   }),
 });
 const peopleRows = collection<TelegramReactionPerson>((person) => person.id).from;
+const placeReactionPicker = domMount<HTMLDivElement>((element) => {
+  const message = element.closest<HTMLElement>('.message');
+  const scroller = element.closest<HTMLElement>('[data-testid="message-scroller"]');
+  if (!message || !scroller) return () => {};
+  const height = element.offsetHeight;
+  const roomAbove = message.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+  if (height > 0 && roomAbove < height + 8) element.classList.add('below');
+  return () => {};
+});
 const ReactionPeople = resourceComponent<
   {
     identity: string;
@@ -260,7 +277,12 @@ export const MessageActions = view<MessageActionsProps, never>((props, _send) =>
             <SmilePlus size={14} />
           </button>
           {props.pickerOpen ? (
-            <div class="reaction-picker" role="dialog" aria-label="Choose reaction">
+            <div
+              class="reaction-picker"
+              role="dialog"
+              aria-label="Choose reaction"
+              use={placeReactionPicker}
+            >
               {renderList(sequence(['👍', '❤️', '😂', '😮', '😢', '🔥']), (emoji) => (
                 <button onClick={() => props.react(emoji)} aria-label={`React with ${emoji}`}>
                   {emoji}
