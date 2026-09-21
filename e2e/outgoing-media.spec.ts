@@ -39,7 +39,7 @@ test('sends adjacent media as a Telegram album and a file-mode item separately',
   );
 });
 
-test('packs image batches into a compact grid with batch actions', async ({ page }) => {
+test('shows image batches as large tiles with batch actions', async ({ page }) => {
   await page
     .locator('input[type="file"]')
     .setInputFiles([imagePath, imagePath, imagePath, imagePath, imagePath]);
@@ -56,8 +56,8 @@ test('packs image batches into a compact grid with batch actions', async ({ page
       return { width, height, top };
     }),
   );
-  expect(bounds.every(({ width, height }) => width < 150 && height < 120)).toBe(true);
-  expect(new Set(bounds.map(({ top }) => Math.round(top))).size).toBe(1);
+  expect(bounds.every(({ width, height }) => width >= 220 && height >= 230)).toBe(true);
+  expect(new Set(bounds.map(({ top }) => Math.round(top))).size).toBeGreaterThan(1);
 
   await batch
     .getByRole('group', { name: 'Send all as' })

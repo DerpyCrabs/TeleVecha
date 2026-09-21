@@ -32,6 +32,47 @@ for (const kind of ['image-file', 'video', 'video-album'] as const) {
     await page
       .locator('input[type="file"]')
       .setInputFiles(Array.from({ length: count }, () => path));
+    if (video) {
+      const previews = page.getByTestId('composer-attachment').locator('video');
+      await expect(previews).toHaveCount(count);
+      await expect(previews.first()).toBeVisible();
+      await expect
+        .poll(() =>
+          previews.evaluateAll((elements) =>
+            elements.every((element) => {
+              const video = element as HTMLVideoElement;
+              return (
+                video.readyState >= 2 && video.videoWidth > 0 && video.paused && video.controls
+              );
+            }),
+          ),
+        )
+        .toBe(true);
+      const preview = previews.first();
+      await preview.focus();
+      await preview.press('Space');
+      await expect
+        .poll(() => preview.evaluate((video) => (video as HTMLVideoElement).currentTime))
+        .toBeGreaterThan(0);
+      await preview.press('Space');
+      await expect
+        .poll(() => preview.evaluate((video) => (video as HTMLVideoElement).paused))
+        .toBe(true);
+      const attachments = page.getByTestId('composer-attachment');
+      await expect(attachments.first().locator('small')).toHaveText(/^[\d.]+ (B|KB|MB|GB)$/u);
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 800 });
+        const geometry = await preview.evaluate((element) => {
+          const { width, height, right } = element.getBoundingClientRect();
+          return { width, height, right, viewport: window.innerWidth };
+        });
+        expect(geometry.width).toBeGreaterThan(200);
+        expect(geometry.height).toBeGreaterThanOrEqual(150);
+        expect(geometry.right).toBeLessThanOrEqual(geometry.viewport);
+      }
+      await page.setViewportSize({ width: 1280, height: 720 });
+      expect((await fixtureStats(page))?.sendFile).toBe(0);
+    }
     if (!video)
       await page
         .getByTestId('composer-attachment')
