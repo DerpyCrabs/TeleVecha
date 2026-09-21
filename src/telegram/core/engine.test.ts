@@ -10,15 +10,18 @@ import { makeMessagingEngine, MessagingEngineLayer, type MessagingEngine } from 
 const credentials = { apiId: 1, apiHash: 'fixture' };
 
 const withEngine = <A, E>(
-  use: (engine: MessagingEngine, transport: TelegramTransport) => Effect.Effect<A, E, never>,
+  use: (
+    engine: MessagingEngine,
+    transport: TelegramTransport,
+    cache: ReturnType<typeof makeMemoryCacheStore>,
+  ) => Effect.Effect<A, E, never>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
       const transport = yield* createFixtureTelegramTransport();
-      const engine = yield* makeMessagingEngine(transport, makeMemoryCacheStore(), {
-        manageTabLease: false,
-      });
-      return yield* use(engine, transport);
+      const cache = makeMemoryCacheStore();
+      const engine = yield* makeMessagingEngine(transport, cache, { manageTabLease: false });
+      return yield* use(engine, transport, cache);
     }).pipe(Effect.provide(MessagingEngineLayer), Effect.provide(BrowserCrypto.layer)),
   );
 
@@ -31,6 +34,47 @@ afterEach(() => {
 });
 
 describe('MessagingEngine', () => {
+  it('removes a previously persisted channel preview when membership is corrected', () =>
+    Effect.runPromise(
+      withEngine((engine, _transport, cache) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          const peer = yield* engine.resolveUsername('public_fixture_news');
+          yield* engine.loadConversationView(peer.id);
+          expect((yield* cache.loadDialogs()).some((dialog) => dialog.peer.id === peer.id)).toBe(
+            false,
+          );
+          const preview = engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)!;
+          const mistaken = { ...preview, transient: false };
+          window.__televechaFixture?.emit({ type: 'dialog-changed', dialog: mistaken });
+          yield* Effect.promise(() =>
+            vi.waitFor(() =>
+              expect(
+                engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)?.transient,
+              ).toBe(false),
+            ),
+          );
+          expect((yield* cache.loadDialogs()).some((dialog) => dialog.peer.id === peer.id)).toBe(
+            true,
+          );
+          window.__televechaFixture?.emit({
+            type: 'dialog-changed',
+            dialog: { ...preview, transient: true },
+          });
+          yield* Effect.promise(() =>
+            vi.waitFor(() =>
+              expect(
+                engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)?.transient,
+              ).toBe(true),
+            ),
+          );
+          const stored = yield* cache.loadDialogs();
+          expect(stored.some((dialog) => dialog.peer.id === peer.id)).toBe(false);
+          expect(stored.some((dialog) => dialog.peer.id === 'c:202')).toBe(true);
+        }),
+      ),
+    ));
+
   it('starts, synchronizes a bounded dialog page, and stops in scope', () =>
     Effect.runPromise(
       withEngine((engine) =>

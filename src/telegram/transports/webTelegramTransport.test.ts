@@ -60,6 +60,183 @@ const withTransport = <A, E>(
   );
 
 describe('web Telegram transport', () => {
+  it.each([true, false])('preserves channel membership when fetching a dialog (left=%s)', (left) =>
+    Effect.runPromise(
+      withTransport(
+        (target) =>
+          Effect.gen(function* () {
+            yield* target.connect({ apiId: 1, apiHash: 'hash' });
+            const dialog = yield* target.getDialog!({
+              id: 'c:707',
+              kind: 'channel',
+              accessHash: '77',
+            });
+            expect(Boolean(dialog?.transient)).toBe(left);
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({
+              invoke: ((request: unknown) => {
+                if (!Api.messages.GetPeerDialogs.is(request))
+                  return Effect.fail(createMtprotoError('protocol', 'Unexpected RPC'));
+                return Effect.succeed(
+                  createTl('messages.peerDialogs', {
+                    dialogs: [
+                      Api.Dialog({
+                        peer: Api.PeerChannel({ channelId: 707n }),
+                        topMessage: 0,
+                        readInboxMaxId: 0,
+                        readOutboxMaxId: 0,
+                        unreadCount: 0,
+                        unreadMentionsCount: 0,
+                        unreadReactionsCount: 0,
+                        unreadPollVotesCount: 0,
+                        notifySettings: Api.PeerNotifySettings(),
+                      }),
+                    ],
+                    messages: [],
+                    users: [],
+                    chats: [
+                      Api.Channel({
+                        id: 707n,
+                        accessHash: 77n,
+                        title: 'Public News',
+                        broadcast: true,
+                        ...(left ? { left: true } : {}),
+                        photo: Api.ChatPhotoEmpty(),
+                        date: 1,
+                      }),
+                    ],
+                    state: Api.updates.State({ pts: 0, qts: 0, date: 0, seq: 0, unreadCount: 0 }),
+                  }),
+                );
+              }) as MtprotoClient['invoke'],
+            }),
+          ),
+      ),
+    ),
+  );
+
+  it('resolves a public channel and loads comments using the discussion peer and root, with entity hydration', () => {
+    const channel = Api.Channel({
+      id: 707n,
+      accessHash: 77n,
+      title: 'Public News',
+      username: 'public_news',
+      broadcast: true,
+      photo: Api.ChatPhotoEmpty(),
+      date: 1,
+    });
+    const group = Api.Channel({
+      id: 909n,
+      accessHash: 99n,
+      title: 'Discussion',
+      megagroup: true,
+      photo: Api.ChatPhotoEmpty(),
+      date: 1,
+    });
+    const post = Api.Message({
+      id: 965,
+      peerId: Api.PeerChannel({ channelId: 707n }),
+      date: 1,
+      message: 'Post',
+      replies: Api.MessageReplies({ comments: true, replies: 3, repliesPts: 1, channelId: 909n }),
+    });
+    const root = Api.Message({
+      id: 42,
+      peerId: Api.PeerChannel({ channelId: 909n }),
+      date: 1,
+      message: 'Forwarded post',
+    });
+    const invoke = vi.fn((request: unknown) => {
+      if (Api.contacts.ResolveUsername.is(request))
+        return Effect.succeed(
+          Api.contacts.ResolvedPeer({
+            peer: Api.PeerChannel({ channelId: 707n }),
+            chats: [channel],
+            users: [],
+          }),
+        );
+      if (Api.messages.GetHistory.is(request))
+        return Effect.succeed(
+          Api.messages.Messages({ messages: [post], chats: [channel], users: [], topics: [] }),
+        );
+      if (Api.messages.GetDiscussionMessage.is(request))
+        return Effect.succeed(
+          Api.messages.DiscussionMessage({
+            messages: [{ ...root, id: 43 }, root, post],
+            chats: [channel, group],
+            users: [],
+            unreadCount: 2,
+          }),
+        );
+      if (Api.messages.GetReplies.is(request))
+        return Effect.succeed(
+          Api.messages.Messages({
+            messages: [103, 102, 101].map((id) =>
+              Api.Message({
+                id,
+                peerId: Api.PeerChannel({ channelId: 909n }),
+                fromId: Api.PeerUser({ userId: 1n }),
+                date: 2,
+                message: `Comment ${id}`,
+              }),
+            ),
+            chats: [group],
+            users: [Api.User({ id: 1n, firstName: 'Commenter' })],
+            topics: [],
+          }),
+        );
+      return Effect.fail(createMtprotoError('protocol', 'Unexpected RPC'));
+    });
+    return Effect.runPromise(
+      withTransport(
+        (target) =>
+          Effect.gen(function* () {
+            yield* target.connect({ apiId: 1, apiHash: 'hash' });
+            const resolved = yield* target.resolveUsername!('public_news');
+            expect(resolved).toMatchObject({
+              peer: { id: 'c:707', accessHash: '77' },
+              category: 'channel',
+              username: 'public_news',
+            });
+            const history = yield* target.getHistoryAround!(resolved!.peer, 965, 3);
+            expect(history.messages[0]?.comments).toEqual({ count: 3, channelId: 'c:909' });
+            const discussion = yield* target.getDiscussion!(resolved!.peer, 965);
+            expect(discussion).toMatchObject({
+              peer: { id: 'c:909', accessHash: '99' },
+              root: { id: 42, peerId: 'c:909' },
+            });
+            const replies = yield* target.getReplies!(
+              discussion!.peer,
+              discussion!.root.id,
+              2,
+              104,
+            );
+            expect(replies).toMatchObject({
+              hasOlder: true,
+              nextBeforeMessageId: 102,
+              messages: [
+                { id: 103, senderName: 'Commenter' },
+                { id: 102, senderName: 'Commenter' },
+              ],
+            });
+            const request = invoke.mock.calls
+              .map(([request]) => request)
+              .find((request) => Api.messages.GetReplies.is(request));
+            expect(request).toMatchObject({
+              peer: { channelId: 909n, accessHash: 99n },
+              msgId: 42,
+              offsetId: 104,
+              limit: 3,
+            });
+          }),
+        () =>
+          Effect.succeed(clientDouble({ invoke: invoke as unknown as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
   it.each(['MESSAGE_NOT_MODIFIED', 'MESSAGE_EDIT_TIME_EXPIRED', 'CHAT_WRITE_FORBIDDEN'])(
     'handles an edit response without hiding real failures: %s',
     (code) => {

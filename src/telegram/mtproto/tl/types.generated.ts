@@ -56,6 +56,7 @@ export declare namespace Tl {
     | Tl.messages.GetChats
     | Tl.messages.GetCustomEmojiDocuments
     | Tl.messages.GetDialogs
+    | Tl.messages.GetDiscussionMessage
     | Tl.messages.GetFullChat
     | Tl.messages.GetHistory
     | Tl.messages.GetInlineBotResults
@@ -64,6 +65,7 @@ export declare namespace Tl {
     | Tl.messages.GetPeerDialogs
     | Tl.messages.GetPinnedDialogs
     | Tl.messages.GetRecentStickers
+    | Tl.messages.GetReplies
     | Tl.messages.GetSavedGifs
     | Tl.messages.GetSearchCounters
     | Tl.messages.GetStickerSet
@@ -7895,6 +7897,17 @@ export declare namespace Tl {
       chats: readonly Tl.TypeChat[];
       users: readonly Tl.TypeUser[];
     }>;
+    export type DiscussionMessage = TlObject<'messages.discussionMessage'> &
+      DiscussionMessageFields;
+    export type DiscussionMessageFields = Readonly<{
+      messages: readonly Tl.TypeMessage[];
+      maxId?: number;
+      readInboxMaxId?: number;
+      readOutboxMaxId?: number;
+      unreadCount: number;
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+    }>;
     export type EditMessage = TlObject<'messages.editMessage'> &
       EditMessageFields &
       TlRequest<Tl.TypeUpdates>;
@@ -7996,6 +8009,13 @@ export declare namespace Tl {
       limit: number;
       hash: bigint;
     }>;
+    export type GetDiscussionMessage = TlObject<'messages.getDiscussionMessage'> &
+      GetDiscussionMessageFields &
+      TlRequest<Tl.messages.TypeDiscussionMessage>;
+    export type GetDiscussionMessageFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      msgId: number;
+    }>;
     export type GetFullChat = TlObject<'messages.getFullChat'> &
       GetFullChatFields &
       TlRequest<Tl.messages.TypeChatFull>;
@@ -8058,6 +8078,20 @@ export declare namespace Tl {
       TlRequest<Tl.messages.TypeRecentStickers>;
     export type GetRecentStickersFields = Readonly<{
       attached?: true;
+      hash: bigint;
+    }>;
+    export type GetReplies = TlObject<'messages.getReplies'> &
+      GetRepliesFields &
+      TlRequest<Tl.messages.TypeMessages>;
+    export type GetRepliesFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      msgId: number;
+      offsetId: number;
+      offsetDate: number;
+      addOffset: number;
+      limit: number;
+      maxId: number;
+      minId: number;
       hash: bigint;
     }>;
     export type GetSavedGifs = TlObject<'messages.getSavedGifs'> &
@@ -8352,6 +8386,7 @@ export declare namespace Tl {
       | Tl.messages.Dialogs
       | Tl.messages.DialogsNotModified
       | Tl.messages.DialogsSlice;
+    export type TypeDiscussionMessage = Tl.messages.DiscussionMessage;
     export type TypeEmojiGameInfo =
       | Tl.messages.EmojiGameDiceInfo
       | Tl.messages.EmojiGameUnavailable;

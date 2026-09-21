@@ -34,7 +34,9 @@ function textParts(message: ChatMessage): TextPart[] {
         ...(url ? { url } : {}),
       })),
     ];
-  for (const match of message.body.matchAll(/https?:\/\/[^\s]+/gu)) {
+  for (const match of message.body.matchAll(
+    /(?:https?:\/\/|tg:\/\/|(?:t\.me|telegram\.me|telegram\.dog)\/)[^\s]+/giu,
+  )) {
     const offset = match.index;
     const text = match[0].replace(/[),.!?]+$/u, '');
     const overlaps = ranges.some(

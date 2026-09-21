@@ -1,3 +1,4 @@
+import { CommentsPanel } from '../conversation/CommentsPanel';
 import { list as renderList } from 'effectweb';
 import { fromPromise } from 'effectweb/load';
 import { Effect } from 'effect';
@@ -902,6 +903,29 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   : undefined
                               }
                             />
+                            {(
+                              message.comments
+                                ? message
+                                : layout.album.find((item) => item.comments)
+                            )
+                              ? ((source) => (
+                                  <button
+                                    class="message-comments"
+                                    onClick={() =>
+                                      model.openComments(activeChatId, Number(source.id))
+                                    }
+                                  >
+                                    <MessageSquareText size={16} />{' '}
+                                    {source.comments!.count
+                                      ? `${source.comments!.count} comments`
+                                      : 'View comments'}
+                                  </button>
+                                ))(
+                                  (message.comments
+                                    ? message
+                                    : layout.album.find((item) => item.comments))!,
+                                )
+                              : null}
                             {!message.service && Number.isSafeInteger(Number(message.id)) ? (
                               <MessageActions
                                 message={message}
@@ -1291,6 +1315,16 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             })(mediaViewer!)
           : null}
 
+        {model.comments ? (
+          <CommentsPanel
+            state={model.comments}
+            close={model.closeComments}
+            loadOlder={model.loadOlderComments}
+            retry={model.retryComments}
+            refresh={model.refreshComments}
+            mediaAssets={mediaAssets}
+          />
+        ) : null}
         {model.selectionAction === 'forward' ? (
           <ForwardMessageDialog
             chats={visibleChats}

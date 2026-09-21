@@ -1,3 +1,5 @@
+import { parseTelegramLink, type TelegramLinkTarget } from '../shared/telegramLink';
+import type { CommentsState } from '../conversation/CommentsPanel';
 import { Effect } from 'effect';
 import { makeUiRuntime, makeProgram, projectionSource } from 'effectweb';
 import * as Atom from 'effect/unstable/reactivity/Atom';
@@ -688,6 +690,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     if (state.model().activeConversation?.peerId !== id)
       state.send({ type: 'Changed', changes: { activeConversation: commandConversation } });
     if (changingPeer) {
+      closeComments();
       const dialog = state.model().snapshot.dialogs.find(({ peer }) => peer.id === id);
       state.send({
         type: 'Changed',
@@ -1674,7 +1677,165 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   const readReceiptFailed = selectors.select(() =>
     /^Could not mark .+ as read\./u.test(state.model().snapshot.operationError ?? ''),
   );
+  let comments: CommentsState | undefined;
+  let commentsGeneration = 0;
+  let linkGeneration = 0;
+  const closeComments = () => {
+    commentsGeneration += 1;
+    comments = undefined;
+    changed();
+  };
+  const loadComments = async (append = false) => {
+    if (!comments || comments.loading) return;
+    const generation = commentsGeneration;
+    const current = comments;
+    comments = { ...current, loading: true, error: '' };
+    changed();
+    try {
+      const discussion =
+        current.discussion ??
+        (await runEffect(engine.getDiscussion(current.sourcePeerId, current.postId)));
+      if (generation !== commentsGeneration || publication.disposed) return;
+      let before = append ? current.before : undefined;
+      const collected = append ? [...current.messages] : [];
+      let hasOlder = false;
+      do {
+        const page = await runEffect(
+          engine.getReplies(discussion.peer, discussion.root.id, before),
+        );
+        if (generation !== commentsGeneration || publication.disposed) return;
+        collected.push(...page.messages.filter((message) => message.id !== discussion.root.id));
+        hasOlder =
+          page.hasOlder &&
+          page.nextBeforeMessageId !== undefined &&
+          page.nextBeforeMessageId !== before;
+        before = page.nextBeforeMessageId;
+        // A comment deep link may point outside the latest page.
+      } while (
+        !append &&
+        current.targetId &&
+        hasOlder &&
+        !collected.some((message) => message.id === current.targetId)
+      );
+      const messages = [
+        ...new Map(collected.map((message) => [message.id, message])).values(),
+      ].sort((a, b) => a.id - b.id);
+      comments = {
+        ...current,
+        discussion,
+        messages,
+        before,
+        hasOlder,
+        loading: false,
+        error:
+          current.targetId && !messages.some((message) => message.id === current.targetId)
+            ? 'This comment is no longer available.'
+            : '',
+      };
+      changed();
+      if (current.targetId)
+        requestAnimationFrame(() => {
+          if (generation === commentsGeneration)
+            document
+              .querySelector(`[data-comment-id="${current.targetId}"]`)
+              ?.scrollIntoView({ block: 'center' });
+        });
+    } catch (error) {
+      if (generation !== commentsGeneration || publication.disposed) return;
+      comments = {
+        ...comments!,
+        loading: false,
+        error: error instanceof Error ? error.message : 'Could not load comments.',
+      };
+      changed();
+    }
+  };
+  const openComments = (peerId: string, postId: number, targetId?: number) => {
+    commentsGeneration += 1;
+    comments = {
+      sourcePeerId: peerId,
+      postId,
+      targetId,
+      messages: [],
+      loading: false,
+      error: '',
+      hasOlder: false,
+    };
+    runInBackground(loadComments());
+  };
+  const navigateTelegramLink = async (target: TelegramLinkTarget) => {
+    const generation = ++linkGeneration;
+    const selection = selectionGeneration;
+    closeComments();
+    state.send({ type: 'Changed', changes: { clipboardError: '' } });
+    try {
+      const peer = target.username
+        ? await runEffect(engine.resolveUsername(target.username))
+        : engine.snapshot().dialogs.find((dialog) => dialog.peer.id === target.peerId)?.peer;
+      if (
+        generation !== linkGeneration ||
+        selection !== selectionGeneration ||
+        publication.disposed
+      )
+        return;
+      if (!peer) throw new Error('This private channel is not available in your chats.');
+      if (target.messageId) {
+        const message = await runEffect(engine.getLinkedMessage(peer, target.messageId));
+        if (
+          generation !== linkGeneration ||
+          selection !== selectionGeneration ||
+          publication.disposed
+        )
+          return;
+        await openMessage(message);
+        if (
+          target.commentId &&
+          generation === linkGeneration &&
+          state.model().activeChatId === peer.id
+        )
+          openComments(peer.id, target.messageId, target.commentId);
+      } else {
+        await selectChat(peer.id);
+      }
+    } catch (error) {
+      if (generation === linkGeneration && !publication.disposed)
+        state.send({
+          type: 'Changed',
+          changes: {
+            clipboardError:
+              error instanceof Error ? error.message : 'Could not open Telegram link.',
+          },
+        });
+    }
+  };
+  const telegramLinkClick = (event: MouseEvent) => {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    const anchor = event.target instanceof Element ? event.target.closest('a[href]') : undefined;
+    const target = anchor ? parseTelegramLink(anchor.getAttribute('href') ?? '') : undefined;
+    if (!target) return;
+    event.preventDefault();
+    runInBackground(navigateTelegramLink(target));
+  };
+  document.addEventListener('click', telegramLinkClick);
+  scope.add(() => {
+    document.removeEventListener('click', telegramLinkClick);
+    commentsGeneration += 1;
+    linkGeneration += 1;
+  });
   const actions = {
+    openComments,
+    closeComments,
+    loadOlderComments: () => runInBackground(loadComments(true)),
+    refreshComments: () => runInBackground(loadComments()),
+    retryComments: () => runInBackground(loadComments(Boolean(comments?.discussion))),
     jumpToPresent: () => {
       openMessageGeneration += 1;
       openingMessage = false;
@@ -1962,6 +2123,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     ),
   );
   const project = () => ({
+    comments,
     mediaRevisions: mediaRevisions(),
     ...actions,
     detailsOpen: detailsOpen(),

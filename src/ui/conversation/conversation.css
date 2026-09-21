@@ -1923,3 +1923,57 @@ article.message[data-selection-active] .message-sender-avatar {
 .message-scroller.channel-messages[data-selection-active] {
   padding-left: 3.5rem;
 }
+
+.message-comments {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 0 4px;
+  margin-top: 8px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+}
+.comments-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  overflow: hidden;
+}
+.comments-scroll {
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.comment-message {
+  padding: 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+.comment-message > strong {
+  color: var(--accent);
+}
+.comment-message > time,
+.comment-message > small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+.comment-message .message-body {
+  white-space: pre-wrap;
+}
+.comments-load {
+  padding: 8px;
+  margin-bottom: 12px;
+  color: var(--accent);
+  cursor: pointer;
+}

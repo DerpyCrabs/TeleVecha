@@ -110,6 +110,12 @@ export interface TelegramGroupMemberPage {
   nextOffset?: number | undefined;
 }
 
+export interface TelegramDiscussion {
+  peer: TelegramPeer;
+  root: TelegramMessage;
+  unreadCount: number;
+}
+
 export interface TelegramMessage {
   id: number;
   peerId: string;
@@ -132,6 +138,7 @@ export interface TelegramMessage {
   editedAt?: number | undefined;
   replyToId?: number | undefined;
   replyQuote?: string | undefined;
+  comments?: { count: number; channelId: string } | undefined;
   randomId?: string | undefined;
   groupedId?: string | undefined;
   forwardedFrom?: TelegramForwardedFrom | undefined;
@@ -630,6 +637,17 @@ export interface TelegramTransport {
   ): TransportEffect<ChannelDifferenceResult>;
   getDialogs(limit: number): TransportEffect<DialogPage>;
   getDialog?(peer: TelegramPeer): TransportEffect<TelegramDialog | undefined>;
+  resolveUsername?(username: string): TransportEffect<TelegramPeerSearchResult | undefined>;
+  getDiscussion?(
+    peer: TelegramPeer,
+    messageId: number,
+  ): TransportEffect<TelegramDiscussion | undefined>;
+  getReplies?(
+    peer: TelegramPeer,
+    rootId: number,
+    limit: number,
+    beforeMessageId?: number,
+  ): TransportEffect<HistoryPage>;
   searchPeers(query: string, limit?: number): TransportEffect<TelegramPeerSearchResult[]>;
   getHistory(
     peer: TelegramPeer,

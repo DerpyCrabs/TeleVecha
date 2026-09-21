@@ -571,6 +571,95 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       })),
     };
   });
+  function peerSearchResult(
+    peer: TelegramPeer,
+    entity: Tl.TypeUser | Tl.TypeChat | undefined,
+  ): TelegramPeerSearchResult {
+    const title = entityTitle(entity) || peer.id;
+    const photo = Api.User.is(entity)
+      ? Api.UserProfilePhoto.is(entity.photo)
+        ? entity.photo
+        : undefined
+      : Api.Chat.is(entity) || Api.Channel.is(entity)
+        ? Api.ChatPhoto.is(entity.photo)
+          ? entity.photo
+          : undefined
+        : undefined;
+    return {
+      peer,
+      category: Api.User.is(entity)
+        ? entity.bot
+          ? 'bot'
+          : 'user'
+        : Api.Channel.is(entity) && entity.broadcast
+          ? 'channel'
+          : 'group',
+      title,
+      initials: initials(title),
+      color: peerColor(peer.id, entity),
+      username: Api.User.is(entity) || Api.Channel.is(entity) ? entity.username : undefined,
+      bot: Api.User.is(entity) && Boolean(entity.bot),
+      isContact: Api.User.is(entity) && Boolean(entity.contact),
+      hasAvatar: Boolean(photo),
+      avatarId: photo?.photoId.toString(),
+      permissions: mapDialogPermissions(peer, entity),
+    };
+  }
+  const resolveUsername = Effect.fn('WebTelegramTransport.resolveUsername')(function* (
+    username: string,
+  ) {
+    const result = yield* (yield* getClient).invoke(Api.contacts.ResolveUsername({ username }));
+    rememberEntities(result.users, result.chats);
+    const peer = mapPeer(result.peer, state.entities);
+    return peer ? peerSearchResult(peer, state.entities.get(peer.id)) : undefined;
+  });
+  const getDiscussion = Effect.fn('WebTelegramTransport.getDiscussion')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+  ) {
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.GetDiscussionMessage({ peer: toInputPeer(peer), msgId: messageId }),
+    );
+    rememberEntities(result.users, result.chats);
+    // Albums can contribute several forwarded messages. The oldest is the thread root.
+    const roots = result.messages
+      .map(mapMessage)
+      .filter(
+        (message): message is TelegramMessage => Boolean(message) && message?.peerId !== peer.id,
+      );
+    const root = roots.sort((a, b) => a.id - b.id)[0];
+    return root?.peer ? { peer: root.peer, root, unreadCount: result.unreadCount } : undefined;
+  });
+  const getReplies = Effect.fn('WebTelegramTransport.getReplies')(function* (
+    peer: TelegramPeer,
+    rootId: number,
+    limit: number,
+    beforeMessageId?: number,
+  ) {
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.GetReplies({
+        peer: toInputPeer(peer),
+        msgId: rootId,
+        offsetId: beforeMessageId ?? 0,
+        offsetDate: 0,
+        addOffset: 0,
+        limit: limit + 1,
+        maxId: 0,
+        minId: 0,
+        hash: 0n,
+      }),
+    );
+    if (Api.messages.MessagesNotModified.is(result)) return { messages: [], hasOlder: false };
+    rememberEntities(result.users, result.chats);
+    const raw = result.messages.slice(0, limit);
+    return {
+      messages: raw
+        .map(mapMessage)
+        .filter((message): message is TelegramMessage => Boolean(message)),
+      hasOlder: result.messages.length > limit,
+      nextBeforeMessageId: raw.length ? Math.min(...raw.map((message) => message.id)) : undefined,
+    };
+  });
   const searchPeers = Effect.fn('WebTelegramTransport.searchPeers')(function* (
     query: string,
     limit: number = 50,
@@ -588,36 +677,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       const peer = mapPeer(candidate, entities);
       if (!peer || seen.has(peer.id)) continue;
       const entity = entities.get(peer.id);
-      const title = entityTitle(entity) || peer.id;
-      const photo = Api.User.is(entity)
-        ? Api.UserProfilePhoto.is(entity.photo)
-          ? entity.photo
-          : undefined
-        : Api.Chat.is(entity) || Api.Channel.is(entity)
-          ? Api.ChatPhoto.is(entity.photo)
-            ? entity.photo
-            : undefined
-          : undefined;
       seen.add(peer.id);
-      found.push({
-        peer,
-        category: Api.User.is(entity)
-          ? entity.bot
-            ? 'bot'
-            : 'user'
-          : Api.Channel.is(entity) && entity.broadcast
-            ? 'channel'
-            : 'group',
-        title,
-        initials: initials(title),
-        color: peerColor(peer.id, entity),
-        username: Api.User.is(entity) || Api.Channel.is(entity) ? entity.username : undefined,
-        bot: Api.User.is(entity) && Boolean(entity.bot),
-        isContact: Api.User.is(entity) && Boolean(entity.contact),
-        hasAvatar: Boolean(photo),
-        avatarId: photo?.photoId.toString(),
-        permissions: mapDialogPermissions(peer, entity),
-      });
+      found.push(peerSearchResult(peer, entity));
       if (found.length >= limit) break;
     }
     return found;
@@ -2556,6 +2617,10 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       replyQuote: Api.MessageReplyHeader.is(message.replyTo)
         ? message.replyTo.quoteText
         : undefined,
+      comments:
+        message.replies?.comments && message.replies.channelId !== undefined
+          ? { count: message.replies.replies, channelId: `c:${message.replies.channelId}` }
+          : undefined,
       botKeyboard: mapBotKeyboard(message.replyMarkup, botUsername),
       media: mapMedia(message.media),
       reactions: mapReactions(message.reactions),
@@ -3738,6 +3803,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       : { presence: 'offline' as const };
     return {
       peer,
+      ...(Api.Channel.is(entity) && entity.left ? { transient: true } : {}),
       ...(peer.kind === 'channel' && item.pts !== undefined ? { channelPts: item.pts } : {}),
       title,
       initials: initials(title),
@@ -4412,6 +4478,9 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     getDifference,
     getChannelDifference,
     getDialogs,
+    resolveUsername,
+    getDiscussion,
+    getReplies,
     searchPeers,
     getDialog,
     getHistory,

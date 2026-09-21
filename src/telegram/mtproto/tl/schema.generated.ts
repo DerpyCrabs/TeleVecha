@@ -45178,6 +45178,36 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 1147761405,
+    name: 'messages.getDiscussionMessage',
+    typeName: 'messages.GetDiscussionMessage',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.DiscussionMessage',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'msgId',
+        wireName: 'msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
     id: 2930772788,
     name: 'messages.getFullChat',
     typeName: 'messages.GetFullChat',
@@ -45520,6 +45550,92 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         flag: {
           field: 'flags',
           bit: 0,
+        },
+      },
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
+    id: 584962828,
+    name: 'messages.getReplies',
+    typeName: 'messages.GetReplies',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.Messages',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'msgId',
+        wireName: 'msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'offsetId',
+        wireName: 'offset_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'offsetDate',
+        wireName: 'offset_date',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'addOffset',
+        wireName: 'add_offset',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'maxId',
+        wireName: 'max_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'minId',
+        wireName: 'min_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
         },
       },
       {

@@ -726,6 +726,97 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         };
       });
     }
+    const publicPeer: TelegramPeer = { id: 'c:707', kind: 'channel', accessHash: '7' };
+    const discussionPeer: TelegramPeer = { id: 'c:909', kind: 'channel', accessHash: '9' };
+    const publicPosts: TelegramMessage[] = [965, 966, 967].map((id) => ({
+      id,
+      peerId: publicPeer.id,
+      peer: publicPeer,
+      senderId: publicPeer.id,
+      senderName: 'Public Fixture News',
+      text: `Public post ${id}`,
+      date: 1_700_000_000 + id,
+      outgoing: false,
+      comments: { count: id === 965 ? 75 : 0, channelId: discussionPeer.id },
+    }));
+    const navigationHistory = (peerId: string) => {
+      if (peerId === publicPeer.id) return publicPosts;
+      const history = messages.get(peerId) ?? [];
+      return scenario.startsWith('comments') && peerId === peers[0]!.id
+        ? history.map((message) =>
+            message.id === 79
+              ? {
+                  ...message,
+                  text: 'https://t.me/public_fixture_news/965',
+                  linkPreview: {
+                    url: 'https://t.me/public_fixture_news/965',
+                    siteName: 'Telegram',
+                    title: 'Public Fixture News',
+                    description: 'Open the public post',
+                  },
+                }
+              : message,
+          )
+        : history;
+    };
+    const resolveUsername = Effect.fn('FixtureTransport.resolveUsername')(function* (
+      username: string,
+    ) {
+      return (yield* searchPeers(username)).find(
+        (result) => result.username?.toLowerCase() === username.toLowerCase(),
+      );
+    });
+    const getDiscussion = Effect.fn('FixtureTransport.getDiscussion')(function* (
+      peer: TelegramPeer,
+      postId: number,
+    ) {
+      if (peer.id !== publicPeer.id || ![965, 967].includes(postId)) return undefined;
+      yield* Effect.void;
+      const post = publicPosts.find((message) => message.id === postId)!;
+      return {
+        peer: discussionPeer,
+        root: {
+          ...post,
+          id: postId === 965 ? 42 : 43,
+          peerId: discussionPeer.id,
+          peer: discussionPeer,
+        },
+        unreadCount: 0,
+      };
+    });
+    let commentFailure = scenario === 'comments-fail-once';
+    const getReplies = Effect.fn('FixtureTransport.getReplies')(function* (
+      peer: TelegramPeer,
+      rootId: number,
+      limit: number,
+      before?: number,
+    ) {
+      if (commentFailure) {
+        commentFailure = false;
+        return yield* Effect.fail(createMtprotoError('transport', 'Could not load comments.'));
+      }
+      const all: TelegramMessage[] =
+        rootId === 42
+          ? Array.from({ length: 75 }, (_, index) => ({
+              id: 100 + index,
+              peerId: peer.id,
+              peer,
+              senderId: 'u:101',
+              senderName: 'Alice Fixture',
+              text: `Fixture comment ${index + 1}`,
+              date: 1_700_001_000 + index,
+              outgoing: false,
+              replyToId: rootId,
+            }))
+          : [];
+      const eligible = all.filter((message) => !before || message.id < before);
+      const page = eligible.slice(-limit);
+      return {
+        messages: page,
+        hasOlder: eligible.length > page.length,
+        nextBeforeMessageId: page[0]?.id,
+      };
+    });
     const getHistory = Effect.fn('FixtureTransport.getHistory')(function* (
       peer: TelegramPeer,
       limit: number,
@@ -763,7 +854,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
               date: 1_700_000_000 + index,
               outgoing: false,
             }))
-          : (messages.get(peer.id) ?? []);
+          : navigationHistory(peer.id);
       const eligible = beforeMessageId ? history.filter(({ id }) => id < beforeMessageId) : history;
       const pageLimit =
         scenario === 'single-message-first-page' &&
@@ -816,7 +907,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         yield* Deferred.await(pendingHistoryAround);
         pendingHistoryAround = undefined;
       }
-      const history = messages.get(peer.id) ?? [];
+      const history = navigationHistory(peer.id);
       const target = Math.max(
         0,
         history.findIndex(({ id }) => id === messageId),
@@ -2103,6 +2194,9 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       getSharedMediaCounts,
       getSharedMedia,
       searchMessages,
+      resolveUsername,
+      getDiscussion,
+      getReplies,
       searchPeers,
       getPinnedMessages,
       setMuted,

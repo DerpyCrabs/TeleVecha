@@ -62,6 +62,9 @@ const $ChatParticipants = createTlFactory<Tl.ChatParticipants, Tl.ChatParticipan
   'chatParticipants',
 );
 const $ChatPhoto = createTlFactory<Tl.ChatPhoto, Tl.ChatPhotoFields>('chatPhoto');
+const $ChatPhotoEmpty = createTlFactory<Tl.ChatPhotoEmpty, Tl.ChatPhotoEmptyFields>(
+  'chatPhotoEmpty',
+);
 const $ChatTheme = createTlFactory<Tl.ChatTheme, Tl.ChatThemeFields>('chatTheme');
 const $ChatThemeUniqueGift = createTlFactory<Tl.ChatThemeUniqueGift, Tl.ChatThemeUniqueGiftFields>(
   'chatThemeUniqueGift',
@@ -415,6 +418,9 @@ const $MessageMediaWebPage = createTlFactory<Tl.MessageMediaWebPage, Tl.MessageM
 );
 const $MessageReactions = createTlFactory<Tl.MessageReactions, Tl.MessageReactionsFields>(
   'messageReactions',
+);
+const $MessageReplies = createTlFactory<Tl.MessageReplies, Tl.MessageRepliesFields>(
+  'messageReplies',
 );
 const $MessageReplyHeader = createTlFactory<Tl.MessageReplyHeader, Tl.MessageReplyHeaderFields>(
   'messageReplyHeader',
@@ -989,6 +995,10 @@ const $contacts_ResolveUsername = createTlFactory<
   Tl.contacts.ResolveUsername,
   Tl.contacts.ResolveUsernameFields
 >('contacts.resolveUsername');
+const $contacts_ResolvedPeer = createTlFactory<
+  Tl.contacts.ResolvedPeer,
+  Tl.contacts.ResolvedPeerFields
+>('contacts.resolvedPeer');
 const $contacts_Search = createTlFactory<Tl.contacts.Search, Tl.contacts.SearchFields>(
   'contacts.search',
 );
@@ -1044,6 +1054,10 @@ const $messages_DialogsSlice = createTlFactory<
   Tl.messages.DialogsSlice,
   Tl.messages.DialogsSliceFields
 >('messages.dialogsSlice');
+const $messages_DiscussionMessage = createTlFactory<
+  Tl.messages.DiscussionMessage,
+  Tl.messages.DiscussionMessageFields
+>('messages.discussionMessage');
 const $messages_EditMessage = createTlFactory<
   Tl.messages.EditMessage,
   Tl.messages.EditMessageFields
@@ -1070,6 +1084,10 @@ const $messages_GetCustomEmojiDocuments = createTlFactory<
 const $messages_GetDialogs = createTlFactory<Tl.messages.GetDialogs, Tl.messages.GetDialogsFields>(
   'messages.getDialogs',
 );
+const $messages_GetDiscussionMessage = createTlFactory<
+  Tl.messages.GetDiscussionMessage,
+  Tl.messages.GetDiscussionMessageFields
+>('messages.getDiscussionMessage');
 const $messages_GetFullChat = createTlFactory<
   Tl.messages.GetFullChat,
   Tl.messages.GetFullChatFields
@@ -1101,6 +1119,9 @@ const $messages_GetRecentStickers = createTlFactory<
   Tl.messages.GetRecentStickers,
   Tl.messages.GetRecentStickersFields
 >('messages.getRecentStickers');
+const $messages_GetReplies = createTlFactory<Tl.messages.GetReplies, Tl.messages.GetRepliesFields>(
+  'messages.getReplies',
+);
 const $messages_GetSavedGifs = createTlFactory<
   Tl.messages.GetSavedGifs,
   Tl.messages.GetSavedGifsFields
@@ -1267,6 +1288,7 @@ export const Api = Object.freeze({
   ChatParticipantCreator: $ChatParticipantCreator,
   ChatParticipants: $ChatParticipants,
   ChatPhoto: $ChatPhoto,
+  ChatPhotoEmpty: $ChatPhotoEmpty,
   ChatTheme: $ChatTheme,
   ChatThemeUniqueGift: $ChatThemeUniqueGift,
   ClientDHInnerData: $ClientDHInnerData,
@@ -1378,6 +1400,7 @@ export const Api = Object.freeze({
   MessageMediaPhoto: $MessageMediaPhoto,
   MessageMediaWebPage: $MessageMediaWebPage,
   MessageReactions: $MessageReactions,
+  MessageReplies: $MessageReplies,
   MessageReplyHeader: $MessageReplyHeader,
   MessageService: $MessageService,
   MsgDetailedInfo: $MsgDetailedInfo,
@@ -1594,6 +1617,7 @@ export const Api = Object.freeze({
     AddContact: $contacts_AddContact,
     Block: $contacts_Block,
     DeleteContacts: $contacts_DeleteContacts,
+    ResolvedPeer: $contacts_ResolvedPeer,
     ResolveUsername: $contacts_ResolveUsername,
     Search: $contacts_Search,
     Unblock: $contacts_Unblock,
@@ -1616,6 +1640,7 @@ export const Api = Object.freeze({
     DeleteMessages: $messages_DeleteMessages,
     DialogsNotModified: $messages_DialogsNotModified,
     DialogsSlice: $messages_DialogsSlice,
+    DiscussionMessage: $messages_DiscussionMessage,
     EditMessage: $messages_EditMessage,
     ForwardMessages: $messages_ForwardMessages,
     GetAllStickers: $messages_GetAllStickers,
@@ -1623,6 +1648,7 @@ export const Api = Object.freeze({
     GetChats: $messages_GetChats,
     GetCustomEmojiDocuments: $messages_GetCustomEmojiDocuments,
     GetDialogs: $messages_GetDialogs,
+    GetDiscussionMessage: $messages_GetDiscussionMessage,
     GetFullChat: $messages_GetFullChat,
     GetHistory: $messages_GetHistory,
     GetInlineBotResults: $messages_GetInlineBotResults,
@@ -1631,6 +1657,7 @@ export const Api = Object.freeze({
     GetPeerDialogs: $messages_GetPeerDialogs,
     GetPinnedDialogs: $messages_GetPinnedDialogs,
     GetRecentStickers: $messages_GetRecentStickers,
+    GetReplies: $messages_GetReplies,
     GetSavedGifs: $messages_GetSavedGifs,
     GetSearchCounters: $messages_GetSearchCounters,
     GetStickerSet: $messages_GetStickerSet,

@@ -164,6 +164,14 @@ const invokeEngineCommand = (
       );
     case 'retryOutbox':
       return engine.retryOutbox();
+    case 'getLinkedMessage':
+      return engine.getLinkedMessage(...(args as Parameters<MessagingEngine['getLinkedMessage']>));
+    case 'resolveUsername':
+      return engine.resolveUsername(...(args as Parameters<MessagingEngine['resolveUsername']>));
+    case 'getDiscussion':
+      return engine.getDiscussion(...(args as Parameters<MessagingEngine['getDiscussion']>));
+    case 'getReplies':
+      return engine.getReplies(...(args as Parameters<MessagingEngine['getReplies']>));
     case 'searchPeers':
       return engine.searchPeers(...(args as Parameters<MessagingEngine['searchPeers']>));
     case 'addPeer':
@@ -749,6 +757,10 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   retryPendingSend: { readiness: 'workspace', surfaceError: true },
   cancelPendingSend: { readiness: 'workspace', surfaceError: true },
   retryOutbox: { readiness: 'workspace', coalesce: true, surfaceError: true },
+  getLinkedMessage: { readiness: 'workspace', concurrent: true },
+  resolveUsername: { readiness: 'workspace', concurrent: true },
+  getDiscussion: { readiness: 'workspace', concurrent: true },
+  getReplies: { readiness: 'workspace', concurrent: true },
   searchPeers: { readiness: 'workspace', concurrent: true },
   addPeer: { readiness: 'account' },
   getUserDetails: { readiness: 'account', concurrent: true, coalesce: true },
@@ -1061,6 +1073,10 @@ function errorMessage(error: unknown) {
     retryPendingSend: remote('retryPendingSend'),
     cancelPendingSend: remote('cancelPendingSend'),
     retryOutbox: remote('retryOutbox'),
+    getLinkedMessage: remote('getLinkedMessage'),
+    resolveUsername: remote('resolveUsername'),
+    getDiscussion: remote('getDiscussion'),
+    getReplies: remote('getReplies'),
     searchPeers: remote('searchPeers'),
     addPeer: remote('addPeer'),
     getUserDetails: remote('getUserDetails'),

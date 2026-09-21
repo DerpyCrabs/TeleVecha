@@ -5,7 +5,8 @@ interface TextPart {
   text: string;
   href?: string | undefined;
 }
-const LINK_PATTERN = /(?:https?:\/\/|www\.)[^\s]+|[\w.%+-]+@[\w.-]+\.[a-z]{2,}|@[a-z][\w]{3,31}/giu;
+const LINK_PATTERN =
+  /(?:https?:\/\/|tg:\/\/|(?:t\.me|telegram\.me|telegram\.dog)\/|www\.)[^\s]+|[\w.%+-]+@[\w.-]+\.[a-z]{2,}|@[a-z][\w]{3,31}/giu;
 export function linkifyText(value: string): TextPart[] {
   const parts: TextPart[] = [];
   let offset = 0;

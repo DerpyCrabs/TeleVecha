@@ -147,6 +147,14 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
               }),
             );
       },
+      getLinkedMessage: () =>
+        Effect.fail(new MessagingError({ message: 'Unavailable in report playback.' })),
+      resolveUsername: () =>
+        Effect.fail(new MessagingError({ message: 'Unavailable in report playback.' })),
+      getDiscussion: () =>
+        Effect.fail(new MessagingError({ message: 'Unavailable in report playback.' })),
+      getReplies: () =>
+        Effect.fail(new MessagingError({ message: 'Unavailable in report playback.' })),
       searchPeers(query: string) {
         const needle = query.trim().toLocaleLowerCase();
         return Effect.succeed(

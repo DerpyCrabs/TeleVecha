@@ -86,6 +86,7 @@ export interface ChatMessage {
   replyTo?: string | undefined;
   replyAuthor?: string | undefined;
   replyToId?: number | undefined;
+  comments?: { count: number; channelId: string } | undefined;
   replyMedia?: ChatMessage['media'] | undefined;
   replyMediaPeerId?: string | undefined;
   reaction?: string;

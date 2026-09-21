@@ -183,6 +183,7 @@ export function presentMessage(
     mentions: message.mentions,
     links: message.links,
     linkPreview: message.linkPreview,
+    comments: message.comments,
     formats: message.formats,
     richMessage: message.richMessage,
     ...presentReply(message.replyToId, message.replyQuote, repliedMessage),

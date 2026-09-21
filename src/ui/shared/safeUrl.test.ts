@@ -15,6 +15,7 @@ describe('safeExternalUrl', () => {
     }
   });
   it('allows web, mail, and Telegram links', () => {
+    expect(safeExternalUrl('t.me/Fourier_series/965')).toBe('https://t.me/Fourier_series/965');
     expect(safeExternalUrl('https://example.com/path')).toBe('https://example.com/path');
     expect(safeExternalUrl('mailto:user@example.com')).toBe('mailto:user@example.com');
     expect(safeExternalUrl('tg://resolve?domain=telegram')).toBe('tg://resolve?domain=telegram');

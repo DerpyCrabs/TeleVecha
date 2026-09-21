@@ -1079,6 +1079,62 @@ function makeMessagingEngineModule(
     yield* writeMetadata(cacheKey, results);
     return results;
   });
+  const resolveUsername = Effect.fn('MessagingEngine.resolveUsername')(function* (
+    username: string,
+  ) {
+    if (!telegramTransport.resolveUsername)
+      return yield* Effect.fail(new Error('Opening Telegram links is unavailable.'));
+    const result = yield* runTelegramOperation(
+      () => telegramTransport.resolveUsername!(username),
+      'Opening Telegram link',
+    );
+    if (!result) return yield* Effect.fail(new Error('This public chat could not be found.'));
+    yield* addPeer(result);
+    return result.peer;
+  });
+  const getLinkedMessage = Effect.fn('MessagingEngine.getLinkedMessage')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+  ) {
+    if (!telegramTransport.getHistoryAround)
+      return yield* Effect.fail(new Error('Opening posts is unavailable.'));
+    const page = yield* runTelegramOperation(
+      () => telegramTransport.getHistoryAround!(peer, messageId, 3),
+      'Opening post',
+    );
+    const message = page.messages.find((message) => message.id === messageId);
+    if (!message) return yield* Effect.fail(new Error('This post was deleted or is unavailable.'));
+    return message;
+  });
+  const getDiscussion = Effect.fn('MessagingEngine.getDiscussion')(function* (
+    peerId: string,
+    messageId: number,
+  ) {
+    const peer = currentSnapshot().dialogs.find((dialog) => dialog.peer.id === peerId)?.peer;
+    if (!peer || !telegramTransport.getDiscussion)
+      return yield* Effect.fail(new Error('Comments are unavailable.'));
+    const result = yield* runTelegramOperation(
+      () => telegramTransport.getDiscussion!(peer, messageId),
+      'Loading comments',
+    );
+    if (!result)
+      return yield* Effect.fail(
+        new Error('Comments for this post are unavailable or have been disabled.'),
+      );
+    return result;
+  });
+  const getReplies = Effect.fn('MessagingEngine.getReplies')(function* (
+    peer: TelegramPeer,
+    rootId: number,
+    beforeMessageId?: number,
+  ) {
+    if (!telegramTransport.getReplies)
+      return yield* Effect.fail(new Error('Comments are unavailable.'));
+    return yield* runTelegramOperation(
+      () => telegramTransport.getReplies!(peer, rootId, 50, beforeMessageId),
+      'Loading comments',
+    );
+  });
   const addPeer = Effect.fn('MessagingEngine.addPeer')(function* (
     result: TelegramPeerSearchResult,
   ) {
@@ -3672,7 +3728,9 @@ function makeMessagingEngineModule(
           if (removeIfMissing) {
             const dialogs = currentSnapshot().dialogs.filter(({ peer }) => peer.id !== peerId);
             yield* cacheStore.replaceDialogs(
-              dialogs.map((dialog) => ({ ...dialog, cacheEpoch: currentCacheEpoch })),
+              dialogs
+                .filter((dialog) => !dialog.transient)
+                .map((dialog) => ({ ...dialog, cacheEpoch: currentCacheEpoch })),
             );
             versions.next('dialog', peerId);
             yield* patch({ dialogs });
@@ -3687,7 +3745,16 @@ function makeMessagingEngineModule(
           ...reconcileFetchedDialog(fresh, previous, changedWhileLoading),
           cacheEpoch: currentCacheEpoch,
         };
-        yield* cacheStore.putDialog(dialog);
+        if (!dialog.transient) {
+          yield* cacheStore.putDialog(dialog);
+        } else {
+          // Remove an older, incorrectly persisted preview once Telegram confirms it.
+          yield* cacheStore.replaceDialogs(
+            currentSnapshot()
+              .dialogs.filter((candidate) => candidate.peer.id !== peerId && !candidate.transient)
+              .map((candidate) => ({ ...candidate, cacheEpoch: currentCacheEpoch })),
+          );
+        }
         versions.next('dialog', peerId);
         yield* patch({
           dialogs: sortDialogs([
@@ -4061,7 +4128,8 @@ function makeMessagingEngineModule(
     );
     const changed = dialogs.find(({ peer }) => peer.id === peerId);
     if (!changed) return;
-    yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
+    if (!changed.transient)
+      yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
     versions.next('dialog', peerId);
     yield* patch({ dialogs });
   });
@@ -4114,7 +4182,8 @@ function makeMessagingEngineModule(
               if (dialog) {
                 const changed = { ...dialog, topMessage: message };
                 versions.next('dialog', peerId);
-                yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
+                if (!changed.transient)
+                  yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
                 if (!isOperationCurrent(session, accountId)) return;
                 yield* patch({
                   dialogs: currentSnapshot().dialogs.map((candidate) =>
@@ -4333,7 +4402,8 @@ function makeMessagingEngineModule(
               topMessageId: topMessage?.id ?? 0,
               topMessage,
             };
-            yield* cacheStore.putDialog({ ...next, cacheEpoch: currentCacheEpoch });
+            if (!next.transient)
+              yield* cacheStore.putDialog({ ...next, cacheEpoch: currentCacheEpoch });
             return next;
           });
         }),
@@ -4521,11 +4591,19 @@ function makeMessagingEngineModule(
     }
     if (update.type === 'dialog-changed') {
       const dialog: CachedDialog = { ...update.dialog, cacheEpoch: currentCacheEpoch };
-      yield* cacheStore.putDialog(dialog);
       const next = [
         ...currentSnapshot().dialogs.filter((current) => current.peer.id !== dialog.peer.id),
         dialog,
       ];
+      if (dialog.transient) {
+        yield* cacheStore.replaceDialogs(
+          next
+            .filter((candidate) => !candidate.transient)
+            .map((candidate) => ({ ...candidate, cacheEpoch: currentCacheEpoch })),
+        );
+      } else {
+        yield* cacheStore.putDialog(dialog);
+      }
 
       versions.next('dialog', dialog.peer.id);
       yield* patch({ dialogs: sortDialogs(next) });
@@ -4553,6 +4631,7 @@ function makeMessagingEngineModule(
             : 'user';
       const placeholder: CachedDialog = {
         peer: { id: message.peerId, kind },
+        ...(kind === 'channel' ? { transient: true } : {}),
         title: message.peerId,
         initials: '?',
         color: '#765cff',
@@ -4567,7 +4646,7 @@ function makeMessagingEngineModule(
         hasAvatar: false,
         cacheEpoch: currentCacheEpoch,
       };
-      yield* cacheStore.putDialog(placeholder);
+      if (!placeholder.transient) yield* cacheStore.putDialog(placeholder);
       versions.next('dialog', message.peerId);
       yield* patch({ dialogs: sortDialogs([...currentSnapshot().dialogs, placeholder]) });
       return;
@@ -4576,7 +4655,8 @@ function makeMessagingEngineModule(
       if (dialog.peer.id !== message.peerId) return dialog;
       return {
         ...dialog,
-        ...(dialog.transient ? { transient: false } : {}),
+        // Public channel updates also arrive while previewing without membership.
+        ...(dialog.transient && dialog.peer.kind !== 'channel' ? { transient: false } : {}),
         ...(message.id >= dialog.topMessageId
           ? { topMessageId: message.id, topMessage: message }
           : {}),
@@ -4589,7 +4669,8 @@ function makeMessagingEngineModule(
     versions.next('dialog', message.peerId);
     yield* patch({ dialogs: sortDialogs(dialogs) });
     const changed = dialogs.find(({ peer }) => peer.id === message.peerId);
-    if (changed) yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
+    if (changed && !changed.transient)
+      yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
   });
   const applyReactionChange = Effect.fn('MessagingEngine.applyReactionChange')(function* (
     peerId: string,
@@ -5260,7 +5341,7 @@ function makeMessagingEngineModule(
             versions.current('unread', peerId) === unreadVersion ? 0 : latest.unreadCount,
           cacheEpoch: currentCacheEpoch,
         };
-        yield* cacheStore.putDialog(changed);
+        if (!changed.transient) yield* cacheStore.putDialog(changed);
         yield* patch({
           dialogs: currentSnapshot().dialogs.map((candidate) =>
             candidate.peer.id === peerId ? changed : candidate,
@@ -5730,6 +5811,10 @@ function makeMessagingEngineModule(
     loadConversationPinnedMessages: loadConversationPinnedMessages,
     getConversationSharedMedia: getConversationSharedMedia,
     searchConversationMessages: searchConversationMessages,
+    getLinkedMessage,
+    resolveUsername,
+    getDiscussion,
+    getReplies,
     searchPeers: searchPeers,
     addPeer: addPeer,
     openMessageInConversationView: openMessageInConversationView,
