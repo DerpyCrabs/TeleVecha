@@ -1,3 +1,5 @@
+import { findMention, filterMentionMembers, shiftFormats } from './mentions';
+import type { TelegramGroupMember } from '../../telegram/types';
 import { list as renderList } from 'effectweb';
 import { commandSlot } from 'effectweb';
 import { Effect } from 'effect';
@@ -94,8 +96,11 @@ type ChatComposerModel = {
   expressionTab: ExpressionTab;
   formatMenu: { x: number; y: number } | undefined;
   expressionPointerType: string;
+  mention: ReturnType<typeof findMention>;
+  mentionIndex: number;
 };
 type ChatComposerMessage =
+  | { type: 'SelectMention'; member: TelegramGroupMember }
   | { type: 'Mounted'; element: HTMLElement }
   | { type: 'Dismiss'; restoreFocus: boolean }
   | { type: 'ApplyFormat'; kind: TelegramTextFormat['kind'] }
@@ -107,7 +112,12 @@ type ChatComposerMessage =
       fields: Partial<
         Pick<
           ChatComposerModel,
-          'editingAttachmentId' | 'expressionTab' | 'formatMenu' | 'expressionPointerType'
+          | 'editingAttachmentId'
+          | 'expressionTab'
+          | 'formatMenu'
+          | 'expressionPointerType'
+          | 'mention'
+          | 'mentionIndex'
         >
       >;
     };
@@ -177,7 +187,6 @@ function insertAtSelection(model: ChatComposerModel, emoji: string) {
     draft = model.props.composer.draft,
     offset = input?.selectionStart ?? draft.length;
   model.props.composer.changeDraft(`${draft.slice(0, offset)}${emoji}${draft.slice(offset)}`);
-  model.props.composer.setFormats([]);
   queueMicrotask(() => {
     if (!input?.isConnected) return;
     input.focus();
@@ -230,10 +239,18 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
     expressionTab: 'emoji',
     formatMenu: undefined,
     expressionPointerType: '',
+    mention: undefined,
+    mentionIndex: 0,
   }),
   receive: (model, props) => {
     const reset = props.conversationId !== model.props.conversationId;
     const close = reset || !props.enabled;
+    const currentMention = model.mention && findMention(props.composer.draft, model.mention.end);
+    const dismissMention =
+      close ||
+      (model.mention &&
+        (currentMention?.offset !== model.mention.offset ||
+          currentMention?.query !== model.mention.query));
     const next = {
       ...model,
       props,
@@ -241,6 +258,7 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
         ? { editingAttachmentId: '', formatMenu: undefined, expressionTab: 'emoji' as const }
         : {}),
       ...(close ? { expressionOpen: false } : {}),
+      ...(dismissMention ? { mention: undefined, mentionIndex: 0 } : {}),
     };
     return close && model.expressionOpen
       ? { model: next, commands: [visibilityCommand(props, false)] }
@@ -248,6 +266,52 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
   },
   update: (model, message) => {
     switch (message.type) {
+      case 'SelectMention': {
+        const mention = model.mention;
+        if (!mention || !model.props.enabled) return { model };
+        return {
+          model: { ...model, mention: undefined, mentionIndex: 0 },
+          commands: [
+            actionCommand(
+              commandInsert,
+              () =>
+                Effect.sync(() => {
+                  const composer = model.props.composer;
+                  const member = message.member;
+                  const text = member.username
+                    ? `@${member.username}`
+                    : member.firstName || member.title;
+                  const draft =
+                    composer.draft.slice(0, mention.offset) +
+                    text +
+                    ' ' +
+                    composer.draft.slice(mention.end);
+                  const formats = shiftFormats(composer.formats, composer.draft, draft);
+                  composer.changeDraft(draft);
+                  composer.setFormats([
+                    ...formats,
+                    {
+                      offset: mention.offset,
+                      length: text.length,
+                      kind: member.username ? 'mention' : 'mentionName',
+                      userId: member.peer.id,
+                      accessHash: member.peer.accessHash,
+                    },
+                  ]);
+                  queueMicrotask(() => {
+                    const input = model.element?.querySelector('textarea');
+                    input?.focus();
+                    input?.setSelectionRange(
+                      mention.offset + text.length + 1,
+                      mention.offset + text.length + 1,
+                    );
+                  });
+                }),
+              'replace',
+            ),
+          ],
+        };
+      }
       case 'Mounted':
         return { model: { ...model, element: message.element } };
       case 'Dismiss':
@@ -328,6 +392,23 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
   },
   view: view((model, send) => {
     const props = model.props;
+    const mentionMembers = () =>
+      model.mention ? filterMentionMembers(props.composer.mentionMembers, model.mention.query) : [];
+    const updateMention = (input: HTMLTextAreaElement) => {
+      const mention = props.enabled
+        ? findMention(input.value, input.selectionStart, input.selectionEnd)
+        : undefined;
+      const blocked =
+        mention &&
+        props.composer.formats.some(
+          (format) =>
+            ['code', 'pre', 'textUrl', 'mention', 'mentionName'].includes(format.kind) &&
+            mention.offset >= format.offset &&
+            mention.offset < format.offset + format.length,
+        );
+      send({ type: 'Fields', fields: { mention: blocked ? undefined : mention, mentionIndex: 0 } });
+      if (mention && !blocked) props.composer.loadMentionMembers();
+    };
     const setExpressionOpen = (open: boolean) => send({ type: 'ExpressionOpenState', value: open });
     const editingAttachment = () =>
       props.composer.attachments.find(({ id }) => id === model.editingAttachmentId);
@@ -570,6 +651,38 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
               attachTransferredFiles(transfer.files, transferName('dropped-file'));
             }}
           >
+            {model.mention && mentionMembers().length > 0 ? (
+              <div
+                class="composer-mentions"
+                id="composer-mentions"
+                role="listbox"
+                aria-label="Mention a member"
+              >
+                {renderList(
+                  idRows(mentionMembers().map((member) => ({ ...member, id: member.peer.id }))),
+                  (member) => (
+                    <button
+                      type="button"
+                      role="option"
+                      id={`mention-${member.peer.id}`}
+                      aria-selected={
+                        mentionMembers()[model.mentionIndex]?.peer.id === member.peer.id
+                      }
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => send({ type: 'SelectMention', member })}
+                    >
+                      <span class="composer-mention-avatar" style={{ background: member.color }}>
+                        {member.initials}
+                      </span>
+                      <span class="composer-mention-name">
+                        <strong>{member.title}</strong>
+                        {member.username ? <small>@{member.username}</small> : null}
+                      </span>
+                    </button>
+                  ),
+                )}
+              </div>
+            ) : null}
             <button
               class="composer-icon-button"
               onPointerDown={(event) => {
@@ -630,11 +743,58 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
               value={props.composer.draft}
               onInput={(event) => {
                 props.composer.changeDraft(event.currentTarget.value);
-                if (props.composer.formats.length > 0) props.composer.setFormats([]);
+                updateMention(event.currentTarget);
                 void event.currentTarget.offsetHeight;
                 props.onGeometryChange?.();
               }}
+              aria-autocomplete="list"
+              aria-expanded={Boolean(model.mention && mentionMembers().length)}
+              aria-controls="composer-mentions"
+              aria-activedescendant={
+                model.mention && mentionMembers()[model.mentionIndex]
+                  ? `mention-${mentionMembers()[model.mentionIndex]!.peer.id}`
+                  : undefined
+              }
+              onSelect={(event) => updateMention(event.currentTarget)}
+              onClick={(event) => updateMention(event.currentTarget)}
+              onKeyUp={(event) => {
+                if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
+                  updateMention(event.currentTarget);
+              }}
+              onBlur={() => send({ type: 'Fields', fields: { mention: undefined } })}
               onKeyDown={(event) => {
+                if (event.isComposing || event.keyCode === 229) return;
+                const members = mentionMembers();
+                if (
+                  model.mention &&
+                  members.length > 0 &&
+                  !event.shiftKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  !event.altKey
+                ) {
+                  if (['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.key === 'Escape')
+                      send({ type: 'Fields', fields: { mention: undefined } });
+                    else if (event.key === 'Enter' || event.key === 'Tab')
+                      send({
+                        type: 'SelectMention',
+                        member: members[model.mentionIndex] ?? members[0]!,
+                      });
+                    else {
+                      const index =
+                        (model.mentionIndex + (event.key === 'ArrowUp' ? -1 : 1) + members.length) %
+                        members.length;
+                      send({ type: 'Fields', fields: { mentionIndex: index } });
+                      model.element
+                        ?.querySelectorAll('.composer-mentions button')
+                        [index]?.scrollIntoView({ block: 'nearest' });
+                    }
+                    return;
+                  }
+                }
                 if (!props.enabled) {
                   event.preventDefault();
                   return;

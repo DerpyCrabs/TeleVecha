@@ -1,3 +1,4 @@
+import { shiftFormats } from './mentions';
 import { commandSlot } from 'effectweb';
 import type { Snapshot } from 'effectweb';
 import { Effect, Fiber } from 'effect';
@@ -6,6 +7,9 @@ import type { EffectConversation } from '../../telegram/core/conversation';
 import type {
   EngineSnapshot,
   TelegramDialog,
+  TelegramGroupMember,
+  TelegramGroupMemberPage,
+  TelegramPeer,
   TelegramDraftDetails,
   TelegramReplyTarget,
   TelegramTextFormat,
@@ -18,6 +22,7 @@ import { prepareAttachment } from './attachmentMetadata';
 import { mediaPreview } from '../conversation/presentation';
 const DRAFT_WRITE_DELAY_MS = 120;
 const DRAFT_WRITE_TASK = commandSlot('composer:draft-write');
+const MENTION_MEMBERS_TASK = commandSlot('composer:members');
 const TYPING_TASK = commandSlot('composer:typing');
 interface ReplyTarget {
   messageId: number;
@@ -38,6 +43,7 @@ interface PendingDraftWrite {
   conversation: EffectConversation;
 }
 interface ComposerSessionOptions {
+  getMentionMembers?: (peer: TelegramPeer) => Effect.Effect<TelegramGroupMemberPage, unknown>;
   conversation: Read<EffectConversation | undefined>;
   runTask: UiTaskRunner;
   snapshot: Read<Snapshot<EngineSnapshot>>;
@@ -56,6 +62,7 @@ function cloneAttachments(attachments: readonly StagedAttachment[]) {
 }
 export function createComposerSession(options: ComposerSessionOptions) {
   type ComposerSessionModel = {
+    mentionMembers: TelegramGroupMember[];
     draft: string;
     formats: TelegramTextFormat[];
     attachments: StagedAttachment[];
@@ -63,6 +70,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     editing: ChatMessage | undefined;
   };
   const empty = (): ComposerSessionModel => ({
+    mentionMembers: [],
     draft: '',
     formats: [],
     attachments: [],
@@ -73,6 +81,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
   const attachmentDrafts = new Map<string, StagedAttachment[]>();
   let editRestore: EditRestore | undefined;
   let editVersion = 0;
+  let mentionPeerId = '';
   let pendingDraftWrite: PendingDraftWrite | undefined;
   let draftBurst = false;
   const draftWrites = new Set<{ peerId: string; fiber: Fiber.Fiber<void, unknown> }>();
@@ -168,7 +177,10 @@ export function createComposerSession(options: ComposerSessionOptions) {
     options.beforeUiChange();
     editVersion += 1;
     const peerId = options.activePeerId();
-    owner.patch({ draft: value });
+    owner.patch({
+      draft: value,
+      formats: shiftFormats(owner.read().formats, owner.read().draft, value),
+    });
     if (owner.read().editing) return;
     if (peerId === 'empty') return;
     const conversation = options.conversation();
@@ -236,6 +248,8 @@ export function createComposerSession(options: ComposerSessionOptions) {
   };
   const switchPeer = (previousPeerId: string, peerId: string, changing: boolean) => {
     if (changing) {
+      owner.cancel(MENTION_MEMBERS_TASK);
+      mentionPeerId = '';
       editVersion += 1;
       options.runTask(flushDraftWrite(previousPeerId).pipe(Effect.ignore));
       if (editRestore) {
@@ -246,6 +260,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
       }
       const details = options.snapshot().draftDetails[peerId];
       owner.patch({
+        mentionMembers: [],
         attachments: cloneAttachments(attachmentDrafts.get(peerId) ?? []),
         editing: undefined,
         formats: details?.formats ? [...details.formats] : [],
@@ -295,6 +310,8 @@ export function createComposerSession(options: ComposerSessionOptions) {
     options.beforeSend();
     options.onSend?.(body);
     stopTyping();
+    mentionPeerId = '';
+    owner.cancel(MENTION_MEMBERS_TASK);
     owner.patch(empty());
     if (!capturedEditing) rememberAttachments(peerId, []);
     yield* Effect.gen(function* () {
@@ -458,10 +475,35 @@ export function createComposerSession(options: ComposerSessionOptions) {
     editVersion += 1;
     stopTyping();
     cancelDraftWrite();
+    mentionPeerId = '';
+    owner.cancel(MENTION_MEMBERS_TASK);
     owner.patch(empty());
     editRestore = undefined;
   };
+  const loadMentionMembers = () => {
+    const peer = options.activeDialog()?.peer;
+    if (!peer || peer.kind === 'user' || !options.getMentionMembers || mentionPeerId === peer.id)
+      return;
+    mentionPeerId = peer.id;
+    owner.run(
+      MENTION_MEMBERS_TASK,
+      options.getMentionMembers(peer).pipe(
+        Effect.tap((page) =>
+          Effect.sync(() => {
+            if (options.activePeerId() === peer.id) owner.patch({ mentionMembers: page.members });
+          }),
+        ),
+        Effect.catchCause(() =>
+          Effect.sync(() => {
+            mentionPeerId = '';
+          }),
+        ),
+      ),
+      'replace',
+    );
+  };
   const actions = {
+    loadMentionMembers,
     setFormats: changeFormats,
     changeDraft,
     replaceDraft,
@@ -503,6 +545,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     },
     snapshot: () => ({
       ...actions,
+      mentionMembers: owner.read().mentionMembers,
       draft: owner.read().draft,
       formats: owner.read().formats,
       attachments: owner.read().attachments,

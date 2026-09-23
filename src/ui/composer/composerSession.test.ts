@@ -57,6 +57,7 @@ it('publishes coherent composer states for chat changes, editing, restoration an
   session.switchPeer('first', 'second', true);
   expect(changes).toHaveBeenCalledTimes(1);
   expect(changes.mock.calls[0]![0]).toEqual({
+    mentionMembers: [],
     draft: 'second draft',
     formats: snapshot.draftDetails.second.formats,
     reply: snapshot.draftDetails.second.reply,
@@ -84,6 +85,7 @@ it('publishes coherent composer states for chat changes, editing, restoration an
   session.cancelEdit();
   expect(changes).toHaveBeenCalledTimes(1);
   expect(session.model()).toMatchObject({
+    mentionMembers: [],
     draft: 'second draft',
     editing: undefined,
     formats: snapshot.draftDetails.second.formats,
@@ -93,6 +95,7 @@ it('publishes coherent composer states for chat changes, editing, restoration an
   session.reset();
   expect(changes).toHaveBeenCalledTimes(1);
   expect(session.model()).toEqual({
+    mentionMembers: [],
     draft: '',
     formats: [],
     attachments: [],

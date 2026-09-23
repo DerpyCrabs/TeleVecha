@@ -1249,6 +1249,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
           {
             peer: { id: 'u:404', kind: 'user' as const },
             title: 'Fixture Author',
+            username: 'fixture_author',
             initials: 'FA',
             color: '#408acf',
             role: 'owner',

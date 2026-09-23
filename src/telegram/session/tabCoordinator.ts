@@ -477,6 +477,8 @@ const LinkPreviewSchema = Schema.Struct({
   media: Schema.optional(MediaSchema),
 });
 const TextFormatSchema = Schema.Struct({
+  userId: Schema.optional(Schema.String),
+  accessHash: Schema.optional(Schema.String),
   offset: Schema.Number,
   length: Schema.Number,
   kind: Schema.Literals([
@@ -489,6 +491,8 @@ const TextFormatSchema = Schema.Struct({
     'spoiler',
     'blockquote',
     'expandableBlockquote',
+    'mention',
+    'mentionName',
     'textUrl',
     'customEmoji',
     'formattedDate',

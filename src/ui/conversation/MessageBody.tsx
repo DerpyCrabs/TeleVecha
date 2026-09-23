@@ -22,11 +22,24 @@ interface TextPart {
 function textParts(message: ChatMessage): TextPart[] {
   const ranges: Array<{ offset: number; length: number; kind: 'mention' | 'link'; url?: string }> =
     [
-      ...(message.mentions ?? []).map(({ offset, length }) => ({
+      ...(message.mentions ?? []).map(({ offset, length, userId }) => ({
         offset,
         length,
         kind: 'mention' as const,
+        ...(userId ? { url: `tg://user?id=${userId.slice(2)}` } : {}),
       })),
+      ...(message.formats ?? []).flatMap((format) =>
+        format.kind === 'mention' || format.kind === 'mentionName'
+          ? [
+              {
+                offset: format.offset,
+                length: format.length,
+                kind: 'mention' as const,
+                ...(format.userId ? { url: `tg://user?id=${format.userId.slice(2)}` } : {}),
+              },
+            ]
+          : [],
+      ),
       ...(message.links ?? []).map(({ offset, length, url }) => ({
         offset,
         length,
@@ -61,7 +74,7 @@ function textParts(message: ChatMessage): TextPart[] {
       {
         text,
         kind: semantic?.kind ?? 'text',
-        ...(semantic?.kind === 'link' ? { url: semantic.url || text } : {}),
+        ...(semantic?.url ? { url: semantic.url } : semantic?.kind === 'link' ? { url: text } : {}),
         formats: new Set(
           (message.formats ?? [])
             .filter((format) => start >= format.offset && start < format.offset + format.length)

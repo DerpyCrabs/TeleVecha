@@ -91,6 +91,8 @@ export interface TelegramUserDetails {
 }
 
 export interface TelegramGroupMember {
+  firstName?: string | undefined;
+  isSelf?: boolean | undefined;
   peer: TelegramPeer;
   title: string;
   initials: string;
@@ -293,6 +295,8 @@ export interface TelegramTextFormat {
     | 'spoiler'
     | 'blockquote'
     | 'expandableBlockquote'
+    | 'mention'
+    | 'mentionName'
     | 'textUrl'
     | 'customEmoji'
     | 'formattedDate'
@@ -300,6 +304,8 @@ export interface TelegramTextFormat {
     | 'diffReplace'
     | 'diffDelete';
   url?: string | undefined;
+  userId?: string | undefined;
+  accessHash?: string | undefined;
   customEmojiId?: string | undefined;
   timestamp?: number | undefined;
   oldText?: string | undefined;

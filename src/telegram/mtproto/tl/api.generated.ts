@@ -140,6 +140,10 @@ const $InputMediaUploadedPhoto = createTlFactory<
   Tl.InputMediaUploadedPhoto,
   Tl.InputMediaUploadedPhotoFields
 >('inputMediaUploadedPhoto');
+const $InputMessageEntityMentionName = createTlFactory<
+  Tl.InputMessageEntityMentionName,
+  Tl.InputMessageEntityMentionNameFields
+>('inputMessageEntityMentionName');
 const $InputMessageID = createTlFactory<Tl.InputMessageID, Tl.InputMessageIDFields>(
   'inputMessageID',
 );
@@ -1320,6 +1324,7 @@ export const Api = Object.freeze({
   InputMediaPhoto: $InputMediaPhoto,
   InputMediaUploadedDocument: $InputMediaUploadedDocument,
   InputMediaUploadedPhoto: $InputMediaUploadedPhoto,
+  InputMessageEntityMentionName: $InputMessageEntityMentionName,
   InputMessageID: $InputMessageID,
   InputMessagesFilterDocument: $InputMessagesFilterDocument,
   InputMessagesFilterEmpty: $InputMessagesFilterEmpty,

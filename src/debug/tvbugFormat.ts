@@ -111,6 +111,8 @@ const SAFE_SEMANTIC_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     'spoiler',
     'blockquote',
     'expandableBlockquote',
+    'mention',
+    'mentionName',
     'textUrl',
     'customEmoji',
     'formattedDate',
@@ -322,6 +324,7 @@ export interface TvBugMediaV2 {
 }
 
 export interface TvBugTextFormatV2 {
+  userId?: string | undefined;
   offset: number;
   length: number;
   kind: TelegramTextFormat['kind'];
@@ -1451,6 +1454,7 @@ function hydrateFormat(format: TvBugTextFormatV2): TelegramTextFormat {
     offset: format.offset,
     length: format.length,
     kind: format.kind,
+    ...(format.userId ? { userId: format.userId } : {}),
     ...(format.url ? { url: format.url } : {}),
     ...(format.customEmojiId ? { customEmojiId: format.customEmojiId } : {}),
     ...(format.timestamp !== undefined ? { timestamp: format.timestamp } : {}),
@@ -2015,6 +2019,7 @@ class StateSanitizer {
       offset: finiteNonNegativeInteger(format.offset, 'format.offset'),
       length: finiteNonNegativeInteger(format.length, 'format.length'),
       kind: format.kind,
+      ...(format.userId ? { userId: this.peerId(format.userId, 'user') } : {}),
       ...(format.url ? { url: this.safeUrl(format.url) } : {}),
       ...(format.customEmojiId
         ? { customEmojiId: this.aliases.get('custom-emoji', format.customEmojiId) }

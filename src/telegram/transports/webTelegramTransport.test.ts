@@ -997,3 +997,34 @@ describe('web Telegram transport', () => {
     );
   });
 });
+
+it('sends username and named mentions with UTF-16 offsets and the selected user access hash', () =>
+  Effect.runPromise(
+    withTransport(
+      (transport) =>
+        transport
+          .sendText({ id: 'g:303', kind: 'group' }, '😀 @alice Bob', '1', undefined, [
+            { kind: 'mention', offset: 3, length: 6 },
+            { kind: 'mentionName', offset: 10, length: 3, userId: 'u:405', accessHash: '77' },
+          ])
+          .pipe(Effect.ignore),
+      () =>
+        Effect.succeed(
+          clientDouble({
+            invoke: ((request) =>
+              Effect.sync(() => {
+                if (!Api.messages.SendMessage.is(request)) throw new Error('Unexpected RPC');
+                expect(request.entities).toEqual([
+                  Api.MessageEntityMention({ offset: 3, length: 6 }),
+                  Api.InputMessageEntityMentionName({
+                    offset: 10,
+                    length: 3,
+                    userId: Api.InputUser({ userId: 405n, accessHash: 77n }),
+                  }),
+                ]);
+                return Api.Updates({ updates: [], users: [], chats: [], date: 1, seq: 1 });
+              })) as MtprotoClient['invoke'],
+          }),
+        ),
+    ),
+  ));

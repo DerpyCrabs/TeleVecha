@@ -141,12 +141,16 @@ export interface ChatMessage {
           | 'spoiler'
           | 'blockquote'
           | 'expandableBlockquote'
+          | 'mention'
+          | 'mentionName'
           | 'textUrl'
           | 'customEmoji'
           | 'formattedDate'
           | 'diffInsert'
           | 'diffReplace'
           | 'diffDelete';
+        userId?: string | undefined;
+        accessHash?: string | undefined;
         url?: string | undefined;
         customEmojiId?: string | undefined;
         timestamp?: number | undefined;

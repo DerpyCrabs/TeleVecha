@@ -3105,7 +3105,20 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     return mapLinkPreview(previewMedia);
   }
   function mapFormats(entities: readonly Tl.TypeMessageEntity[] | undefined) {
-    return (entities ?? []).flatMap((entity) => {
+    return (entities ?? []).flatMap((entity): TelegramTextFormat[] => {
+      if (Api.MessageEntityMention.is(entity))
+        return [{ offset: entity.offset, length: entity.length, kind: 'mention' }];
+      if (Api.MessageEntityMentionName.is(entity))
+        return [
+          {
+            offset: entity.offset,
+            length: entity.length,
+            kind: 'mentionName',
+            userId: `u:${entity.userId}`,
+            accessHash: mapPeer(Api.PeerUser({ userId: entity.userId }), state.entities)
+              ?.accessHash,
+          },
+        ];
       const kind = Api.MessageEntityBold.is(entity)
         ? ('bold' as const)
         : Api.MessageEntityItalic.is(entity)
@@ -3477,6 +3490,13 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   function inputEntities(formats: readonly TelegramTextFormat[]): Tl.TypeMessageEntity[] {
     return formats.map((format): Tl.TypeMessageEntity => {
       const base = { offset: format.offset, length: format.length };
+      if (format.kind === 'mention') return Api.MessageEntityMention(base);
+      if (format.kind === 'mentionName' && format.userId) {
+        return Api.InputMessageEntityMentionName({
+          ...base,
+          userId: inputUser({ id: format.userId, kind: 'user', accessHash: format.accessHash }),
+        });
+      }
       if (format.kind === 'bold') return Api.MessageEntityBold(base);
       if (format.kind === 'italic') return Api.MessageEntityItalic(base);
       if (format.kind === 'underline') return Api.MessageEntityUnderline(base);
@@ -4371,6 +4391,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       initials: initials(title),
       color: peerColor(peer.id, user),
       username: user.username,
+      firstName: user.firstName,
+      isSelf: Boolean(user.self),
       ...role,
       hasAvatar: Boolean(photo),
       avatarId: photo?.photoId.toString(),

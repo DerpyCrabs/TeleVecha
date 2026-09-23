@@ -433,6 +433,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     context,
   );
   const composer = createComposerSession({
+    getMentionMembers: (peer) => engine.getGroupMembers(peer, 200),
     conversation: () => state.model().activeConversation,
     runTask,
     snapshot: () => state.model().snapshot,
