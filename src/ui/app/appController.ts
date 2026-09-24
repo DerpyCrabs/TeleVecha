@@ -1,3 +1,5 @@
+import type { TelegramPeer, TelegramSearchOffset } from '../../telegram/types';
+import { createVoicePlayback, type VoiceTrack } from '../media/voicePlayback';
 import { parseTelegramLink, type TelegramLinkTarget } from '../shared/telegramLink';
 import type { CommentsState } from '../conversation/CommentsPanel';
 import { Effect } from 'effect';
@@ -246,6 +248,67 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     runSharedEffect,
     () => state.model().snapshot.dialogs,
   );
+  const voicePlayback = createVoicePlayback();
+  scope.add(() => voicePlayback.dispose());
+  const voiceTrack = (message: TelegramMessage): VoiceTrack => {
+    const dialog = engine.snapshot().dialogs.find(({ peer }) => peer.id === message.peerId);
+    const peer: TelegramPeer = dialog?.peer ?? {
+      id: message.peerId,
+      kind: message.peerId.startsWith('u:')
+        ? 'user'
+        : message.peerId.startsWith('g:')
+          ? 'group'
+          : 'channel',
+    };
+    const asset = mediaAssets.message(message);
+    return {
+      key: `${message.peerId}:${message.id}`,
+      peerId: message.peerId,
+      id: message.id,
+      label: dialog?.title ?? 'Voice message',
+      duration: message.media?.duration ?? 0,
+      unheard: !message.outgoing && message.mediaUnread === true,
+      load: () => runEffect(asset.load()),
+      next: async (heard) => {
+        if (!engine.snapshot().online) throw new Error('Offline voice queue');
+        let offset: TelegramSearchOffset | undefined;
+        let candidate: TelegramMessage | undefined;
+        const offsets = new Set<number>();
+        for (;;) {
+          if (voicePlayback.snapshot().track?.key !== `${message.peerId}:${message.id}`)
+            return undefined;
+          const page = await runEffect(engine.getConversationSharedMedia(peer, 'voice', offset));
+          for (const item of page.messages) {
+            if (
+              item.peerId === message.peerId &&
+              item.id > message.id &&
+              item.media?.kind === 'voice' &&
+              !item.outgoing &&
+              item.mediaUnread === true &&
+              !heard.has(`${item.peerId}:${item.id}`) &&
+              (!candidate || item.id < candidate.id)
+            )
+              candidate = item;
+          }
+          if (
+            !page.hasMore ||
+            !page.nextOffset ||
+            page.messages.some((item) => item.id <= message.id) ||
+            offsets.has(page.nextOffset.messageId)
+          )
+            break;
+          offset = page.nextOffset;
+          offsets.add(offset.messageId);
+        }
+        return candidate ? voiceTrack(candidate) : undefined;
+      },
+      heard: () => {
+        void runEffect(engine.markMediaRead(peer, message.id)).catch(() => {});
+      },
+    };
+  };
+  const voiceTracks = (messages: readonly TelegramMessage[]) =>
+    messages.filter((message) => message.media?.kind === 'voice').map(voiceTrack);
   let appGridElement: HTMLDivElement | undefined;
   let conversationPaneElement: HTMLElement | undefined;
   let mobileSidebarTriggerElement: HTMLButtonElement | undefined;
@@ -838,6 +901,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     if (state.model().clearingCache || state.model().loggingOut) return;
     state.send({ type: 'Changed', changes: { clearingCache: true } });
     try {
+      voicePlayback.stop();
       mediaAssets.dispose();
       await runEffect(engine.clearCache());
       Atom.batch(() => model.resetResources());
@@ -1201,7 +1265,12 @@ export const createAppController = Effect.fn('createAppController')(function* (p
         Atom.batch(() => {
           mediaAssets.confirmUploads(state.model().snapshot.pending, next.messages);
           state.send({ type: 'Changed', changes: { snapshot: next } });
-          if (clearedAccount) mediaAssets.dispose();
+          if (clearedAccount) {
+            voicePlayback.stop();
+            mediaAssets.dispose();
+          }
+          if (next.activePeerId)
+            voicePlayback.updateQueue(next.activePeerId, voiceTracks(next.messages));
           if (clearedAccount || authenticated) model.resetResources();
         });
         if (next.requiresReload) {
@@ -1280,6 +1349,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
           ),
         );
       }
+      voicePlayback.stop();
       mediaAssets.dispose();
       const badgeNavigator = navigator as Navigator & { clearAppBadge?: () => Promise<void> };
       if (badgeNavigator.clearAppBadge) runInBackground(badgeNavigator.clearAppBadge());
@@ -1857,6 +1927,26 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       }),
     sidebarLayout,
     mediaAssets,
+    voicePlayback,
+    voiceControlForMessage: (source: TelegramMessage, messages: readonly TelegramMessage[]) =>
+      source.media?.kind === 'voice'
+        ? {
+            player: voicePlayback,
+            key: `${source.peerId}:${source.id}`,
+            start: () => voicePlayback.start(voiceTrack(source), voiceTracks(messages)),
+          }
+        : undefined,
+    voiceControlFor: (messageId: string) => {
+      const source = mediaSourceFor(messageId);
+      return source?.media?.kind === 'voice'
+        ? {
+            player: voicePlayback,
+            key: `${source.peerId}:${source.id}`,
+            start: () =>
+              voicePlayback.start(voiceTrack(source), voiceTracks(engine.snapshot().messages)),
+          }
+        : undefined;
+    },
     chatDirectory,
     deleteChat: chatDirectory.delete,
     setDeleteChatTarget: (

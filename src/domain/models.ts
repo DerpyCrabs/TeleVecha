@@ -39,6 +39,7 @@ export interface ChatMessage {
   date?: number | undefined;
   editedAt?: number | undefined;
   outgoing: boolean;
+  mediaUnread?: boolean | undefined;
   protected?: boolean | undefined;
   status: MessageStatus;
   groupedId?: string | undefined;

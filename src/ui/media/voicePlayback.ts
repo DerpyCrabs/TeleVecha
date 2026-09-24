@@ -1,0 +1,209 @@
+export interface VoiceTrack {
+  key: string;
+  peerId: string;
+  id: number;
+  label: string;
+  duration: number;
+  unheard: boolean;
+  load: () => Promise<string>;
+  heard: () => void;
+  next?: ((heard: ReadonlySet<string>) => Promise<VoiceTrack | undefined>) | undefined;
+}
+
+export interface VoicePlaybackState {
+  track: VoiceTrack | undefined;
+  position: number;
+  duration: number;
+  playing: boolean;
+  waiting: boolean;
+  ready: boolean;
+  rate: number;
+  error: boolean;
+}
+
+/** One audio owner per app; message bubbles only subscribe to it. */
+export function createVoicePlayback(createAudio = () => document.createElement('audio')) {
+  let audio: HTMLAudioElement | undefined;
+  let queue: VoiceTrack[] = [];
+  let generation = 0;
+  const heard = new Set<string>();
+  const listeners = new Set<() => void>();
+  let state: VoicePlaybackState = {
+    track: undefined,
+    position: 0,
+    duration: 0,
+    playing: false,
+    waiting: false,
+    ready: false,
+    rate: 1,
+    error: false,
+  };
+  const publish = (changes: Partial<VoicePlaybackState>) => {
+    state = { ...state, ...changes };
+    for (const listener of listeners) listener();
+  };
+  const ensureAudio = () => {
+    if (audio) return audio;
+    audio = createAudio();
+    audio.hidden = true;
+    audio.dataset.voiceAudio = '';
+    audio.preload = 'metadata';
+    // Mounted at app lifetime so the asset cache also protects its object URL.
+    document.body.append(audio);
+    const sync = (changes: Partial<VoicePlaybackState> = {}) => {
+      if (!audio) return;
+      publish({
+        position: audio.currentTime,
+        duration:
+          Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : state.duration,
+        playing: !audio.paused && !audio.ended,
+        ready: audio.readyState >= 1,
+        rate: audio.playbackRate,
+        ...changes,
+      });
+    };
+    for (const event of ['timeupdate', 'loadedmetadata', 'durationchange', 'seeked', 'ratechange'])
+      audio.addEventListener(event, () => sync());
+    audio.addEventListener('playing', () => {
+      sync({ waiting: false, error: false });
+      const track = state.track;
+      if (track) {
+        heard.add(track.key);
+        // The engine deduplicates successful receipts; resuming retries a failed receipt.
+        track.heard();
+      }
+    });
+    audio.addEventListener('pause', () => {
+      sync({ waiting: false });
+    });
+    audio.addEventListener('waiting', () => publish({ waiting: true }));
+    audio.addEventListener('error', () => publish({ error: true, waiting: false, playing: false }));
+    audio.addEventListener('ended', () => {
+      sync();
+      const current = state.track;
+      if (!current) return;
+      const token = generation;
+      const localNext = () =>
+        queue.find(
+          (track) =>
+            track.peerId === current.peerId &&
+            track.id > current.id &&
+            track.unheard &&
+            !heard.has(track.key),
+        );
+      const advance = async () => {
+        publish({ waiting: true });
+        let next = localNext();
+        try {
+          if (current.next) next = await current.next(heard);
+        } catch {
+          // The retained queue still works while offline.
+        }
+        if (token !== generation) return;
+        publish({ waiting: false });
+        if (next) await play(next);
+      };
+      void advance().catch(() => publish({ waiting: false, error: true }));
+    });
+    return audio;
+  };
+  const play = async (track: VoiceTrack) => {
+    const token = ++generation;
+    const element = ensureAudio();
+    element.pause();
+    element.removeAttribute('src');
+    element.load();
+    publish({
+      track,
+      position: 0,
+      duration: track.duration,
+      playing: false,
+      waiting: true,
+      ready: false,
+      error: false,
+    });
+    try {
+      const source = await track.load();
+      if (token !== generation) return;
+      element.src = source;
+      element.playbackRate = state.rate;
+      await element.play();
+    } catch {
+      if (token === generation) publish({ waiting: false, playing: false, error: true });
+    }
+  };
+  const stop = () => {
+    generation++;
+    audio?.pause();
+    audio?.removeAttribute('src');
+    audio?.load();
+    queue = [];
+    heard.clear();
+    publish({
+      track: undefined,
+      position: 0,
+      duration: 0,
+      playing: false,
+      waiting: false,
+      ready: false,
+      error: false,
+    });
+  };
+  return {
+    snapshot: () => state,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      listener();
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    updateQueue(peerId: string, tracks: VoiceTrack[]) {
+      if (state.track?.peerId === peerId) queue = [...tracks].sort((a, b) => a.id - b.id);
+    },
+    start(track: VoiceTrack, tracks: VoiceTrack[]) {
+      queue = [...tracks].sort((a, b) => a.id - b.id);
+      void play(track).catch(() => publish({ waiting: false, error: true }));
+    },
+    toggle() {
+      if (!state.track) return;
+      if (state.waiting) {
+        stop();
+        return;
+      }
+      if (state.error) {
+        void play(state.track).catch(() => publish({ waiting: false, error: true }));
+        return;
+      }
+      if (!audio?.paused) audio?.pause();
+      else {
+        const token = generation;
+        void audio.play().catch(() => {
+          if (token === generation) publish({ error: true, waiting: false });
+        });
+      }
+    },
+    seek(position: number) {
+      if (audio && state.ready) audio.currentTime = Math.min(state.duration, Math.max(0, position));
+    },
+    speed() {
+      const rate = state.rate === 1 ? 1.5 : state.rate === 1.5 ? 2 : 1;
+      if (audio) audio.playbackRate = rate;
+      publish({ rate });
+    },
+    stop,
+    dispose() {
+      stop();
+      audio?.remove();
+      audio = undefined;
+      heard.clear();
+      listeners.clear();
+    },
+  };
+}
+export type VoicePlayback = ReturnType<typeof createVoicePlayback>;
+export interface VoiceControl {
+  player: VoicePlayback;
+  key: string;
+  start: () => void;
+}

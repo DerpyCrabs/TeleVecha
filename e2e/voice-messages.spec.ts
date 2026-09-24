@@ -41,27 +41,28 @@ for (const kind of ['voice', 'round-video'] as const) {
             .messages.find(({ id }) => id === 81)?.mediaUnread,
       );
     await expect.poll(() => unread(second)).toBe(true);
-    const player = second.locator(
-      'article[data-message-id="81"] audio, article[data-message-id="81"] video',
-    );
-    await expect(player).toBeAttached();
-    if (kind === 'voice')
-      await expect(second.getByRole('button', { name: 'Play voice message' })).toBeVisible();
-    else await expect(player).toBeVisible();
-    await expect
-      .poll(() => player.evaluate((element: HTMLMediaElement) => element.readyState))
-      .toBeGreaterThanOrEqual(2);
     expect(await page.evaluate(() => window.__televechaFixture!.stats.readMessageContents)).toEqual(
       [],
     );
+    if (kind === 'voice') await second.getByRole('button', { name: 'Play voice message' }).click();
+    const player = second.locator(
+      kind === 'voice' ? 'audio[data-voice-audio]' : 'article[data-message-id="81"] video',
+    );
+    await expect(player).toBeAttached();
+    if (kind !== 'voice') await expect(player).toBeVisible();
+    await expect
+      .poll(() => player.evaluate((element: HTMLMediaElement) => element.readyState))
+      .toBeGreaterThanOrEqual(2);
+
     await player.evaluate(async (element: HTMLMediaElement) => {
       element.muted = true;
       await element.play();
     });
     await expect.poll(() => unread(second)).toBe(false);
     await expect.poll(() => unread(page)).toBe(false);
+    if (kind === 'voice') await page.getByRole('button', { name: 'Play voice message' }).click();
     const ownerPlayer = page.locator(
-      'article[data-message-id="81"] audio, article[data-message-id="81"] video',
+      kind === 'voice' ? 'audio[data-voice-audio]' : 'article[data-message-id="81"] video',
     );
     await ownerPlayer.evaluate(async (element: HTMLMediaElement) => {
       element.muted = true;
@@ -169,11 +170,11 @@ for (const device of [
       ).toEqual([]);
       for (const id of [81, 82]) {
         const message = page.locator(`article[data-message-id="${id}"]`);
-        const audio = message.locator('audio[data-voice-audio]');
+        const audio = page.locator('audio[data-voice-audio]');
         const player = message.locator('.voice-player');
         await player.scrollIntoViewIfNeeded();
         await expect(player).toBeVisible();
-        await expect(audio).toBeHidden();
+
         const bounds = await player.evaluate((element) => {
           const audio = element.getBoundingClientRect();
           const bubble = element.closest('article')!.getBoundingClientRect();
@@ -184,21 +185,8 @@ for (const device of [
           };
         });
         expect(bounds.width).toBeGreaterThanOrEqual(280);
-        expect(bounds.height).toBeLessThanOrEqual(60);
+        expect(bounds.height).toBeLessThanOrEqual(70);
         expect(bounds.contained).toBe(true);
-        await expect
-          .poll(() => audio.evaluate((element: HTMLAudioElement) => element.readyState))
-          .toBeGreaterThanOrEqual(2);
-        await expect
-          .poll(() => audio.evaluate((element: HTMLAudioElement) => element.duration))
-          .toBe(58);
-        if (id === 81)
-          expect(
-            await page.evaluate(() => window.__televechaFixture?.stats.readMessageContents),
-          ).toEqual([]);
-        await audio.evaluate((element: HTMLAudioElement) => {
-          element.muted = true;
-        });
         await message.getByRole('button', { name: 'Play voice message' }).click();
         await expect
           .poll(() => audio.evaluate((element: HTMLAudioElement) => !element.paused))
@@ -217,10 +205,14 @@ for (const device of [
         await expect
           .poll(() => audio.evaluate((element: HTMLAudioElement) => element.currentTime))
           .toBeCloseTo(29, 0);
-        await message.getByRole('button', { name: 'Playback speed 1x', exact: true }).click();
+        await expect(message.getByRole('button', { name: /speed/i })).toHaveCount(0);
+        await page
+          .getByRole('region', { name: 'Voice memo player' })
+          .getByRole('button', { name: `Voice memo speed ${id === 81 ? 1 : 1.5}x`, exact: true })
+          .click();
         await expect
           .poll(() => audio.evaluate((element: HTMLAudioElement) => element.playbackRate))
-          .toBe(1.5);
+          .toBe(id === 81 ? 1.5 : 2);
         await audio.evaluate(async (element: HTMLAudioElement) => {
           await element.play();
           element.pause();
@@ -241,3 +233,176 @@ for (const device of [
     });
   });
 }
+
+test('keeps playing across chats and advances only to later unheard incoming memos', async ({
+  page,
+}) => {
+  await openReady(page, '/?chat=u%3A101');
+  await page.evaluate(() => {
+    for (const [index, id] of [81, 82, 83, 84, 85].entries()) {
+      const message = {
+        id,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: '',
+        date: Math.floor(Date.now() / 1000) + index,
+        outgoing: id === 83,
+        mediaUnread: id !== 82,
+        media: {
+          kind: 'voice' as const,
+          name: `voice-${id}.ogg`,
+          mimeType: 'audio/ogg',
+          duration: 58,
+        },
+      };
+      window.__televechaFixture!.setMessages([message]);
+      // The last memo exists on the server but has never been rendered.
+      if (id !== 85)
+        window.__televechaFixture!.emit({
+          type: 'new-message',
+          pts: 11 + index,
+          ptsCount: 1,
+          message,
+        });
+    }
+  });
+  const bubble = (id: number) => page.locator(`article[data-message-id="${id}"]`);
+  await expect(bubble(81).getByRole('button', { name: 'Play voice message' })).toBeVisible();
+  await expect(page.locator('audio[data-voice-audio]')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Voice memo player' })).toBeHidden();
+  await bubble(81).getByRole('button', { name: 'Play voice message' }).click();
+  const audio = page.locator('audio[data-voice-audio]');
+  const player = page.getByRole('region', { name: 'Voice memo player' });
+  await expect(player).toContainText('Alice Fixture');
+  await expect
+    .poll(() => audio.evaluate((element: HTMLAudioElement) => !element.paused))
+    .toBe(true);
+  await player.getByRole('button', { name: 'Voice memo speed 1x', exact: true }).click();
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Fixture Group/ })
+    .click();
+  await expect(bubble(81)).toHaveCount(0);
+  await expect(player).toBeVisible();
+  await expect
+    .poll(() => audio.evaluate((element: HTMLAudioElement) => !element.paused))
+    .toBe(true);
+  await player.getByRole('button', { name: 'Pause voice memo' }).click();
+  await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.paused)).toBe(true);
+  await player.getByRole('button', { name: 'Resume voice memo' }).click();
+  await audio.evaluate((element: HTMLAudioElement) => {
+    element.currentTime = element.duration - 0.1;
+  });
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture!.stats.readMessageContents))
+    .toEqual([
+      { peerId: 'u:101', messageIds: [81] },
+      { peerId: 'u:101', messageIds: [84] },
+    ]);
+  await expect
+    .poll(() => audio.evaluate((element: HTMLAudioElement) => element.playbackRate))
+    .toBe(1.5);
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Alice Fixture/ })
+    .click();
+  await expect(bubble(84).getByRole('button', { name: 'Pause voice message' })).toBeVisible();
+  await expect(bubble(81).getByRole('button', { name: 'Play voice message' })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('global-voice-player.png') });
+  await audio.evaluate((element: HTMLAudioElement) => {
+    element.currentTime = element.duration - 0.1;
+  });
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture!.stats.readMessageContents))
+    .toEqual([
+      { peerId: 'u:101', messageIds: [81] },
+      { peerId: 'u:101', messageIds: [84] },
+      { peerId: 'u:101', messageIds: [85] },
+    ]);
+  await player.getByRole('button', { name: 'Close voice memo player' }).click();
+  await expect(player).toBeHidden();
+  await expect
+    .poll(() =>
+      audio.evaluate((element: HTMLAudioElement) => element.paused && !element.getAttribute('src')),
+    )
+    .toBe(true);
+  await expect(bubble(84).getByRole('button', { name: 'Play voice message' })).toBeVisible();
+});
+
+test('restores listened appearance after reload and aligns duration with message time', async ({
+  page,
+}) => {
+  await page.goto('/?scenario=held-connect&chat=u%3A101');
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture?.stats.connect ?? 0))
+    .toBeGreaterThan(0);
+  await page.evaluate(() => window.__televechaFixture!.releaseConnect());
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__televechaRuntimes?.get('fixture:held-connect')?.engine.snapshot().online,
+      ),
+    )
+    .toBe(true);
+  await page.evaluate(() => {
+    for (const id of [81, 82])
+      window.__televechaFixture!.emit({
+        type: 'new-message',
+        pts: id - 70,
+        ptsCount: 1,
+        message: {
+          id,
+          peerId: 'u:101',
+          senderId: 'u:101',
+          text: '',
+          date: Math.floor(Date.now() / 1000) + id,
+          outgoing: false,
+          mediaUnread: true,
+          media: { kind: 'voice', name: `voice-${id}.ogg`, mimeType: 'audio/ogg', duration: 58 },
+        },
+      });
+  });
+  const memo = (id: number) => page.locator(`article[data-message-id="${id}"]`);
+  await expect(memo(81).getByLabel('Unheard voice message')).toBeVisible();
+  await memo(81).getByRole('button', { name: 'Play voice message' }).click();
+  await expect(memo(81).getByLabel('Unheard voice message')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close voice memo player' }).click();
+  await page.reload();
+  await expect(memo(81).locator('.voice-player')).toBeVisible();
+  await expect(memo(81).getByLabel('Unheard voice message')).toHaveCount(0);
+  await expect(memo(82).getByLabel('Unheard voice message')).toBeVisible();
+  await expect(memo(81).locator('.voice-waveform-played')).toHaveCSS(
+    'clip-path',
+    'inset(0px 0% 0px 0px)',
+  );
+  await expect(memo(82).locator('.voice-waveform-played')).toHaveCSS(
+    'clip-path',
+    'inset(0px 100% 0px 0px)',
+  );
+  const layout = await memo(81).evaluate((element) => {
+    const bubble = element.getBoundingClientRect();
+    const button = element.querySelector('.voice-play')!.getBoundingClientRect();
+    const waveform = element.querySelector('.voice-seek svg')!.getBoundingClientRect();
+    const duration = element.querySelector('.voice-duration')!.getBoundingClientRect();
+    const time = element.querySelector('footer')!.getBoundingClientRect();
+    return {
+      waveformHeight: waveform.height,
+      buttonAlignment: Math.abs(
+        (button.top + button.bottom) / 2 - (bubble.top + bubble.bottom) / 2,
+      ),
+      waveformTimeGap: duration.top - waveform.bottom,
+      bottomInset: bubble.bottom - time.bottom,
+      waveformAboveButton: (button.top + button.bottom) / 2 - (waveform.top + waveform.bottom) / 2,
+      alignment: Math.abs((duration.top + duration.bottom) / 2 - (time.top + time.bottom) / 2),
+      height: element.getBoundingClientRect().height,
+    };
+  });
+  expect(layout.waveformHeight).toBe(32);
+  expect(layout.buttonAlignment).toBeLessThan(1);
+  expect(layout.waveformTimeGap).toBeGreaterThanOrEqual(0);
+  expect(layout.bottomInset).toBeLessThan(7);
+  expect(layout.waveformAboveButton).toBeGreaterThan(0);
+  expect(layout.alignment).toBeLessThan(3);
+  expect(layout.height).toBeLessThan(100);
+  await page.screenshot({ path: test.info().outputPath('voice-listened-reload.png') });
+});

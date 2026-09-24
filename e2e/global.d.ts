@@ -80,6 +80,7 @@ interface Window {
       setTyping: number;
     };
     emit(update: import('../src/telegram/types').TransportUpdate): void;
+    setMessages(values: import('../src/telegram/types').TelegramMessage[]): void;
     releaseConnect(): void;
     releaseSend(): void;
     releaseUpload(): void;

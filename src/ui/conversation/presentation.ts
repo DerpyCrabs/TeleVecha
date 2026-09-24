@@ -179,6 +179,7 @@ export function presentMessage(
     service: message.service,
     botKeyboard: message.botKeyboard,
     media: message.media,
+    mediaUnread: message.mediaUnread,
     reactions: message.reactions,
     mentions: message.mentions,
     links: message.links,

@@ -1,3 +1,4 @@
+import { GlobalVoicePlayer } from '../media/GlobalVoicePlayer';
 import { CommentsPanel } from '../conversation/CommentsPanel';
 import { list as renderList } from 'effectweb';
 import { fromPromise } from 'effectweb/load';
@@ -298,6 +299,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
           use={model.dom.conversationPaneElement}
           class="conversation-pane relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-chat"
         >
+          <GlobalVoicePlayer player={model.voicePlayback} />
           <header
             class="chat-header flex h-16 shrink-0 items-center justify-between border-b border-line bg-panel px-4"
             data-testid="conversation-header"
@@ -830,6 +832,8 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                             ? ((media) => (
                                 <>
                                   <MediaAttachment
+                                    voiceControl={model.voiceControlFor(message.id)}
+                                    mediaUnread={message.mediaUnread}
                                     media={media}
                                     uploadProgress={message.uploadProgress}
                                     uploadFailed={message.status === 'failed'}
@@ -1317,6 +1321,9 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
 
         {model.comments ? (
           <CommentsPanel
+            voiceControl={(message) =>
+              model.voiceControlForMessage(message, model.comments!.messages)
+            }
             state={model.comments}
             close={model.closeComments}
             loadOlder={model.loadOlderComments}

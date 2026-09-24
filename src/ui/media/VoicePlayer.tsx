@@ -6,9 +6,12 @@ import Download from '@effectweb/lucide/icons/download';
 import RotateCcw from '@effectweb/lucide/icons/rotate-ccw';
 import LoaderCircle from '@effectweb/lucide/icons/loader-circle';
 import { formatMediaDuration } from './mediaPresentation';
+import type { VoiceControl } from './voicePlayback';
 import { voiceWaveformBars } from './voiceWaveform';
 
 interface VoicePlayerProps {
+  control?: VoiceControl | undefined;
+  mediaUnread?: boolean | undefined;
   source: string;
   duration?: number | undefined;
   waveform?: readonly number[] | undefined;
@@ -37,6 +40,20 @@ const initialPlayback = (): PlaybackState => ({
   rate: 1,
   error: false,
 });
+function acquireShared(
+  _element: HTMLElement,
+  input: () => { send: Send<VoiceMessage>; control: VoiceControl },
+) {
+  return input().control.player.subscribe(() => {
+    const control = input().control;
+    const state = control.player.snapshot();
+    input().send({
+      type: 'Playback',
+      state: state.track?.key === control.key ? state : { ...initialPlayback(), rate: state.rate },
+    });
+  });
+}
+
 type AudioInput = {
   send: Send<VoiceMessage>;
   onPlaybackStarted: VoicePlayerProps['onPlaybackStarted'];
@@ -104,7 +121,11 @@ function playerAudio(element: HTMLElement) {
 export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>({
   init: (props) => ({ props, ...initialPlayback() }),
   receive: (model, props) => ({
-    model: { ...model, ...(props.source !== model.props.source ? initialPlayback() : {}), props },
+    model: {
+      ...model,
+      ...(!props.control && props.source !== model.props.source ? initialPlayback() : {}),
+      props,
+    },
   }),
   update: (model, message) => ({
     model:
@@ -118,13 +139,24 @@ export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>
     const position = Math.min(duration, Math.max(0, model.position));
     const elapsed = formatMediaDuration(Math.floor(position));
     const total = formatMediaDuration(duration);
-    const busy = props.loading || model.waiting;
-    const failed = Boolean(props.error) || model.error;
+    const active = props.control
+      ? props.control.player.snapshot().track?.key === props.control.key
+      : model.playing || model.waiting || position > 0;
+    const progress =
+      !active && props.mediaUnread === false ? 100 : duration > 0 ? (position / duration) * 100 : 0;
+    const busy = (!props.control && props.loading) || model.waiting;
+    const failed = (!props.control && Boolean(props.error)) || model.error;
     const bars = voiceWaveformBars(props.waveform);
     const waveform = bars
-      .map((height, index) => `M${index * 5 + 2.5} ${(32 - height) / 2}v${height}`)
+      .map((height, index) => `M${index * 5 + 2.5} ${29 - height}v${height}`)
       .join(' ');
     const toggle = (element: HTMLElement) => {
+      if (props.control) {
+        if (props.control.player.snapshot().track?.key === props.control.key)
+          props.control.player.toggle();
+        else props.control.start();
+        return;
+      }
       const audio = playerAudio(element);
       if (!props.source) {
         props.load();
@@ -142,19 +174,27 @@ export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>
       });
     };
     return (
-      <div class="voice-player" classList={{ 'voice-playing': model.playing }}>
-        <audio
-          use={domBinding({ send, onPlaybackStarted: props.onPlaybackStarted }, acquireAudio)}
-          src={props.source || undefined}
-          preload="metadata"
-          data-voice-audio
-          hidden
-          aria-hidden="true"
-        />
+      <div
+        class="voice-player"
+        data-media-unread={props.mediaUnread}
+        classList={{ 'voice-playing': model.playing }}
+      >
+        {props.control ? (
+          <span hidden use={domBinding({ send, control: props.control }, acquireShared)} />
+        ) : (
+          <audio
+            use={domBinding({ send, onPlaybackStarted: props.onPlaybackStarted }, acquireAudio)}
+            src={props.source || undefined}
+            preload="metadata"
+            data-voice-audio
+            hidden
+            aria-hidden="true"
+          />
+        )}
         <button
           type="button"
           class="voice-play"
-          disabled={props.loading}
+          disabled={!props.control && props.loading}
           aria-label={
             failed
               ? 'Retry voice message'
@@ -169,15 +209,15 @@ export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>
           }}
         >
           {busy ? (
-            <LoaderCircle class="animate-spin" size={21} />
+            <LoaderCircle class="animate-spin" size={18} />
           ) : failed ? (
-            <RotateCcw size={20} />
+            <RotateCcw size={18} />
           ) : model.playing ? (
-            <Pause size={21} fill="currentColor" strokeWidth={0} />
-          ) : props.source ? (
-            <Play size={21} fill="currentColor" strokeWidth={0} />
+            <Pause size={18} fill="currentColor" strokeWidth={0} />
+          ) : props.source || props.control ? (
+            <Play size={18} fill="currentColor" strokeWidth={0} />
           ) : (
-            <Download size={21} />
+            <Download size={18} />
           )}
         </button>
         <div class="voice-track">
@@ -187,9 +227,7 @@ export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>
               <path
                 class="voice-waveform-played"
                 d={waveform}
-                style={{
-                  'clip-path': `inset(0 ${duration > 0 ? 100 - (position / duration) * 100 : 100}% 0 0)`,
-                }}
+                style={{ 'clip-path': `inset(0 ${duration > 0 ? 100 - progress : 100}% 0 0)` }}
               />
             </svg>
             <input
@@ -203,6 +241,10 @@ export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>
               aria-valuetext={`${elapsed} of ${total}`}
               onClick={(event) => event.stopPropagation()}
               onInput={(event) => {
+                if (props.control) {
+                  props.control.player.seek(Number(event.currentTarget.value));
+                  return;
+                }
                 const audio = playerAudio(event.currentTarget);
                 if (audio && Number.isFinite(audio.duration))
                   audio.currentTime = Number(event.currentTarget.value);
@@ -213,25 +255,13 @@ export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>
             <span class="voice-duration">
               {failed
                 ? 'Unable to play'
-                : props.loading
-                  ? 'Loading…'
-                  : position > 0 && position < duration
-                    ? `${elapsed} / ${total}`
-                    : total || 'Voice message'}
+                : model.playing || model.waiting || (position > 0 && position < duration)
+                  ? `${elapsed} / ${total}`
+                  : total || 'Voice message'}
+              {props.mediaUnread === true ? (
+                <span class="voice-unheard-dot" aria-label="Unheard voice message" />
+              ) : null}
             </span>
-            <button
-              type="button"
-              class="voice-speed"
-              aria-label={`Playback speed ${model.rate}x`}
-              title="Change playback speed"
-              onClick={(event) => {
-                event.stopPropagation();
-                const audio = playerAudio(event.currentTarget);
-                if (audio) audio.playbackRate = model.rate === 1 ? 1.5 : model.rate === 1.5 ? 2 : 1;
-              }}
-            >
-              {model.rate}×
-            </button>
           </div>
         </div>
       </div>

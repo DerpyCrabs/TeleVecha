@@ -96,3 +96,124 @@
   background: var(--surface-hover);
   color: var(--text);
 }
+
+.global-voice-player {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 42px;
+  padding: 0 12px 2px;
+  background: var(--panel);
+}
+.global-voice-player[hidden] {
+  display: none;
+}
+.global-voice-toggle,
+.global-voice-close,
+.global-voice-speed {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.global-voice-toggle {
+  width: 30px;
+  color: var(--accent);
+}
+.global-voice-close {
+  width: 30px;
+  color: var(--muted);
+}
+.global-voice-speed {
+  min-width: 36px;
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.global-voice-toggle:hover,
+.global-voice-close:hover,
+.global-voice-speed:hover {
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+.global-voice-details {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  min-width: 0;
+  gap: 10px;
+}
+.global-voice-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+.global-voice-time {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.global-voice-progress {
+  position: absolute;
+  inset: auto 0 0;
+  height: 8px;
+}
+.global-voice-progress-track {
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: var(--line);
+  transition: height 120ms ease;
+}
+.global-voice-progress-track span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.global-voice-progress input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.global-voice-progress input:disabled {
+  cursor: default;
+}
+.global-voice-progress:hover .global-voice-progress-track,
+.global-voice-progress:has(input:focus-visible) .global-voice-progress-track {
+  height: 4px;
+}
+.global-voice-progress:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (max-width: 480px) {
+  .global-voice-player {
+    gap: 4px;
+    padding-inline: 8px;
+  }
+  .global-voice-details {
+    gap: 8px;
+  }
+  .global-voice-title {
+    font-size: 12px;
+  }
+  .global-voice-time {
+    font-size: 11px;
+  }
+}

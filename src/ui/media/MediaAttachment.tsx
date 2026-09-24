@@ -12,6 +12,7 @@ import type { Send, Transition } from 'effectweb/program';
 import { loadEffect } from 'effectweb/cache';
 import { MediaViewer } from './MediaViewer';
 import { TgsPlayer } from './TgsPlayer';
+import type { VoiceControl } from './voicePlayback';
 import { VoicePlayer } from './VoicePlayer';
 import { saveMediaUrl } from './mediaActions';
 import {
@@ -26,6 +27,8 @@ const commandDownload = commandSlot('download');
 const commandOpen = commandSlot('open');
 
 interface MediaAttachmentProps {
+  voiceControl?: VoiceControl | undefined;
+  mediaUnread?: boolean | undefined;
   media: NonNullable<ChatMessage['media']>;
   load: (progress?: TelegramTransferProgress) => Effect.Effect<string, unknown>;
   loadPreview?: (() => Effect.Effect<string, unknown>) | undefined;
@@ -573,6 +576,8 @@ export const MediaAttachment = component<
         ) : null}
         {isVoice ? (
           <VoicePlayer
+            control={props.voiceControl}
+            mediaUnread={props.mediaUnread}
             source={model.url}
             duration={props.media.duration}
             waveform={props.media.waveform}

@@ -1131,26 +1131,61 @@
   border-radius: 0.7rem;
   object-fit: contain;
 }
+.message[data-media-kind='voice'] {
+  padding-top: calc(0.25rem + 8px);
+  padding-bottom: 0.32rem;
+}
 .media-attachment.media-voice {
   overflow: visible;
-  margin-top: 0.15rem;
+  margin-top: 0;
 }
 .message[data-media-kind='voice'] > .message-copy:has(> .message-body:empty) footer {
   padding-top: 0;
 }
+/* Reuse the duration row for metadata when there is no caption or reaction row. */
+.message[data-media-kind='voice']
+  > .message-copy:has(> .message-body:empty):not(:has(.reaction, .message-comments)) {
+  margin-top: calc(-1rem * var(--chat-font-scale, 1));
+}
+.message[data-media-kind='voice']
+  > .message-copy:has(> .message-body:empty):not(:has(.reaction, .message-comments))
+  > footer {
+  padding-top: 0;
+  line-height: calc(1rem * var(--chat-font-scale, 1));
+}
+.message[data-media-kind='voice']:has(> .message-copy > .message-body:empty):not(
+    :has(.reaction, .message-comments)
+  )
+  .voice-details {
+  padding-right: 7rem;
+}
+.voice-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.voice-unheard-dot {
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 50%;
+  background: currentColor;
+}
 .voice-player {
   display: grid;
-  grid-template-columns: 2.75rem minmax(0, 1fr);
+  grid-template-columns: 2.25rem minmax(0, 1fr);
   align-items: center;
   gap: 0.7rem;
   width: 100%;
-  padding: 0.15rem 0 0;
+  padding: 0;
   color: var(--message-control-accent, var(--accent));
 }
 .voice-play {
+  transform: translateY(-4px);
   display: grid;
-  width: 2.75rem;
-  height: 2.75rem;
+  width: 2.25rem;
+  height: 2.25rem;
   place-items: center;
   border: 0;
   border-radius: 50%;
@@ -1166,12 +1201,14 @@
 }
 .voice-seek {
   position: relative;
-  height: 2rem;
+  display: flex;
+  align-items: center;
+  height: 2.25rem;
 }
 .voice-seek svg {
   display: block;
   width: 100%;
-  height: 100%;
+  height: 2rem;
   fill: none;
   stroke: currentColor;
   stroke-width: 2.5;
@@ -1182,9 +1219,9 @@
 }
 .voice-seek input {
   position: absolute;
-  inset: -0.375rem 0;
+  inset: 0;
   width: 100%;
-  height: 2.75rem;
+  height: 100%;
   margin: 0;
   opacity: 0;
   cursor: pointer;
@@ -1198,28 +1235,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 1.1rem;
+  min-height: calc(1rem * var(--chat-font-scale, 1));
   font-size: calc(0.72rem * var(--chat-font-scale, 1));
   line-height: 1.1;
-}
-.voice-speed {
-  position: relative;
-  border: 0;
-  border-radius: 0.25rem;
-  background: transparent;
-  padding: 0.1rem 0.25rem;
-  color: inherit;
-  font-size: inherit;
-  font-weight: 650;
-  cursor: pointer;
-}
-.voice-speed::after {
-  content: '';
-  position: absolute;
-  inset: -0.4rem -0.15rem;
-}
-.voice-speed:hover {
-  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 .media-album {
   display: flex;

@@ -1,3 +1,4 @@
+import type { VoiceControl } from '../media/voicePlayback';
 import { collection, list as renderList, view } from 'effectweb';
 import type { TelegramDiscussion, TelegramMessage } from '../../telegram/types';
 import type { MediaAssets } from '../media/mediaAssets';
@@ -26,6 +27,7 @@ export const CommentsPanel = view<
     retry: () => void;
     refresh: () => void;
     mediaAssets: MediaAssets;
+    voiceControl?: ((message: TelegramMessage) => VoiceControl | undefined) | undefined;
   },
   never
 >((props) => (
@@ -53,6 +55,8 @@ export const CommentsPanel = view<
           ) : null}
           {message.media ? (
             <MediaAttachment
+              voiceControl={props.voiceControl?.(message)}
+              mediaUnread={message.mediaUnread}
               media={message.media}
               protected={message.protected}
               load={(progress) => props.mediaAssets.loadMedia(message, progress)}

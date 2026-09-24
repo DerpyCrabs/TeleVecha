@@ -343,6 +343,7 @@ declare global {
     __televechaFixture?: {
       stats: FixtureStats;
       emit(update: TransportUpdate): void;
+      setMessages(values: TelegramMessage[]): void;
       releaseConnect(): void;
       releaseSend(): void;
       releaseUpload(): void;
@@ -2104,6 +2105,16 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
     });
     window.__televechaFixture = {
       stats,
+      setMessages: (values) => {
+        for (const value of values)
+          messages.set(
+            value.peerId,
+            [
+              ...(messages.get(value.peerId) ?? []).filter((item) => item.id !== value.id),
+              value,
+            ].sort((a, b) => a.id - b.id),
+          );
+      },
       emit: (update) => {
         Queue.offerUnsafe(controls, { _tag: 'emit', update });
       },
