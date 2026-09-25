@@ -107,6 +107,20 @@
   padding: 0 12px 2px;
   background: var(--panel);
 }
+.global-voice-player.is-closing {
+  transform: translateY(-100%);
+  opacity: 0;
+  margin-bottom: -42px;
+}
+.global-voice-player {
+  transition-property: transform, opacity, margin-bottom;
+  transition-timing-function: ease-in;
+}
+@media (prefers-reduced-motion: reduce) {
+  .global-voice-player {
+    transition: none;
+  }
+}
 .global-voice-player[hidden] {
   display: none;
 }

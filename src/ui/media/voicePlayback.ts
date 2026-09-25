@@ -1,3 +1,6 @@
+const COMPLETED_DISMISS_DELAY_MS = 5_000;
+export const VOICE_DISMISS_ANIMATION_MS = 250;
+
 export interface VoiceTrack {
   key: string;
   peerId: string;
@@ -11,6 +14,7 @@ export interface VoiceTrack {
 }
 
 export interface VoicePlaybackState {
+  closing: boolean;
   track: VoiceTrack | undefined;
   position: number;
   duration: number;
@@ -26,9 +30,12 @@ export function createVoicePlayback(createAudio = () => document.createElement('
   let audio: HTMLAudioElement | undefined;
   let queue: VoiceTrack[] = [];
   let generation = 0;
+  let dismissTimer: ReturnType<typeof setTimeout> | undefined;
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
   const heard = new Set<string>();
   const listeners = new Set<() => void>();
   let state: VoicePlaybackState = {
+    closing: false,
     track: undefined,
     position: 0,
     duration: 0,
@@ -41,6 +48,22 @@ export function createVoicePlayback(createAudio = () => document.createElement('
   const publish = (changes: Partial<VoicePlaybackState>) => {
     state = { ...state, ...changes };
     for (const listener of listeners) listener();
+  };
+  const cancelDismiss = () => {
+    clearTimeout(dismissTimer);
+    clearTimeout(closeTimer);
+    dismissTimer = undefined;
+    closeTimer = undefined;
+    if (state.closing) publish({ closing: false });
+  };
+  const scheduleDismiss = () => {
+    cancelDismiss();
+    if (!audio?.ended || state.playing) return;
+    dismissTimer = setTimeout(() => {
+      dismissTimer = undefined;
+      publish({ closing: true });
+      closeTimer = setTimeout(stop, VOICE_DISMISS_ANIMATION_MS);
+    }, COMPLETED_DISMISS_DELAY_MS);
   };
   const ensureAudio = () => {
     if (audio) return audio;
@@ -65,6 +88,7 @@ export function createVoicePlayback(createAudio = () => document.createElement('
     for (const event of ['timeupdate', 'loadedmetadata', 'durationchange', 'seeked', 'ratechange'])
       audio.addEventListener(event, () => sync());
     audio.addEventListener('playing', () => {
+      cancelDismiss();
       sync({ waiting: false, error: false });
       const track = state.track;
       if (track) {
@@ -102,12 +126,14 @@ export function createVoicePlayback(createAudio = () => document.createElement('
         if (token !== generation) return;
         publish({ waiting: false });
         if (next) await play(next);
+        else scheduleDismiss();
       };
       void advance().catch(() => publish({ waiting: false, error: true }));
     });
     return audio;
   };
   const play = async (track: VoiceTrack) => {
+    cancelDismiss();
     const token = ++generation;
     const element = ensureAudio();
     element.pause();
@@ -133,6 +159,7 @@ export function createVoicePlayback(createAudio = () => document.createElement('
     }
   };
   const stop = () => {
+    cancelDismiss();
     generation++;
     audio?.pause();
     audio?.removeAttribute('src');
@@ -167,6 +194,7 @@ export function createVoicePlayback(createAudio = () => document.createElement('
     },
     toggle() {
       if (!state.track) return;
+      cancelDismiss();
       if (state.waiting) {
         stop();
         return;
@@ -184,6 +212,7 @@ export function createVoicePlayback(createAudio = () => document.createElement('
       }
     },
     seek(position: number) {
+      cancelDismiss();
       if (audio && state.ready) audio.currentTime = Math.min(state.duration, Math.max(0, position));
     },
     speed() {

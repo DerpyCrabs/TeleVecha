@@ -327,6 +327,20 @@ test('keeps playing across chats and advances only to later unheard incoming mem
     )
     .toBe(true);
   await expect(bubble(84).getByRole('button', { name: 'Play voice message' })).toBeVisible();
+
+  await bubble(85).getByRole('button', { name: 'Play voice message' }).click();
+  await expect(player.getByRole('button', { name: 'Pause voice memo' })).toBeVisible();
+  await audio.evaluate((element: HTMLAudioElement) => {
+    element.currentTime = element.duration - 0.1;
+  });
+  await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.ended)).toBe(true);
+  await expect(player).toBeVisible();
+  await expect(player).not.toHaveClass(/is-closing/);
+  await expect(player).toHaveClass(/is-closing/, { timeout: 6_000 });
+  await expect
+    .poll(() => player.evaluate((element) => getComputedStyle(element).transform))
+    .not.toBe('none');
+  await expect(player).toBeHidden();
 });
 
 test('restores listened appearance after reload and aligns duration with message time', async ({

@@ -5,6 +5,7 @@ import Pause from '@effectweb/lucide/icons/pause';
 import X from '@effectweb/lucide/icons/x';
 import LoaderCircle from '@effectweb/lucide/icons/loader-circle';
 import type { VoicePlayback, VoicePlaybackState } from './voicePlayback';
+import { VOICE_DISMISS_ANIMATION_MS } from './voicePlayback';
 import { formatMediaDuration } from './mediaPresentation';
 
 interface Props {
@@ -31,6 +32,8 @@ export const GlobalVoicePlayer = component<Props, Model, VoicePlaybackState>({
       <div
         use={domBinding({ player, send }, acquire)}
         class="global-voice-player"
+        classList={{ 'is-closing': state.closing }}
+        style={{ transitionDuration: `${VOICE_DISMISS_ANIMATION_MS}ms` }}
         hidden={!state.track}
         role="region"
         aria-label="Voice memo player"

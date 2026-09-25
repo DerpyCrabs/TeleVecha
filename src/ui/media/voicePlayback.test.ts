@@ -157,3 +157,82 @@ describe('app voice playback', () => {
     player.dispose();
   });
 });
+
+describe('completed voice memo dismissal', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('keeps the completed memo for five seconds, then closes after the exit animation', async () => {
+    vi.useFakeTimers();
+    const { audio, player } = setup();
+    const note = track(1);
+    player.start(note, [note]);
+    await Promise.resolve();
+    audio.finish();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(player.snapshot().track).toBe(note);
+    expect(player.snapshot().closing).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(player.snapshot().closing).toBe(true);
+    expect(player.snapshot().track).toBe(note);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(player.snapshot().track).toBeUndefined();
+    expect(audio.src).toBe('');
+    player.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['resume', 'seek', 'start', 'stop', 'dispose'] as const)(
+    'cancels a pending animated dismissal on %s',
+    async (action) => {
+      vi.useFakeTimers();
+      const { audio, player } = setup();
+      const note = track(1);
+      player.start(note, [note]);
+      await Promise.resolve();
+      audio.finish();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(player.snapshot().closing).toBe(true);
+      if (action === 'resume') player.toggle();
+      if (action === 'seek') player.seek(2);
+      if (action === 'start') player.start(track(2), []);
+      if (action === 'stop') player.stop();
+      if (action === 'dispose') player.dispose();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(player.snapshot().closing).toBe(false);
+      if (action === 'stop' || action === 'dispose')
+        expect(player.snapshot().track).toBeUndefined();
+      else expect(player.snapshot().track?.id).toBe(action === 'start' ? 2 : 1);
+      expect(vi.getTimerCount()).toBe(0);
+      player.dispose();
+    },
+  );
+
+  it('does not dismiss while paused or while the next memo is still being found', async () => {
+    vi.useFakeTimers();
+    const { audio, player } = setup();
+    const second = track(2);
+    let resolveNext!: (next: VoiceTrack) => void;
+    const first = track(1, {
+      next: () =>
+        new Promise((resolve) => {
+          resolveNext = resolve;
+        }),
+    });
+    player.start(first, [first]);
+    await Promise.resolve();
+    player.toggle();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(player.snapshot().track).toBe(first);
+    player.toggle();
+    audio.finish();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(player.snapshot().waiting).toBe(true);
+    expect(player.snapshot().closing).toBe(false);
+    resolveNext(second);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(player.snapshot().track).toBe(second);
+    expect(player.snapshot().playing).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    player.dispose();
+  });
+});
