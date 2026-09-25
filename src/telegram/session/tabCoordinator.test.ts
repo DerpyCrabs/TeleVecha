@@ -1,3 +1,4 @@
+import type { TelegramMessage } from '../types';
 import { BrowserCrypto } from '@effect/platform-browser';
 import { makeMessagingEngine, MessagingEngineLayer } from '../core/engine';
 import { createFixtureTelegramTransport } from '../transports/fixtureTransport';
@@ -314,6 +315,87 @@ describe('tab coordinator request and hydration regressions', () => {
               message: expect.stringContaining('closed during the command') as unknown,
             },
           });
+        }),
+      ),
+    );
+  });
+
+  it('joins an owner whose dialog and conversation contain optional rich-message fields', () => {
+    installChannel();
+    return Effect.runPromise(
+      provideCoordinator(
+        Effect.gen(function* () {
+          const coordinator = yield* makeUnavailableCoordinator();
+          yield* coordinator.start({ apiId: 1, apiHash: 'fixture' });
+          const hello = RecordingChannel.latest.hello;
+          const owner = { from: 'owner', version: hello.version };
+          yield* coordinator.receive({ ...owner, type: 'owner', at: Date.now() });
+          const message: TelegramMessage = {
+            id: 81,
+            peerId: 'u:101',
+            senderId: 'u:101',
+            text: '',
+            date: 1,
+            outgoing: false,
+            richMessage: {
+              rtl: undefined,
+              partial: false,
+              blocks: [
+                { kind: 'pre', text: { kind: 'text', text: 'hello' }, language: undefined },
+                {
+                  kind: 'list',
+                  ordered: false,
+                  items: [
+                    { text: { kind: 'text', text: 'item' }, checked: undefined, blocks: undefined },
+                  ],
+                },
+              ],
+            },
+          };
+          const snapshot = {
+            ...initialEngineSnapshot(),
+            phase: 'ready' as const,
+            online: true,
+            activePeerId: 'u:101',
+            messages: [message],
+            pinnedMessages: [message],
+            dialogs: [
+              {
+                peer: { id: 'u:101', kind: 'user' as const },
+                title: 'Alice',
+                initials: 'A',
+                color: '#123456',
+                hasAvatar: false,
+                topMessageId: 81,
+                topMessage: message,
+                unreadCount: 0,
+                readInboxMaxId: 81,
+                readOutboxMaxId: 0,
+                muted: false,
+                pinned: false,
+              },
+            ],
+          };
+          yield* coordinator.receive(
+            structuredClone({
+              ...owner,
+              type: 'state',
+              to: hello.from,
+              account: accountSnapshot(snapshot),
+              conversation: conversationViewSnapshot(snapshot),
+            }),
+          );
+          yield* Effect.yieldNow;
+          expect(coordinator.client.snapshot().phase).toBe('ready');
+          expect(coordinator.client.snapshot().dialogs[0]?.topMessage?.richMessage).toEqual(
+            message.richMessage,
+          );
+          expect(coordinator.client.snapshot().messages[0]?.richMessage).toEqual(
+            message.richMessage,
+          );
+          expect(coordinator.client.snapshot().pinnedMessages[0]?.richMessage).toEqual(
+            message.richMessage,
+          );
         }),
       ),
     );

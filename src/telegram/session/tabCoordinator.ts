@@ -515,6 +515,30 @@ const DraftDetailsSchema = Schema.Struct({
     }),
   ),
 });
+// BroadcastChannel uses structured clone, which preserves explicit undefined fields
+// in rich blocks (for example a preformatted block without a language).
+function isRichMessageValue(input: unknown, ancestors = new Set<object>()): boolean {
+  if (
+    input === undefined ||
+    input === null ||
+    typeof input === 'string' ||
+    typeof input === 'boolean'
+  )
+    return true;
+  if (typeof input === 'number') return Number.isFinite(input);
+  if (typeof input !== 'object' || ancestors.has(input)) return false;
+  const prototype: unknown = Object.getPrototypeOf(input);
+  if (!Array.isArray(input) && prototype !== Object.prototype && prototype !== null) return false;
+  ancestors.add(input);
+  const valid = Object.values(input).every((value) => isRichMessageValue(value, ancestors));
+  ancestors.delete(input);
+  return valid;
+}
+const RichMessageValueSchema = Schema.declare(
+  (input: unknown): input is unknown => isRichMessageValue(input),
+  { identifier: 'RichMessageStructuredCloneValue' },
+);
+
 const MessageSchema = Schema.Struct({
   id: Schema.Number,
   peerId: Schema.String,
@@ -548,7 +572,7 @@ const MessageSchema = Schema.Struct({
   links: Schema.optional(Schema.Array(LinkSchema)),
   linkPreview: Schema.optional(LinkPreviewSchema),
   formats: Schema.optional(Schema.Array(TextFormatSchema)),
-  richMessage: Schema.optional(Schema.Json),
+  richMessage: Schema.optional(RichMessageValueSchema),
   pinned: Schema.optional(Schema.Boolean),
 });
 const DialogSchema = Schema.Struct({
