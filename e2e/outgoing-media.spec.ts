@@ -413,3 +413,44 @@ test('does not overwrite a newer draft when a slow edit finishes', async ({ page
     .click();
   await expect(composer).toHaveValue('Newer draft while edit saves');
 });
+
+test('keeps image-only corners free of the Telegram outgoing bubble background', async ({
+  page,
+}) => {
+  await page.evaluate(() =>
+    window.__televechaFixture!.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 81,
+        peerId: 'u:101',
+        senderId: 'u:999',
+        text: '',
+        date: Math.floor(Date.now() / 1000),
+        outgoing: true,
+        media: {
+          kind: 'photo',
+          name: 'corner.jpg',
+          mimeType: 'image/jpeg',
+          width: 400,
+          height: 240,
+        },
+      },
+    }),
+  );
+  const message = page.locator('article[data-message-id="81"]');
+  await expect(message).toHaveClass(/message-media-surface/u);
+  await expect(message.locator('img')).toBeVisible();
+  await page.locator('.message-scroll-shell').evaluate((shell) => {
+    shell.setAttribute('data-chat-theme', 'telegram');
+    (shell as HTMLElement).style.setProperty('--chat-message-1', '#2dba77');
+    (shell as HTMLElement).style.setProperty('--chat-message-2', '#2dba77');
+  });
+  await expect(message).toHaveCSS('background-image', 'none');
+  await expect(message).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(page.locator('.message.outgoing:not(.message-media-surface)').first()).not.toHaveCSS(
+    'background-image',
+    'none',
+  );
+});

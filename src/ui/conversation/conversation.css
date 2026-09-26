@@ -96,7 +96,7 @@
 .message-scroll-shell[data-chat-pattern='inverted'] .chat-wallpaper::before {
   mask-image: var(--chat-wallpaper-asset, none);
 }
-.message-scroll-shell[data-chat-theme='telegram'] .message.outgoing {
+.message-scroll-shell[data-chat-theme='telegram'] .message.outgoing:not(.message-media-surface) {
   --message-foreground: var(--chat-message-text);
   background: linear-gradient(135deg, var(--chat-message-1), var(--chat-message-2));
   color: var(--chat-message-text);
