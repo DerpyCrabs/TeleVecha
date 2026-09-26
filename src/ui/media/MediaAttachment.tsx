@@ -14,6 +14,7 @@ import { MediaViewer } from './MediaViewer';
 import { TgsPlayer } from './TgsPlayer';
 import type { VoiceControl } from './voicePlayback';
 import { VoicePlayer } from './VoicePlayer';
+import { RoundVideoPlayer } from './RoundVideoPlayer';
 import { saveMediaUrl } from './mediaActions';
 import {
   describeMedia,
@@ -552,25 +553,15 @@ export const MediaAttachment = component<
           </div>
         ) : null}
         {isRoundVideo ? (
-          <div
-            class="media-visual media-round-video-visual"
-            style={{
-              'aspect-ratio':
-                props.media.width && props.media.height
-                  ? `${props.media.width} / ${props.media.height}`
-                  : undefined,
-            }}
-          >
-            <video
-              src={model.url || undefined}
-              controls
-              playsinline
-              preload="metadata"
-              aria-label={`Video message ${props.media.name}`}
-              onPlaying={() => props.onPlaybackStarted?.()}
-              hidden={!model.url}
-              onClick={(event) => event.stopPropagation()}
-            />
+          <div class="media-visual media-round-video-visual">
+            {model.url ? (
+              <RoundVideoPlayer
+                mediaUnread={props.mediaUnread}
+                source={model.url}
+                duration={props.media.duration}
+                onPlaybackStarted={props.onPlaybackStarted}
+              />
+            ) : null}
             {loadFallback('video message')}
           </div>
         ) : null}

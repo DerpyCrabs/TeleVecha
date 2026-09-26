@@ -1123,13 +1123,99 @@
   pointer-events: none;
   backdrop-filter: blur(0.25rem);
 }
-.media-round-video-visual {
-  min-height: 10rem;
-  border-radius: 0.7rem;
+.message[data-media-kind='round-video'] {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
-.media-round-video-visual video {
-  border-radius: 0.7rem;
-  object-fit: contain;
+.media-attachment.media-round-video {
+  margin-top: 0;
+  border-radius: 0;
+}
+.media-round-video-visual {
+  width: 17rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+.round-video-player {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  color: #fff;
+  background: #101419;
+}
+.round-video-player video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.round-video-progress {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.4;
+  pointer-events: none;
+}
+.round-video-progress-track {
+  stroke: rgb(255 255 255 / 0.25);
+}
+.round-video-toggle {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.round-video-play-icon {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(4px);
+  transition: opacity 150ms;
+}
+.round-video-player:not(.round-video-feedback):not(:hover)
+  .round-video-toggle:not(:focus-visible)
+  .round-video-play-icon {
+  opacity: 0;
+}
+.round-video-toggle:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -6px;
+}
+.message[data-media-kind='round-video'] > .message-copy > footer {
+  border-radius: 999px;
+  padding: 0.12rem 0.4rem;
+  background: rgb(24 28 34 / 0.78);
+  color: #f4f6f8;
+}
+.message[data-media-kind='round-video']
+  > .message-copy:has(> .message-body:empty):not(:has(.reaction, .message-comments)) {
+  position: relative;
+}
+.message[data-media-kind='round-video']
+  > .message-copy:has(> .message-body:empty):not(:has(.reaction, .message-comments))
+  > footer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  float: none;
+  margin: 0;
 }
 .message[data-media-kind='voice'] {
   padding-top: calc(0.25rem + 8px);

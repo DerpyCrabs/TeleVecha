@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import type { TransportUpdate } from '../src/telegram/types';
 import { openReady, selectAlice } from './helpers';
 
-test('renders voice notes, rectangular video messages, service events, and albums', async ({
+test('renders voice notes, circular video messages, service events, and albums', async ({
   page,
 }) => {
   await openReady(page);
@@ -136,13 +136,22 @@ test('renders voice notes, rectangular video messages, service events, and album
   await expect(voice).toHaveAttribute('data-media-kind', 'voice');
 
   const videoMessage = page.locator('article[data-message-id="82"]');
-  const video = videoMessage.locator('video[controls]');
+  const video = videoMessage.locator('video');
   await expect(video).toBeVisible();
   await expect(videoMessage).toHaveAttribute('data-media-kind', 'round-video');
-  await expect(videoMessage.locator('.media-round-video-visual')).not.toHaveCSS(
-    'border-radius',
-    '50%',
-  );
+  await expect(videoMessage.locator('.media-round-video-visual')).toHaveCSS('border-radius', '50%');
+
+  await expect(video).not.toHaveAttribute('controls');
+  await expect(videoMessage).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(videoMessage).toHaveCSS('border-top-width', '0px');
+  await videoMessage.getByRole('button', { name: 'Play video message', exact: true }).click();
+  await expect(
+    videoMessage.getByRole('button', { name: 'Pause video message', exact: true }),
+  ).toBeVisible();
+  await videoMessage.getByRole('button', { name: 'Pause video message', exact: true }).click();
+  await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true);
+  await expect(videoMessage.getByRole('slider')).toHaveCount(0);
+  await expect(videoMessage.locator('.round-video-controls')).toHaveCount(0);
 
   const videoSticker = page.locator('article[data-message-id="89"]');
   await expect(videoSticker.locator('video')).toHaveCount(1);

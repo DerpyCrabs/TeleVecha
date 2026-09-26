@@ -420,3 +420,80 @@ test('restores listened appearance after reload and aligns duration with message
   expect(layout.height).toBeLessThan(100);
   await page.screenshot({ path: test.info().outputPath('voice-listened-reload.png') });
 });
+
+test('restores watched round video ring after reload', async ({ page }) => {
+  await page.goto('/?scenario=held-connect&chat=u%3A101');
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture?.stats.connect ?? 0))
+    .toBeGreaterThan(0);
+  await page.evaluate(() => window.__televechaFixture!.releaseConnect());
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => window.__televechaRuntimes?.get('fixture:held-connect')?.engine.snapshot().online,
+      ),
+    )
+    .toBe(true);
+  await page.evaluate(() => {
+    for (const id of [81, 82])
+      window.__televechaFixture!.emit({
+        type: 'new-message',
+        pts: id - 70,
+        ptsCount: 1,
+        message: {
+          id,
+          peerId: 'u:101',
+          senderId: 'u:101',
+          text: '',
+          date: Math.floor(Date.now() / 1000) + id,
+          outgoing: false,
+          mediaUnread: true,
+          media: {
+            kind: 'round-video',
+            name: `round-${id}.mp4`,
+            mimeType: 'video/mp4',
+            duration: 8,
+            width: 240,
+            height: 240,
+          },
+        },
+      });
+  });
+  const memo = (id: number) => page.locator(`article[data-message-id="${id}"]`);
+  const ring = (id: number) => memo(id).locator('.round-video-progress circle').last();
+  await expect(memo(81).getByLabel('Unwatched video message', { exact: true })).toBeVisible();
+  await expect(ring(81)).toHaveAttribute('stroke-dashoffset', '100');
+  await memo(81).getByRole('button', { name: 'Play video message', exact: true }).click();
+  await expect(memo(81).getByLabel('Watched video message', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(memo(81).locator('.round-video-player')).toBeVisible();
+  await expect(memo(81).getByLabel('Watched video message', { exact: true })).toBeVisible();
+  await expect(ring(81)).toHaveAttribute('stroke-dashoffset', '0');
+  const alignment = await memo(81).evaluate((message) => {
+    const videoBottom = message
+      .querySelector('.media-round-video-visual')!
+      .getBoundingClientRect().bottom;
+    const footer = message.querySelector('footer')!;
+    const pillBottom = footer.getBoundingClientRect().bottom;
+    return {
+      timestampGap: Math.abs(pillBottom - videoBottom),
+      extraHeight:
+        message.getBoundingClientRect().bottom -
+        message.querySelector('.media-round-video-visual')!.getBoundingClientRect().bottom,
+    };
+  });
+  expect(alignment.timestampGap).toBeLessThan(0.5);
+  expect(alignment.extraHeight).toBeLessThan(0.5);
+
+  await expect(memo(82).getByLabel('Unwatched video message', { exact: true })).toBeVisible();
+  await expect(ring(82)).toHaveAttribute('stroke-dashoffset', '100');
+  const toggle = memo(82).locator('.round-video-toggle');
+  const icon = memo(82).locator('.round-video-play-icon');
+  await toggle.hover();
+  await expect(icon).toHaveCSS('opacity', '1');
+  await toggle.click();
+  await page.mouse.move(0, 0);
+  await expect(icon).toHaveCSS('opacity', '0');
+  await toggle.hover();
+  await expect(icon).toHaveCSS('opacity', '1');
+});
