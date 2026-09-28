@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { makeMemoryCacheStore } from '../persistence/memoryStore';
 import { createFixtureTelegramTransport } from '../transports/fixtureTransport';
-import type { TelegramTransport } from '../types';
+import type { TelegramChatAppearance, TelegramTransport, TelegramWallpaper } from '../types';
+import { createMtprotoError } from '../mtproto/errors';
 import { makeMessagingEngine, MessagingEngineLayer, type MessagingEngine } from './engine';
 
 const credentials = { apiId: 1, apiHash: 'fixture' };
@@ -34,6 +35,76 @@ afterEach(() => {
 });
 
 describe('MessagingEngine', () => {
+  it.each([
+    { themed: false, imageCached: false },
+    { themed: true, imageCached: false },
+    { themed: false, imageCached: true },
+    { themed: true, imageCached: true },
+  ])(
+    'restores wallpaper download references after reload (themed=$themed, imageCached=$imageCached)',
+    ({ themed, imageCached }) =>
+      Effect.runPromise(
+        withEngine((engine, transport, cache) =>
+          Effect.gen(function* () {
+            yield* engine.start(credentials);
+            const peer = { id: 'u:101', kind: 'user' } as const;
+            const wallpaper: TelegramWallpaper = {
+              id: 'chat-only-pattern',
+              dark: true,
+              pattern: true,
+              hasFile: true,
+              settings: { backgroundColors: ['#112233', '#445566'], blur: false, motion: false },
+            };
+            const appearance: TelegramChatAppearance = themed
+              ? {
+                  theme: {
+                    id: 'chat-theme',
+                    slug: '',
+                    title: 'Chat theme',
+                    default: false,
+                    forChat: true,
+                    settings: [
+                      {
+                        baseTheme: 'night',
+                        accentColor: '#123456',
+                        messageColors: [],
+                        messageColorsAnimated: false,
+                        wallpaper,
+                      },
+                    ],
+                  },
+                }
+              : { wallpaper };
+            // Model persisted metadata with an empty transport document map after reload.
+            yield* cache.saveMetadata(`chat-appearance:${peer.id}`, appearance);
+            const image = new Blob(['pattern'], { type: 'image/png' });
+            if (imageCached) yield* cache.saveBlob(`wallpaper:${wallpaper.id}`, image);
+            let documentAvailable = false;
+            const getAppearance = vi.spyOn(transport, 'getChatAppearance').mockImplementation(() =>
+              Effect.sync(() => {
+                documentAvailable = true;
+                return appearance;
+              }),
+            );
+            const download = vi
+              .spyOn(transport, 'downloadWallpaper')
+              .mockImplementation(() =>
+                documentAvailable
+                  ? Effect.succeed(image)
+                  : Effect.fail(createMtprotoError('protocol', 'Missing wallpaper document.')),
+              );
+            expect(yield* engine.getChatAppearance(peer)).toEqual(appearance);
+            expect(yield* engine.downloadWallpaper(wallpaper.id)).toEqual(image);
+            expect(getAppearance).toHaveBeenCalledTimes(imageCached ? 0 : 1);
+            expect(download).toHaveBeenCalledTimes(imageCached ? 0 : 1);
+            expect(yield* cache.loadBlob(`wallpaper:${wallpaper.id}`)).toEqual(image);
+            yield* engine.getChatAppearance(peer);
+            expect(getAppearance).toHaveBeenCalledTimes(imageCached ? 0 : 1);
+          }),
+        ),
+      ),
+  );
+
   it('removes a previously persisted channel preview when membership is corrected', () =>
     Effect.runPromise(
       withEngine((engine, _transport, cache) =>
