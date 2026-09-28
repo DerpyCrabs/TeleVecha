@@ -19,6 +19,7 @@ import {
   rememberAssetUrl,
 } from './assetUrls';
 import type { UiSharedEffectRunner } from '../app/appRuntime';
+import { createMediaStreaming } from './mediaStreaming';
 
 const MAX_AVATAR_URLS = 256;
 
@@ -26,6 +27,7 @@ export interface MediaAsset {
   readonly revision: string;
   cached(): string | undefined;
   load(progress?: TelegramTransferProgress): Effect.Effect<string, MessagingError>;
+  play?(): Effect.Effect<string, MessagingError>;
 }
 
 type MediaSource = Pick<
@@ -46,6 +48,7 @@ export function createMediaAssets(
   const customEmojiAssets = new Map<string, { url: string; mimeType: string }>();
   const avatarUrls = new Map<string, string>();
   const activeLoadKeys = new Set<string>();
+  const streaming = createMediaStreaming();
 
   const loadPeerAvatar = (
     peer: TelegramPeer,
@@ -116,10 +119,36 @@ export function createMediaAssets(
     };
   };
 
-  const message = (value: TelegramMessage) =>
-    asset(engine.mediaAssetKey(value), (progress) =>
+  const message = (value: TelegramMessage): MediaAsset => {
+    const original = asset(engine.mediaAssetKey(value), (progress) =>
       progress ? engine.downloadMedia(value, { progress }) : engine.downloadMedia(value),
     );
+    const media = value.media ?? value.linkPreview?.media;
+    return {
+      ...original,
+      play: () =>
+        Effect.gen(function* () {
+          const cached = original.cached();
+          if (cached) return cached;
+          if (media?.mimeType.startsWith('video/') && media.size) {
+            const url = yield* Effect.promise(() =>
+              streaming.url(original.revision, media.size!, media.mimeType, (start, end) => {
+                const key = `media:range:${original.revision}:${start}-${end}`;
+                activeLoadKeys.add(key);
+                return runSharedEffect(
+                  key,
+                  engine
+                    .downloadMedia(value, { range: { start, end } })
+                    .pipe(Effect.ensuring(Effect.sync(() => activeLoadKeys.delete(key)))),
+                );
+              }),
+            );
+            if (url) return url;
+          }
+          return yield* original.load();
+        }),
+    };
+  };
   const sticker = (value: TelegramSticker) =>
     asset(`sticker:${value.id}`, () => engine.downloadSticker(value));
 
@@ -176,6 +205,7 @@ export function createMediaAssets(
     sticker,
     loadMedia: (value: TelegramMessage, progress?: TelegramTransferProgress) =>
       message(value).load(progress),
+    playMedia: (value: TelegramMessage) => message(value).play!(),
     loadSticker: (value: TelegramSticker) => sticker(value).load(),
     loadCustomEmoji: (documentId: string) =>
       Effect.suspend(() => {
@@ -202,6 +232,7 @@ export function createMediaAssets(
         );
       }),
     dispose() {
+      streaming.dispose();
       for (const url of avatarUrls.values()) URL.revokeObjectURL(url);
       avatarUrls.clear();
       for (const key of activeLoadKeys) runSharedEffect.cancel(key).catch(() => undefined);

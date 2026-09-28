@@ -53,6 +53,7 @@ interface SharedMediaPanelProps {
     kind: SharedMediaKind,
     offset?: TelegramSearchPage['nextOffset'],
   ) => UiLoad<TelegramSearchPage>;
+  loadPlayback?: ((message: TelegramMessage) => Effect.Effect<string, unknown>) | undefined;
   loadMedia: (
     message: TelegramMessage,
     progress?: TelegramTransferProgress,
@@ -283,6 +284,11 @@ const SharedMediaContent = component<
                             ? ((media) => (
                                 <MediaAttachment
                                   media={media}
+                                  loadPlayback={
+                                    props.loadPlayback
+                                      ? () => props.loadPlayback!(message)
+                                      : undefined
+                                  }
                                   load={(progress) => props.loadMedia(message, progress)}
                                   loadPreview={() => props.loadMediaPreview(message)}
                                   cachedUrl={() => props.cachedMedia(message)}
@@ -491,6 +497,7 @@ export const SharedMediaPanel = component({
         initialKind={props.initialKind}
         peerId={props.peerId}
         loadItems={props.loadItems}
+        loadPlayback={props.loadPlayback}
         loadMedia={props.loadMedia}
         loadMediaPreview={props.loadMediaPreview}
         cachedMedia={props.cachedMedia}

@@ -419,6 +419,8 @@ export type TelegramTransportProgress = (progress: number) => Effect.Effect<void
 export interface TelegramDownloadOptions {
   progress?: TelegramTransferProgress | undefined;
   preview?: boolean | undefined;
+  /** Inclusive byte range of the original media, for browser playback. */
+  range?: { start: number; end: number } | undefined;
 }
 
 export type TransportUpdate =

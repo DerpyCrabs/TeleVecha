@@ -1410,6 +1410,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     const bytes = yield* (yield* getClient).downloadMedia(media, {
       workers: 1,
       ...(options?.preview ? { sizeType: 'm' } : {}),
+      ...options?.range,
       progress: options?.progress
         ? (progress) => Effect.sync(() => options.progress!(progress))
         : undefined,

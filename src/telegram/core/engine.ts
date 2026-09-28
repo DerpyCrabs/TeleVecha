@@ -2554,6 +2554,17 @@ function makeMessagingEngineModule(
     const accountId = activeAccountId;
     const assetKey = mediaAssetKey(message);
     const cacheKey = options?.preview ? `preview:${assetKey}` : assetKey;
+    const range = options?.range;
+    if (
+      range &&
+      (options?.preview ||
+        !Number.isSafeInteger(range.start) ||
+        !Number.isSafeInteger(range.end) ||
+        range.start < 0 ||
+        range.end < range.start)
+    ) {
+      return yield* Effect.fail(new Error('Invalid media byte range.'));
+    }
     const mediaSlot = `${options?.preview ? 'preview:' : ''}${message.peerId}:${message.id}`;
     const mediaVersion = resourceCache.version(mediaSlot);
     const load = () =>
@@ -2566,7 +2577,10 @@ function makeMessagingEngineModule(
         accountId,
         options,
       );
-    return yield* options?.progress ? load() : resourceCache.load(`media:${cacheKey}`, load);
+    const requestKey = range
+      ? `media:${cacheKey}:${range.start}-${range.end}`
+      : `media:${cacheKey}`;
+    return yield* options?.progress ? load() : resourceCache.load(requestKey, load);
   });
   function mediaAssetKey(message: TelegramMessage) {
     return telegramMediaAssetKey(message);
@@ -2597,7 +2611,10 @@ function makeMessagingEngineModule(
         new Error('The media request no longer belongs to the active account.'),
       );
     }
-    if (cached) return cached;
+    if (cached)
+      return options?.range
+        ? cached.slice(options.range.start, options.range.end + 1, cached.type)
+        : cached;
     return yield* Effect.gen(function* () {
       const blob = yield* runTransportWithDeadline(
         () => telegramTransport.downloadMedia(message, { ...options }),
@@ -2607,7 +2624,8 @@ function makeMessagingEngineModule(
       );
       if (
         isOperationCurrent(session, accountId) &&
-        resourceCache.version(mediaSlot) === mediaVersion
+        resourceCache.version(mediaSlot) === mediaVersion &&
+        !options?.range
       ) {
         yield* cacheStore
           .saveBlob(cacheKey, blob)
@@ -2682,7 +2700,8 @@ function makeMessagingEngineModule(
           );
           if (
             isOperationCurrent(session, accountId) &&
-            resourceCache.version(mediaSlot) === mediaVersion
+            resourceCache.version(mediaSlot) === mediaVersion &&
+            !options?.range
           ) {
             yield* cacheStore
               .saveBlob(cacheKey, blob)

@@ -32,6 +32,7 @@ interface MediaAttachmentProps {
   mediaUnread?: boolean | undefined;
   media: NonNullable<ChatMessage['media']>;
   load: (progress?: TelegramTransferProgress) => Effect.Effect<string, unknown>;
+  loadPlayback?: (() => Effect.Effect<string, unknown>) | undefined;
   loadPreview?: (() => Effect.Effect<string, unknown>) | undefined;
   cachedUrl?: (() => string | undefined) | undefined;
   cachedPreviewUrl?: (() => string | undefined) | undefined;
@@ -115,7 +116,11 @@ function transfer(
           ? Effect.succeed(cached)
           : lightweight
             ? props.loadPreview!()
-            : props.load(progress);
+            : purpose !== 'download' &&
+                props.loadPlayback &&
+                props.media.mimeType.startsWith('video/')
+              ? props.loadPlayback()
+              : props.load(progress);
       }).pipe(
         Effect.flatMap((url) => {
           const presentation = mediaPresentation(props.media);
@@ -188,22 +193,35 @@ function pause(video: HTMLVideoElement) {
 function play(video: HTMLVideoElement) {
   void video.play().catch(() => undefined);
 }
-function acquirePlayback(video: HTMLVideoElement, input: () => boolean) {
-  let playing = input();
-  if (playing) play(video);
-  else pause(video);
+function acquirePlayback(
+  video: HTMLVideoElement,
+  input: () => { playing: boolean; source: string },
+) {
+  let current = input();
+  const sync = () => {
+    if (current.playing) {
+      if (current.source) play(video);
+    } else pause(video);
+  };
+  video.addEventListener('loadedmetadata', sync);
+  sync();
   return {
     update() {
       const next = input();
-      if (next === playing) return;
-      playing = next;
-      if (playing) play(video);
-      else pause(video);
+      if (next.playing === current.playing && next.source === current.source) return;
+      current = next;
+      sync();
     },
-    dispose: () => pause(video),
+    dispose: () => {
+      video.removeEventListener('loadedmetadata', sync);
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    },
   };
 }
-const playbackMount = (playing: boolean) => domBinding(playing, acquirePlayback);
+const playbackMount = (playing: boolean, source: string) =>
+  domBinding({ playing, source }, acquirePlayback);
 export const MediaAttachment = component<
   MediaAttachmentProps,
   MediaAttachmentModel,
@@ -390,7 +408,7 @@ export const MediaAttachment = component<
     const displayUrl = model.url || (isImage ? model.previousImageUrl : '');
     const previewKind = presentation.preview;
     const previewEnabled =
-      Boolean(model.url && previewKind && !props.decorative) &&
+      Boolean((model.url || isVideo) && previewKind && !props.decorative) &&
       (!props.media.spoiler || model.spoilerRevealed);
     const openPreview = (origin?: HTMLElement) =>
       send({ type: 'Original', purpose: 'preview', origin: origin?.getBoundingClientRect() });
@@ -506,7 +524,7 @@ export const MediaAttachment = component<
                   hidden={!model.url || Boolean(model.inlineVideoUrl)}
                 />
                 <video
-                  use={playbackMount(model.inlineVideoPlaying)}
+                  use={playbackMount(model.inlineVideoPlaying, model.inlineVideoUrl)}
                   src={model.inlineVideoUrl || undefined}
                   muted
                   loop
@@ -518,6 +536,7 @@ export const MediaAttachment = component<
               </>
             ) : (
               <video
+                use={playbackMount(model.inlineVideoPlaying, model.url)}
                 src={model.url || undefined}
                 muted
                 loop
@@ -526,10 +545,6 @@ export const MediaAttachment = component<
                 aria-label={`${props.media.name}. Hover to play.`}
                 tabIndex={model.url ? 0 : -1}
                 hidden={!model.url}
-                onPointerEnter={(event) => play(event.currentTarget)}
-                onPointerLeave={(event) => pause(event.currentTarget)}
-                onFocus={(event) => play(event.currentTarget)}
-                onBlur={(event) => pause(event.currentTarget)}
               />
             )}
             {props.media.kind === 'video' && !model.inlineVideoPlaying ? (

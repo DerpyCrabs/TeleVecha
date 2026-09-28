@@ -37,7 +37,7 @@ import type {
   TelegramResourceInvalidation,
 } from '../types';
 
-const PROTOCOL_VERSION = 8;
+const PROTOCOL_VERSION = 9;
 const OWNER_HEARTBEAT_MS = 2_000;
 const OWNER_TIMEOUT_MS = 7_000;
 const REQUEST_RETRY_MS = 2_000;
@@ -1006,7 +1006,10 @@ function errorMessage(error: unknown) {
         Effect.gen(function* () {
           const key = `${options?.preview ? 'preview:' : ''}${mediaAssetKey(message)}`;
           const cached = yield* coordinatorOptions.loadBlob(key);
-          if (cached) return cached;
+          if (cached)
+            return options?.range
+              ? cached.slice(options.range.start, options.range.end + 1, cached.type)
+              : cached;
           // Progress callbacks cannot cross BroadcastChannel. Keep them local when
           // this tab is the owner, but still use the normal readiness gate.
           if (options?.progress && activeOwner) {
@@ -1014,9 +1017,11 @@ function errorMessage(error: unknown) {
           }
           const downloaded = yield* invokeCoalesced('downloadMedia', [
             message,
-            options?.preview ? { preview: true } : undefined,
+            options ? { preview: options.preview, range: options.range } : undefined,
           ]);
           if (downloaded instanceof Blob) return downloaded;
+          if (options?.range)
+            return yield* Effect.fail(new Error('The media range was not returned.'));
           const blob = yield* coordinatorOptions.loadBlob(key);
           if (!blob)
             return yield* Effect.fail(

@@ -49,6 +49,26 @@ function acquireOrigin(element: HTMLImageElement, input: () => DOMRect | undefin
   };
 }
 const originMount = (origin: DOMRect | undefined) => domBinding(origin, acquireOrigin);
+function acquirePlayback(video: HTMLVideoElement, input: () => string) {
+  let source = input();
+  const start = () => {
+    video.play().catch(() => undefined);
+  };
+  start();
+  return {
+    update() {
+      const next = input();
+      if (next === source) return;
+      source = next;
+      start();
+    },
+    dispose() {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    },
+  };
+}
 export interface MediaViewerProps {
   kind: 'image' | 'video';
   name: string;
@@ -296,10 +316,12 @@ export const MediaViewer = component<MediaViewerProps, MediaViewerModel, MediaVi
               />
             ) : (
               <video
+                use={domBinding(props.url, acquirePlayback)}
                 src={props.url}
+                autoplay
                 controls
                 playsinline
-                preload="metadata"
+                preload="auto"
                 aria-label={props.name}
                 onContextMenu={openContextMenu}
               />

@@ -814,6 +814,12 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   ? asset.load()
                                   : Effect.fail(new Error('Album preview is unavailable.'));
                               }}
+                              loadPlayback={(albumMessage) => {
+                                const asset = mediaAssetFor(albumMessage.id);
+                                return asset
+                                  ? (asset.play?.() ?? asset.load())
+                                  : Effect.fail(new Error('Album media is unavailable.'));
+                              }}
                               load={(albumMessage, progress) => {
                                 const asset = mediaAssetFor(albumMessage.id);
                                 return asset
@@ -868,6 +874,12 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                           }
                                         : undefined
                                     }
+                                    loadPlayback={() => {
+                                      const asset = mediaAssetFor(message.id);
+                                      return asset
+                                        ? (asset.play?.() ?? asset.load())
+                                        : Effect.fail(new Error('Attachment data is unavailable.'));
+                                    }}
                                     load={(progress) => {
                                       const asset = mediaAssetFor(message.id);
                                       return asset
@@ -1401,6 +1413,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                 peerId={activeChatId}
                 initialKind={kind}
                 loadItems={(selected, offset) => activeConversation!.sharedMedia(selected, offset)}
+                loadPlayback={(message) => mediaAssets.playMedia(message)}
                 loadMedia={(message, progress) => mediaAssets.loadMedia(message, progress)}
                 loadMediaPreview={(message) => mediaAssets.messagePreview(message).load()}
                 cachedMedia={(message) => mediaAssets.message(message).cached()}

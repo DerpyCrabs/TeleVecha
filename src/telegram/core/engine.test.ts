@@ -35,6 +35,51 @@ afterEach(() => {
 });
 
 describe('MessagingEngine', () => {
+  it('downloads independent video ranges without caching a partial file as the original', () =>
+    Effect.runPromise(
+      withEngine((engine, transport, cache) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          const message = {
+            id: 700,
+            peerId: 'u:101',
+            senderId: 'u:101',
+            date: 1,
+            text: '',
+            outgoing: false,
+          };
+          const original = new Blob(['0123456789'], { type: 'video/mp4' });
+          const download = vi
+            .spyOn(transport, 'downloadMedia')
+            .mockImplementation((_message, options) =>
+              Effect.succeed(
+                options?.range
+                  ? original.slice(options.range.start, options.range.end + 1, original.type)
+                  : original,
+              ),
+            );
+          const ranges = yield* Effect.all(
+            [
+              engine.downloadMedia(message, { range: { start: 0, end: 2 } }),
+              engine.downloadMedia(message, { range: { start: 7, end: 9 } }),
+            ],
+            { concurrency: 'unbounded' },
+          );
+          expect(
+            yield* Effect.promise(() => Promise.all(ranges.map((blob) => blob.text()))),
+          ).toEqual(['012', '789']);
+          expect(download).toHaveBeenCalledTimes(2);
+          expect(yield* cache.loadBlob(engine.mediaAssetKey(message))).toBeUndefined();
+          expect(yield* engine.downloadMedia(message)).toEqual(original);
+          expect(yield* cache.loadBlob(engine.mediaAssetKey(message))).toEqual(original);
+          const cachedRange = yield* engine.downloadMedia(message, { range: { start: 3, end: 6 } });
+          expect(yield* Effect.promise(() => cachedRange.text())).toBe('3456');
+          expect(cachedRange.type).toBe('video/mp4');
+          expect(download).toHaveBeenCalledTimes(3);
+        }),
+      ),
+    ));
+
   it.each([
     { themed: false, imageCached: false },
     { themed: true, imageCached: false },

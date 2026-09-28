@@ -152,7 +152,11 @@ test('unrelated video props preserve playback and stopping hover pauses once', a
     await new Promise(requestAnimationFrame);
     const visual = document.querySelector('.media-visual')!;
     visual.dispatchEvent(new PointerEvent('pointerenter'));
-    await new Promise(requestAnimationFrame);
+    // Playback now waits for the asynchronous source, rather than calling play()
+    // on an empty video element and losing the hover request.
+    for (let index = 0; index < 300 && plays === 0; index++) {
+      await new Promise(requestAnimationFrame);
+    }
     const before = { plays, pauses };
     for (let index = 0; index < 5; index++) {
       fixture.patch({ compact: index % 2 === 0 });

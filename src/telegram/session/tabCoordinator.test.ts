@@ -140,6 +140,55 @@ const installChannel = (owner: boolean = false) => {
 };
 
 describe('tab coordinator request and hydration regressions', () => {
+  it('preserves byte ranges when forwarding media requests to the owner', () => {
+    installChannel(true);
+    return Effect.runPromise(
+      provideCoordinator(
+        Effect.gen(function* () {
+          const transport = yield* createFixtureTelegramTransport();
+          const store = makeMemoryCacheStore();
+          const download = vi
+            .spyOn(transport, 'downloadMedia')
+            .mockImplementation((_message, options) =>
+              Effect.succeed(new Blob([`${options?.range?.start}-${options?.range?.end}`])),
+            );
+          const engine = yield* makeMessagingEngine(transport, store, { manageTabLease: false });
+          const coordinator = yield* makeTabCoordinator({
+            key: 'video-range',
+            loadBlob: (key) => store.loadBlob(key),
+            createOwner: () => Effect.succeed({ engine }),
+          });
+          yield* coordinator.start({ apiId: 1, apiHash: 'fixture' });
+          const message = {
+            id: 700,
+            peerId: 'u:101',
+            senderId: 'u:101',
+            date: 1,
+            text: '',
+            outgoing: false,
+          };
+          const blob = yield* coordinator.client.downloadMedia(message, {
+            range: { start: 123, end: 456 },
+          });
+          expect(yield* Effect.promise(() => blob.text())).toBe('123-456');
+          expect(download).toHaveBeenCalledWith(
+            message,
+            expect.objectContaining({ range: { start: 123, end: 456 } }),
+          );
+          yield* store.saveBlob(
+            engine.mediaAssetKey(message),
+            new Blob(['0123456789'], { type: 'video/mp4' }),
+          );
+          const cached = yield* coordinator.client.downloadMedia(message, {
+            range: { start: 2, end: 4 },
+          });
+          expect(yield* Effect.promise(() => cached.text())).toBe('234');
+          expect(download).toHaveBeenCalledTimes(1);
+        }),
+      ).pipe(Effect.provide(MessagingEngineLayer), Effect.provide(BrowserCrypto.layer)),
+    );
+  });
+
   it('keeps a confirmed send visible in the selected conversation', () => {
     installChannel(true);
     return Effect.runPromise(

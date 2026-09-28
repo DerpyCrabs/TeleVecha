@@ -59,6 +59,7 @@ export const CommentsPanel = view<
               mediaUnread={message.mediaUnread}
               media={message.media}
               protected={message.protected}
+              loadPlayback={() => props.mediaAssets.playMedia(message)}
               load={(progress) => props.mediaAssets.loadMedia(message, progress)}
               loadPreview={() => props.mediaAssets.messagePreview(message).load()}
             />

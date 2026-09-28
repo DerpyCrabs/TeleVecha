@@ -18,6 +18,7 @@ interface MessageAlbumProps {
     message: ChatMessage,
     progress?: TelegramTransferProgress,
   ) => Effect.Effect<string, unknown>;
+  loadPlayback?: ((message: ChatMessage) => Effect.Effect<string, unknown>) | undefined;
   loadPreview?: ((message: ChatMessage) => Effect.Effect<string, unknown>) | undefined;
   cachedUrl: (message: ChatMessage) => string | undefined;
   cachedPreviewUrl?: ((message: ChatMessage) => string | undefined) | undefined;
@@ -81,7 +82,10 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
               () =>
                 cachedLoad(
                   () => model.props.cachedUrl(selected),
-                  () => model.props.load(selected),
+                  () =>
+                    media.kind !== 'photo' && model.props.loadPlayback
+                      ? model.props.loadPlayback(selected)
+                      : model.props.load(selected),
                 ),
               {
                 policy: 'replace',
@@ -178,6 +182,9 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
                     uploadFailed={message.status === 'failed'}
                     cachedUrl={() => props.cachedUrl(message)}
                     cachedPreviewUrl={() => props.cachedPreviewUrl?.(message)}
+                    loadPlayback={
+                      props.loadPlayback ? () => props.loadPlayback!(message) : undefined
+                    }
                     load={(progress) => props.load(message, progress)}
                     loadPreview={
                       props.loadPreview &&
