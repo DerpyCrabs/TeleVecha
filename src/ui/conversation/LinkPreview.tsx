@@ -1,9 +1,13 @@
-import { commandSlot } from 'effectweb';
+import {
+  commandSlot,
+  available,
+  component,
+  resourceComponent,
+  view,
+  effectCommand,
+} from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
-import { available, component, resourceComponent, view } from 'effectweb';
-import { effectCommand } from 'effectweb/program';
-import { loadEffect } from 'effectweb/cache';
 import { safeExternalUrl } from '../shared/safeUrl';
 const commandMedia = commandSlot('media');
 
@@ -100,7 +104,7 @@ export const LinkPreview = resourceComponent<LinkPreviewProps, string | undefine
   request: (props) => ({
     key: [props.preview.url, props.preview.hasPhoto, Boolean(props.loadPhoto)].join(':'),
     load: () =>
-      loadEffect(
+      Effect.suspend(
         () =>
           (props.preview.hasPhoto ? props.loadPhoto?.() : undefined) ?? Effect.succeed(undefined),
       ).pipe(Effect.catch(() => Effect.succeed(undefined))),

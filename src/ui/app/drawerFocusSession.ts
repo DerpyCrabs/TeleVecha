@@ -1,14 +1,13 @@
 import { activateFocusScope } from '../shared/focusScope';
-import type { Read } from 'effectweb/session';
 
 /** Applies modal focus containment and restoration to responsive side drawers. */
 export function createDrawerFocusSession(options: {
-  root: Read<HTMLElement | undefined>;
-  conversationPane: Read<HTMLElement | undefined>;
-  mobileTrigger: Read<HTMLElement | undefined>;
-  mobileOpen: Read<boolean>;
-  detailsOpen: Read<boolean>;
-  viewportWidth: Read<number>;
+  root: () => HTMLElement | undefined;
+  conversationPane: () => HTMLElement | undefined;
+  mobileTrigger: () => HTMLElement | undefined;
+  mobileOpen: () => boolean;
+  detailsOpen: () => boolean;
+  viewportWidth: () => number;
   closeMobile: () => void;
   closeDetails: () => void;
 }) {

@@ -3,18 +3,17 @@ import type { ChatMessage } from '../../domain/models';
 import type { EffectConversation } from '../../telegram/core/conversation';
 import type { EngineSnapshot, TelegramHistoryGap } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
-import type { Read } from 'effectweb/session';
 import type { ConversationViewport } from './conversationViewport';
 interface ConversationHistoryOptions {
-  snapshot: Read<Snapshot<EngineSnapshot>>;
-  activePeerId: Read<string>;
-  conversation: Read<EffectConversation | undefined>;
+  snapshot: () => Snapshot<EngineSnapshot>;
+  activePeerId: () => string;
+  conversation: () => EffectConversation | undefined;
   runEffect: UiEffectRunner;
-  loaded: Read<boolean>;
-  openingMessage: Read<boolean>;
-  unreadAfterId: Read<number | undefined>;
-  scroller: Read<HTMLDivElement | undefined>;
-  viewport: Read<ConversationViewport>;
+  loaded: () => boolean;
+  openingMessage: () => boolean;
+  unreadAfterId: () => number | undefined;
+  scroller: () => HTMLDivElement | undefined;
+  viewport: () => ConversationViewport;
 }
 
 /** Adapts viewport pagination requests to the active conversation. */

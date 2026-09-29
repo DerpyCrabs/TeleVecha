@@ -1,5 +1,4 @@
-import { lifetime } from 'effectweb/session';
-import { program } from 'effectweb';
+import { program, lifetime } from 'effectweb';
 const WIDTH_STORAGE_KEY = 'televecha:left-sidebar-width';
 const DETAILS_STORAGE_KEY = 'televecha:details-open';
 const DEFAULT_WIDTH = 320;

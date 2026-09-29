@@ -1,7 +1,15 @@
 import { findMention, filterMentionMembers, shiftFormats } from './mentions';
+import { patchModel } from 'effectweb/advanced';
 import type { TelegramGroupMember } from '../../telegram/types';
-import { list as renderList } from 'effectweb';
-import { commandSlot } from 'effectweb';
+import {
+  list as renderList,
+  commandSlot,
+  component,
+  domBinding,
+  sequence,
+  view,
+  actionCommand,
+} from 'effectweb';
 import { Effect } from 'effect';
 import type { TelegramSticker, TelegramTextFormat } from '../../telegram/types';
 import { idRows } from '../collections';
@@ -20,8 +28,7 @@ import Strikethrough from '@effectweb/lucide/icons/strikethrough';
 import Underline from '@effectweb/lucide/icons/underline';
 import X from '@effectweb/lucide/icons/x';
 import type { Command } from 'effectweb';
-import { component, domBinding, sequence, view, actionCommand, patchModel } from 'effectweb';
-import type { Send } from 'effectweb/program';
+import type { Send } from 'effectweb';
 import type { ComposerSession } from './composerSession';
 import type { ExpressionTab } from './ExpressionPicker';
 import { ExpressionPicker } from './ExpressionPicker';

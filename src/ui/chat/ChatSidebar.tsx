@@ -1,8 +1,14 @@
-import { list as renderList } from 'effectweb';
-import { commandSlot } from 'effectweb';
+import {
+  list as renderList,
+  commandSlot,
+  effectCommand,
+  component,
+  domBinding,
+  sequence,
+  view,
+} from 'effectweb';
+import { cachedLoad } from '../shared/cachedLoad';
 import type { Snapshot } from 'effectweb';
-import { effectCommand } from 'effectweb/program';
-import { cachedLoad } from 'effectweb/load';
 import { Effect } from 'effect';
 import type { ChatSummary } from '../../domain/models';
 import type { TelegramDialog, TelegramPeerSearchResult } from '../../telegram/types';
@@ -22,9 +28,7 @@ import Settings from '@effectweb/lucide/icons/settings';
 import Trash2 from '@effectweb/lucide/icons/trash-2';
 import type { MediaAssets } from '../media/mediaAssets';
 import type { Command, CommandSlot } from 'effectweb';
-import { component, domBinding, sequence, view } from 'effectweb';
-import type { Send, Transition } from 'effectweb/program';
-import { loadEffect } from 'effectweb/cache';
+import type { Send, Transition } from 'effectweb';
 import { Avatar } from '../shared/Avatar';
 import type { ChatDirectory } from './chatDirectory';
 import { describeUnreadCount, formatUnreadCount, normalizeUnreadCount } from './unreadCount';
@@ -124,7 +128,7 @@ function refreshSidebar(
           commandPeers,
           () =>
             Effect.sleep(retry ? 0 : 250).pipe(
-              Effect.andThen(loadEffect(() => model.props.directory.search(term))),
+              Effect.andThen(Effect.suspend(() => model.props.directory.search(term))),
             ),
           {
             policy: 'replace',

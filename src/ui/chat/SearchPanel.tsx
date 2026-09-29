@@ -1,5 +1,5 @@
-import { programView } from 'effectweb';
 import { createSearchProgram, searchActions } from './searchProgram';
+import { programView } from 'effectweb/advanced';
 import { SearchView } from './SearchView';
 
 export const SearchPanel = programView({

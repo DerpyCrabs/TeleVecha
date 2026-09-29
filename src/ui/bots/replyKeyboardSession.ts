@@ -1,14 +1,12 @@
 import type { Snapshot } from 'effectweb';
+import { lifetime, program } from 'effectweb';
 import type { EngineSnapshot } from '../../telegram/types';
-import type { Read } from 'effectweb/session';
-import { lifetime } from 'effectweb/session';
-import { program } from 'effectweb';
 /** Owns reply-keyboard visibility, single-use dismissal, and forced replies. */
 export function createReplyKeyboardSession(options: {
-  snapshot: Read<Snapshot<EngineSnapshot>>;
-  activePeerId: Read<string>;
-  reply: Read<unknown>;
-  editing: Read<unknown>;
+  snapshot: () => Snapshot<EngineSnapshot>;
+  activePeerId: () => string;
+  reply: () => unknown;
+  editing: () => unknown;
   forceReply: (messageId: number, preview: string) => void;
 }) {
   const scope = lifetime();

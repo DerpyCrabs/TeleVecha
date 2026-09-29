@@ -1,10 +1,9 @@
 import { Context, Effect } from 'effect';
+import { lifetime, observeQuery, available, query } from 'effectweb';
+import type { SessionContext } from '../app/sessionContext';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type { TelegramChatAppearance, TelegramDialog, TelegramPeer } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
-import type { Read, SessionContext } from 'effectweb/session';
-import { lifetime, queryResource } from 'effectweb/session';
-import { available, query } from 'effectweb';
 import type { ThemePreferences } from './themePreferences';
 import { readableTextColor, telegramWallpaperBackground } from './themePreferences';
 import { tvbugResourceState, type TvBugChatAppearanceState } from '../../debug/tvbugUiState';
@@ -74,17 +73,20 @@ export function createChatAppearanceSession(
   options: {
     source: ChatAppearanceSource;
     runEffect: UiEffectRunner;
-    activeDialog: Read<TelegramDialog | undefined>;
-    online: Read<boolean>;
-    preferences: Read<ThemePreferences>;
+    activeDialog: () => TelegramDialog | undefined;
+    online: () => boolean;
+    preferences: () => ThemePreferences;
   },
   context: SessionContext<ChatAppearanceSource>,
 ) {
   const scope = lifetime();
-  const appearanceResource = queryResource(context, chatAppearanceQuery);
-  const assetResource = queryResource(context, wallpaperBlobQuery);
-  scope.add(appearanceResource.dispose);
-  scope.add(assetResource.dispose);
+  const appearanceResource = observeQuery(
+    scope,
+    context.cache,
+    chatAppearanceQuery,
+    context.changed,
+  );
+  const assetResource = observeQuery(scope, context.cache, wallpaperBlobQuery, context.changed);
   const chatAppearance = () => available(appearanceResource.read());
   let wasOnline = options.online();
   let wallpaperAsset = '',

@@ -1,4 +1,6 @@
 import { Context, Effect } from 'effect';
+import { lifetime, observeQuery, query, available, program, resourceError } from 'effectweb';
+import type { SessionContext } from '../app/sessionContext';
 import type { EffectConversation } from '../../telegram/core/conversation';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
@@ -9,10 +11,6 @@ import type {
 } from '../../telegram/types';
 import type { UiEffectRunner, UiTaskRunner } from '../app/appRuntime';
 import { subscribeAtUi } from '../app/appRuntime';
-import type { Read, SessionContext } from 'effectweb/session';
-import { lifetime, queryResource } from 'effectweb/session';
-import { query } from 'effectweb/query';
-import { available, program, resourceError } from 'effectweb';
 export interface ExpressionSource {
   getRecentStickers(): Effect.Effect<TelegramSticker[], MessagingError>;
   getStickerPacks(): Effect.Effect<TelegramStickerPack[], MessagingError>;
@@ -51,10 +49,10 @@ export function createExpressionSession(
     source: ExpressionSource;
     runEffect: UiEffectRunner;
     runTask: UiTaskRunner;
-    conversation: Read<EffectConversation | undefined>;
-    reply: Read<TelegramReplyTarget | undefined>;
-    canSendStickers: Read<boolean>;
-    canSendGifs: Read<boolean>;
+    conversation: () => EffectConversation | undefined;
+    reply: () => TelegramReplyTarget | undefined;
+    canSendStickers: () => boolean;
+    canSendGifs: () => boolean;
     clearReply: () => void;
   },
   context: SessionContext<ExpressionSource>,
@@ -79,15 +77,13 @@ export function createExpressionSession(
               : { ...model, gifOpen: !model.gifOpen, stickerOpen: false },
     }),
   });
-  const stickers = queryResource(context, stickerCatalog);
-  const savedGifs = queryResource(context, gifCatalog);
+  const stickers = observeQuery(scope, context.cache, stickerCatalog, context.changed);
+  const savedGifs = observeQuery(scope, context.cache, gifCatalog, context.changed);
   const refresh = () => {
     stickers.select(state.model().stickerOpen ? true : undefined);
     savedGifs.select(state.model().gifOpen ? true : undefined);
   };
   scope.add(state.subscribe(refresh));
-  scope.add(stickers.dispose);
-  scope.add(savedGifs.dispose);
   scope.add(
     subscribeAtUi(
       options.runTask,

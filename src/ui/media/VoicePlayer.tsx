@@ -1,5 +1,5 @@
 import { component, domBinding, view } from 'effectweb';
-import type { Send } from 'effectweb/program';
+import type { Send } from 'effectweb';
 import Play from '@effectweb/lucide/icons/play';
 import Pause from '@effectweb/lucide/icons/pause';
 import Download from '@effectweb/lucide/icons/download';
@@ -28,6 +28,8 @@ interface PlaybackState {
   ready: boolean;
   rate: number;
   error: boolean;
+  /** This message's track is the shared player's current track. */
+  active: boolean;
 }
 type VoiceModel = PlaybackState & { props: VoicePlayerProps };
 type VoiceMessage = { type: 'Playback'; state: PlaybackState } | { type: 'Error' };
@@ -39,19 +41,24 @@ const initialPlayback = (): PlaybackState => ({
   ready: false,
   rate: 1,
   error: false,
+  active: false,
 });
 function acquireShared(
   _element: HTMLElement,
   input: () => { send: Send<VoiceMessage>; control: VoiceControl },
 ) {
-  return input().control.player.subscribe(() => {
+  const publish = () => {
     const control = input().control;
-    const state = control.player.snapshot();
+    const state = control.service.player.snapshot();
+    const active = state.track?.key === control.key;
     input().send({
       type: 'Playback',
-      state: state.track?.key === control.key ? state : { ...initialPlayback(), rate: state.rate },
+      state: active ? { ...state, active } : { ...initialPlayback(), rate: state.rate },
     });
-  });
+  };
+  // Publish the current track on mount; rendering reads playback only from the model.
+  publish();
+  return input().control.service.player.subscribe(publish);
 }
 
 type AudioInput = {
@@ -72,6 +79,7 @@ function acquireAudio(audio: HTMLAudioElement, input: () => AudioInput) {
         ready: audio.readyState >= 1,
         rate: audio.playbackRate,
         error: Boolean(audio.error),
+        active: false,
       },
     });
   const onPlaying = () => {
@@ -139,9 +147,7 @@ export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>
     const position = Math.min(duration, Math.max(0, model.position));
     const elapsed = formatMediaDuration(Math.floor(position));
     const total = formatMediaDuration(duration);
-    const active = props.control
-      ? props.control.player.snapshot().track?.key === props.control.key
-      : model.playing || model.waiting || position > 0;
+    const active = props.control ? model.active : model.playing || model.waiting || position > 0;
     const progress =
       !active && props.mediaUnread === false ? 100 : duration > 0 ? (position / duration) * 100 : 0;
     const busy = (!props.control && props.loading) || model.waiting;
@@ -152,9 +158,9 @@ export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>
       .join(' ');
     const toggle = (element: HTMLElement) => {
       if (props.control) {
-        if (props.control.player.snapshot().track?.key === props.control.key)
-          props.control.player.toggle();
-        else props.control.start();
+        const { service, key } = props.control;
+        if (service.player.snapshot().track?.key === key) service.player.toggle();
+        else service.start(key);
         return;
       }
       const audio = playerAudio(element);
@@ -242,7 +248,7 @@ export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>
               onClick={(event) => event.stopPropagation()}
               onInput={(event) => {
                 if (props.control) {
-                  props.control.player.seek(Number(event.currentTarget.value));
+                  props.control.service.player.seek(Number(event.currentTarget.value));
                   return;
                 }
                 const audio = playerAudio(event.currentTarget);

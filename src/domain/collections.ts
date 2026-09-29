@@ -1,4 +1,4 @@
-import { collection } from 'effectweb/collection';
+import { collection } from 'effectweb';
 
 export const ids = collection<{ id: string | number }>((item) => item.id);
 export const peers = collection<{ peer: { id: string } }>((item) => item.peer.id);

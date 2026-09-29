@@ -1,19 +1,21 @@
-import { commandSlot } from 'effectweb';
-import type { Snapshot } from 'effectweb';
-import { Effect } from 'effect';
-import type { TelegramDialog, TelegramMessage, TelegramSearchPage } from '../../telegram/types';
 import {
+  commandSlot,
   available,
   collection,
-  defineActions,
-  pages,
   program,
   resourceError,
-  type ActionMessage,
+  actionCommand,
+  type Snapshot,
 } from 'effectweb';
-import type { PagesMessage, PagesModel } from 'effectweb/pages';
-import { actionCommand } from 'effectweb/program';
-import type { UiLoad } from 'effectweb/cache';
+import {
+  defineActions,
+  pages,
+  type ActionMessage,
+  type PagesMessage,
+  type PagesModel,
+} from 'effectweb/advanced';
+import { Effect } from 'effect';
+import type { TelegramDialog, TelegramMessage, TelegramSearchPage } from '../../telegram/types';
 
 const commandHost = commandSlot('host');
 
@@ -24,7 +26,7 @@ export interface SearchPanelProps {
     query: string,
     global: boolean,
     offset?: TelegramSearchPage['nextOffset'],
-  ) => UiLoad<TelegramSearchPage>;
+  ) => Effect.Effect<TelegramSearchPage, unknown>;
   openResult: (message: TelegramMessage) => void;
   close: () => void;
 }

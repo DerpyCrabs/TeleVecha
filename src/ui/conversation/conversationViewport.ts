@@ -1,8 +1,5 @@
-import { commandSlot } from 'effectweb';
+import { commandSlot, program, actionCommand } from 'effectweb';
 import { Effect } from 'effect';
-import type { Read } from 'effectweb/session';
-import { program } from 'effectweb';
-import { actionCommand } from 'effectweb/program';
 import type {
   ConversationViewportEffect,
   ConversationViewportEvent,
@@ -19,10 +16,10 @@ interface ConversationMessage {
   outgoing: boolean;
 }
 interface ConversationViewportOptions {
-  scroller: Read<HTMLDivElement | undefined>;
-  activePeerId: Read<string>;
-  messages: Read<readonly ConversationMessage[]>;
-  canLoadOlder: Read<boolean>;
+  scroller: () => HTMLDivElement | undefined;
+  activePeerId: () => string;
+  messages: () => readonly ConversationMessage[];
+  canLoadOlder: () => boolean;
   reportVisibility: () => void;
   dismissUnreadMarker: () => void;
   loadOlder: (scroller: HTMLDivElement) => Promise<void>;

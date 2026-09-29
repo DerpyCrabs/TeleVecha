@@ -57,6 +57,7 @@ export default defineConfig({
     options: { typeAware: true, typeCheck: true },
     rules: {
       'effectweb/query-key': 'error',
+      'effectweb/identity': 'warn',
       'effecttsgo/missing-effect-context': 'error',
       'effecttsgo/missing-effect-error': 'error',
       'effecttsgo/missing-layer-context': 'error',

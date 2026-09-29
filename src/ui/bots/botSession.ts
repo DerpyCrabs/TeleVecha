@@ -1,5 +1,6 @@
 import type { Snapshot } from 'effectweb';
-import { query } from 'effectweb/query';
+import { lifetime, observeQuery, query, available, program } from 'effectweb';
+import type { SessionContext } from '../app/sessionContext';
 import { Context, Effect } from 'effect';
 import type { EffectConversation } from '../../telegram/core/conversation';
 import type { MessagingError } from '../../telegram/core/messagingError';
@@ -15,9 +16,6 @@ import type {
 } from '../../telegram/types';
 import type { UiEffectRunner, UiTaskRunner } from '../app/appRuntime';
 import { subscribeAtUi } from '../app/appRuntime';
-import type { Read, SessionContext } from 'effectweb/session';
-import { lifetime, queryResource } from 'effectweb/session';
-import { available, program } from 'effectweb';
 import { safeExternalUrl } from '../shared/safeUrl';
 export interface BotCommandSource {
   getBotCommands(peer: TelegramPeer): Effect.Effect<TelegramBotCommand[], MessagingError>;
@@ -43,12 +41,12 @@ interface PendingInlineSwitch {
   owner: string;
 }
 interface BotSessionOptions {
-  conversation: Read<EffectConversation | undefined>;
+  conversation: () => EffectConversation | undefined;
   runEffect: UiEffectRunner;
   runTask: UiTaskRunner;
-  snapshot: Read<Snapshot<EngineSnapshot>>;
-  activePeerId: Read<string>;
-  activeDialog: Read<TelegramDialog | undefined>;
+  snapshot: () => Snapshot<EngineSnapshot>;
+  activePeerId: () => string;
+  activeDialog: () => TelegramDialog | undefined;
   selectChat: (peerId: string) => Promise<boolean>;
   setDraft: (value: string) => void;
   setPeerDraft: (peerId: string, value: string) => Effect.Effect<unknown, MessagingError>;
@@ -174,8 +172,7 @@ export function createBotSession(
     const opened = window.open(url, '_blank', 'noopener,noreferrer');
     if (!opened) showNotice('The browser blocked the new tab.');
   };
-  const commandsResource = queryResource(context, botCommandsQuery);
-  scope.add(commandsResource.dispose);
+  const commandsResource = observeQuery(scope, context.cache, botCommandsQuery, context.changed);
   const commands = () => available(commandsResource.read()) ?? [];
   const commandsLoading = () => commandsResource.read().waiting;
   const loadCommands = async () => {

@@ -1,9 +1,6 @@
-import { commandSlot } from 'effectweb';
-import { effectCommand } from 'effectweb/program';
+import { commandSlot, effectCommand, component, domBinding, view } from 'effectweb';
 import { Effect } from 'effect';
-import { component, domBinding, view } from 'effectweb';
-import type { Send, Transition } from 'effectweb/program';
-import { loadEffect } from 'effectweb/cache';
+import type { Send, Transition } from 'effectweb';
 const commandAvatar = commandSlot('avatar');
 
 const visibleAvatars = new Map<Element, () => void>();
@@ -61,12 +58,12 @@ function request(model: AvatarModel): Transition<AvatarModel, AvatarMessage> {
         commandAvatar,
         () =>
           Effect.gen(function* () {
-            const cached = yield* loadEffect(
+            const cached = yield* Effect.suspend(
               () => props.loadCached?.() ?? Effect.succeed(undefined),
             ).pipe(Effect.catch(() => Effect.succeed(undefined)));
             if (cached || !props.load) return cached;
             for (let attempt = 0; attempt < 3; attempt++) {
-              const source = yield* loadEffect(props.load).pipe(
+              const source = yield* Effect.suspend(props.load).pipe(
                 Effect.catch(() => Effect.succeed(undefined)),
               );
               if (source) return source;

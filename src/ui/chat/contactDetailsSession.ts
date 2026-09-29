@@ -1,4 +1,6 @@
-import { available, pages } from 'effectweb';
+import { available, lifetime } from 'effectweb';
+import { pages } from 'effectweb/advanced';
+import type { SessionContext } from '../app/sessionContext';
 import { Effect } from 'effect';
 import { permissionsForDialog } from '../../telegram/core/chatPermissions';
 import type { MessagingError } from '../../telegram/core/messagingError';
@@ -10,8 +12,6 @@ import type {
 } from '../../telegram/types';
 import type { UiEffectRunner, UiTaskRunner } from '../app/appRuntime';
 import { subscribeAtUi } from '../app/appRuntime';
-import type { Read, SessionContext } from 'effectweb/session';
-import { lifetime } from 'effectweb/session';
 interface ContactDetailsSource {
   getGroupMembers(
     peer: TelegramPeer,
@@ -36,8 +36,8 @@ export function createContactDetailsSession(
     source: ContactDetailsSource;
     runEffect: UiEffectRunner;
     runTask: UiTaskRunner;
-    dialog: Read<TelegramDialog | undefined>;
-    detailsOpen: Read<boolean>;
+    dialog: () => TelegramDialog | undefined;
+    detailsOpen: () => boolean;
   },
   context: SessionContext,
 ) {

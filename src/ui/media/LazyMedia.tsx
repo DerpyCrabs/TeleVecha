@@ -1,9 +1,7 @@
-import { commandSlot } from 'effectweb';
-import { effectCommand } from 'effectweb/program';
-import { cachedLoad } from 'effectweb/load';
-import { component, domBinding, view } from 'effectweb';
-import type { Send, Transition } from 'effectweb/program';
-import type { UiLoad } from 'effectweb/cache';
+import type { Effect } from 'effect';
+import { commandSlot, effectCommand, component, domBinding, view } from 'effectweb';
+import { cachedLoad } from '../shared/cachedLoad';
+import type { Send, Transition } from 'effectweb';
 import { TgsPlayer } from './TgsPlayer';
 import { VisibilityVideo } from './VisibilityVideo';
 const commandAsset = commandSlot('asset');
@@ -13,7 +11,7 @@ interface Props {
   mimeType: string;
   label?: string | undefined;
   placeholder: string;
-  load: () => UiLoad<string | undefined>;
+  load: () => Effect.Effect<string | undefined, unknown>;
   cachedUrl: () => string | undefined;
   eager?: boolean | undefined;
   rootSelector?: string | undefined;

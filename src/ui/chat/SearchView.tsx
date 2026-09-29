@@ -1,5 +1,5 @@
 import { list as renderList } from 'effectweb';
-import { available, inputText, submit, view } from 'effectweb';
+import { available, submit, view } from 'effectweb';
 import { Dialog } from '../shared/Dialog';
 import { panelClass, panelErrorClass, panelLoadMoreClass } from '../shared/panelStyles';
 import {
@@ -70,7 +70,7 @@ export const SearchView = view<SearchModel, SearchMessage>((model, send) => {
         <input
           class="w-full border-0 bg-transparent py-[0.7rem] text-ink outline-0"
           value={query}
-          onInput={inputText(dispatch.Query)}
+          onInput={(event) => dispatch.Query(event.currentTarget.value)}
           placeholder={global ? 'Search all Telegram messages' : 'Search this chat'}
           aria-label="Message search query"
           autofocus

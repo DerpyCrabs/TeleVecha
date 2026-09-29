@@ -5,7 +5,6 @@ import type {
   TelegramPeerSearchResult,
 } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
-import type { Read } from 'effectweb/session';
 type DirectorySource = Pick<
   EffectMessagingClient,
   | 'searchPeers'
@@ -22,7 +21,7 @@ type DirectorySource = Pick<
 export function createChatDirectory(
   source: DirectorySource,
   runEffect: UiEffectRunner,
-  dialogs: Read<readonly TelegramDialog[]>,
+  dialogs: () => readonly TelegramDialog[],
   selectPeer: (peerId: string) => Promise<boolean>,
 ) {
   let openGeneration = 0;

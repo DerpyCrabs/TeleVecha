@@ -1,8 +1,7 @@
 import { Context, Effect } from 'effect';
-import { uiRuntime } from 'effectweb';
+import { uiRuntime, makeQueryCache } from 'effectweb';
 import { expect, it, vi } from 'vitest';
 import type { TelegramResourceInvalidation } from '../../telegram/types';
-import { makeQueryCache } from 'effectweb/cache';
 import { createExpressionSession, ExpressionSource } from './expressionSession';
 
 it('shares catalog data across session recreation and invalidates the defined expression queries', () => {

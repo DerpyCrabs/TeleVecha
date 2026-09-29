@@ -1,5 +1,5 @@
 import { component, domBinding, view } from 'effectweb';
-import type { Send } from 'effectweb/program';
+import type { Send } from 'effectweb';
 import Play from '@effectweb/lucide/icons/play';
 import Pause from '@effectweb/lucide/icons/pause';
 import X from '@effectweb/lucide/icons/x';

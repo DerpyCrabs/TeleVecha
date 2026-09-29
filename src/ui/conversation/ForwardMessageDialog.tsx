@@ -1,16 +1,12 @@
-import { list as renderList } from 'effectweb';
-import { commandSlot } from 'effectweb';
+import { list as renderList, commandSlot, effectCommand, component, Portal, view } from 'effectweb';
 import type { Snapshot } from 'effectweb';
-import { effectCommand } from 'effectweb/program';
 import { Effect } from 'effect';
 import type { ChatSummary } from '../../domain/models';
 import type { TelegramPeerSearchResult } from '../../telegram/types';
 import { idRows, remotePeerRows } from '../collections';
 import Search from '@effectweb/lucide/icons/search';
 import X from '@effectweb/lucide/icons/x';
-import { component, Portal, view } from 'effectweb';
-import type { Transition } from 'effectweb/program';
-import { loadEffect } from 'effectweb/cache';
+import type { Transition } from 'effectweb';
 import { modalMount } from '../shared/modalMount';
 const commandSearch = commandSlot('search');
 
@@ -43,7 +39,8 @@ function requestSearch(
     commands: [
       effectCommand(
         commandSearch,
-        () => Effect.sleep(180).pipe(Effect.andThen(loadEffect(() => model.props.search!(term)))),
+        () =>
+          Effect.sleep(180).pipe(Effect.andThen(Effect.suspend(() => model.props.search!(term)))),
         {
           policy: 'replace',
           onSuccess: (value) => ({ type: 'RemoteResults', value }) as const,

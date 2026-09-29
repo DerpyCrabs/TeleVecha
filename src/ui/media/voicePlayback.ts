@@ -231,8 +231,13 @@ export function createVoicePlayback(createAudio = () => document.createElement('
   };
 }
 export type VoicePlayback = ReturnType<typeof createVoicePlayback>;
+/** The app's shared voice player; `start` resolves the message and its playlist by track key. */
+export interface VoiceService {
+  readonly player: VoicePlayback;
+  readonly start: (key: string) => void;
+}
+/** One voice message's handle on the shared player. */
 export interface VoiceControl {
-  player: VoicePlayback;
-  key: string;
-  start: () => void;
+  readonly service: VoiceService;
+  readonly key: string;
 }

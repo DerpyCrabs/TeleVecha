@@ -1,7 +1,18 @@
-import { list as renderList } from 'effectweb';
-import { commandSlot } from 'effectweb';
-import { cachedLoad } from 'effectweb/load';
-import { actionCommand, effectCommand } from 'effectweb/program';
+import {
+  list as renderList,
+  commandSlot,
+  actionCommand,
+  effectCommand,
+  available,
+  collection,
+  component,
+  Portal,
+  resourceError,
+  sequence,
+  view,
+} from 'effectweb';
+import { pages, type PagesMessage, type PagesModel } from 'effectweb/advanced';
+import { cachedLoad } from '../shared/cachedLoad';
 import { Effect } from 'effect';
 import type {
   SharedMediaKind,
@@ -19,20 +30,6 @@ import { MediaAttachment } from '../media/MediaAttachment';
 import { MediaViewer } from '../media/MediaViewer';
 import { saveMediaUrl } from '../media/mediaActions';
 import { mediaPresentation } from '../media/mediaPresentation';
-import {
-  available,
-  collection,
-  component,
-  pages,
-  Portal,
-  resourceError,
-  sequence,
-  view,
-  type PagesMessage,
-  type PagesModel,
-} from 'effectweb';
-import type { UiLoad } from 'effectweb/cache';
-import { loadEffect } from 'effectweb/cache';
 import { modalMount } from '../shared/modalMount';
 import {
   panelClass,
@@ -52,7 +49,7 @@ interface SharedMediaPanelProps {
   loadItems: (
     kind: SharedMediaKind,
     offset?: TelegramSearchPage['nextOffset'],
-  ) => UiLoad<TelegramSearchPage>;
+  ) => Effect.Effect<TelegramSearchPage, unknown>;
   loadPlayback?: ((message: TelegramMessage) => Effect.Effect<string, unknown>) | undefined;
   loadMedia: (
     message: TelegramMessage,
@@ -477,7 +474,7 @@ const pagination = pages<SharedMediaPanelProps, TelegramMessage, TelegramSearchP
   key: (props) => `${props.peerId}:${props.initialKind}`,
   itemKey: (message) => `${message.peerId}:${message.id}`,
   load: (props, cursor) =>
-    loadEffect(() => props.loadItems(props.initialKind, cursor)).pipe(
+    Effect.suspend(() => props.loadItems(props.initialKind, cursor)).pipe(
       Effect.map((page) => ({
         items: page.messages,
         next: page.hasMore ? page.nextOffset : undefined,

@@ -1,6 +1,12 @@
-import { list as renderList } from 'effectweb';
-import { commandSlot } from 'effectweb';
-import { effectCommand } from 'effectweb/program';
+import {
+  list as renderList,
+  commandSlot,
+  effectCommand,
+  component,
+  sequence,
+  view,
+} from 'effectweb';
+import { cachedLoad } from '../shared/cachedLoad';
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
 import type { TelegramTransferProgress } from '../../telegram/types';
@@ -8,8 +14,6 @@ import { idRows } from '../collections';
 import type { MediaPreview } from '../media/MediaAttachment';
 import { MediaAttachment } from '../media/MediaAttachment';
 import { MediaViewer } from '../media/MediaViewer';
-import { component, sequence, view } from 'effectweb';
-import { cachedLoad } from 'effectweb/load';
 const commandPreview = commandSlot('preview');
 
 interface MessageAlbumProps {

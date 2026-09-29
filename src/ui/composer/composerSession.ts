@@ -1,5 +1,5 @@
 import { shiftFormats } from './mentions';
-import { commandSlot } from 'effectweb';
+import { commandSlot, modelOwner } from 'effectweb';
 import type { Snapshot } from 'effectweb';
 import { Effect, Fiber } from 'effect';
 import type { ChatMessage } from '../../domain/models';
@@ -15,8 +15,6 @@ import type {
   TelegramTextFormat,
 } from '../../telegram/types';
 import type { UiTaskRunner } from '../app/appRuntime';
-import type { Read } from 'effectweb/session';
-import { modelOwner } from 'effectweb';
 import { stageAttachment, type StagedAttachment } from './outgoingAttachments';
 import { prepareAttachment } from './attachmentMetadata';
 import { mediaPreview } from '../conversation/presentation';
@@ -44,13 +42,13 @@ interface PendingDraftWrite {
 }
 interface ComposerSessionOptions {
   getMentionMembers?: (peer: TelegramPeer) => Effect.Effect<TelegramGroupMemberPage, unknown>;
-  conversation: Read<EffectConversation | undefined>;
+  conversation: () => EffectConversation | undefined;
   runTask: UiTaskRunner;
-  snapshot: Read<Snapshot<EngineSnapshot>>;
-  activePeerId: Read<string>;
-  activeDialog: Read<TelegramDialog | undefined>;
-  canSend: Read<boolean>;
-  canSendMedia: Read<boolean>;
+  snapshot: () => Snapshot<EngineSnapshot>;
+  activePeerId: () => string;
+  activeDialog: () => TelegramDialog | undefined;
+  canSend: () => boolean;
+  canSendMedia: () => boolean;
   beforeUiChange: () => void;
   beforeSend: () => void;
   focus: () => void;

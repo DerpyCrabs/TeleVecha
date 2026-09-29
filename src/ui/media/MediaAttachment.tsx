@@ -1,15 +1,12 @@
-import { commandSlot } from 'effectweb';
+import { commandSlot, actionCommand, component, domBinding, view } from 'effectweb';
 import { Cause, Effect, Queue, Stream } from 'effect';
-import { actionCommand } from 'effectweb/program';
 import type { ChatMessage } from '../../domain/models';
 import type { TelegramTransferProgress } from '../../telegram/types';
 import Download from '@effectweb/lucide/icons/download';
 import FileText from '@effectweb/lucide/icons/file-text';
 import LoaderCircle from '@effectweb/lucide/icons/loader-circle';
 import X from '@effectweb/lucide/icons/x';
-import { component, domBinding, view } from 'effectweb';
-import type { Send, Transition } from 'effectweb/program';
-import { loadEffect } from 'effectweb/cache';
+import type { Send, Transition } from 'effectweb';
 import { MediaViewer } from './MediaViewer';
 import { TgsPlayer } from './TgsPlayer';
 import type { VoiceControl } from './voicePlayback';
@@ -110,7 +107,7 @@ function transfer(
           progress.isCanceled = true;
         }),
       );
-      const result = yield* loadEffect(() => {
+      const result = yield* Effect.suspend(() => {
         const cached = lightweight ? props.cachedPreviewUrl?.() : props.cachedUrl?.();
         return cached
           ? Effect.succeed(cached)

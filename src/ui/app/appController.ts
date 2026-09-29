@@ -1,9 +1,10 @@
 import type { TelegramPeer, TelegramSearchOffset } from '../../telegram/types';
-import { createVoicePlayback, type VoiceTrack } from '../media/voicePlayback';
+import { projectionCache, projectionSource, sessionGroup, shareValue } from 'effectweb/advanced';
+import { lifetime, makeUiRuntime, makeProgram, domMount, makeQueryCache } from 'effectweb';
+import { createVoicePlayback, type VoiceService, type VoiceTrack } from '../media/voicePlayback';
 import { parseTelegramLink, type TelegramLinkTarget } from '../shared/telegramLink';
 import type { CommentsState } from '../conversation/CommentsPanel';
 import { Effect } from 'effect';
-import { makeUiRuntime, makeProgram, projectionSource } from 'effectweb';
 import * as Atom from 'effect/unstable/reactivity/Atom';
 import { messageTextForClipboard } from '../../domain/messageText';
 import type { ChatMessage, ChatSummary } from '../../domain/models';
@@ -46,9 +47,6 @@ import type { MediaAsset } from '../media/mediaAssets';
 import { createMediaAssets } from '../media/mediaAssets';
 import type { MediaPreview } from '../media/MediaAttachment';
 import { mediaPresentation } from '../media/mediaPresentation';
-import { domMount } from 'effectweb';
-import { makeQueryCache } from 'effectweb/cache';
-import { shareValue } from 'effectweb/share';
 import { modalVisible, subscribeModalVisibility } from '../shared/focusScope';
 import { createAppearanceSession, AppearanceSource } from '../theme/appearanceSession';
 import {
@@ -60,7 +58,6 @@ import type { AppEnvironment } from './appRuntime';
 import { subscribeAtUi } from './appRuntime';
 import { createDrawerFocusSession } from './drawerFocusSession';
 import { retainPeerValue } from './retainedPeerValues';
-import { lifetime, projectionCache, sessionGroup } from 'effectweb/session';
 import { createSidebarLayout } from './sidebarLayout';
 function whenChanged<A>(read: () => A, run: (value: A) => void) {
   let started = false,
@@ -309,6 +306,18 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   };
   const voiceTracks = (messages: readonly TelegramMessage[]) =>
     messages.filter((message) => message.media?.kind === 'voice').map(voiceTrack);
+  // Views render only a track key; the message and its playlist are resolved on start.
+  const voice: VoiceService = {
+    player: voicePlayback,
+    start: (key) => {
+      for (const messages of [engine.snapshot().messages, comments?.messages ?? []]) {
+        const source = messages.find(
+          (message) => message.media?.kind === 'voice' && `${message.peerId}:${message.id}` === key,
+        );
+        if (source) return voicePlayback.start(voiceTrack(source), voiceTracks(messages));
+      }
+    },
+  };
   let appGridElement: HTMLDivElement | undefined;
   let conversationPaneElement: HTMLElement | undefined;
   let mobileSidebarTriggerElement: HTMLButtonElement | undefined;
@@ -1928,25 +1937,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     sidebarLayout,
     mediaAssets,
     voicePlayback,
-    voiceControlForMessage: (source: TelegramMessage, messages: readonly TelegramMessage[]) =>
-      source.media?.kind === 'voice'
-        ? {
-            player: voicePlayback,
-            key: `${source.peerId}:${source.id}`,
-            start: () => voicePlayback.start(voiceTrack(source), voiceTracks(messages)),
-          }
-        : undefined,
-    voiceControlFor: (messageId: string) => {
-      const source = mediaSourceFor(messageId);
-      return source?.media?.kind === 'voice'
-        ? {
-            player: voicePlayback,
-            key: `${source.peerId}:${source.id}`,
-            start: () =>
-              voicePlayback.start(voiceTrack(source), voiceTracks(engine.snapshot().messages)),
-          }
-        : undefined;
-    },
+    voice,
     chatDirectory,
     deleteChat: chatDirectory.delete,
     setDeleteChatTarget: (

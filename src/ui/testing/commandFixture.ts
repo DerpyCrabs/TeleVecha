@@ -5,8 +5,7 @@ import type { EngineSnapshot } from '../../telegram/types';
 import { AuthOverlay } from '../app/AuthOverlay';
 import { GifPicker } from '../composer/GifPicker';
 import { MediaAttachment } from '../media/MediaAttachment';
-// oxlint-disable-next-line no-restricted-imports -- Browser fixture mounts compiled components directly to test scope disposal.
-import { Scope } from 'effectweb/dom';
+import { renderView } from 'effectweb/testing';
 
 /** Browser regression fixture for the actual authentication component and Effect command runtime. */
 export function mountAuthCommandFixture(
@@ -49,9 +48,8 @@ export function mountAuthCommandFixture(
     onCode: action,
     onPassword: action,
   };
-  const scope = new Scope<typeof props, never>(props, () => {});
-  AuthOverlay.build(scope, parent, null);
-  return { attempts: () => attempts, dispose: () => scope.dispose() };
+  const rendered = renderView(parent, AuthOverlay, props);
+  return { attempts: () => attempts, dispose: rendered.dispose };
 }
 
 export function mountMediaCommandFixture(
@@ -69,9 +67,8 @@ export function mountMediaCommandFixture(
         : Effect.die(new Error('Media defect'));
     },
   };
-  const scope = new Scope<typeof props, never>(props, () => {});
-  MediaAttachment.build(scope, parent, null);
-  return () => scope.dispose();
+  const rendered = renderView(parent, MediaAttachment, props);
+  return rendered.dispose;
 }
 
 export function mountGifRetryFixture(parent: HTMLElement) {
@@ -91,9 +88,8 @@ export function mountGifRetryFixture(parent: HTMLElement) {
         parent.dataset.gifAttempts = String(++attempts);
       }),
   };
-  const scope = new Scope<typeof props, never>(props, () => {});
-  GifPicker.build(scope, parent, null);
-  return () => scope.dispose();
+  const rendered = renderView(parent, GifPicker, props);
+  return rendered.dispose;
 }
 
 export function mountPreviewIdentityFixture(parent: HTMLElement) {

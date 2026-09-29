@@ -1,7 +1,6 @@
 import { GlobalVoicePlayer } from '../media/GlobalVoicePlayer';
 import { CommentsPanel } from '../conversation/CommentsPanel';
-import { list as renderList } from 'effectweb';
-import { fromPromise } from 'effectweb/load';
+import { list as renderList, fromPromise, collection, view } from 'effectweb';
 import { Effect } from 'effect';
 import { messageTextForClipboard } from '../../domain/messageText';
 import type { ChatMessage } from '../../domain/models';
@@ -47,7 +46,6 @@ import { MediaViewer } from '../media/MediaViewer';
 import { saveMediaUrl } from '../media/mediaActions';
 import type { MediaAsset } from '../media/mediaAssets';
 import { mediaPresentation } from '../media/mediaPresentation';
-import { collection, view } from 'effectweb';
 import { Avatar } from '../shared/Avatar';
 import { AuthOverlay } from './AuthOverlay';
 import { SettingsDialog } from './SettingsDialog';
@@ -838,7 +836,14 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                             ? ((media) => (
                                 <>
                                   <MediaAttachment
-                                    voiceControl={model.voiceControlFor(message.id)}
+                                    voiceControl={
+                                      media.kind === 'voice' && message.peerId !== undefined
+                                        ? {
+                                            service: model.voice,
+                                            key: `${message.peerId}:${message.id}`,
+                                          }
+                                        : undefined
+                                    }
                                     mediaUnread={message.mediaUnread}
                                     media={media}
                                     uploadProgress={message.uploadProgress}
@@ -1333,9 +1338,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
 
         {model.comments ? (
           <CommentsPanel
-            voiceControl={(message) =>
-              model.voiceControlForMessage(message, model.comments!.messages)
-            }
+            voice={model.voice}
             state={model.comments}
             close={model.closeComments}
             loadOlder={model.loadOlderComments}

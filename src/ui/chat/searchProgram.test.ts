@@ -1,4 +1,4 @@
-import { fromPromise } from 'effectweb/load';
+import { fromPromise } from 'effectweb';
 import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
 import type { TelegramMessage, TelegramSearchPage } from '../../telegram/types';

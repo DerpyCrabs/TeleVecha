@@ -6,7 +6,7 @@ import LoaderCircle from '@effectweb/lucide/icons/loader-circle';
 import Phone from '@effectweb/lucide/icons/phone';
 import RotateCw from '@effectweb/lucide/icons/rotate-cw';
 import ShieldCheck from '@effectweb/lucide/icons/shield-check';
-import { Portal, defineTasks, inputText, submit, view } from 'effectweb';
+import { Portal, defineTasks, submit, view } from 'effectweb';
 import { modalMount } from '../shared/modalMount';
 interface AuthOverlayProps {
   open: boolean;
@@ -85,7 +85,7 @@ const AuthForm = view<
           inputmode={form.inputmode}
           autocomplete={form.autocomplete}
           value={props.value}
-          onInput={inputText(props.change)}
+          onInput={(event) => props.change(event.currentTarget.value)}
           autofocus
           required
         />

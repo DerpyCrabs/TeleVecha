@@ -1,10 +1,8 @@
-import { list as renderList } from 'effectweb';
+import { list as renderList, localComponent, sequence, view } from 'effectweb';
 import type { Effect } from 'effect';
 import type { TelegramSticker, TelegramStickerPack } from '../../telegram/types';
 import { emojiRows } from '../collections';
 import Search from '@effectweb/lucide/icons/search';
-import { localComponent, sequence, view } from 'effectweb';
-import type { UiLoad } from 'effectweb/cache';
 import { GifPicker } from './GifPicker';
 import { StickerPicker } from './StickerPicker';
 import { emojiEntries } from './emojiData';
@@ -25,7 +23,7 @@ interface ExpressionPickerProps {
   stickerUrl: (sticker: TelegramSticker) => string | undefined;
   sendSticker: (sticker: TelegramSticker) => void;
   sendGif: (gif: TelegramSticker) => void;
-  searchGifs: (query: string) => UiLoad<TelegramSticker[]>;
+  searchGifs: (query: string) => Effect.Effect<TelegramSticker[], unknown>;
   retryGifs: () => Effect.Effect<void, unknown>;
 }
 export const ExpressionPicker = localComponent<ExpressionPickerProps, { query: string }>({

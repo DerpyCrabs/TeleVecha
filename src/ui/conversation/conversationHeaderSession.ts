@@ -1,9 +1,7 @@
 import type { Snapshot } from 'effectweb';
+import { lifetime, program } from 'effectweb';
 import type { ChatSummary } from '../../domain/models';
 import type { EngineSnapshot } from '../../telegram/types';
-import type { Read } from 'effectweb/session';
-import { lifetime } from 'effectweb/session';
-import { program } from 'effectweb';
 function lastSeenStatus(timestamp: number) {
   const seen = new Date(timestamp * 1000);
   const today = new Date();
@@ -21,10 +19,10 @@ function lastSeenStatus(timestamp: number) {
 
 /** Derives conversation-header status and owns pinned-message navigation. */
 export function createConversationHeaderSession(options: {
-  snapshot: Read<Snapshot<EngineSnapshot>>;
-  chat: Read<ChatSummary>;
-  activePeerId: Read<string>;
-  activePeerMatches: Read<boolean>;
+  snapshot: () => Snapshot<EngineSnapshot>;
+  chat: () => ChatSummary;
+  activePeerId: () => string;
+  activePeerMatches: () => boolean;
 }) {
   const scope = lifetime();
   type ConversationHeaderSessionModel = {

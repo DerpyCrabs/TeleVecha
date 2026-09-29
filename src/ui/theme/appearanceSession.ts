@@ -1,10 +1,9 @@
 import { Context, Effect } from 'effect';
+import { lifetime, observeQuery, available, program, resourceError, query } from 'effectweb';
+import type { SessionContext } from '../app/sessionContext';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type { TelegramWallpaper } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
-import type { SessionContext } from 'effectweb/session';
-import { lifetime, queryResource } from 'effectweb/session';
-import { available, program, resourceError, query } from 'effectweb';
 import { loadCustomWallpaper, saveCustomWallpaper } from './customWallpaperStore';
 import type { ThemePreferences, ThemePresetId } from './themePreferences';
 import {
@@ -78,9 +77,8 @@ export function createAppearanceSession(
       }
     },
   });
-  const catalog = queryResource(context, wallpaperCatalog);
+  const catalog = observeQuery(scope, context.cache, wallpaperCatalog, context.changed);
   const refresh = () => catalog.select(state.model().catalogRequested ? true : undefined);
-  scope.add(catalog.dispose);
   scope.add(state.subscribe(refresh));
   const telegramWallpapers = () => available(catalog.read()) ?? [];
   const catalogLoading = () => catalog.read().waiting;

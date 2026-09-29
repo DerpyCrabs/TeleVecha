@@ -1,10 +1,15 @@
-import { list as renderList } from 'effectweb';
+import {
+  list as renderList,
+  AsyncContent,
+  effectEvent,
+  resourceComponent,
+  slot,
+  view,
+} from 'effectweb';
 import type { Effect } from 'effect';
 import type { TelegramSticker } from '../../telegram/types';
 import { idRows } from '../collections';
 import { LazyMedia } from '../media/LazyMedia';
-import { AsyncContent, effectEvent, resourceComponent, slot, view } from 'effectweb';
-import type { UiLoad } from 'effectweb/cache';
 const GifOption = view<
   {
     gif: TelegramSticker;
@@ -41,7 +46,7 @@ export const GifPicker = resourceComponent<
     query: string;
     load: (gif: TelegramSticker) => Effect.Effect<string, unknown>;
     cachedUrl: (gif: TelegramSticker) => string | undefined;
-    search: (query: string) => UiLoad<TelegramSticker[]>;
+    search: (query: string) => Effect.Effect<TelegramSticker[], unknown>;
     send: (gif: TelegramSticker) => void;
     enabled: boolean;
     retry: () => Effect.Effect<void, unknown>;

@@ -1,5 +1,5 @@
-import { shareValue, type ShareFields } from 'effectweb/share';
 import { ids, peers, messages } from '../../domain/collections';
+import { shareValue, type ShareFields } from 'effectweb/advanced';
 import { Context, Effect, Fiber, FiberSet, Layer, Option, PubSub, Ref, Stream } from 'effect';
 
 import type {

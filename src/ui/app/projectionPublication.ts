@@ -1,6 +1,3 @@
-import { projectionSource } from 'effectweb';
-import { shareValue } from 'effectweb/share';
-
 /** Application projections retain structurally equal domain values. */
 export function projectionPublication<Model>(options: {
   invalidate: () => void;
@@ -10,3 +7,4 @@ export function projectionPublication<Model>(options: {
 }) {
   return projectionSource<Model>({ ...options, reconcile: shareValue });
 }
+import { projectionSource, shareValue } from 'effectweb/advanced';
