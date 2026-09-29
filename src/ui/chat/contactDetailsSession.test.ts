@@ -1,9 +1,10 @@
-import { Effect } from 'effect';
+import { Context, Effect } from 'effect';
+import { uiRuntime } from 'effectweb';
 import { expect, it, vi } from 'vitest';
-import { makeQueryCache } from 'effectweb';
 import { permissionsForDialog } from '../../telegram/core/chatPermissions';
 import type { TelegramDialog, TelegramGroupMemberPage } from '../../telegram/types';
-import { createContactDetailsSession } from './contactDetailsSession';
+import { createContactDetailsSession, GroupMemberSource } from './contactDetailsSession';
+import { makeQueryCache } from '@effectweb/query';
 
 it('clears member pages synchronously on cache reset and cancels their pending continuation', async () => {
   const dialog: TelegramDialog = {
@@ -29,18 +30,20 @@ it('clears member pages synchronously on cache reset and cancels their pending c
   };
   const cancelled = vi.fn();
   let finish!: () => void;
-  const cache = makeQueryCache();
+  const members: GroupMemberSource = {
+    getGroupMembers: (_peer, _limit, offset) =>
+      offset === 0
+        ? Effect.succeed({ members: [member], totalCount: 2, hasMore: true, nextOffset: 1 })
+        : Effect.callback<TelegramGroupMemberPage>((resume) => {
+            finish = () =>
+              resume(Effect.succeed({ members: [member], totalCount: 2, hasMore: false }));
+            return Effect.sync(cancelled);
+          }),
+  };
+  const cache = makeQueryCache(uiRuntime(Context.make(GroupMemberSource, members)));
   const session = createContactDetailsSession(
     {
       source: {
-        getGroupMembers: (_peer, _limit, offset) =>
-          offset === undefined
-            ? Effect.succeed({ members: [member], totalCount: 2, hasMore: true, nextOffset: 1 })
-            : Effect.callback<TelegramGroupMemberPage>((resume) => {
-                finish = () =>
-                  resume(Effect.succeed({ members: [member], totalCount: 2, hasMore: false }));
-                return Effect.sync(cancelled);
-              }),
         updateContact: () => Effect.void,
         deleteContact: () => Effect.void,
         subscribeResources: () => Effect.succeed(Effect.void),

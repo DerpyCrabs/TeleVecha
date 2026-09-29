@@ -1,4 +1,4 @@
-import type { QueryCache } from 'effectweb';
+import { type QueryCache } from '@effectweb/query';
 
 /** What a session needs from the app: the shared query cache and a change notification. */
 export interface SessionContext<R = never> {

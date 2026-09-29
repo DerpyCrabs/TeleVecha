@@ -1,5 +1,5 @@
 import type { Snapshot } from 'effectweb';
-import { lifetime, observeQuery, query, available, program } from 'effectweb';
+import { lifetime, available, program } from 'effectweb';
 import type { SessionContext } from '../app/sessionContext';
 import { Context, Effect } from 'effect';
 import type { EffectConversation } from '../../telegram/core/conversation';
@@ -17,6 +17,7 @@ import type {
 import type { UiEffectRunner, UiTaskRunner } from '../app/appRuntime';
 import { subscribeAtUi } from '../app/appRuntime';
 import { safeExternalUrl } from '../shared/safeUrl';
+import { observeQuery, query } from '@effectweb/query';
 export interface BotCommandSource {
   getBotCommands(peer: TelegramPeer): Effect.Effect<TelegramBotCommand[], MessagingError>;
 }

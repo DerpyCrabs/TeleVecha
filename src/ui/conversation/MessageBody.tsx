@@ -1,7 +1,8 @@
 import { list as renderList } from 'effectweb';
 import type { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
-import { component, sequence, view } from 'effectweb';
+import { component, sequence, view, type Source } from 'effectweb';
+import type * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
 import { safeExternalUrl } from '../shared/safeUrl';
 import { LinkPreview } from './LinkPreview';
 import { RichMessageBody } from './RichMessageBody';
@@ -217,7 +218,7 @@ const Part = component<{ part: TextPart }, PartModel, PartMessage>({
 export const MessageBody = view<
   {
     message: ChatMessage;
-    loadPreviewPhoto?: (() => Effect.Effect<string, unknown>) | undefined;
+    previewPhoto?: Source<AsyncResult.AsyncResult<string | undefined, never>> | undefined;
     loadPreviewMedia?: (() => Effect.Effect<string, unknown>) | undefined;
   },
   never
@@ -239,7 +240,7 @@ export const MessageBody = view<
         ? ((preview) => (
             <LinkPreview
               preview={preview}
-              loadPhoto={props.loadPreviewPhoto}
+              photo={props.previewPhoto}
               loadMedia={props.loadPreviewMedia}
             />
           ))(props.message.linkPreview!)

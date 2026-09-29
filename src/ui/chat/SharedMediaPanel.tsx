@@ -6,12 +6,18 @@ import {
   available,
   collection,
   component,
+  defineTasks,
+  observe,
   Portal,
   resourceError,
   sequence,
   view,
+  type Snapshot,
+  type Source,
 } from 'effectweb';
-import { pages, type PagesMessage, type PagesModel } from 'effectweb/advanced';
+import type { InfiniteData } from '@effectweb/query';
+import type * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
+import { pageMessages, type SearchCursor } from '../app/queries';
 import { cachedLoad } from '../shared/cachedLoad';
 import { Effect } from 'effect';
 import type {
@@ -46,10 +52,6 @@ const commandDownload = commandSlot('download');
 interface SharedMediaPanelProps {
   initialKind: SharedMediaKind;
   peerId: string;
-  loadItems: (
-    kind: SharedMediaKind,
-    offset?: TelegramSearchPage['nextOffset'],
-  ) => Effect.Effect<TelegramSearchPage, unknown>;
   loadPlayback?: ((message: TelegramMessage) => Effect.Effect<string, unknown>) | undefined;
   loadMedia: (
     message: TelegramMessage,
@@ -64,8 +66,11 @@ interface SharedMediaPanelProps {
   deleteMessage?: ((message: TelegramMessage) => void) | undefined;
   close: () => void;
 }
+export type SharedMediaResults = Source<
+  AsyncResult.AsyncResult<Snapshot<InfiniteData<TelegramSearchPage, SearchCursor>>, unknown>
+>;
 interface SharedMediaContentProps extends SharedMediaPanelProps {
-  items: TelegramMessage[];
+  items: readonly TelegramMessage[];
   loading: boolean;
   loadingMore: boolean;
   hasMore: boolean;
@@ -470,47 +475,44 @@ const SharedMediaContent = component<
     );
   }),
 });
-const pagination = pages<SharedMediaPanelProps, TelegramMessage, TelegramSearchPage['nextOffset']>({
-  key: (props) => `${props.peerId}:${props.initialKind}`,
-  itemKey: (message) => `${message.peerId}:${message.id}`,
-  load: (props, cursor) =>
-    Effect.suspend(() => props.loadItems(props.initialKind, cursor)).pipe(
-      Effect.map((page) => ({
-        items: page.messages,
-        next: page.hasMore ? page.nextOffset : undefined,
-      })),
-    ),
-});
-export const SharedMediaPanel = component({
-  ...pagination,
-  view: view<
-    PagesModel<SharedMediaPanelProps, TelegramMessage, TelegramSearchPage['nextOffset']>,
-    PagesMessage<TelegramMessage, TelegramSearchPage['nextOffset']>
-  >((model, send) => {
+const sharedMedia = defineTasks({
+  init: (
+    _props: SharedMediaPanelProps & {
+      /** Cached pages of the selected kind. */
+      media: SharedMediaResults;
+      more: () => Effect.Effect<unknown, unknown>;
+      refresh: () => void;
+    },
+  ) => ({}),
+}).tasks({ more: { policy: 'drop', run: (model) => model.props.more() } });
+export const SharedMediaPanel = sharedMedia.view(
+  view((model, send) => {
     const props = model.props;
-    const page = available(model.result);
-    return (
-      <SharedMediaContent
-        initialKind={props.initialKind}
-        peerId={props.peerId}
-        loadItems={props.loadItems}
-        loadPlayback={props.loadPlayback}
-        loadMedia={props.loadMedia}
-        loadMediaPreview={props.loadMediaPreview}
-        cachedMedia={props.cachedMedia}
-        cachedMediaPreview={props.cachedMediaPreview}
-        openMessage={props.openMessage}
-        forwardMessage={props.forwardMessage}
-        dialogs={props.dialogs}
-        deleteMessage={props.deleteMessage}
-        close={props.close}
-        items={page?.items ?? []}
-        loading={model.result.waiting && !page}
-        loadingMore={model.result.waiting && Boolean(page)}
-        hasMore={page?.next !== undefined}
-        error={resourceError(model.result)}
-        loadPage={(append) => send({ type: append ? 'More' : 'Refresh' })}
-      />
-    );
+    const controls = sharedMedia.controls(send);
+    return observe(props.media, (result) => {
+      const page = available(result);
+      return (
+        <SharedMediaContent
+          initialKind={props.initialKind}
+          peerId={props.peerId}
+          loadPlayback={props.loadPlayback}
+          loadMedia={props.loadMedia}
+          loadMediaPreview={props.loadMediaPreview}
+          cachedMedia={props.cachedMedia}
+          cachedMediaPreview={props.cachedMediaPreview}
+          openMessage={props.openMessage}
+          forwardMessage={props.forwardMessage}
+          dialogs={props.dialogs}
+          deleteMessage={props.deleteMessage}
+          close={props.close}
+          items={pageMessages(page?.pages ?? [])}
+          loading={result.waiting && !page}
+          loadingMore={model.tasks.more.waiting}
+          hasMore={page?.next !== undefined}
+          error={resourceError(model.tasks.more) || resourceError(result)}
+          loadPage={(append) => (append ? controls.run('more') : props.refresh())}
+        />
+      );
+    });
   }),
-});
+);

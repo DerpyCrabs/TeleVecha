@@ -1,6 +1,6 @@
 import type { TelegramPeer, TelegramSearchOffset } from '../../telegram/types';
 import { projectionCache, projectionSource, sessionGroup, shareValue } from 'effectweb/advanced';
-import { lifetime, makeUiRuntime, makeProgram, domMount, makeQueryCache } from 'effectweb';
+import { lifetime, makeUiRuntime, makeProgram, domMount } from 'effectweb';
 import { createVoicePlayback, type VoiceService, type VoiceTrack } from '../media/voicePlayback';
 import { parseTelegramLink, type TelegramLinkTarget } from '../shared/telegramLink';
 import type { CommentsState } from '../conversation/CommentsPanel';
@@ -30,7 +30,8 @@ import type {
 import { createBotSession, BotCommandSource } from '../bots/botSession';
 import { createReplyKeyboardSession } from '../bots/replyKeyboardSession';
 import { createChatDirectory } from '../chat/chatDirectory';
-import { createContactDetailsSession } from '../chat/contactDetailsSession';
+import { createContactDetailsSession, GroupMemberSource } from '../chat/contactDetailsSession';
+import { QueryLoaders, querySources } from './queries';
 import { createComposerSession } from '../composer/composerSession';
 import { createExpressionSession, ExpressionSource } from '../composer/expressionSession';
 import { createConversationHeaderSession } from '../conversation/conversationHeaderSession';
@@ -59,6 +60,7 @@ import { subscribeAtUi } from './appRuntime';
 import { createDrawerFocusSession } from './drawerFocusSession';
 import { retainPeerValue } from './retainedPeerValues';
 import { createSidebarLayout } from './sidebarLayout';
+import { makeQueryCache } from '@effectweb/query';
 function whenChanged<A>(read: () => A, run: (value: A) => void) {
   let started = false,
     previous: A;
@@ -193,9 +195,53 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   });
   const changed = publication.changed;
   publication.watch(state);
+  // Loaders read the latest snapshot and media services when a query runs, not when it is defined.
+  const queryLoaders: QueryLoaders = {
+    reactionPeople: (peerId, messageId, emoji) =>
+      Effect.suspend(() => {
+        const peer = state
+          .model()
+          .snapshot.dialogs.find((dialog) => dialog.peer.id === peerId)?.peer;
+        return peer && engine.getReactionPeople
+          ? engine.getReactionPeople(peer, messageId, emoji)
+          : Effect.fail(new Error('Reaction details are unavailable.'));
+      }),
+    customEmoji: (documentId) => mediaAssets.loadCustomEmoji(documentId),
+    previewPhoto: (peerId, messageId) =>
+      Effect.suspend(() => {
+        const matches = (candidate: TelegramMessage) =>
+          candidate.peerId === peerId && String(candidate.id) === messageId;
+        // Comment threads are loaded outside the active chat's snapshot.
+        const source =
+          state.model().snapshot.messages.find(matches) ?? comments?.messages.find(matches);
+        return source
+          ? mediaAssets.messagePreview(source).load()
+          : Effect.fail(new Error('Preview image is unavailable.'));
+      }),
+    // Global searches have no chat in their identity; they run through the open chat.
+    searchMessages: (peerId, text, global, offset) =>
+      Effect.suspend(
+        () =>
+          engine.conversation(peerId || state.model().activeChatId)?.search(text, global, offset) ??
+          Effect.fail(new Error('This chat is unavailable.')),
+      ),
+    sharedMedia: (peerId, kind, offset) =>
+      Effect.suspend(
+        () =>
+          engine.conversation(peerId)?.sharedMedia(kind, offset) ??
+          Effect.fail(new Error('This chat is unavailable.')),
+      ),
+  };
   const queryRuntime = yield* makeUiRuntime<
-    ExpressionSource | AppearanceSource | ChatAppearanceSource | BotCommandSource
+    | ExpressionSource
+    | AppearanceSource
+    | ChatAppearanceSource
+    | BotCommandSource
+    | GroupMemberSource
+    | QueryLoaders
   >().pipe(
+    Effect.provideService(QueryLoaders, queryLoaders),
+    Effect.provideService(GroupMemberSource, engine),
     Effect.provideService(ExpressionSource, engine),
     Effect.provideService(AppearanceSource, engine),
     Effect.provideService(ChatAppearanceSource, engine),
@@ -882,16 +928,19 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       }
     }
   };
-  const retrySync = async () => {
-    if (state.model().syncRetrying) return;
-    state.send({ type: 'Changed', changes: { syncRetrying: true } });
-    try {
-      await runEffect(engine.retrySync());
-      if (engine.snapshot().online) await runEffect(engine.retryOutbox());
-    } finally {
-      state.send({ type: 'Changed', changes: { syncRetrying: false } });
-    }
-  };
+  const retrySync = () =>
+    Effect.gen(function* () {
+      if (state.model().syncRetrying) return;
+      state.send({ type: 'Changed', changes: { syncRetrying: true } });
+      yield* Effect.gen(function* () {
+        yield* engine.retrySync();
+        if (engine.snapshot().online) yield* engine.retryOutbox();
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => state.send({ type: 'Changed', changes: { syncRetrying: false } })),
+        ),
+      );
+    });
   const logOut = async () => {
     if (state.model().loggingOut) return;
     state.send({ type: 'Changed', changes: { loggingOut: true } });
@@ -1938,6 +1987,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     mediaAssets,
     voicePlayback,
     voice,
+    queries: querySources(model),
     chatDirectory,
     deleteChat: chatDirectory.delete,
     setDeleteChatTarget: (

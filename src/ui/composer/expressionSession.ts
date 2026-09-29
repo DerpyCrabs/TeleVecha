@@ -1,9 +1,10 @@
 import { Context, Effect } from 'effect';
-import { lifetime, observeQuery, query, available, program, resourceError } from 'effectweb';
+import { lifetime, available, program, resourceError } from 'effectweb';
 import type { SessionContext } from '../app/sessionContext';
 import type { EffectConversation } from '../../telegram/core/conversation';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
+  TelegramPeer,
   TelegramReplyTarget,
   TelegramResourceInvalidation,
   TelegramSticker,
@@ -11,10 +12,12 @@ import type {
 } from '../../telegram/types';
 import type { UiEffectRunner, UiTaskRunner } from '../app/appRuntime';
 import { subscribeAtUi } from '../app/appRuntime';
+import { observeQuery, query, querySource } from '@effectweb/query';
 export interface ExpressionSource {
   getRecentStickers(): Effect.Effect<TelegramSticker[], MessagingError>;
   getStickerPacks(): Effect.Effect<TelegramStickerPack[], MessagingError>;
   getSavedGifs(): Effect.Effect<TelegramSticker[], MessagingError>;
+  searchGifs(peer: TelegramPeer, query: string): Effect.Effect<TelegramSticker[], MessagingError>;
   subscribeResources(
     listener: (event: TelegramResourceInvalidation) => void,
   ): Effect.Effect<Effect.Effect<void>, MessagingError>;
@@ -41,6 +44,18 @@ export const stickerCatalog = query({
 export const gifCatalog = query({
   name: 'expressions:gifs',
   load: () => Effect.flatMap(ExpressionSource, (source) => source.getSavedGifs()),
+});
+
+// Typing selects a new query; the unobserved search is cancelled before its debounce ends.
+export const gifSearch = query({
+  name: 'expressions:gif-search',
+  unused: 'cancel',
+  load: (args: { peer: TelegramPeer; text: string }) =>
+    Effect.sleep(250).pipe(
+      Effect.andThen(
+        Effect.flatMap(ExpressionSource, (source) => source.searchGifs(args.peer, args.text)),
+      ),
+    ),
 });
 
 /** Owns expression catalogs, picker exclusivity, invalidation, and sends. */
@@ -118,12 +133,9 @@ export function createExpressionSession(
     sendSticker: (sticker: TelegramSticker) =>
       sendExpression(sticker, options.canSendStickers(), 'sticker'),
     sendGif: (sticker: TelegramSticker) => sendExpression(sticker, options.canSendGifs(), 'gif'),
-    searchGifs: (query: string) => {
-      const conversation = options.conversation();
-      return options.canSendGifs() && conversation
-        ? conversation.searchGifs(query)
-        : Effect.succeed([]);
-    },
+    /** Cached GIF results for a search term in a chat; see `gifPeer` in the snapshot. */
+    gifSearch: (peer: TelegramPeer, text: string) =>
+      querySource(context.cache, gifSearch, { peer, text }),
     close: () => state.send({ type: 'Close' }),
   };
   return {
@@ -143,6 +155,8 @@ export function createExpressionSession(
       stickerLoading: stickers.read().waiting,
       gifLoading: savedGifs.read().waiting,
       gifError: resourceError(savedGifs.read()) ? 'GIFs could not be loaded.' : '',
+      /** The chat GIF search runs in, when sending GIFs is allowed there. */
+      gifPeer: options.canSendGifs() ? options.conversation()?.peer : undefined,
     }),
   };
 }

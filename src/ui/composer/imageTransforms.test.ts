@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { Effect, Fiber } from 'effect';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { planImageTransform } from './imageTransforms';
+import { planImageTransform, readImageDimensions, transformImageFile } from './imageTransforms';
 
 describe('planImageTransform', () => {
   it('center-crops a landscape image to a square', () => {
@@ -32,5 +33,79 @@ describe('planImageTransform', () => {
       outputWidth: 480,
       outputHeight: 640,
     });
+  });
+});
+
+describe('image transform ownership', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const installBitmap = () => {
+    const bitmap = { width: 640, height: 480, close: vi.fn() };
+    const createImageBitmap = vi.fn(async () => bitmap);
+    vi.stubGlobal('window', { createImageBitmap });
+    vi.stubGlobal('createImageBitmap', createImageBitmap);
+    return { bitmap, createImageBitmap };
+  };
+
+  it('defers decoding until execution and releases the bitmap after reading metadata', async () => {
+    const { bitmap, createImageBitmap } = installBitmap();
+    const dimensions = readImageDimensions(new File(['image'], 'photo.png'));
+    expect(createImageBitmap).not.toHaveBeenCalled();
+    await expect(Effect.runPromise(dimensions)).resolves.toEqual({ width: 640, height: 480 });
+    expect(bitmap.close).toHaveBeenCalledOnce();
+  });
+
+  it('releases decoded resources when canceled during native canvas encoding', async () => {
+    const { bitmap } = installBitmap();
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({ drawImage: vi.fn() }),
+      toBlob: vi.fn(),
+    };
+    vi.stubGlobal('document', { createElement: () => canvas });
+    const fiber = Effect.runFork(
+      transformImageFile(new File(['image'], 'photo.png'), 0, 'original'),
+    );
+    await vi.waitFor(() => expect(canvas.toBlob).toHaveBeenCalledOnce());
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    expect(bitmap.close).toHaveBeenCalledOnce();
+  });
+
+  it('releases a bitmap that finishes decoding after cancellation', async () => {
+    const bitmap = { width: 640, height: 480, close: vi.fn() };
+    let finish!: (value: typeof bitmap) => void;
+    const createImageBitmap = vi.fn(
+      () =>
+        new Promise<typeof bitmap>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.stubGlobal('window', { createImageBitmap });
+    vi.stubGlobal('createImageBitmap', createImageBitmap);
+    const fiber = Effect.runFork(readImageDimensions(new File(['image'], 'photo.png')));
+    await vi.waitFor(() => expect(createImageBitmap).toHaveBeenCalledOnce());
+    const interrupted = Effect.runPromise(Fiber.interrupt(fiber));
+    finish(bitmap);
+    await interrupted;
+    expect(bitmap.close).toHaveBeenCalledOnce();
+  });
+
+  it('revokes the fallback object URL when canceled during image decoding', async () => {
+    const decode = vi.fn(() => new Promise<void>(() => {}));
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('window', {});
+    vi.stubGlobal(
+      'Image',
+      class {
+        src = '';
+        decode = decode;
+      },
+    );
+    vi.stubGlobal('URL', { createObjectURL: () => 'blob:image', revokeObjectURL });
+    const fiber = Effect.runFork(readImageDimensions(new File(['image'], 'photo.png')));
+    await vi.waitFor(() => expect(decode).toHaveBeenCalledOnce());
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:image');
   });
 });

@@ -1,12 +1,4 @@
-import {
-  list as renderList,
-  Portal,
-  defineTasks,
-  resourceError,
-  sequence,
-  view,
-  fromPromise,
-} from 'effectweb';
+import { list as renderList, Portal, defineTasks, resourceError, sequence, view } from 'effectweb';
 import { Effect } from 'effect';
 import Crop from '@effectweb/lucide/icons/crop';
 import RotateCcw from '@effectweb/lucide/icons/rotate-ccw';
@@ -38,9 +30,7 @@ const editing = defineTasks({
   apply: {
     policy: 'drop',
     run: (model) =>
-      fromPromise(() =>
-        transformImageFile(model.props.attachment.file, model.rotation, model.crop),
-      ).pipe(
+      transformImageFile(model.props.attachment.file, model.rotation, model.crop).pipe(
         Effect.tap((file) =>
           Effect.sync(() => {
             model.props.apply(file);

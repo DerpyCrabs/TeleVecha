@@ -2,12 +2,16 @@ import {
   list as renderList,
   AsyncContent,
   effectEvent,
-  resourceComponent,
+  observe,
   slot,
   view,
+  type Snapshot,
+  type Source,
 } from 'effectweb';
 import type { Effect } from 'effect';
+import type * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
 import type { TelegramSticker } from '../../telegram/types';
+import type { MessagingError } from '../../telegram/core/messagingError';
 import { idRows } from '../collections';
 import { LazyMedia } from '../media/LazyMedia';
 const GifOption = view<
@@ -38,66 +42,61 @@ const GifOption = view<
     </button>
   );
 });
-export const GifPicker = resourceComponent<
-  {
-    gifs: TelegramSticker[];
-    loading: boolean;
-    error: string;
-    query: string;
-    load: (gif: TelegramSticker) => Effect.Effect<string, unknown>;
-    cachedUrl: (gif: TelegramSticker) => string | undefined;
-    search: (query: string) => Effect.Effect<TelegramSticker[], unknown>;
-    send: (gif: TelegramSticker) => void;
-    enabled: boolean;
-    retry: () => Effect.Effect<void, unknown>;
-  },
-  TelegramSticker[]
->({
-  request: (props) =>
-    props.query.trim()
-      ? { key: props.query.trim(), delay: 250, load: () => props.search(props.query.trim()) }
-      : undefined,
-  view: view((model, _send) => {
-    const props = model.props;
-    const results = slot((gifs: readonly TelegramSticker[]) => {
-      if (!gifs.length) return <p>No GIFs found</p>;
-      return renderList(idRows(gifs), (gif) => (
-        <GifOption
-          gif={gif}
-          load={() => props.load(gif)}
-          cachedUrl={() => props.cachedUrl(gif)}
-          send={() => props.send(gif)}
-          enabled={props.enabled}
+/** Cached search results for one term. */
+export type GifResults = Source<
+  AsyncResult.AsyncResult<Snapshot<TelegramSticker[]>, MessagingError>
+>;
+export const GifPicker = view<{
+  gifs: TelegramSticker[];
+  loading: boolean;
+  error: string;
+  query: string;
+  load: (gif: TelegramSticker) => Effect.Effect<string, unknown>;
+  cachedUrl: (gif: TelegramSticker) => string | undefined;
+  /** Search results for the current query; absent when the query is empty or search is unavailable. */
+  results?: GifResults | undefined;
+  send: (gif: TelegramSticker) => void;
+  enabled: boolean;
+  retry: () => Effect.Effect<void, unknown>;
+}>((props) => {
+  const results = slot((gifs: readonly TelegramSticker[]) => {
+    if (!gifs.length) return <p>No GIFs found</p>;
+    return renderList(idRows(gifs), (gif) => (
+      <GifOption
+        gif={gif}
+        load={() => props.load(gif)}
+        cachedUrl={() => props.cachedUrl(gif)}
+        send={() => props.send(gif)}
+        enabled={props.enabled}
+      />
+    ));
+  });
+  const contents = () => {
+    if (props.loading) return <p>Loading GIF index…</p>;
+    if (props.error)
+      return (
+        <div role="alert">
+          <p>{props.error}</p>
+          <button onClick={effectEvent('drop', () => props.retry())}>Retry GIFs</button>
+        </div>
+      );
+    if (props.results)
+      return observe(props.results, (result) => (
+        <AsyncContent
+          result={result}
+          content={results}
+          pending={<p>Searching Telegram…</p>}
+          empty={<p>Searching Telegram…</p>}
+          failure={slot((_cause) => (
+            <p role="alert">Could not search GIFs. Try again.</p>
+          ))}
         />
       ));
-    });
-    const contents = () => {
-      if (props.loading) return <p>Loading GIF index…</p>;
-      if (props.error)
-        return (
-          <div role="alert">
-            <p>{props.error}</p>
-            <button onClick={effectEvent('drop', () => props.retry())}>Retry GIFs</button>
-          </div>
-        );
-      if (props.query.trim())
-        return (
-          <AsyncContent
-            result={model.result}
-            content={results}
-            pending={<p>Searching Telegram…</p>}
-            empty={<p>Searching Telegram…</p>}
-            failure={slot((_cause) => (
-              <p role="alert">Could not search GIFs. Try again.</p>
-            ))}
-          />
-        );
-      return results(props.gifs);
-    };
-    return (
-      <div class="gif-picker" aria-label="GIFs">
-        {contents()}
-      </div>
-    );
-  }),
+    return results(props.query.trim() ? [] : props.gifs);
+  };
+  return (
+    <div class="gif-picker" aria-label="GIFs">
+      {contents()}
+    </div>
+  );
 });

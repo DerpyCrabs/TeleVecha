@@ -1,5 +1,5 @@
 import { Context, Effect } from 'effect';
-import { lifetime, observeQuery, available, program, resourceError, query } from 'effectweb';
+import { lifetime, available, program, resourceError } from 'effectweb';
 import type { SessionContext } from '../app/sessionContext';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type { TelegramWallpaper } from '../../telegram/types';
@@ -12,6 +12,7 @@ import {
   readThemePreferences,
   saveThemePreferences,
 } from './themePreferences';
+import { observeQuery, query } from '@effectweb/query';
 export interface AppearanceSource {
   getWallpapers(): Effect.Effect<TelegramWallpaper[], MessagingError>;
   downloadWallpaper(wallpaperId: string): Effect.Effect<Blob, MessagingError>;

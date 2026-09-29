@@ -3,7 +3,7 @@ import type { Effect } from 'effect';
 import type { TelegramSticker, TelegramStickerPack } from '../../telegram/types';
 import { emojiRows } from '../collections';
 import Search from '@effectweb/lucide/icons/search';
-import { GifPicker } from './GifPicker';
+import { GifPicker, type GifResults } from './GifPicker';
 import { StickerPicker } from './StickerPicker';
 import { emojiEntries } from './emojiData';
 export type ExpressionTab = 'emoji' | 'gifs' | 'stickers';
@@ -23,7 +23,7 @@ interface ExpressionPickerProps {
   stickerUrl: (sticker: TelegramSticker) => string | undefined;
   sendSticker: (sticker: TelegramSticker) => void;
   sendGif: (gif: TelegramSticker) => void;
-  searchGifs: (query: string) => Effect.Effect<TelegramSticker[], unknown>;
+  gifSearch?: ((text: string) => GifResults) | undefined;
   retryGifs: () => Effect.Effect<void, unknown>;
 }
 export const ExpressionPicker = localComponent<ExpressionPickerProps, { query: string }>({
@@ -89,7 +89,11 @@ export const ExpressionPicker = localComponent<ExpressionPickerProps, { query: s
               send={props.sendGif}
               query={model.query}
               cachedUrl={props.stickerUrl}
-              search={props.searchGifs}
+              results={
+                props.gifSearch && model.query.trim()
+                  ? props.gifSearch(model.query.trim())
+                  : undefined
+              }
               retry={props.retryGifs}
               enabled={props.canSend && props.canSendGifs}
             />

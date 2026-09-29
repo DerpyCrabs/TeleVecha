@@ -1,6 +1,6 @@
 import { GlobalVoicePlayer } from '../media/GlobalVoicePlayer';
 import { CommentsPanel } from '../conversation/CommentsPanel';
-import { list as renderList, fromPromise, collection, view } from 'effectweb';
+import { list as renderList, collection, view } from 'effectweb';
 import { Effect } from 'effect';
 import { messageTextForClipboard } from '../../domain/messageText';
 import type { ChatMessage } from '../../domain/models';
@@ -341,7 +341,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                     <button
                       class="connection-state-chip"
                       disabled={syncRetrying}
-                      onClick={() => void retrySync()}
+                      onClick={retrySync}
                       aria-label={`${status} Retry Telegram connection`}
                     >
                       {status}
@@ -427,7 +427,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                 <div class="sync-state-banner operation-state-banner" role="alert">
                   <span>{message}</span>
                   {snapshot.pending.some(({ lastError }) => Boolean(lastError)) ? (
-                    <button disabled={syncRetrying} onClick={() => void retrySync()}>
+                    <button disabled={syncRetrying} onClick={retrySync}>
                       {syncRetrying ? 'Retrying…' : 'Retry queued'}
                     </button>
                   ) : null}
@@ -899,16 +899,12 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                           <div class="message-copy">
                             <MessageBody
                               message={caption}
-                              loadPreviewPhoto={
+                              previewPhoto={
                                 message.linkPreview?.hasPhoto
-                                  ? () => {
-                                      const source = snapshot.messages.find(
-                                        (candidate) => String(candidate.id) === message.id,
-                                      );
-                                      return source
-                                        ? mediaAssets.messagePreview(source).load()
-                                        : Effect.fail(new Error('Preview image is unavailable.'));
-                                    }
+                                  ? model.queries.previewPhoto(
+                                      message.peerId ?? activeChatId,
+                                      message.id,
+                                    )
                                   : undefined
                               }
                               loadPreviewMedia={
@@ -957,14 +953,14 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 react={(emoji) =>
                                   runInBackground(reactToMessage(message.id, emoji))
                                 }
-                                loadReactionPeople={(emoji) => {
-                                  const peer = snapshot.dialogs.find(
-                                    ({ peer }) => peer.id === message.peerId,
-                                  )?.peer;
-                                  return peer
-                                    ? engine.getReactionPeople(peer, Number(message.id), emoji)
-                                    : Effect.fail(new Error('Reaction details are unavailable.'));
-                                }}
+                                reactionPeople={(emoji, revision) =>
+                                  model.queries.reactionPeople(
+                                    message.peerId ?? activeChatId,
+                                    Number(message.id),
+                                    emoji,
+                                    revision,
+                                  )
+                                }
                                 loadReactionAvatar={(person, cachedOnly) =>
                                   mediaAssets.loadPeerAvatar(
                                     person.peer,
@@ -974,9 +970,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   )
                                 }
                                 reply={(article) => composer.beginReply(message, article)}
-                                loadCustomEmoji={(documentId) =>
-                                  mediaAssets.loadCustomEmoji(documentId)
-                                }
+                                customEmoji={model.queries.customEmoji}
                               />
                             ) : null}
                             <footer
@@ -1339,6 +1333,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
         {model.comments ? (
           <CommentsPanel
             voice={model.voice}
+            previewPhoto={model.queries.previewPhoto}
             state={model.comments}
             close={model.closeComments}
             loadOlder={model.loadOlderComments}
@@ -1401,7 +1396,9 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
           <SearchPanel
             dialogs={snapshot.dialogs}
             activePeerId={activeChatId}
-            search={(term, global, offset) => activeConversation!.search(term, global, offset)}
+            results={model.queries.messageSearch}
+            more={model.queries.moreMessages}
+            refresh={model.queries.refreshMessages}
             openResult={(message) => {
               setSearchOpen(false);
               runInBackground(openMessage(message));
@@ -1415,7 +1412,9 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
               <SharedMediaPanel
                 peerId={activeChatId}
                 initialKind={kind}
-                loadItems={(selected, offset) => activeConversation!.sharedMedia(selected, offset)}
+                media={model.queries.sharedMedia(activeChatId, kind)}
+                more={() => model.queries.moreMedia(activeChatId, kind)}
+                refresh={() => model.queries.refreshMedia(activeChatId, kind)}
                 loadPlayback={(message) => mediaAssets.playMedia(message)}
                 loadMedia={(message, progress) => mediaAssets.loadMedia(message, progress)}
                 loadMediaPreview={(message) => mediaAssets.messagePreview(message).load()}
@@ -1549,7 +1548,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
           open
           snapshot={snapshot}
           configurationError={configurationError}
-          onRetry={() => fromPromise(retrySync)}
+          onRetry={retrySync}
           onPhone={(phone) => engine.requestCode(phone).pipe(Effect.asVoid)}
           onCode={(code) => engine.submitCode(code).pipe(Effect.asVoid)}
           onPassword={(password) => engine.submitPassword(password).pipe(Effect.asVoid)}

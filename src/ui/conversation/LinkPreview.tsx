@@ -2,18 +2,21 @@ import {
   commandSlot,
   available,
   component,
-  resourceComponent,
+  observe,
   view,
   effectCommand,
+  type Snapshot,
+  type Source,
 } from 'effectweb';
 import { Effect } from 'effect';
+import type * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
 import type { ChatMessage } from '../../domain/models';
 import { safeExternalUrl } from '../shared/safeUrl';
 const commandMedia = commandSlot('media');
 
 interface LinkPreviewProps {
   preview: NonNullable<ChatMessage['linkPreview']>;
-  loadPhoto?: (() => Effect.Effect<string, unknown>) | undefined;
+  photo?: Source<AsyncResult.AsyncResult<string | undefined, never>> | undefined;
   loadMedia?: (() => Effect.Effect<string, unknown>) | undefined;
 }
 interface PreviewVideoProps {
@@ -100,92 +103,86 @@ const PreviewVideo = component<PreviewVideoProps, PreviewVideoModel, PreviewVide
     </span>
   )),
 });
-export const LinkPreview = resourceComponent<LinkPreviewProps, string | undefined>({
-  request: (props) => ({
-    key: [props.preview.url, props.preview.hasPhoto, Boolean(props.loadPhoto)].join(':'),
-    load: () =>
-      Effect.suspend(
-        () =>
-          (props.preview.hasPhoto ? props.loadPhoto?.() : undefined) ?? Effect.succeed(undefined),
-      ).pipe(Effect.catch(() => Effect.succeed(undefined))),
-  }),
-  view: view((model, _send) => {
-    const props = model.props;
-    const photo = () => available(model.result);
-    const isVideoPreview = () =>
-      props.preview.type === 'video' || props.preview.type === 'gif' || props.preview.hasEmbed;
-    const usesLargePhoto = () => {
-      const provider = props.preview.siteName?.trim().toLowerCase() ?? '';
-      const providerDefaultsToLarge =
-        provider === 'twitter' ||
-        provider === 'x' ||
-        provider === 'x (formerly twitter)' ||
-        provider === 'facebook';
-      return props.preview.photoSize === 'large' || providerDefaultsToLarge;
-    };
-    const copy = () => (
-      <span class="link-preview-copy">
-        {props.preview.siteName ? <small>{props.preview.siteName}</small> : null}
-        <strong>{props.preview.title || props.preview.url}</strong>
-        {props.preview.description ? <span>{props.preview.description}</span> : null}
-      </span>
-    );
-    const content = () => (
-      <>
-        {props.preview.hasPhoto ? (
-          <span class="link-preview-photo" aria-hidden="true">
-            <img draggable={false} src={photo()} alt="" classList={{ loaded: Boolean(photo()) }} />
-          </span>
-        ) : null}
-        {copy()}
-      </>
-    );
-    const href = () => safeExternalUrl(props.preview.url);
-    return props.preview.media ? (
-      ((previewMedia) => (
-        <div class="link-preview link-preview-large link-preview-media">
-          <PreviewVideo
-            identity={`${props.preview.url}:${previewMedia.cacheKey ?? previewMedia.name}`}
-            media={previewMedia}
-            poster={photo()}
-            title={props.preview.title || previewMedia.name}
-            load={props.loadMedia}
-          />
-          {href()
-            ? ((url) => (
-                <a draggable={false} href={url} target="_blank" rel="noopener noreferrer">
-                  {copy()}
-                </a>
-              ))(href()!)
-            : copy()}
-        </div>
-      ))(props.preview.media!)
-    ) : href() ? (
-      ((url) => (
-        <a
-          draggable={false}
-          class="link-preview"
-          classList={{
-            'link-preview-large': usesLargePhoto(),
-            'link-preview-video-cover': Boolean(isVideoPreview()),
-          }}
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {content()}
-        </a>
-      ))(href()!)
-    ) : (
-      <div
+function linkPreview(props: Snapshot<LinkPreviewProps>, loaded: string | undefined) {
+  const photo = () => loaded;
+  const isVideoPreview = () =>
+    props.preview.type === 'video' || props.preview.type === 'gif' || props.preview.hasEmbed;
+  const usesLargePhoto = () => {
+    const provider = props.preview.siteName?.trim().toLowerCase() ?? '';
+    const providerDefaultsToLarge =
+      provider === 'twitter' ||
+      provider === 'x' ||
+      provider === 'x (formerly twitter)' ||
+      provider === 'facebook';
+    return props.preview.photoSize === 'large' || providerDefaultsToLarge;
+  };
+  const copy = () => (
+    <span class="link-preview-copy">
+      {props.preview.siteName ? <small>{props.preview.siteName}</small> : null}
+      <strong>{props.preview.title || props.preview.url}</strong>
+      {props.preview.description ? <span>{props.preview.description}</span> : null}
+    </span>
+  );
+  const content = () => (
+    <>
+      {props.preview.hasPhoto ? (
+        <span class="link-preview-photo" aria-hidden="true">
+          <img draggable={false} src={photo()} alt="" classList={{ loaded: Boolean(photo()) }} />
+        </span>
+      ) : null}
+      {copy()}
+    </>
+  );
+  const href = () => safeExternalUrl(props.preview.url);
+  return props.preview.media ? (
+    ((previewMedia) => (
+      <div class="link-preview link-preview-large link-preview-media">
+        <PreviewVideo
+          identity={`${props.preview.url}:${previewMedia.cacheKey ?? previewMedia.name}`}
+          media={previewMedia}
+          poster={photo()}
+          title={props.preview.title || previewMedia.name}
+          load={props.loadMedia}
+        />
+        {href()
+          ? ((url) => (
+              <a draggable={false} href={url} target="_blank" rel="noopener noreferrer">
+                {copy()}
+              </a>
+            ))(href()!)
+          : copy()}
+      </div>
+    ))(props.preview.media!)
+  ) : href() ? (
+    ((url) => (
+      <a
+        draggable={false}
         class="link-preview"
         classList={{
           'link-preview-large': usesLargePhoto(),
           'link-preview-video-cover': Boolean(isVideoPreview()),
         }}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
       >
         {content()}
-      </div>
-    );
-  }),
-});
+      </a>
+    ))(href()!)
+  ) : (
+    <div
+      class="link-preview"
+      classList={{
+        'link-preview-large': usesLargePhoto(),
+        'link-preview-video-cover': Boolean(isVideoPreview()),
+      }}
+    >
+      {content()}
+    </div>
+  );
+}
+export const LinkPreview = view<LinkPreviewProps>((props) =>
+  props.photo
+    ? observe(props.photo, (result) => linkPreview(props, available(result)))
+    : linkPreview(props, undefined),
+);

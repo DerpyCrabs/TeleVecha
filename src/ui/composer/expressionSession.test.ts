@@ -1,8 +1,9 @@
 import { Context, Effect } from 'effect';
-import { uiRuntime, makeQueryCache } from 'effectweb';
+import { uiRuntime } from 'effectweb';
 import { expect, it, vi } from 'vitest';
 import type { TelegramResourceInvalidation } from '../../telegram/types';
 import { createExpressionSession, ExpressionSource } from './expressionSession';
+import { makeQueryCache } from '@effectweb/query';
 
 it('shares catalog data across session recreation and invalidates the defined expression queries', () => {
   const listeners: Array<(event: TelegramResourceInvalidation) => void> = [];
@@ -13,6 +14,7 @@ it('shares catalog data across session recreation and invalidates the defined ex
     getRecentStickers: recent,
     getStickerPacks: packs,
     getSavedGifs: gifs,
+    searchGifs: vi.fn(() => Effect.succeed([])),
     subscribeResources: (listener: (event: TelegramResourceInvalidation) => void) =>
       Effect.sync(() => {
         listeners.push(listener);
@@ -48,6 +50,9 @@ it('shares catalog data across session recreation and invalidates the defined ex
   second.toggleGifs();
   expect(gifs).toHaveBeenCalledTimes(1);
   expect(second.snapshot().gifLoading).toBe(false);
+  const peer = { id: 'u:1', kind: 'user' as const };
+  expect(second.gifSearch(peer, 'cat')).toBe(second.gifSearch(peer, 'cat'));
+  expect(second.snapshot().gifPeer).toBeUndefined();
   second.dispose();
   cache.dispose();
 });

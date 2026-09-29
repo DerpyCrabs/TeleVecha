@@ -8,7 +8,7 @@ export function prepareAttachment(attachment: OutgoingAttachment) {
   const metadata: Effect.Effect<LocalMediaMetadata | undefined, unknown> = file.type.startsWith(
     'image/',
   )
-    ? Effect.tryPromise(() => readImageDimensions(file))
+    ? readImageDimensions(file)
     : file.type.startsWith('video/')
       ? Effect.tryPromise((signal) => readVideoPreview(file, signal))
       : Effect.succeed(undefined);

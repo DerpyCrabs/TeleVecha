@@ -107,6 +107,7 @@ type ChatComposerModel = {
   mentionIndex: number;
 };
 type ChatComposerMessage =
+  | { type: 'MentionChanged'; mention: ReturnType<typeof findMention> }
   | { type: 'SelectMention'; member: TelegramGroupMember }
   | { type: 'Mounted'; element: HTMLElement }
   | { type: 'Dismiss'; restoreFocus: boolean }
@@ -273,6 +274,19 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
   },
   update: (model, message) => {
     switch (message.type) {
+      case 'MentionChanged': {
+        const unchanged =
+          model.mention?.offset === message.mention?.offset &&
+          model.mention?.end === message.mention?.end &&
+          model.mention?.query === message.mention?.query;
+        return {
+          model: {
+            ...model,
+            mention: message.mention,
+            mentionIndex: unchanged ? model.mentionIndex : 0,
+          },
+        };
+      }
       case 'SelectMention': {
         const mention = model.mention;
         if (!mention || !model.props.enabled) return { model };
@@ -413,7 +427,7 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
             mention.offset >= format.offset &&
             mention.offset < format.offset + format.length,
         );
-      send({ type: 'Fields', fields: { mention: blocked ? undefined : mention, mentionIndex: 0 } });
+      send({ type: 'MentionChanged', mention: blocked ? undefined : mention });
       if (mention && !blocked) props.composer.loadMentionMembers();
     };
     const setExpressionOpen = (open: boolean) => send({ type: 'ExpressionOpenState', value: open });
@@ -494,7 +508,11 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
                 closeExpression();
                 void props.expressions.sendGif(gif).catch(() => undefined);
               }}
-              searchGifs={props.expressions.searchGifs}
+              gifSearch={
+                props.expressions.gifPeer
+                  ? (text) => props.expressions.gifSearch(props.expressions.gifPeer!, text)
+                  : undefined
+              }
               retryGifs={props.expressions.retryGifs}
             />
           </div>

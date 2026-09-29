@@ -1,5 +1,5 @@
 import { Context, Effect } from 'effect';
-import { lifetime, observeQuery, available, query } from 'effectweb';
+import { lifetime, available } from 'effectweb';
 import type { SessionContext } from '../app/sessionContext';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type { TelegramChatAppearance, TelegramDialog, TelegramPeer } from '../../telegram/types';
@@ -7,6 +7,7 @@ import type { UiEffectRunner } from '../app/appRuntime';
 import type { ThemePreferences } from './themePreferences';
 import { readableTextColor, telegramWallpaperBackground } from './themePreferences';
 import { tvbugResourceState, type TvBugChatAppearanceState } from '../../debug/tvbugUiState';
+import { observeQuery, query } from '@effectweb/query';
 export interface ChatAppearanceSource {
   getChatAppearance(
     peer: TelegramPeer,

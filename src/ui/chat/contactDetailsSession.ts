@@ -1,7 +1,7 @@
 import { available, lifetime } from 'effectweb';
-import { pages } from 'effectweb/advanced';
+import { infiniteQuery, infiniteResource } from '@effectweb/query';
 import type { SessionContext } from '../app/sessionContext';
-import { Effect } from 'effect';
+import { Context, Effect } from 'effect';
 import { permissionsForDialog } from '../../telegram/core/chatPermissions';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
@@ -13,11 +13,6 @@ import type {
 import type { UiEffectRunner, UiTaskRunner } from '../app/appRuntime';
 import { subscribeAtUi } from '../app/appRuntime';
 interface ContactDetailsSource {
-  getGroupMembers(
-    peer: TelegramPeer,
-    limit?: number,
-    offset?: number,
-  ): Effect.Effect<TelegramGroupMemberPage, MessagingError>;
   updateContact(
     peer: TelegramPeer,
     firstName: string,
@@ -30,6 +25,23 @@ interface ContactDetailsSource {
   ): Effect.Effect<Effect.Effect<void>, MessagingError>;
 }
 
+export interface GroupMemberSource {
+  getGroupMembers(
+    peer: TelegramPeer,
+    limit?: number,
+    offset?: number,
+  ): Effect.Effect<TelegramGroupMemberPage, MessagingError>;
+}
+export const GroupMemberSource = Context.Service<GroupMemberSource>('ui/GroupMemberSource');
+export const groupMembers = infiniteQuery({
+  name: 'group-members',
+  initial: 0,
+  load: (args: { peer: TelegramPeer }, offset: number) =>
+    Effect.flatMap(GroupMemberSource, (source) => source.getGroupMembers(args.peer, 50, offset)),
+  next: (page, offset) =>
+    page.hasMore ? (page.nextOffset ?? offset + page.members.length) : undefined,
+});
+
 /** Owns contact actions and the group-member catalog shown by the details pane. */
 export function createContactDetailsSession(
   options: {
@@ -39,35 +51,13 @@ export function createContactDetailsSession(
     dialog: () => TelegramDialog | undefined;
     detailsOpen: () => boolean;
   },
-  context: SessionContext,
+  context: SessionContext<GroupMemberSource>,
 ) {
   const scope = lifetime();
-  let memberRevision = 0;
-  type Input = { peer: TelegramPeer | undefined; revision: number };
-  const members = pages<Input, TelegramGroupMemberPage['members'][number], number>({
-    key: ({ peer, revision }) =>
-      peer ? `${peer.id}:${peer.accessHash ?? ''}:${revision}` : undefined,
-    itemKey: (member) => member.peer.id,
-    load: ({ peer }, offset) =>
-      options.source
-        .getGroupMembers(peer!, 50, offset)
-        .pipe(
-          Effect.map((page) => ({
-            items: page.members,
-            totalCount: page.totalCount,
-            next: page.hasMore
-              ? (page.nextOffset ?? (offset ?? 0) + page.members.length)
-              : undefined,
-          })),
-        ),
-  }).create({ peer: undefined, revision: 0 });
-  scope.add(members.dispose);
+  const members = scope.own(infiniteResource(context.cache, groupMembers));
   scope.add(members.subscribe(context.changed));
-  scope.add(
-    context.cache.onReset(() => {
-      members.receive({ peer: undefined, revision: memberRevision });
-    }),
-  );
+  let selected: TelegramPeer | undefined;
+  let loadingMore = false;
   const userDetails = () => options.dialog()?.userDetails;
   const refresh = () => {
     const dialog = options.dialog();
@@ -78,20 +68,32 @@ export function createContactDetailsSession(
       permissionsForDialog(dialog).canViewMembers
         ? dialog.peer
         : undefined;
-    members.receive({ peer, revision: memberRevision });
+    selected = peer;
+    members.select(peer ? { peer } : undefined);
   };
   scope.add(
     subscribeAtUi(
       options.runTask,
       options.source.subscribeResources((event) => {
         if (event.kind === 'group-members' && event.peerId === options.dialog()?.peer.id) {
-          memberRevision++;
+          if (selected) context.cache.invalidateQuery(groupMembers.query, { peer: selected });
           refresh();
         }
       }),
     ),
   );
-  const loadMoreMembers = () => members.send({ type: 'More' });
+  const loadMoreMembers = () => {
+    if (loadingMore) return;
+    loadingMore = true;
+    context.changed();
+    void options
+      .runEffect(members.loadNext())
+      .catch(() => undefined)
+      .finally(() => {
+        loadingMore = false;
+        context.changed();
+      });
+  };
   const share = async () => {
     const dialog = options.dialog();
     if (!dialog) return;
@@ -144,17 +146,23 @@ export function createContactDetailsSession(
     refresh,
     dispose: () => scope.dispose(),
     snapshot: () => {
-      const result = members.model().result;
-      const page = available(result);
+      const result = members.read();
+      const data = available(result);
+      const seen = new Set<string>();
+      const loaded = (data?.pages ?? [])
+        .flatMap((page) => page.value.members)
+        .filter((member) => !seen.has(member.peer.id) && Boolean(seen.add(member.peer.id)));
       return {
         ...actions,
         userDetails: userDetails(),
-        members: page?.items ?? [],
-        membersLoading: result.waiting && !page,
+        members: loaded,
+        membersLoading: result.waiting && !data,
         membersTotal:
-          page?.totalCount ?? options.dialog()?.permissions?.memberCount ?? page?.items.length ?? 0,
-        membersHasMore: page?.next !== undefined,
-        membersLoadingMore: result.waiting && Boolean(page),
+          data?.pages.at(-1)?.value.totalCount ??
+          options.dialog()?.permissions?.memberCount ??
+          loaded.length,
+        membersHasMore: data?.next !== undefined,
+        membersLoadingMore: loadingMore,
       };
     },
   };

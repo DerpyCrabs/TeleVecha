@@ -123,6 +123,7 @@ export function makeConversation(host: ConversationHost, peer: TelegramPeer) {
   };
 
   return {
+    peer,
     peerId,
     setDraft(text: string, details?: TelegramDraftDetails) {
       return host.setDraft(peerId, text, details);

@@ -1,26 +1,72 @@
 import { list as renderList } from 'effectweb';
-import { available, submit, view } from 'effectweb';
+import { available, observe, submit, view } from 'effectweb';
 import { Dialog } from '../shared/Dialog';
 import { panelClass, panelErrorClass, panelLoadMoreClass } from '../shared/panelStyles';
 import {
   searchActions,
+  searchArgs,
   searchError,
   searchMessages,
+  searchRows,
   type SearchMessage,
   type SearchModel,
+  type SearchResults,
 } from './searchProgram';
+import * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
 
-const emptyMessages: never[] = [];
+const notSubmitted: SearchResults = AsyncResult.initial();
 
 export const SearchView = view<SearchModel, SearchMessage>((model, send) => {
   const dispatch = searchActions.bind(send);
   const { query, global, submitted, host } = model.props;
-  const result = model.result;
-  const page = available(result);
-  const rows = searchMessages.from(page?.items ?? emptyMessages);
-  const error = searchError(result);
-  const loading = result.waiting && !page;
+  const args = searchArgs(model.props);
   const title = (peerId: string) => host.dialogs.find(({ peer }) => peer.id === peerId)?.title;
+  const results = (result: SearchResults) => {
+    const page = available(result);
+    const rows = searchMessages.from(searchRows(result));
+    const error = model.moreError || searchError(result);
+    const loading = result.waiting && !page;
+    return loading ? (
+      <p class="text-[0.78rem] text-muted">Searching Telegram…</p>
+    ) : (
+      <>
+        {renderList(rows, (message) => (
+          <button
+            class="grid w-full gap-[0.2rem] rounded-[0.6rem] border-0 bg-transparent p-[0.65rem] text-left text-ink hover:bg-white/5 [&>span]:text-[0.78rem] [&>span]:text-muted"
+            onClick={() => dispatch.Open(message)}
+          >
+            <strong>{title(message.peerId) ?? message.peerTitle ?? message.peerId}</strong>
+            <span>{message.text || message.media?.name || 'Message'}</span>
+          </button>
+        ))}
+        {error ? (
+          <div class={`panel-error ${panelErrorClass}`} role="alert">
+            <p>{error}</p>
+            <button onClick={dispatch.Retry}>
+              {model.moreError ? 'Retry loading more' : 'Retry search'}
+            </button>
+          </div>
+        ) : rows.length === 0 ? (
+          <p class="text-[0.78rem] text-muted">
+            {query.trim()
+              ? submitted
+                ? 'No messages found'
+                : 'Press Enter to search'
+              : 'Enter a search term'}
+          </p>
+        ) : null}
+        {page?.next !== undefined && !error ? (
+          <button
+            class={`panel-load-more ${panelLoadMoreClass}`}
+            disabled={model.loadingMore}
+            onClick={dispatch.More}
+          >
+            {model.loadingMore ? 'Loading more…' : 'Load more'}
+          </button>
+        ) : null}
+      </>
+    );
+  };
   return (
     <Dialog
       title="Search messages"
@@ -77,46 +123,7 @@ export const SearchView = view<SearchModel, SearchMessage>((model, send) => {
         />
       </form>
       <div class="search-results min-h-40 overflow-y-auto px-[0.8rem] pt-[0.4rem] pb-[0.8rem]">
-        {loading ? (
-          <p class="text-[0.78rem] text-muted">Searching Telegram…</p>
-        ) : (
-          <>
-            {renderList(rows, (message) => (
-              <button
-                class="grid w-full gap-[0.2rem] rounded-[0.6rem] border-0 bg-transparent p-[0.65rem] text-left text-ink hover:bg-white/5 [&>span]:text-[0.78rem] [&>span]:text-muted"
-                onClick={() => dispatch.Open(message)}
-              >
-                <strong>{title(message.peerId) ?? message.peerTitle ?? message.peerId}</strong>
-                <span>{message.text || message.media?.name || 'Message'}</span>
-              </button>
-            ))}
-            {error ? (
-              <div class={`panel-error ${panelErrorClass}`} role="alert">
-                <p>{error}</p>
-                <button onClick={() => send({ type: 'Retry' })}>
-                  {model.append ? 'Retry loading more' : 'Retry search'}
-                </button>
-              </div>
-            ) : rows.length === 0 ? (
-              <p class="text-[0.78rem] text-muted">
-                {query.trim()
-                  ? submitted
-                    ? 'No messages found'
-                    : 'Press Enter to search'
-                  : 'Enter a search term'}
-              </p>
-            ) : null}
-            {page?.next !== undefined && !error ? (
-              <button
-                class={`panel-load-more ${panelLoadMoreClass}`}
-                disabled={result.waiting}
-                onClick={() => send({ type: 'More' })}
-              >
-                {result.waiting ? 'Loading more…' : 'Load more'}
-              </button>
-            ) : null}
-          </>
-        )}
+        {args ? observe(host.results(args), results) : results(notSubmitted)}
       </div>
     </Dialog>
   );

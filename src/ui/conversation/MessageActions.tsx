@@ -7,66 +7,55 @@ import SmilePlus from '@effectweb/lucide/icons/smile-plus';
 import { TgsPlayer } from '../media/TgsPlayer';
 import { VisibilityVideo } from '../media/VisibilityVideo';
 import { Avatar } from '../shared/Avatar';
+import type * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
 import {
   available,
   collection,
   component,
   domMount,
-  resourceComponent,
+  observe,
   sequence,
   view,
+  type Snapshot,
+  type Source,
 } from 'effectweb';
+import type { CustomEmojiAsset } from '../app/queries';
 const reactionRows = collection<NonNullable<ChatMessage['reactions']>[number]>(
   (reaction) => reaction.customEmojiId ?? reaction.emoji,
 ).from;
-interface CustomEmojiAsset {
-  url: string;
-  mimeType: string;
-}
+// Optional details load without failing: an unavailable asset is `undefined`.
+type Optional<A> = Source<AsyncResult.AsyncResult<Snapshot<A> | undefined, never>>;
 interface MessageActionsProps {
   message: ChatMessage;
   pickerOpen: boolean;
   setPickerOpen: (open: boolean) => void;
   react: (emoji: string) => void;
-  loadReactionPeople: (emoji: string) => Effect.Effect<TelegramReactionPeople, unknown>;
+  /** Who reacted; `revision` changes with the reaction count so the list reloads. */
+  reactionPeople: (emoji: string, revision: string) => Optional<TelegramReactionPeople>;
   loadReactionAvatar: (
     person: TelegramReactionPerson,
     cachedOnly: boolean,
   ) => Effect.Effect<string | undefined, unknown>;
   reply: (article: HTMLElement) => void;
-  loadCustomEmoji?: ((documentId: string) => Effect.Effect<CustomEmojiAsset, unknown>) | undefined;
+  customEmoji?: ((documentId: string) => Optional<CustomEmojiAsset>) | undefined;
 }
-const CustomReaction = resourceComponent<
-  {
-    documentId: string;
-    load?: ((documentId: string) => Effect.Effect<CustomEmojiAsset, unknown>) | undefined;
-  },
-  CustomEmojiAsset | undefined
->({
-  request: (props) =>
-    props.load
-      ? {
-          key: props.documentId,
-          load: () =>
-            props.load!(props.documentId).pipe(Effect.catch(() => Effect.succeed(undefined))),
-        }
-      : undefined,
-  view: view((model, _send) => {
-    const asset = () => available(model.result);
-    return asset() ? (
-      ((loaded) =>
-        loaded.mimeType === 'application/x-tgsticker' ? (
-          <TgsPlayer source={loaded.url} label="Custom emoji reaction" />
-        ) : loaded.mimeType.startsWith('video/') ? (
-          <VisibilityVideo source={loaded.url} label="Custom emoji reaction" />
-        ) : (
-          <img draggable={false} src={loaded.url} alt="" />
-        ))(asset()!)
+const customReaction = (asset: Snapshot<CustomEmojiAsset> | undefined) =>
+  asset ? (
+    asset.mimeType === 'application/x-tgsticker' ? (
+      <TgsPlayer source={asset.url} label="Custom emoji reaction" />
+    ) : asset.mimeType.startsWith('video/') ? (
+      <VisibilityVideo source={asset.url} label="Custom emoji reaction" />
     ) : (
-      <span class="custom-reaction-placeholder" />
-    );
-  }),
-});
+      <img draggable={false} src={asset.url} alt="" />
+    )
+  ) : (
+    <span class="custom-reaction-placeholder" />
+  );
+const CustomReaction = view<{ asset?: Optional<CustomEmojiAsset> | undefined }>((props) =>
+  props.asset
+    ? observe(props.asset, (result) => customReaction(available(result)))
+    : customReaction(undefined),
+);
 const peopleRows = collection<TelegramReactionPerson>((person) => person.id).from;
 const placeReactionPicker = domMount<HTMLDivElement>((element) => {
   const message = element.closest<HTMLElement>('.message');
@@ -77,20 +66,12 @@ const placeReactionPicker = domMount<HTMLDivElement>((element) => {
   if (height > 0 && roomAbove < height + 8) element.classList.add('below');
   return () => {};
 });
-const ReactionPeople = resourceComponent<
-  {
-    identity: string;
-    load: () => Effect.Effect<TelegramReactionPeople, unknown>;
-    loadAvatar: MessageActionsProps['loadReactionAvatar'];
-  },
-  TelegramReactionPeople | undefined
->({
-  request: (props) => ({
-    key: props.identity,
-    load: () => props.load().pipe(Effect.catch(() => Effect.succeed(undefined))),
-  }),
-  view: view((model) => {
-    const result = () => available(model.result);
+const ReactionPeople = view<{
+  people: Optional<TelegramReactionPeople>;
+  loadAvatar: MessageActionsProps['loadReactionAvatar'];
+}>((props) =>
+  observe(props.people, (people) => {
+    const result = () => available(people);
     return (
       <span class="reaction-people-content">
         {result()
@@ -109,14 +90,10 @@ const ReactionPeople = resourceComponent<
                             color={person.color}
                             size="sm"
                             loadCached={
-                              person.hasAvatar
-                                ? () => model.props.loadAvatar(person, true)
-                                : undefined
+                              person.hasAvatar ? () => props.loadAvatar(person, true) : undefined
                             }
                             load={
-                              person.hasAvatar
-                                ? () => model.props.loadAvatar(person, false)
-                                : undefined
+                              person.hasAvatar ? () => props.loadAvatar(person, false) : undefined
                             }
                           />
                         </span>
@@ -132,20 +109,20 @@ const ReactionPeople = resourceComponent<
                 )}
               </>
             ))(result()!)
-          : model.result.waiting
+          : people.waiting
             ? 'Loading…'
             : 'Could not load reaction details'}
       </span>
     );
   }),
-});
+);
 interface ReactionButtonProps {
   message: ChatMessage;
   reaction: NonNullable<ChatMessage['reactions']>[number];
   react: MessageActionsProps['react'];
-  load: MessageActionsProps['loadReactionPeople'];
+  people: MessageActionsProps['reactionPeople'];
   loadAvatar: MessageActionsProps['loadReactionAvatar'];
-  loadCustomEmoji: MessageActionsProps['loadCustomEmoji'];
+  customEmoji: MessageActionsProps['customEmoji'];
 }
 const ReactionButton = component<
   ReactionButtonProps,
@@ -207,7 +184,7 @@ const ReactionButton = component<
           }}
         >
           {reaction.customEmojiId ? (
-            <CustomReaction documentId={reaction.customEmojiId!} load={props.loadCustomEmoji} />
+            <CustomReaction asset={props.customEmoji?.(reaction.customEmojiId!)} />
           ) : (
             <span>{reaction.emoji}</span>
           )}
@@ -225,8 +202,7 @@ const ReactionButton = component<
             }}
           >
             <ReactionPeople
-              identity={`${props.message.peerId}:${props.message.id}:${reaction.emoji}:${reaction.count}:${reaction.chosen}`}
-              load={() => props.load(reaction.emoji)}
+              people={props.people(reaction.emoji, `${reaction.count}:${reaction.chosen}`)}
               loadAvatar={props.loadAvatar}
             />
           </span>
@@ -248,9 +224,9 @@ export const MessageActions = view<MessageActionsProps, never>((props, _send) =>
           message={props.message}
           reaction={reaction}
           react={props.react}
-          load={props.loadReactionPeople}
+          people={props.reactionPeople}
           loadAvatar={props.loadReactionAvatar}
-          loadCustomEmoji={props.loadCustomEmoji}
+          customEmoji={props.customEmoji}
         />
       ))}
       {Number.isSafeInteger(Number(props.message.id)) ? (

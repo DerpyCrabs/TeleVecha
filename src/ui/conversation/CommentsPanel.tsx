@@ -1,3 +1,4 @@
+import type { QuerySources } from '../app/queries';
 import type { VoiceService } from '../media/voicePlayback';
 import { collection, list as renderList, view } from 'effectweb';
 import type { TelegramDiscussion, TelegramMessage } from '../../telegram/types';
@@ -27,6 +28,7 @@ export const CommentsPanel = view<
     retry: () => void;
     refresh: () => void;
     mediaAssets: MediaAssets;
+    previewPhoto: QuerySources['previewPhoto'];
     voice?: VoiceService | undefined;
   },
   never
@@ -70,9 +72,9 @@ export const CommentsPanel = view<
           ) : null}
           <MessageBody
             message={presentMessage(message, 0)}
-            loadPreviewPhoto={
+            previewPhoto={
               message.linkPreview?.hasPhoto
-                ? () => props.mediaAssets.messagePreview(message).load()
+                ? props.previewPhoto(message.peerId, String(message.id))
                 : undefined
             }
             loadPreviewMedia={

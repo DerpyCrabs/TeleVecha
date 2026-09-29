@@ -38,6 +38,11 @@ test('supports mouse selection, Escape, caret boundaries, and chat switching', a
   await input.fill('@');
   await expect(page.getByRole('option', { name: /Fixture Author/ })).toBeVisible();
   await input.press('ArrowDown');
+  await input.dispatchEvent('select');
+  await expect(page.getByRole('option', { name: /Another Member/ })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
   await input.press('Tab');
   await expect(input).toHaveValue('Another Member ');
   await input.fill('@');
