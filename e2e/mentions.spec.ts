@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 import { chatButton, openReady } from './helpers';
 
 test('selects a member without a username, preserves the mention while typing, and sends it', async ({

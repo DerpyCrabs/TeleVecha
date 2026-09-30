@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test, type Page } from '@playwright/test';
+import { expect } from './expect';
 
 import { chatButton, openReady, selectAlice } from './helpers';
 

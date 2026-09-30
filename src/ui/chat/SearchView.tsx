@@ -1,4 +1,4 @@
-import { list as renderList } from 'effectweb';
+import { list } from 'effectweb';
 import { available, observe, submit, view } from 'effectweb';
 import { Dialog } from '../shared/Dialog';
 import { panelClass, panelErrorClass, panelLoadMoreClass } from '../shared/panelStyles';
@@ -30,7 +30,7 @@ export const SearchView = view<SearchModel, SearchMessage>((model, send) => {
       <p class="text-[0.78rem] text-muted">Searching Telegram…</p>
     ) : (
       <>
-        {renderList(rows, (message) => (
+        {list(rows, (message) => (
           <button
             class="grid w-full gap-[0.2rem] rounded-[0.6rem] border-0 bg-transparent p-[0.65rem] text-left text-ink hover:bg-white/5 [&>span]:text-[0.78rem] [&>span]:text-muted"
             onClick={() => dispatch.Open(message)}

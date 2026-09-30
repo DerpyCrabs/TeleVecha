@@ -1,57 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
 import { fixtureStats, openReady, selectAlice } from './helpers';
-
-test.beforeEach(async ({ page }) => {
-  await openReady(page);
-  await selectAlice(page);
-});
-
-test('media and link thumbnails do not start native drags while message text stays selectable', async ({
-  page,
-}) => {
-  await page.evaluate(() => {
-    document.addEventListener('dragstart', (event) => {
-      document.documentElement.setAttribute('data-native-drag-started', 'true');
-      event.preventDefault();
-    });
-  });
-  for (const thumbnail of [
-    page.getByRole('img', { name: 'fixture.jpg', exact: true }),
-    page.locator('article[data-message-id="71"] .link-preview img'),
-  ]) {
-    await expect(thumbnail).toBeVisible();
-    await thumbnail.scrollIntoViewIfNeeded();
-    const bounds = await thumbnail.boundingBox();
-    if (!bounds) throw new Error('Thumbnail is not visible');
-    const x = bounds.x + bounds.width / 2;
-    const y = bounds.y + bounds.height / 2;
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await page.mouse.move(x + 12, y, { steps: 5 });
-    // Release outside the thumbnail to avoid activating its normal click action.
-    await page.mouse.move(1, 1);
-    await page.mouse.up();
-    await expect(page.locator('html')).not.toHaveAttribute('data-native-drag-started', 'true');
-  }
-  const body = page.locator('article[data-message-id="79"] .message-body');
-  await body.click({ clickCount: 3 });
-  await expect
-    .poll(() => page.evaluate(() => window.getSelection()?.toString().trim()))
-    .toContain((await body.innerText()).trim());
-  await expect(page.locator('.chat-row').first()).toHaveCSS('user-select', 'none');
-});
-
-test('shows a forwarded source and opens its original post', async ({ page }) => {
-  const forwarded = page
-    .locator('article[data-message-id="73"]')
-    .getByRole('button', { name: 'Forwarded from Release Channel' });
-  await expect(forwarded).toBeVisible();
-  await forwarded.click();
-
-  await expect(page.locator('article[data-message-id="5"]')).toHaveClass(/message-target/);
-  await expect(page.getByRole('heading', { name: 'Release Channel' })).toBeVisible();
-});
 
 async function openStickers(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' }).click();
@@ -60,165 +10,119 @@ async function openStickers(page: import('@playwright/test').Page) {
   return expressionPicker.getByLabel('Stickers');
 }
 
-test('shows the people behind a reaction on hover and keyboard focus', async ({ page }) => {
-  const reaction = page
-    .locator('article[data-message-id="79"]')
-    .getByRole('button', { name: 'Add 👍 reaction' });
-  await reaction.hover();
-  const tooltip = page.getByRole('tooltip');
-  await expect(tooltip).toContainText('Alice Fixture');
-  await expect(tooltip).toContainText('Bob Fixture');
-  const aliceAvatar = tooltip
-    .locator('.reaction-person', { hasText: 'Alice Fixture' })
-    .locator('img');
-  const bobAvatar = tooltip.locator('.reaction-person', { hasText: 'Bob Fixture' }).locator('img');
-  await expect(aliceAvatar).toBeVisible();
-  await expect(bobAvatar).toBeVisible();
-  await expect(bobAvatar).toHaveJSProperty('naturalWidth', 96);
-  const sources = await tooltip
-    .locator('img')
-    .evaluateAll((images) => images.map((image) => image.getAttribute('src')));
-  const downloads = (await fixtureStats(page))?.downloadAvatar;
-  await expect(tooltip).toBeInViewport({ ratio: 1 });
-  await expect(reaction).toContainText('2');
-  expect((await fixtureStats(page))?.setReaction).toBe(0);
-  await tooltip.hover();
-  await expect(tooltip).toBeVisible();
-  await page.getByRole('textbox', { name: 'Message' }).hover();
-  await expect(tooltip).toHaveCount(0);
-  await reaction.focus();
-  await expect(tooltip).toContainText('Alice Fixture');
-  await expect(aliceAvatar).toBeVisible();
-  await expect(bobAvatar).toBeVisible();
-  expect(
-    await tooltip
-      .locator('img')
-      .evaluateAll((images) => images.map((image) => image.getAttribute('src'))),
-  ).toEqual(sources);
-  expect((await fixtureStats(page))?.downloadAvatar).toBe(downloads);
-  await reaction.press('Escape');
-  await expect(tooltip).toHaveCount(0);
-});
+test('toggles standard and custom-emoji reactions', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
+  await test.step('adds and removes a Telegram reaction optimistically', async () => {
+    const message = page.locator('article[data-message-id="79"]');
+    await message.getByRole('button', { name: 'Add 👍 reaction' }).click();
+    await expect(message.getByRole('button', { name: 'Remove 👍 reaction' })).toContainText('3');
+    expect((await fixtureStats(page))?.setReaction).toBe(1);
 
-test('adds and removes a Telegram reaction optimistically', async ({ page }) => {
-  const message = page.locator('article[data-message-id="79"]');
-  await message.getByRole('button', { name: 'Add 👍 reaction' }).click();
-  await expect(message.getByRole('button', { name: 'Remove 👍 reaction' })).toContainText('3');
-  expect((await fixtureStats(page))?.setReaction).toBe(1);
-
-  await message.getByRole('button', { name: 'Remove 👍 reaction' }).click();
-  await expect(message.getByRole('button', { name: 'Add 👍 reaction' })).toContainText('2');
-  expect((await fixtureStats(page))?.setReaction).toBe(2);
-});
-
-test('chooses a new reaction from the message reaction picker', async ({ page }) => {
-  const message = page.locator('article[data-message-id="80"]');
-  await message.hover();
-  await message.getByRole('button', { name: 'React to message 80' }).click();
-  await page
-    .getByRole('dialog', { name: 'Choose reaction' })
-    .getByRole('button', { name: 'React with 🔥' })
-    .click();
-
-  await expect(message.getByRole('button', { name: 'Remove 🔥 reaction' })).toContainText('1');
-  expect((await fixtureStats(page))?.setReaction).toBe(1);
-});
-
-test('renders and toggles a Telegram custom-emoji reaction', async ({ page }) => {
-  await page.evaluate(() =>
-    window.__televechaFixture?.emit({
-      type: 'reaction-changed',
-      peerId: 'u:101',
-      messageId: 79,
-      reactions: [{ emoji: 'custom:99', customEmojiId: '99', count: 2, chosen: false }],
-    }),
-  );
-  const message = page.locator('article[data-message-id="79"]');
-  const reaction = message.getByRole('button', { name: 'Add custom emoji reaction' });
-  await expect(reaction.locator('img')).toBeVisible();
-  await reaction.click();
-  await expect(message.getByRole('button', { name: 'Remove custom emoji reaction' })).toContainText(
-    '3',
-  );
-});
-
-test('opens recent stickers, previews them, and sends the selected sticker', async ({ page }) => {
-  const picker = await openStickers(page);
-  await expect(picker).toBeVisible();
-  await expect(picker.locator('img').first()).toBeVisible();
-  await expect(picker.getByRole('img', { name: '✨ animated sticker' })).toBeVisible();
-  await picker.getByRole('button', { name: 'Send 👍 sticker' }).click();
-
-  await expect(page.locator('article[data-media-kind="sticker"]').last()).toBeVisible();
-  const stats = await fixtureStats(page);
-  expect(stats?.getRecentStickers).toBe(1);
-  expect(stats?.getStickerPacks).toBe(1);
-  expect(stats?.downloadSticker).toBe(3);
-  expect(stats?.sendSticker).toBe(1);
-});
-
-test('sends and plays an animated TGS sticker', async ({ page }) => {
-  const picker = await openStickers(page);
-  await picker.getByRole('button', { name: 'Send ✨ sticker' }).click();
-
-  const sent = page.locator('article[data-media-kind="sticker"]').last();
-  await expect(sent.getByRole('img', { name: 'sticker-sticker-3.tgs' })).toBeVisible();
-  await expect(sent.locator('.tgs-player')).not.toHaveAttribute('data-error', 'true');
-});
-
-test('navigates every installed sticker pack', async ({ page }) => {
-  const picker = await openStickers(page);
-  const recent = picker.getByRole('button', { name: 'Recent' });
-  await expect(recent).toBeVisible();
-  await expect(recent.locator('svg')).toBeVisible();
-  await expect(recent.locator('img, video, .tgs-player')).toHaveCount(0);
-  await expect(picker.getByRole('button', { name: 'Fixture Animals' })).toBeVisible();
-  await expect(picker.getByRole('button', { name: 'Fixture Animated' })).toBeVisible();
-  await picker.getByRole('button', { name: 'Fixture Animated' }).click();
-  await expect(picker.getByLabel('Fixture Animated').getByRole('button')).toHaveCount(1);
-});
-
-test('uploads a pasted clipboard image through the attachment path', async ({ page }) => {
-  await page.getByRole('textbox', { name: 'Message' }).evaluate((textarea) => {
-    const transfer = new DataTransfer();
-    transfer.items.add(new File(['clipboard'], '', { type: 'image/png' }));
-    textarea.dispatchEvent(
-      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }),
-    );
+    await message.getByRole('button', { name: 'Remove 👍 reaction' }).click();
+    await expect(message.getByRole('button', { name: 'Add 👍 reaction' })).toContainText('2');
+    expect((await fixtureStats(page))?.setReaction).toBe(2);
   });
-
-  await expect(page.getByTestId('composer-attachment')).toContainText('pasted-image-');
-  expect((await fixtureStats(page))?.sendFile).toBe(0);
-  await page.getByRole('textbox', { name: 'Message' }).fill('Pasted caption');
-  await page.getByRole('button', { name: 'Send message' }).click();
-  await expect.poll(async () => (await fixtureStats(page))?.sendFile).toBe(1);
-  await expect(page.locator('article.message').last()).toContainText('Pasted caption');
-  await expect(page.locator('article.message').last().locator('img')).toBeVisible();
-});
-
-test('uploads a file dropped onto the composer', async ({ page }) => {
-  await page.locator('.composer').evaluate((composer) => {
-    const transfer = new DataTransfer();
-    transfer.items.add(new File(['drop'], 'dropped.png', { type: 'image/png' }));
-    composer.dispatchEvent(
-      new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }),
+  await test.step('renders and toggles a Telegram custom-emoji reaction', async () => {
+    await page.evaluate(() =>
+      window.__televechaFixture?.emit({
+        type: 'reaction-changed',
+        peerId: 'u:101',
+        messageId: 79,
+        reactions: [{ emoji: 'custom:99', customEmojiId: '99', count: 2, chosen: false }],
+      }),
     );
+    const message = page.locator('article[data-message-id="79"]');
+    const reaction = message.getByRole('button', { name: 'Add custom emoji reaction' });
+    await expect(reaction.locator('img')).toBeVisible();
+    await reaction.click();
+    await expect(
+      message.getByRole('button', { name: 'Remove custom emoji reaction' }),
+    ).toContainText('3');
   });
-
-  await expect(page.getByTestId('composer-attachment')).toContainText('dropped.png');
-  expect((await fixtureStats(page))?.sendFile).toBe(0);
-  await page.getByRole('button', { name: 'Send message' }).click();
-  await expect.poll(async () => (await fixtureStats(page))?.sendFile).toBe(1);
-  await expect(page.locator('article.message').last()).toContainText('dropped.png');
-  await expect(page.locator('article.message').last().getByRole('img')).toBeVisible();
 });
 
-test('removes a staged attachment without sending it', async ({ page }) => {
-  await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
-  await expect(page.getByTestId('composer-attachment')).toContainText('report.txt');
-  await page.getByRole('button', { name: 'Remove attachment' }).click();
-  await expect(page.getByTestId('composer-attachment')).toHaveCount(0);
-  expect((await fixtureStats(page))?.sendFile).toBe(0);
+test('picks a reaction and sends stickers from the picker', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
+  await test.step('chooses a new reaction from the message reaction picker', async () => {
+    const message = page.locator('article[data-message-id="80"]');
+    await message.hover();
+    await message.getByRole('button', { name: 'React to message 80' }).click();
+    await page
+      .getByRole('dialog', { name: 'Choose reaction' })
+      .getByRole('button', { name: 'React with 🔥' })
+      .click();
+
+    await expect(message.getByRole('button', { name: 'Remove 🔥 reaction' })).toContainText('1');
+    expect((await fixtureStats(page))?.setReaction).toBe(1);
+  });
+  await test.step('opens recent stickers, previews them, and sends the selected sticker', async () => {
+    const picker = await openStickers(page);
+    await expect(picker).toBeVisible();
+    await expect(picker.locator('img').first()).toBeVisible();
+    await expect(picker.getByRole('img', { name: '✨ animated sticker' })).toBeVisible();
+    await picker.getByRole('button', { name: 'Send 👍 sticker' }).click();
+
+    await expect(page.locator('article[data-media-kind="sticker"]').last()).toBeVisible();
+    // The optimistic bubble appears before the requests behind it are counted.
+    await expect
+      .poll(() => fixtureStats(page))
+      .toMatchObject({
+        getRecentStickers: 1,
+        getStickerPacks: 1,
+        downloadSticker: 3,
+        sendSticker: 1,
+      });
+  });
+  await test.step('sends and plays an animated TGS sticker', async () => {
+    const picker = await openStickers(page);
+    await picker.getByRole('button', { name: 'Send ✨ sticker' }).click();
+
+    const sent = page.locator('article[data-media-kind="sticker"]').last();
+    await expect(sent.getByRole('img', { name: 'sticker-sticker-3.tgs' })).toBeVisible();
+    await expect(sent.locator('.tgs-player')).not.toHaveAttribute('data-error', 'true');
+  });
+  await test.step('navigates every installed sticker pack', async () => {
+    const picker = await openStickers(page);
+    const recent = picker.getByRole('button', { name: 'Recent' });
+    await expect(recent).toBeVisible();
+    await expect(recent.locator('svg')).toBeVisible();
+    await expect(recent.locator('img, video, .tgs-player')).toHaveCount(0);
+    await expect(picker.getByRole('button', { name: 'Fixture Animals' })).toBeVisible();
+    await expect(picker.getByRole('button', { name: 'Fixture Animated' })).toBeVisible();
+    await picker.getByRole('button', { name: 'Fixture Animated' }).click();
+    await expect(picker.getByLabel('Fixture Animated').getByRole('button')).toHaveCount(1);
+  });
+});
+
+test('stages, removes and uploads a pasted attachment', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
+  await test.step('removes a staged attachment without sending it', async () => {
+    await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
+    await expect(page.getByTestId('composer-attachment')).toContainText('report.txt');
+    await page.getByRole('button', { name: 'Remove attachment' }).click();
+    await expect(page.getByTestId('composer-attachment')).toHaveCount(0);
+    expect((await fixtureStats(page))?.sendFile).toBe(0);
+  });
+  await test.step('uploads a pasted clipboard image through the attachment path', async () => {
+    await page.getByRole('textbox', { name: 'Message' }).evaluate((textarea) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['clipboard'], '', { type: 'image/png' }));
+      textarea.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }),
+      );
+    });
+
+    await expect(page.getByTestId('composer-attachment')).toContainText('pasted-image-');
+    expect((await fixtureStats(page))?.sendFile).toBe(0);
+    await page.getByRole('textbox', { name: 'Message' }).fill('Pasted caption');
+    await page.getByRole('button', { name: 'Send message' }).click();
+    await expect.poll(async () => (await fixtureStats(page))?.sendFile).toBe(1);
+    await expect(page.locator('article.message').last()).toContainText('Pasted caption');
+    await expect(page.locator('article.message').last().locator('img')).toBeVisible();
+  });
 });
 
 test('preserves the pending bubble DOM node when Telegram confirms the send', async ({ page }) => {
@@ -352,81 +256,426 @@ test('never renders a server echo beside its optimistic message', async ({ page 
   await expect(bubble).toHaveAttribute('data-pending-node', 'server-echo');
 });
 
-test('sends a whole-message reply and renders its reply preview', async ({ page }) => {
-  const source = page.locator('article[data-message-id="79"]');
-  await source.hover();
-  await source.getByRole('button', { name: 'Reply to message 79' }).click();
-  await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
-  await expect(page.getByTestId('composer-reply')).toContainText('Reply');
-  await expect(page.getByTestId('composer-reply')).toContainText('Fixture message 79');
-  await expect(page.getByTestId('composer-reply')).not.toHaveCSS(
-    'background-color',
-    'rgb(25, 28, 34)',
-  );
+test('replies, quotes, uploads a dropped file and keeps composer focus', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
+  await test.step('holding Reply does not leave the present edge', async () => {
+    const source = page.locator('article[data-message-id="79"]');
+    const reply = source.getByRole('button', { name: 'Reply to message 79' });
+    await source.hover();
+    const box = await reply.boundingBox();
+    expect(box).not.toBeNull();
 
-  await page.getByRole('textbox', { name: 'Message' }).fill('Reply body');
-  await page.getByRole('button', { name: 'Send message' }).click();
-  const reply = page.locator('article.message').last();
-  const preview = reply.getByRole('button', { name: /Jump/ });
-  await expect(preview.locator('.message-reply-copy > strong')).toHaveText('Alice Fixture');
-  await expect(preview.locator('.message-reply-copy > span')).toHaveText('Fixture message 79');
-  await expect(reply).toHaveClass(/message-inline-time/u);
-  const inlineTime = await reply.evaluate((element) => {
-    const body = element.querySelector<HTMLElement>('.message-body')!;
-    const footer = element.querySelector<HTMLElement>('footer')!;
-    const range = document.createRange();
-    range.selectNodeContents(body);
-    const text = [...range.getClientRects()].at(-1)!;
-    const time = footer.getBoundingClientRect();
-    return {
-      bodyDisplay: getComputedStyle(body).display,
-      horizontalGap: time.left - text.right,
-      verticalOverlap: Math.min(text.bottom, time.bottom) - Math.max(text.top, time.top),
-    };
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await expect(page.getByTestId('composer-reply')).toBeVisible();
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+    await page.mouse.up();
+
+    await expect(page.getByRole('button', { name: 'Jump to present' })).toHaveCount(0);
   });
-  expect(inlineTime.bodyDisplay).toBe('inline');
-  expect(inlineTime.horizontalGap).toBeGreaterThan(4);
-  expect(inlineTime.verticalOverlap).toBeGreaterThan(0);
+  await test.step('focuses the composer after choosing Reply from the context menu', async () => {
+    const source = page.locator('article[data-message-id="79"]');
+    await source.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Reply' }).click();
+
+    await expect(page.getByTestId('composer-reply')).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
+  });
+  await test.step('cancels a composer reply without changing the draft', async () => {
+    const source = page.locator('article[data-message-id="79"]');
+    await source.getByRole('button', { name: 'Reply to message 79' }).click();
+    await page.getByRole('textbox', { name: 'Message' }).fill('Keep this draft');
+    await page.getByRole('button', { name: 'Cancel reply' }).click();
+
+    await expect(page.getByTestId('composer-reply')).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Keep this draft');
+  });
+  await test.step('sends a whole-message reply and renders its reply preview', async () => {
+    const source = page.locator('article[data-message-id="79"]');
+    await source.hover();
+    await source.getByRole('button', { name: 'Reply to message 79' }).click();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
+    await expect(page.getByTestId('composer-reply')).toContainText('Reply');
+    await expect(page.getByTestId('composer-reply')).toContainText('Fixture message 79');
+    await expect(page.getByTestId('composer-reply')).not.toHaveCSS(
+      'background-color',
+      'rgb(25, 28, 34)',
+    );
+
+    await page.getByRole('textbox', { name: 'Message' }).fill('Reply body');
+    await page.getByRole('button', { name: 'Send message' }).click();
+    const reply = page.locator('article.message').last();
+    const preview = reply.getByRole('button', { name: /Jump/ });
+    await expect(preview.locator('.message-reply-copy > strong')).toHaveText('Alice Fixture');
+    await expect(preview.locator('.message-reply-copy > span')).toHaveText('Fixture message 79');
+    await expect(reply).toHaveClass(/message-inline-time/u);
+    const inlineTime = await reply.evaluate((element) => {
+      const body = element.querySelector<HTMLElement>('.message-body')!;
+      const footer = element.querySelector<HTMLElement>('footer')!;
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      const text = [...range.getClientRects()].at(-1)!;
+      const time = footer.getBoundingClientRect();
+      return {
+        bodyDisplay: getComputedStyle(body).display,
+        horizontalGap: time.left - text.right,
+        verticalOverlap: Math.min(text.bottom, time.bottom) - Math.max(text.top, time.top),
+      };
+    });
+    expect(inlineTime.bodyDisplay).toBe('inline');
+    expect(inlineTime.horizontalGap).toBeGreaterThan(4);
+    expect(inlineTime.verticalOverlap).toBeGreaterThan(0);
+  });
+  await test.step('replies with the selected part of a message as a Telegram quote', async () => {
+    const source = page.locator('article[data-message-id="76"]');
+    await source.evaluate((article) => {
+      const body = article.querySelector('.message-body');
+      if (!body) throw new Error('Message body is missing');
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      let start: { node: Node; offset: number } | undefined;
+      let consumed = 0;
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.textContent ?? '';
+        const index = (body.textContent ?? '').indexOf('bold italic');
+        if (!start && index >= consumed && index < consumed + text.length) {
+          start = { node, offset: index - consumed };
+        }
+        if (start && index + 'bold italic'.length <= consumed + text.length) {
+          range.setStart(start.node, start.offset);
+          range.setEnd(node, index + 'bold italic'.length - consumed);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+          return;
+        }
+        consumed += text.length;
+      }
+      throw new Error('Quote text was not found');
+    });
+    await source.getByRole('button', { name: 'Reply to message 76' }).click();
+    await expect(page.getByTestId('composer-reply')).toContainText('Reply with quote');
+    await expect(page.getByTestId('composer-reply')).toContainText('bold italic');
+
+    await page.getByRole('textbox', { name: 'Message' }).fill('Quoted reply');
+    await page.getByRole('button', { name: 'Send message' }).click();
+    const preview = page.locator('article.message').last().getByRole('button', { name: /Jump/ });
+    await expect(preview.locator('.message-reply-copy > strong')).toHaveText('You');
+    await expect(preview.locator('.message-reply-copy > span')).toHaveText('bold italic');
+  });
+  await test.step('uploads a file dropped onto the composer', async () => {
+    await page.locator('.composer').evaluate((composer) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['drop'], 'dropped.png', { type: 'image/png' }));
+      composer.dispatchEvent(
+        new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }),
+      );
+    });
+
+    await expect(page.getByTestId('composer-attachment')).toContainText('dropped.png');
+    expect((await fixtureStats(page))?.sendFile).toBe(0);
+    await page.getByRole('button', { name: 'Send message' }).click();
+    await expect.poll(async () => (await fixtureStats(page))?.sendFile).toBe(1);
+    await expect(page.locator('article.message').last()).toContainText('dropped.png');
+    await expect(page.locator('article.message').last().getByRole('img')).toBeVisible();
+  });
+  await test.step('focuses the composer after switching dialogs', async () => {
+    await page
+      .getByTestId('chat-list')
+      .getByRole('button', { name: /Release Channel/ })
+      .click();
+
+    await expect(page.getByTestId('conversation-header')).toContainText('Release Channel');
+    await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
+  });
 });
 
-test('holding Reply does not leave the present edge', async ({ page }) => {
-  const source = page.locator('article[data-message-id="79"]');
-  const reply = source.getByRole('button', { name: 'Reply to message 79' });
-  await source.hover();
-  const box = await reply.boundingBox();
-  expect(box).not.toBeNull();
+test('renders rich message content, previews and reaction details', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
+  await test.step('clips long link-preview titles before the small thumbnail', async () => {
+    const preview = page.locator('article[data-message-id="71"] .link-preview');
+    await expect(preview).toBeVisible();
 
-  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-  await page.mouse.down();
-  await expect(page.getByTestId('composer-reply')).toBeVisible();
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-  await page.mouse.up();
+    const layout = await preview.evaluate((element) => {
+      const copy = element.querySelector<HTMLElement>('.link-preview-copy')!;
+      const title = element.querySelector<HTMLElement>('strong')!;
+      const photo = element.querySelector<HTMLElement>('.link-preview-photo')!;
+      const previewBounds = element.getBoundingClientRect();
+      const copyBounds = copy.getBoundingClientRect();
+      const titleBounds = title.getBoundingClientRect();
+      const photoBounds = photo.getBoundingClientRect();
+      return {
+        previewDoesNotScroll: element.scrollWidth <= element.clientWidth,
+        copyEndsBeforePhoto: copyBounds.right <= photoBounds.left,
+        titleEndsBeforePhoto: titleBounds.right <= photoBounds.left,
+        photoInsidePreview: photoBounds.right <= previewBounds.right,
+        titleOverflow: getComputedStyle(title).overflow,
+        titleWhiteSpace: getComputedStyle(title).whiteSpace,
+      };
+    });
 
-  await expect(page.getByRole('button', { name: 'Jump to present' })).toHaveCount(0);
-});
+    expect(layout).toEqual({
+      previewDoesNotScroll: true,
+      copyEndsBeforePhoto: true,
+      titleEndsBeforePhoto: true,
+      photoInsidePreview: true,
+      titleOverflow: 'hidden',
+      titleWhiteSpace: 'nowrap',
+    });
+  });
+  await test.step('renders mentions, links, previews, wrapping, formatting, and spoilers', async () => {
+    const message = page.locator('article[data-message-id="76"]');
+    await expect(message.locator('.mention')).toHaveText('@alice');
+    await expect(message.getByRole('link', { name: /https:\/\/example.com/ })).toHaveAttribute(
+      'href',
+      'https://example.com/a/very/long/link',
+    );
+    await expect(message.getByRole('link', { name: /Fixture link preview/ })).toContainText(
+      'Telegram supplied this preview description.',
+    );
+    await expect(message.locator('.link-preview img')).toBeVisible();
+    const previewLayout = await message.evaluate((element) => {
+      const preview = element.querySelector<HTMLElement>('.link-preview')!;
+      const photo = element.querySelector<HTMLElement>('.link-preview-photo')!;
+      const bodyLink = element.querySelector<HTMLElement>('.message-body a')!;
+      const messageBounds = element.getBoundingClientRect();
+      const footerBounds = element.querySelector<HTMLElement>('footer')!.getBoundingClientRect();
+      return {
+        previewHeight: preview.getBoundingClientRect().height,
+        photoWidth: photo.getBoundingClientRect().width,
+        photoHeight: photo.getBoundingClientRect().height,
+        messageColor: getComputedStyle(element).color,
+        linkColor: getComputedStyle(bodyLink).color,
+        footerInsideBubble: footerBounds.bottom <= messageBounds.bottom,
+      };
+    });
+    expect(previewLayout).toMatchObject({
+      photoWidth: 92,
+      photoHeight: 92,
+      messageColor: previewLayout.linkColor,
+    });
+    expect(previewLayout.previewHeight).toBeLessThanOrEqual(96);
+    expect(previewLayout.footerInsideBubble).toBe(true);
+    await expect(page.locator('article[data-message-id="77"] .message-reply')).not.toHaveCSS(
+      'color',
+      'rgb(139, 144, 154)',
+    );
+    const renderedReply = page.locator('article[data-message-id="77"] .message-reply');
+    await expect(renderedReply).toHaveCSS('border-left-width', '3px');
+    await expect(renderedReply).toHaveCSS('border-left-style', 'solid');
+    const authorColor = await renderedReply
+      .locator('.message-reply-copy > strong')
+      .evaluate((element) => getComputedStyle(element).color);
+    await expect(renderedReply).toHaveCSS('border-left-color', authorColor);
+    await expect(renderedReply).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(message.locator('.bold')).toHaveCSS('font-weight', '700');
+    await expect(message.locator('.italic')).toHaveCSS('font-style', 'italic');
+    const spoiler = message.locator('.spoiler');
+    await expect(spoiler).toHaveAttribute('role', 'button');
+    await expect(spoiler).toHaveAttribute('aria-expanded', 'false');
+    await expect(spoiler).toHaveCSS('color', 'rgba(0, 0, 0, 0)');
+    await spoiler.focus();
+    await spoiler.press('Enter');
+    await expect(spoiler).toHaveAttribute('aria-expanded', 'true');
+    await expect(spoiler).not.toHaveCSS('color', 'rgba(0, 0, 0, 0)');
+    expect(
+      await message
+        .locator('.message-body')
+        .evaluate((body) => body.scrollWidth <= body.clientWidth),
+    ).toBe(true);
+  });
+  await test.step('renders bot Rich Markdown blocks and nested formatting', async () => {
+    const rich = page.locator('article[data-message-id="74"] .rich-message');
+    await expect(rich.getByRole('heading', { name: 'Rich Markdown' })).toBeVisible();
+    await expect(rich.locator('mark')).toHaveText('Highlighted');
+    await expect(rich.getByRole('checkbox', { name: 'Completed' })).toBeChecked();
+    await expect(rich.getByRole('columnheader', { name: 'Feature' })).toBeVisible();
+    await expect(rich.getByRole('cell', { name: 'Status' })).toBeVisible();
 
-test('focuses the composer after choosing Reply from the context menu', async ({ page }) => {
-  const source = page.locator('article[data-message-id="79"]');
-  await source.click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Reply' }).click();
+    const spoiler = rich.locator('.rich-spoiler');
+    await expect(spoiler).toHaveAccessibleName('Hidden spoiler. Activate to reveal.');
+    await expect(spoiler).toHaveCSS('color', 'rgba(0, 0, 0, 0)');
+    await spoiler.click();
+    await expect(spoiler).toHaveAttribute('aria-expanded', 'true');
 
-  await expect(page.getByTestId('composer-reply')).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
-});
+    await rich.getByText('More').click();
+    await expect(rich.getByText('Nested content')).toBeVisible();
+  });
+  await test.step('media and link thumbnails do not start native drags while message text stays selectable', async () => {
+    await page.evaluate(() => {
+      document.addEventListener('dragstart', (event) => {
+        document.documentElement.setAttribute('data-native-drag-started', 'true');
+        event.preventDefault();
+      });
+    });
+    for (const thumbnail of [
+      page.getByRole('img', { name: 'fixture.jpg', exact: true }),
+      page.locator('article[data-message-id="71"] .link-preview img'),
+    ]) {
+      await expect(thumbnail).toBeVisible();
+      await thumbnail.scrollIntoViewIfNeeded();
+      const bounds = await thumbnail.boundingBox();
+      if (!bounds) throw new Error('Thumbnail is not visible');
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + bounds.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + 12, y, { steps: 5 });
+      // Release outside the thumbnail to avoid activating its normal click action.
+      await page.mouse.move(1, 1);
+      await page.mouse.up();
+      await expect(page.locator('html')).not.toHaveAttribute('data-native-drag-started', 'true');
+    }
+    const body = page.locator('article[data-message-id="79"] .message-body');
+    await body.click({ clickCount: 3 });
+    await expect
+      .poll(() => page.evaluate(() => window.getSelection()?.toString().trim()))
+      .toContain((await body.innerText()).trim());
+    await expect(page.locator('.chat-row').first()).toHaveCSS('user-select', 'none');
+  });
+  await test.step('shows the people behind a reaction on hover and keyboard focus', async () => {
+    const reaction = page
+      .locator('article[data-message-id="79"]')
+      .getByRole('button', { name: 'Add 👍 reaction' });
+    await reaction.hover();
+    const tooltip = page.getByRole('tooltip');
+    await expect(tooltip).toContainText('Alice Fixture');
+    await expect(tooltip).toContainText('Bob Fixture');
+    const aliceAvatar = tooltip
+      .locator('.reaction-person', { hasText: 'Alice Fixture' })
+      .locator('img');
+    const bobAvatar = tooltip
+      .locator('.reaction-person', { hasText: 'Bob Fixture' })
+      .locator('img');
+    await expect(aliceAvatar).toBeVisible();
+    await expect(bobAvatar).toBeVisible();
+    await expect(bobAvatar).toHaveJSProperty('naturalWidth', 96);
+    const sources = await tooltip
+      .locator('img')
+      .evaluateAll((images) => images.map((image) => image.getAttribute('src')));
+    const downloads = (await fixtureStats(page))?.downloadAvatar;
+    await expect(tooltip).toBeInViewport({ ratio: 1 });
+    await expect(reaction).toContainText('2');
+    expect((await fixtureStats(page))?.setReaction).toBe(0);
+    await tooltip.hover();
+    await expect(tooltip).toBeVisible();
+    await page.getByRole('textbox', { name: 'Message' }).hover();
+    await expect(tooltip).toHaveCount(0);
+    await reaction.focus();
+    await expect(tooltip).toContainText('Alice Fixture');
+    await expect(aliceAvatar).toBeVisible();
+    await expect(bobAvatar).toBeVisible();
+    expect(
+      await tooltip
+        .locator('img')
+        .evaluateAll((images) => images.map((image) => image.getAttribute('src'))),
+    ).toEqual(sources);
+    expect((await fixtureStats(page))?.downloadAvatar).toBe(downloads);
+    await reaction.press('Escape');
+    await expect(tooltip).toHaveCount(0);
+  });
+  await test.step('loads webpage videos only on click and rounds every preview corner', async () => {
+    const message = page.locator('article[data-message-id="72"]');
+    const preview = message.locator('.link-preview-media');
+    const video = preview.locator('video');
 
-test('focuses the composer after switching dialogs', async ({ page }) => {
-  await page
-    .getByTestId('chat-list')
-    .getByRole('button', { name: /Release Channel/ })
-    .click();
+    await expect(preview).toBeVisible();
+    const thumbnail = preview.locator('.link-preview-play img');
+    await expect(thumbnail).toBeVisible();
+    await expect
+      .poll(() => thumbnail.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+      .toBeGreaterThan(0);
+    await expect(video).toHaveCount(0);
+    expect(
+      (await fixtureStats(page))?.downloadMediaRequests.filter(
+        (request) => request.messageId === 72 && !request.preview,
+      ),
+    ).toEqual([]);
+    await preview.getByRole('button', { name: 'Play video', exact: true }).click();
+    await expect(video).toBeVisible();
+    await expect(video).toHaveAttribute('controls', '');
+    await expect
+      .poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentSrc))
+      .toMatch(/^blob:/u);
+    await expect.poll(() => video.getAttribute('poster')).toMatch(/^blob:/u);
+    await expect
+      .poll(() =>
+        video.evaluate((element) => {
+          const videoElement = element as HTMLVideoElement;
+          return (
+            Number.isFinite(videoElement.duration) &&
+            videoElement.duration > 0 &&
+            videoElement.readyState >= 1
+          );
+        }),
+      )
+      .toBe(true);
 
-  await expect(page.getByTestId('conversation-header')).toContainText('Release Channel');
-  await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused();
+    const layout = await preview.evaluate((element) => {
+      const title = element.querySelector<HTMLElement>('strong')!;
+      const previewBounds = element.getBoundingClientRect();
+      const titleBounds = title.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const accentStyle = getComputedStyle(element, '::before');
+      return {
+        previewDoesNotScroll: element.scrollWidth <= element.clientWidth,
+        titleInsidePreview: titleBounds.right <= previewBounds.right,
+        titleOverflow: getComputedStyle(title).overflow,
+        borderLeftWidth: style.borderLeftWidth,
+        borderTopLeftRadius: style.borderTopLeftRadius,
+        borderBottomLeftRadius: style.borderBottomLeftRadius,
+        accentContent: accentStyle.content,
+        borderTopRightRadius: style.borderTopRightRadius,
+        borderBottomRightRadius: style.borderBottomRightRadius,
+      };
+    });
+    expect(layout).toEqual({
+      previewDoesNotScroll: true,
+      titleInsidePreview: true,
+      titleOverflow: 'hidden',
+      borderLeftWidth: '0px',
+      borderTopLeftRadius: '5.6px',
+      borderBottomLeftRadius: '5.6px',
+      borderTopRightRadius: '5.6px',
+      borderBottomRightRadius: '5.6px',
+      accentContent: 'none',
+    });
+    expect(
+      (await fixtureStats(page))?.downloadMediaRequests.filter(
+        (request) => request.messageId === 72 && !request.preview,
+      ),
+    ).toHaveLength(1);
+    await video.dispatchEvent('error');
+    await expect(preview.getByRole('button', { name: 'Retry video' })).toBeVisible();
+    await expect(thumbnail).toBeVisible();
+    await preview.getByRole('button', { name: 'Retry video' }).click();
+    await expect(video).toBeVisible();
+    await expect
+      .poll(() => video.evaluate((element) => (element as HTMLVideoElement).readyState))
+      .toBeGreaterThanOrEqual(1);
+  });
+  await test.step('shows a forwarded source and opens its original post', async () => {
+    const forwarded = page
+      .locator('article[data-message-id="73"]')
+      .getByRole('button', { name: 'Forwarded from Release Channel' });
+    await expect(forwarded).toBeVisible();
+    await forwarded.click();
+
+    await expect(page.locator('article[data-message-id="5"]')).toHaveClass(/message-target/);
+    await expect(page.getByRole('heading', { name: 'Release Channel' })).toBeVisible();
+  });
 });
 
 test('an outgoing reply rejoins the present edge after reading older messages', async ({
   page,
 }) => {
+  await openReady(page);
+  await selectAlice(page);
   const scroller = page.getByTestId('message-scroller');
   await scroller.dispatchEvent('wheel', { deltaY: -1 });
   await scroller.evaluate((element) => {
@@ -449,244 +698,4 @@ test('an outgoing reply rejoins the present edge after reading older messages', 
     )
     .toBeLessThan(0.5);
   await expect(page.getByRole('button', { name: 'Jump to present' })).toHaveCount(0);
-});
-
-test('cancels a composer reply without changing the draft', async ({ page }) => {
-  const source = page.locator('article[data-message-id="79"]');
-  await source.getByRole('button', { name: 'Reply to message 79' }).click();
-  await page.getByRole('textbox', { name: 'Message' }).fill('Keep this draft');
-  await page.getByRole('button', { name: 'Cancel reply' }).click();
-
-  await expect(page.getByTestId('composer-reply')).toHaveCount(0);
-  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Keep this draft');
-});
-
-test('replies with the selected part of a message as a Telegram quote', async ({ page }) => {
-  const source = page.locator('article[data-message-id="76"]');
-  await source.evaluate((article) => {
-    const body = article.querySelector('.message-body');
-    if (!body) throw new Error('Message body is missing');
-    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-    const range = document.createRange();
-    let start: { node: Node; offset: number } | undefined;
-    let consumed = 0;
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      const text = node.textContent ?? '';
-      const index = (body.textContent ?? '').indexOf('bold italic');
-      if (!start && index >= consumed && index < consumed + text.length) {
-        start = { node, offset: index - consumed };
-      }
-      if (start && index + 'bold italic'.length <= consumed + text.length) {
-        range.setStart(start.node, start.offset);
-        range.setEnd(node, index + 'bold italic'.length - consumed);
-        const selection = window.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(range);
-        return;
-      }
-      consumed += text.length;
-    }
-    throw new Error('Quote text was not found');
-  });
-  await source.getByRole('button', { name: 'Reply to message 76' }).click();
-  await expect(page.getByTestId('composer-reply')).toContainText('Reply with quote');
-  await expect(page.getByTestId('composer-reply')).toContainText('bold italic');
-
-  await page.getByRole('textbox', { name: 'Message' }).fill('Quoted reply');
-  await page.getByRole('button', { name: 'Send message' }).click();
-  const preview = page.locator('article.message').last().getByRole('button', { name: /Jump/ });
-  await expect(preview.locator('.message-reply-copy > strong')).toHaveText('You');
-  await expect(preview.locator('.message-reply-copy > span')).toHaveText('bold italic');
-});
-
-test('renders mentions, links, previews, wrapping, formatting, and spoilers', async ({ page }) => {
-  const message = page.locator('article[data-message-id="76"]');
-  await expect(message.locator('.mention')).toHaveText('@alice');
-  await expect(message.getByRole('link', { name: /https:\/\/example.com/ })).toHaveAttribute(
-    'href',
-    'https://example.com/a/very/long/link',
-  );
-  await expect(message.getByRole('link', { name: /Fixture link preview/ })).toContainText(
-    'Telegram supplied this preview description.',
-  );
-  await expect(message.locator('.link-preview img')).toBeVisible();
-  const previewLayout = await message.evaluate((element) => {
-    const preview = element.querySelector<HTMLElement>('.link-preview')!;
-    const photo = element.querySelector<HTMLElement>('.link-preview-photo')!;
-    const bodyLink = element.querySelector<HTMLElement>('.message-body a')!;
-    const messageBounds = element.getBoundingClientRect();
-    const footerBounds = element.querySelector<HTMLElement>('footer')!.getBoundingClientRect();
-    return {
-      previewHeight: preview.getBoundingClientRect().height,
-      photoWidth: photo.getBoundingClientRect().width,
-      photoHeight: photo.getBoundingClientRect().height,
-      messageColor: getComputedStyle(element).color,
-      linkColor: getComputedStyle(bodyLink).color,
-      footerInsideBubble: footerBounds.bottom <= messageBounds.bottom,
-    };
-  });
-  expect(previewLayout).toMatchObject({
-    photoWidth: 92,
-    photoHeight: 92,
-    messageColor: previewLayout.linkColor,
-  });
-  expect(previewLayout.previewHeight).toBeLessThanOrEqual(96);
-  expect(previewLayout.footerInsideBubble).toBe(true);
-  await expect(page.locator('article[data-message-id="77"] .message-reply')).not.toHaveCSS(
-    'color',
-    'rgb(139, 144, 154)',
-  );
-  const renderedReply = page.locator('article[data-message-id="77"] .message-reply');
-  await expect(renderedReply).toHaveCSS('border-left-width', '3px');
-  await expect(renderedReply).toHaveCSS('border-left-style', 'solid');
-  const authorColor = await renderedReply
-    .locator('.message-reply-copy > strong')
-    .evaluate((element) => getComputedStyle(element).color);
-  await expect(renderedReply).toHaveCSS('border-left-color', authorColor);
-  await expect(renderedReply).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  await expect(message.locator('.bold')).toHaveCSS('font-weight', '700');
-  await expect(message.locator('.italic')).toHaveCSS('font-style', 'italic');
-  const spoiler = message.locator('.spoiler');
-  await expect(spoiler).toHaveAttribute('role', 'button');
-  await expect(spoiler).toHaveAttribute('aria-expanded', 'false');
-  await expect(spoiler).toHaveCSS('color', 'rgba(0, 0, 0, 0)');
-  await spoiler.focus();
-  await spoiler.press('Enter');
-  await expect(spoiler).toHaveAttribute('aria-expanded', 'true');
-  await expect(spoiler).not.toHaveCSS('color', 'rgba(0, 0, 0, 0)');
-  expect(
-    await message.locator('.message-body').evaluate((body) => body.scrollWidth <= body.clientWidth),
-  ).toBe(true);
-});
-
-test('loads webpage videos only on click and rounds every preview corner', async ({ page }) => {
-  const message = page.locator('article[data-message-id="72"]');
-  const preview = message.locator('.link-preview-media');
-  const video = preview.locator('video');
-
-  await expect(preview).toBeVisible();
-  const thumbnail = preview.locator('.link-preview-play img');
-  await expect(thumbnail).toBeVisible();
-  await expect
-    .poll(() => thumbnail.evaluate((img) => (img as HTMLImageElement).naturalWidth))
-    .toBeGreaterThan(0);
-  await expect(video).toHaveCount(0);
-  expect(
-    (await fixtureStats(page))?.downloadMediaRequests.filter(
-      (request) => request.messageId === 72 && !request.preview,
-    ),
-  ).toEqual([]);
-  await preview.getByRole('button', { name: 'Play video', exact: true }).click();
-  await expect(video).toBeVisible();
-  await expect(video).toHaveAttribute('controls', '');
-  await expect
-    .poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentSrc))
-    .toMatch(/^blob:/u);
-  await expect.poll(() => video.getAttribute('poster')).toMatch(/^blob:/u);
-  await expect
-    .poll(() =>
-      video.evaluate((element) => {
-        const videoElement = element as HTMLVideoElement;
-        return (
-          Number.isFinite(videoElement.duration) &&
-          videoElement.duration > 0 &&
-          videoElement.readyState >= 1
-        );
-      }),
-    )
-    .toBe(true);
-
-  const layout = await preview.evaluate((element) => {
-    const title = element.querySelector<HTMLElement>('strong')!;
-    const previewBounds = element.getBoundingClientRect();
-    const titleBounds = title.getBoundingClientRect();
-    const style = getComputedStyle(element);
-    const accentStyle = getComputedStyle(element, '::before');
-    return {
-      previewDoesNotScroll: element.scrollWidth <= element.clientWidth,
-      titleInsidePreview: titleBounds.right <= previewBounds.right,
-      titleOverflow: getComputedStyle(title).overflow,
-      borderLeftWidth: style.borderLeftWidth,
-      borderTopLeftRadius: style.borderTopLeftRadius,
-      borderBottomLeftRadius: style.borderBottomLeftRadius,
-      accentContent: accentStyle.content,
-      borderTopRightRadius: style.borderTopRightRadius,
-      borderBottomRightRadius: style.borderBottomRightRadius,
-    };
-  });
-  expect(layout).toEqual({
-    previewDoesNotScroll: true,
-    titleInsidePreview: true,
-    titleOverflow: 'hidden',
-    borderLeftWidth: '0px',
-    borderTopLeftRadius: '5.6px',
-    borderBottomLeftRadius: '5.6px',
-    borderTopRightRadius: '5.6px',
-    borderBottomRightRadius: '5.6px',
-    accentContent: 'none',
-  });
-  expect(
-    (await fixtureStats(page))?.downloadMediaRequests.filter(
-      (request) => request.messageId === 72 && !request.preview,
-    ),
-  ).toHaveLength(1);
-  await video.dispatchEvent('error');
-  await expect(preview.getByRole('button', { name: 'Retry video' })).toBeVisible();
-  await expect(thumbnail).toBeVisible();
-  await preview.getByRole('button', { name: 'Retry video' }).click();
-  await expect(video).toBeVisible();
-  await expect
-    .poll(() => video.evaluate((element) => (element as HTMLVideoElement).readyState))
-    .toBeGreaterThanOrEqual(1);
-});
-
-test('clips long link-preview titles before the small thumbnail', async ({ page }) => {
-  const preview = page.locator('article[data-message-id="71"] .link-preview');
-  await expect(preview).toBeVisible();
-
-  const layout = await preview.evaluate((element) => {
-    const copy = element.querySelector<HTMLElement>('.link-preview-copy')!;
-    const title = element.querySelector<HTMLElement>('strong')!;
-    const photo = element.querySelector<HTMLElement>('.link-preview-photo')!;
-    const previewBounds = element.getBoundingClientRect();
-    const copyBounds = copy.getBoundingClientRect();
-    const titleBounds = title.getBoundingClientRect();
-    const photoBounds = photo.getBoundingClientRect();
-    return {
-      previewDoesNotScroll: element.scrollWidth <= element.clientWidth,
-      copyEndsBeforePhoto: copyBounds.right <= photoBounds.left,
-      titleEndsBeforePhoto: titleBounds.right <= photoBounds.left,
-      photoInsidePreview: photoBounds.right <= previewBounds.right,
-      titleOverflow: getComputedStyle(title).overflow,
-      titleWhiteSpace: getComputedStyle(title).whiteSpace,
-    };
-  });
-
-  expect(layout).toEqual({
-    previewDoesNotScroll: true,
-    copyEndsBeforePhoto: true,
-    titleEndsBeforePhoto: true,
-    photoInsidePreview: true,
-    titleOverflow: 'hidden',
-    titleWhiteSpace: 'nowrap',
-  });
-});
-
-test('renders bot Rich Markdown blocks and nested formatting', async ({ page }) => {
-  const rich = page.locator('article[data-message-id="74"] .rich-message');
-  await expect(rich.getByRole('heading', { name: 'Rich Markdown' })).toBeVisible();
-  await expect(rich.locator('mark')).toHaveText('Highlighted');
-  await expect(rich.getByRole('checkbox', { name: 'Completed' })).toBeChecked();
-  await expect(rich.getByRole('columnheader', { name: 'Feature' })).toBeVisible();
-  await expect(rich.getByRole('cell', { name: 'Status' })).toBeVisible();
-
-  const spoiler = rich.locator('.rich-spoiler');
-  await expect(spoiler).toHaveAccessibleName('Hidden spoiler. Activate to reveal.');
-  await expect(spoiler).toHaveCSS('color', 'rgba(0, 0, 0, 0)');
-  await spoiler.click();
-  await expect(spoiler).toHaveAttribute('aria-expanded', 'true');
-
-  await rich.getByText('More').click();
-  await expect(rich.getByText('Nested content')).toBeVisible();
 });

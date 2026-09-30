@@ -13,16 +13,24 @@ export function applyConversationChange<View extends ConversationViewSnapshot>(
   let pinnedMessages = view.pinnedMessages;
   if (event.type === 'message-upsert') {
     if (event.message.peerId !== peerId) return view;
-    const known = messages.some(({ id }) => id === event.message.id);
+    const messageId = event.message.id;
+    const known = messages.some(({ id }) => id === messageId);
     const newestId = messages.at(-1)?.id ?? 0;
-    if (known || event.insertIfMissing || event.message.id > newestId) {
-      messages = [...messages.filter(({ id }) => id !== event.message.id), event.message].sort(
+    // A message missing from inside the loaded range arrived out of order, for example when
+    // a history page loaded between two updates. Only a declared gap may hide it.
+    const insideLoadedRange =
+      messageId > (messages[0]?.id ?? Number.POSITIVE_INFINITY) &&
+      !view.historyGaps.some(
+        (gap) => gap.olderMaxMessageId < messageId && messageId < gap.newerMinMessageId,
+      );
+    if (known || event.insertIfMissing || messageId > newestId || insideLoadedRange) {
+      messages = [...messages.filter(({ id }) => id !== messageId), event.message].sort(
         (left, right) => left.id - right.id,
       );
     }
-    if (pinnedMessages.some(({ id }) => id === event.message.id))
+    if (pinnedMessages.some(({ id }) => id === messageId))
       pinnedMessages = pinnedMessages.map((message) =>
-        message.id === event.message.id ? event.message : message,
+        message.id === messageId ? event.message : message,
       );
   } else if (event.type === 'messages-delete') {
     if (event.peerId && event.peerId !== peerId) return view;

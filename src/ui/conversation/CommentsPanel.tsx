@@ -1,6 +1,6 @@
 import type { QuerySources } from '../app/queries';
 import type { VoiceService } from '../media/voicePlayback';
-import { collection, list as renderList, view } from 'effectweb';
+import { collection, list, view } from 'effectweb';
 import type { TelegramDiscussion, TelegramMessage } from '../../telegram/types';
 import type { MediaAssets } from '../media/mediaAssets';
 import { Dialog } from '../shared/Dialog';
@@ -43,7 +43,7 @@ export const CommentsPanel = view<
           Load older comments
         </button>
       ) : null}
-      {renderList(rows(props.state.messages), (message) => (
+      {list(rows(props.state.messages), (message) => (
         <article
           classList={{
             'comment-message': true,

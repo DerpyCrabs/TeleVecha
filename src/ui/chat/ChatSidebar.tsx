@@ -1,12 +1,4 @@
-import {
-  list as renderList,
-  commandSlot,
-  effectCommand,
-  component,
-  domBinding,
-  sequence,
-  view,
-} from 'effectweb';
+import { list, commandSlot, effectCommand, component, domBinding, sequence, view } from 'effectweb';
 import { cachedLoad } from '../shared/cachedLoad';
 import type { Snapshot } from 'effectweb';
 import { Effect } from 'effect';
@@ -401,7 +393,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarModel, ChatSid
           classList={{ hidden: compact() }}
           onWheel={scrollFilters}
         >
-          {renderList(sequence(['all', 'unread', 'groups', 'archived'] as const), (value) => (
+          {list(sequence(['all', 'unread', 'groups', 'archived'] as const), (value) => (
             <button
               class="shrink-0 rounded-full px-3 py-1.5"
               classList={{
@@ -460,7 +452,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarModel, ChatSid
               style={{ height: `${virtualRange.start * CHAT_ROW_HEIGHT}px` }}
             />
           ) : null}
-          {renderList(idRows(virtualChats), (chat, virtualIndex) => (
+          {list(idRows(virtualChats), (chat, virtualIndex) => (
             <a
               href={chatHref(chat.id)}
               draggable={false}
@@ -556,7 +548,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarModel, ChatSid
               <p class="mx-[0.7rem] mt-3 mb-1 text-xs font-bold tracking-[0.04em] text-accent uppercase">
                 Telegram
               </p>
-              {renderList(remotePeerRows(visiblePeerResults), (result) => (
+              {list(remotePeerRows(visiblePeerResults), (result) => (
                 <button
                   class="chat-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
                   classList={{

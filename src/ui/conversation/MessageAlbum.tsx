@@ -1,11 +1,4 @@
-import {
-  list as renderList,
-  commandSlot,
-  effectCommand,
-  component,
-  sequence,
-  view,
-} from 'effectweb';
+import { list, commandSlot, effectCommand, component, sequence, view } from 'effectweb';
 import { cachedLoad } from '../shared/cachedLoad';
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
@@ -142,9 +135,9 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
         aria-label={`${props.messages.length} grouped media attachments`}
         data-album-size={props.messages.length}
       >
-        {renderList(sequence(rows), (row) => (
+        {list(sequence(rows), (row) => (
           <div class="media-album-row">
-            {renderList(idRows(row), (message) => (
+            {list(idRows(row), (message) => (
               <div
                 class="media-album-item"
                 data-message-id={message.id}

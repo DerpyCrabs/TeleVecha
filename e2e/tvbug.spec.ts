@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 import { strFromU8, unzipSync } from 'fflate';
 
 import { openReady, selectAlice } from './helpers';

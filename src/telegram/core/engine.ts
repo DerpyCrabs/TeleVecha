@@ -3780,6 +3780,13 @@ function makeMessagingEngineModule(
           ...reconcileFetchedDialog(fresh, previous, changedWhileLoading),
           cacheEpoch: currentCacheEpoch,
         };
+        versions.next('dialog', peerId);
+        yield* patch({
+          dialogs: sortDialogs([
+            ...currentSnapshot().dialogs.filter(({ peer }) => peer.id !== peerId),
+            dialog,
+          ]),
+        });
         if (!dialog.transient) {
           yield* cacheStore.putDialog(dialog);
         } else {
@@ -3790,13 +3797,6 @@ function makeMessagingEngineModule(
               .map((candidate) => ({ ...candidate, cacheEpoch: currentCacheEpoch })),
           );
         }
-        versions.next('dialog', peerId);
-        yield* patch({
-          dialogs: sortDialogs([
-            ...currentSnapshot().dialogs.filter(({ peer }) => peer.id !== peerId),
-            dialog,
-          ]),
-        });
         return true;
       });
     });
@@ -4163,10 +4163,10 @@ function makeMessagingEngineModule(
     );
     const changed = dialogs.find(({ peer }) => peer.id === peerId);
     if (!changed) return;
-    if (!changed.transient)
-      yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
     versions.next('dialog', peerId);
     yield* patch({ dialogs });
+    if (!changed.transient)
+      yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
   });
   function updatePeerId(update: Extract<TransportUpdate, { pts: number }>) {
     if (update.type === 'new-message' || update.type === 'edit-message') {
@@ -4217,14 +4217,14 @@ function makeMessagingEngineModule(
               if (dialog) {
                 const changed = { ...dialog, topMessage: message };
                 versions.next('dialog', peerId);
-                if (!changed.transient)
-                  yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
-                if (!isOperationCurrent(session, accountId)) return;
                 yield* patch({
                   dialogs: currentSnapshot().dialogs.map((candidate) =>
                     candidate.peer.id === peerId ? changed : candidate,
                   ),
                 });
+                if (!changed.transient)
+                  yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
+                if (!isOperationCurrent(session, accountId)) return;
               }
               if (publish) yield* publishConversationEvent({ type: 'message-upsert', message });
             }
@@ -4326,7 +4326,9 @@ function makeMessagingEngineModule(
         yield* publishConversationEvent({
           type: 'message-upsert',
           message,
-          ...(message.outgoing ? { insertIfMissing: true } : {}),
+          // A new message can arrive after a newer one is already shown, for example when
+          // a history page loaded between two updates. It belongs in the view either way.
+          ...(message.outgoing || isNewMessage ? { insertIfMissing: true } : {}),
         });
       }
       return;
@@ -4422,29 +4424,28 @@ function makeMessagingEngineModule(
           }));
         }
       }
-      const dialogs = yield* Effect.all(
-        currentSnapshot().dialogs.map((dialog) => {
-          return Effect.gen(function* () {
-            const deleted = messagePeers.get(dialog.peer.id);
-            if (!deleted || !deleted.has(dialog.topMessageId)) {
-              return dialog;
-            }
-            affectedDialogPeers.push(dialog.peer.id);
-            const remaining = sortMessages(yield* cacheStore.loadMessages(dialog.peer.id, 1));
-            const topMessage = remaining.at(-1);
-            const next: TelegramDialog = {
-              ...dialog,
-              topMessageId: topMessage?.id ?? 0,
-              topMessage,
-            };
-            if (!next.transient)
-              yield* cacheStore.putDialog({ ...next, cacheEpoch: currentCacheEpoch });
-            return next;
-          });
-        }),
-      );
+      const heads = new Map<string, TelegramMessage | undefined>();
+      for (const dialog of currentSnapshot().dialogs) {
+        const deleted = messagePeers.get(dialog.peer.id);
+        if (!deleted || !deleted.has(dialog.topMessageId)) continue;
+        affectedDialogPeers.push(dialog.peer.id);
+        heads.set(
+          dialog.peer.id,
+          sortMessages(yield* cacheStore.loadMessages(dialog.peer.id, 1)).at(-1),
+        );
+      }
+      // The heads were read asynchronously; apply them to the dialogs as they are now.
+      const dialogs = currentSnapshot().dialogs.map((dialog): TelegramDialog => {
+        if (!heads.has(dialog.peer.id)) return dialog;
+        const topMessage = heads.get(dialog.peer.id);
+        return { ...dialog, topMessageId: topMessage?.id ?? 0, topMessage };
+      });
       for (const peerId of affectedDialogPeers) versions.next('dialog', peerId);
       yield* patch({ dialogs: sortDialogs(dialogs) });
+      for (const dialog of dialogs) {
+        if (heads.has(dialog.peer.id) && !dialog.transient)
+          yield* cacheStore.putDialog({ ...dialog, cacheEpoch: currentCacheEpoch });
+      }
       for (const peerId of affectedDialogPeers) {
         const local = dialogs.find(({ peer }) => peer.id === peerId);
         yield* refreshDialogHead(
@@ -4594,11 +4595,11 @@ function makeMessagingEngineModule(
         ),
       );
       const changed = dialogs.filter((dialog) => folders.has(dialog.peer.id) && !dialog.transient);
+      for (const peerId of folders.keys()) versions.next('dialog', peerId);
+      yield* patch({ dialogs });
       yield* Effect.all(
         changed.map((dialog) => cacheStore.putDialog({ ...dialog, cacheEpoch: currentCacheEpoch })),
       );
-      for (const peerId of folders.keys()) versions.next('dialog', peerId);
-      yield* patch({ dialogs });
       return;
     }
     if (update.type === 'dialog-list-invalidated') {
@@ -4630,6 +4631,8 @@ function makeMessagingEngineModule(
         ...currentSnapshot().dialogs.filter((current) => current.peer.id !== dialog.peer.id),
         dialog,
       ];
+      versions.next('dialog', dialog.peer.id);
+      yield* patch({ dialogs: sortDialogs(next) });
       if (dialog.transient) {
         yield* cacheStore.replaceDialogs(
           next
@@ -4639,9 +4642,6 @@ function makeMessagingEngineModule(
       } else {
         yield* cacheStore.putDialog(dialog);
       }
-
-      versions.next('dialog', dialog.peer.id);
-      yield* patch({ dialogs: sortDialogs(next) });
     }
   });
   const updateDialogHead = Effect.fn('MessagingEngine.updateDialogHead')(function* (
@@ -5368,20 +5368,25 @@ function makeMessagingEngineModule(
     yield* queueDialogStateOperation(() => {
       return Effect.gen(function* () {
         if (!isOperationCurrent(session, accountId)) return;
-        const latest = currentSnapshot().dialogs.find(({ peer }) => peer.id === peerId) ?? current;
-        const changed: CachedDialog = {
-          ...latest,
-          readInboxMaxId: Math.max(latest.readInboxMaxId, maxMessageId),
+        // Publish before persisting: a dialog written back after the cache write would
+        // erase every update that arrived while the write was in flight.
+        const read = (dialog: TelegramDialog): TelegramDialog => ({
+          ...dialog,
+          readInboxMaxId: Math.max(dialog.readInboxMaxId, maxMessageId),
           unreadCount:
-            versions.current('unread', peerId) === unreadVersion ? 0 : latest.unreadCount,
-          cacheEpoch: currentCacheEpoch,
-        };
-        if (!changed.transient) yield* cacheStore.putDialog(changed);
-        yield* patch({
-          dialogs: currentSnapshot().dialogs.map((candidate) =>
-            candidate.peer.id === peerId ? changed : candidate,
-          ),
+            versions.current('unread', peerId) === unreadVersion ? 0 : dialog.unreadCount,
         });
+        const latest = currentSnapshot().dialogs.find(({ peer }) => peer.id === peerId);
+        const changed = read(latest ?? current);
+        if (latest) {
+          yield* patch({
+            dialogs: currentSnapshot().dialogs.map((candidate) =>
+              candidate.peer.id === peerId ? changed : candidate,
+            ),
+          });
+        }
+        if (!changed.transient)
+          yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
       });
     });
     if (currentSnapshot().operationError?.startsWith('Could not mark ')) {

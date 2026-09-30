@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 import { openReady } from './helpers';
 
 for (const kind of ['voice', 'round-video'] as const) {
@@ -330,16 +331,35 @@ test('keeps playing across chats and advances only to later unheard incoming mem
 
   await bubble(85).getByRole('button', { name: 'Play voice message' }).click();
   await expect(player.getByRole('button', { name: 'Pause voice memo' })).toBeVisible();
+  // The closing phase is brief. Record it in the page instead of racing it from the test.
+  await player.evaluate((element) => {
+    const seen = { closing: false, moved: false };
+    Object.assign(window, { __voicePlayerClosing: seen });
+    const sample = () => {
+      if (!element.classList.contains('is-closing')) return;
+      seen.closing = true;
+      if (getComputedStyle(element).transform !== 'none') seen.moved = true;
+      if (element.isConnected && !seen.moved) requestAnimationFrame(sample);
+    };
+    new MutationObserver(sample).observe(element, { attributes: true, attributeFilter: ['class'] });
+  });
   await audio.evaluate((element: HTMLAudioElement) => {
     element.currentTime = element.duration - 0.1;
   });
   await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.ended)).toBe(true);
   await expect(player).toBeVisible();
   await expect(player).not.toHaveClass(/is-closing/);
-  await expect(player).toHaveClass(/is-closing/, { timeout: 6_000 });
   await expect
-    .poll(() => player.evaluate((element) => getComputedStyle(element).transform))
-    .not.toBe('none');
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (window as Window & { __voicePlayerClosing?: { closing: boolean; moved: boolean } })
+              .__voicePlayerClosing,
+        ),
+      { timeout: 6_000 },
+    )
+    .toEqual({ closing: true, moved: true });
   await expect(player).toBeHidden();
 });
 

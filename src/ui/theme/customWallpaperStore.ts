@@ -77,7 +77,7 @@ const openWallpaperDatabase = Effect.callback<
   });
 });
 
-const useDatabase = <A>(
+const withDatabase = <A>(
   operation: Exclude<StorageOperation, 'open'>,
   use: (database: IDBPDatabase<AppearanceSchema>) => Effect.Effect<A, WallpaperStorageError>,
 ) =>
@@ -93,7 +93,7 @@ const request = <A>(operation: Exclude<StorageOperation, 'open'>, evaluate: () =
   Effect.tryPromise({ try: evaluate, catch: (cause) => storageError(operation, cause) });
 
 const loadWallpaper = (key: string) =>
-  useDatabase('load', (database) => request('load', () => database.get(STORE_NAME, key)));
+  withDatabase('load', (database) => request('load', () => database.get(STORE_NAME, key)));
 
 export const loadCustomWallpaper = loadWallpaper(WALLPAPER_KEY);
 export const loadTelegramWallpaper = loadWallpaper(TELEGRAM_WALLPAPER_KEY);
@@ -105,18 +105,18 @@ export const saveCustomWallpaper = (
   if (file.size > MAX_CUSTOM_WALLPAPER_BYTES) {
     return Effect.fail(validationError('The background image must be smaller than 12 MB.'));
   }
-  return useDatabase('save', (database) =>
+  return withDatabase('save', (database) =>
     request('save', () => database.put(STORE_NAME, file, WALLPAPER_KEY)).pipe(Effect.asVoid),
   );
 };
 
 export const saveTelegramWallpaper = (blob: Blob) =>
-  useDatabase('save', (database) =>
+  withDatabase('save', (database) =>
     request('save', () => database.put(STORE_NAME, blob, TELEGRAM_WALLPAPER_KEY)).pipe(
       Effect.asVoid,
     ),
   );
 
-export const deleteCustomWallpaper = useDatabase('delete', (database) =>
+export const deleteCustomWallpaper = withDatabase('delete', (database) =>
   request('delete', () => database.delete(STORE_NAME, WALLPAPER_KEY)),
 );

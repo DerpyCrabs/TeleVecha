@@ -1,5 +1,5 @@
 import {
-  list as renderList,
+  list,
   AsyncContent,
   effectEvent,
   observe,
@@ -61,7 +61,7 @@ export const GifPicker = view<{
 }>((props) => {
   const results = slot((gifs: readonly TelegramSticker[]) => {
     if (!gifs.length) return <p>No GIFs found</p>;
-    return renderList(idRows(gifs), (gif) => (
+    return list(idRows(gifs), (gif) => (
       <GifOption
         gif={gif}
         load={() => props.load(gif)}

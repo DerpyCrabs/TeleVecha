@@ -1,16 +1,20 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
-import { fixtureStats, openReady, selectAlice } from './helpers';
-
-test.beforeEach(async ({ page }) => {
-  await openReady(page);
-  await selectAlice(page);
-});
+import {
+  counterSettled,
+  fixtureStats,
+  openReady,
+  releaseHeldConnect,
+  selectAlice,
+} from './helpers';
 
 for (const reactionCount of [1, 5, 7]) {
   test(`lays out ${reactionCount} image document reactions before the timestamp`, async ({
     page,
   }) => {
+    await openReady(page);
+    await selectAlice(page);
     await page.evaluate(
       (count) =>
         window.__televechaFixture?.emit({
@@ -90,6 +94,8 @@ for (const reactionCount of [1, 5, 7]) {
 }
 
 test('opens image documents from a file card and keeps download separate', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -153,6 +159,8 @@ test('opens image documents from a file card and keeps download separate', async
 test('keeps dragging a zoomed long image across updates and outside the image area', async ({
   page,
 }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -205,6 +213,8 @@ test('keeps dragging a zoomed long image across updates and outside the image ar
 });
 
 test('offers image viewer actions, zoom, and adjacent-message navigation', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() => {
     for (const [id, name] of [
       [81, 'first.png'],
@@ -251,6 +261,8 @@ test('offers image viewer actions, zoom, and adjacent-message navigation', async
 test('reveals media spoilers and suppresses export actions for protected media', async ({
   page,
 }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -324,37 +336,60 @@ test('reports and cancels an attachment download', async ({ page }) => {
   ).toBeEnabled();
 });
 
-test('loads original photos and stores the full blob in IndexedDB', async ({ page }) => {
-  await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
-  // Other visible attachments download too; inspect this photo's durable cache entry.
+test('stores original photos and reuses cached avatars and media after reload', async ({
+  page,
+}) => {
+  await openReady(page);
+  await selectAlice(page);
+  await test.step('loads original photos and stores the full blob in IndexedDB', async () => {
+    await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
+    // Other visible attachments download too; inspect this photo's durable cache entry.
 
-  await expect
-    .poll(() =>
-      page.evaluate(async () => {
-        const request = indexedDB.open('televecha-e2e');
-        const database = await new Promise<IDBDatabase>((resolve, reject) => {
-          request.onsuccess = () => resolve(request.result);
-          request.onerror = () => reject(request.error);
-        });
-        const records = await new Promise<Array<{ key: string; blob: Blob }>>((resolve, reject) => {
-          const lookup = database.transaction('files').objectStore('files').getAll();
-          lookup.onsuccess = () => resolve(lookup.result);
-          lookup.onerror = () => reject(lookup.error);
-        });
-        const original = records.find((record) => record.key.startsWith('media:u:101:78:'));
-        const preview = records.find((record) => record.key.startsWith('preview:media:u:101:78:'));
-        return {
-          hasOriginal: Boolean(original?.blob.size),
-          hasPreview: Boolean(preview?.blob.size),
-        };
-      }),
-    )
-    .toEqual({ hasOriginal: true, hasPreview: false });
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const request = indexedDB.open('televecha-e2e');
+          const database = await new Promise<IDBDatabase>((resolve, reject) => {
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          const records = await new Promise<Array<{ key: string; blob: Blob }>>(
+            (resolve, reject) => {
+              const lookup = database.transaction('files').objectStore('files').getAll();
+              lookup.onsuccess = () => resolve(lookup.result);
+              lookup.onerror = () => reject(lookup.error);
+            },
+          );
+          const original = records.find((record) => record.key.startsWith('media:u:101:78:'));
+          const preview = records.find((record) =>
+            record.key.startsWith('preview:media:u:101:78:'),
+          );
+          return {
+            hasOriginal: Boolean(original?.blob.size),
+            hasPreview: Boolean(preview?.blob.size),
+          };
+        }),
+      )
+      .toEqual({ hasOriginal: true, hasPreview: false });
+  });
+  await test.step('uses cached avatars and media after reload instead of downloading again', async () => {
+    await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
+
+    const stats = await fixtureStats(page);
+    expect(stats?.downloadMedia).toBe(0);
+    expect(stats?.downloadAvatar).toBe(0);
+  });
 });
 
 test('renders a single photo with one media canvas instead of nested containers', async ({
   page,
 }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -438,6 +473,8 @@ test('renders a single photo with one media canvas instead of nested containers'
 });
 
 test('removes the outer frame from a media-only single photo', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -483,6 +520,8 @@ test('removes the outer frame from a media-only single photo', async ({ page }) 
 });
 
 test('keeps decorated and extreme portrait photos free of an outer frame', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() => {
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -577,6 +616,8 @@ test('keeps decorated and extreme portrait photos free of an outer frame', async
 });
 
 test('widens an extreme portrait preview when its caption needs more room', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -626,6 +667,8 @@ test('shows a retry control when automatic media loading fails', async ({ page }
 });
 
 test('opens photo and video attachments in a fullscreen viewer', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   const photoTrigger = page.getByRole('button', { name: 'Open fixture.jpg fullscreen preview' });
   await expect(photoTrigger).toBeVisible();
   const fullDownloadsBefore = (await fixtureStats(page))?.downloadMediaFull ?? 0;
@@ -672,6 +715,8 @@ test('opens photo and video attachments in a fullscreen viewer', async ({ page }
   await expect(videoMessage.getByText('16.6 MB')).toBeVisible();
   await expect(videoMessage.getByText('0:45')).toBeVisible();
   await expect(videoMessage.locator('.media-video-play')).toBeVisible();
+  // The thumbnail is downloaded after the bubble appears.
+  await expect(videoMessage.locator('.media-visual > img')).toHaveAttribute('src', /.+/);
   const thumbnailUrl = await videoMessage.locator('.media-visual > img').getAttribute('src');
   await videoMessage.locator('.media-visual').hover();
   const inlineVideo = videoMessage.locator('video[aria-label="fixture.mp4. Hover to play."]');
@@ -695,27 +740,15 @@ test('opens photo and video attachments in a fullscreen viewer', async ({ page }
   await expect(videoViewer).toHaveCount(0);
 });
 
-test('uses cached avatars and media after reload instead of downloading again', async ({
-  page,
-}) => {
-  await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
-  await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
-  await page.reload();
-  await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
-  await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
-
-  const stats = await fixtureStats(page);
-  expect(stats?.downloadMedia).toBe(0);
-  expect(stats?.downloadAvatar).toBe(0);
-});
-
 test('keeps cached chats usable while reconnecting without redownloading avatars', async ({
   page,
 }) => {
   await page.goto('/?scenario=held-connect');
   await expect(page.getByText('Connecting to Telegram')).toBeVisible();
-  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+  await releaseHeldConnect(page);
   await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
+  // Every avatar must be cached before the reload, not only the first one shown.
+  await counterSettled(page, async () => (await fixtureStats(page))?.downloadAvatar ?? 0);
 
   await page.reload();
 
@@ -737,6 +770,9 @@ test('keeps cached chats usable while reconnecting without redownloading avatars
 test('loads cached-dialog avatars after a delayed Telegram connection becomes ready', async ({
   page,
 }) => {
+  // The default account's cached avatars are what the delayed connection must not refetch.
+  await openReady(page);
+  await selectAlice(page);
   await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
   await page.evaluate(async () => {
     const request = indexedDB.open('televecha-e2e');
@@ -755,7 +791,7 @@ test('loads cached-dialog avatars after a delayed Telegram connection becomes re
   await page.goto('/?scenario=held-connect');
   await expect(page.getByText('Connecting to Telegram')).toBeVisible();
   expect((await fixtureStats(page))?.downloadAvatar).toBe(0);
-  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+  await releaseHeldConnect(page);
   await expect(page.getByText('Connecting to Telegram')).toHaveCount(0);
   await expect(page.locator('[data-testid="chat-list"] img').first()).toBeVisible();
   expect((await fixtureStats(page))?.downloadAvatar).toBeGreaterThan(0);
@@ -764,7 +800,7 @@ test('loads cached-dialog avatars after a delayed Telegram connection becomes re
 test('waits for Telegram to reconnect before loading uncached message media', async ({ page }) => {
   await page.goto('/?scenario=held-connect&chat=u%3A101');
   await expect(page.getByText('Connecting to Telegram')).toBeVisible();
-  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+  await releaseHeldConnect(page);
   await expect(page.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
   await page.evaluate(async () => {
     const request = indexedDB.open('televecha-e2e-held-connect');
@@ -794,39 +830,38 @@ test('waits for Telegram to reconnect before loading uncached message media', as
   expect((await fixtureStats(page))?.downloadMedia).toBeGreaterThan(0);
 });
 
-test('shows upload progress, preserves the caption, and completes a file upload', async ({
-  page,
-}) => {
-  await page.goto('/?scenario=held-upload');
-  await selectAlice(page);
-  await page.getByRole('textbox', { name: 'Message' }).fill('Fixture caption');
-  await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
-  await expect(page.getByTestId('composer-attachment')).toContainText('report.txt');
-  expect((await fixtureStats(page))?.sendFile).toBe(0);
-  await page.getByRole('button', { name: 'Send message' }).click();
+test('shows upload progress and classifies WebP uploads as stickers', async ({ page }) => {
+  await test.step('shows upload progress, preserves the caption, and completes a file upload', async () => {
+    await page.goto('/?scenario=held-upload');
+    await selectAlice(page);
+    await page.getByRole('textbox', { name: 'Message' }).fill('Fixture caption');
+    await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
+    await expect(page.getByTestId('composer-attachment')).toContainText('report.txt');
+    expect((await fixtureStats(page))?.sendFile).toBe(0);
+    await page.getByRole('button', { name: 'Send message' }).click();
 
-  const upload = page.locator('article.message', { hasText: 'Fixture caption' });
-  await expect(upload).toContainText('report.txt');
-  await expect(upload).toContainText('25%');
-  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('');
-  await page.evaluate(() => window.__televechaFixture?.releaseUpload());
-  await expect(upload).not.toContainText('25%');
-  await expect(upload.locator('footer')).toHaveAttribute('aria-label', /Message status: sent$/u);
-});
+    const upload = page.locator('article.message', { hasText: 'Fixture caption' });
+    await expect(upload).toContainText('report.txt');
+    await expect(upload).toContainText('25%');
+    await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('');
+    await page.evaluate(() => window.__televechaFixture?.releaseUpload());
+    await expect(upload).not.toContainText('25%');
+    await expect(upload.locator('footer')).toHaveAttribute('aria-label', /Message status: sent$/u);
+  });
+  await test.step('classifies WebP uploads as stickers', async () => {
+    await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/sticker.webp');
+    await expect(page.getByTestId('composer-attachment')).toContainText('sticker.webp');
+    await page.getByRole('button', { name: 'Send message' }).click();
 
-test('classifies WebP uploads as stickers', async ({ page }) => {
-  await page.goto('/?scenario=held-upload');
-  await selectAlice(page);
-  await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/sticker.webp');
-  await expect(page.getByTestId('composer-attachment')).toContainText('sticker.webp');
-  await page.getByRole('button', { name: 'Send message' }).click();
-
-  const upload = page.locator('article[data-media-kind="sticker"]');
-  await expect(upload).toContainText('sticker.webp');
-  await page.evaluate(() => window.__televechaFixture?.releaseUpload());
+    const upload = page.locator('article[data-media-kind="sticker"]');
+    await expect(upload).toContainText('sticker.webp');
+    await page.evaluate(() => window.__televechaFixture?.releaseUpload());
+  });
 });
 
 test('downloads a generic file on demand from its file card', async ({ page, context }) => {
+  await openReady(page);
+  await selectAlice(page);
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({

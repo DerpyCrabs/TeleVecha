@@ -1,4 +1,4 @@
-import { list as renderList } from 'effectweb';
+import { list } from 'effectweb';
 import { deleteDialogOptions } from '../../telegram/core/chatPermissions';
 import type { TelegramDeleteDialogAction, TelegramDialog } from '../../telegram/types';
 import { sequence, view } from 'effectweb';
@@ -39,7 +39,7 @@ export const DeleteChatDialog = view<
         ) : null}
       </p>
       <div class="grid gap-1 px-[0.7rem]">
-        {renderList(sequence(options()), (option) => (
+        {list(sequence(options()), (option) => (
           <button
             class={`mx-0 my-[0.2rem] rounded-[0.6rem] border-0 bg-[#20232a] p-[0.7rem] text-left ${option.danger ? 'text-red-300' : 'text-ink'}`}
             onClick={() => props.confirm(option.action)}

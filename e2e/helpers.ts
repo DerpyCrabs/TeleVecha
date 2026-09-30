@@ -1,4 +1,5 @@
-import { expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { expect } from './expect';
 
 export async function openReady(page: Page, path = '/') {
   await page.goto(path);
@@ -32,4 +33,27 @@ export async function selectAlice(page: Page) {
 
 export async function fixtureStats(page: Page) {
   return page.evaluate(() => window.__televechaFixture?.stats);
+}
+
+/** Release a held connection once the application has actually asked to connect. */
+export async function releaseHeldConnect(page: Page) {
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture?.stats.connect ?? 0))
+    .toBeGreaterThan(0);
+  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+}
+
+/** Wait until a fixture counter has stopped changing, so later counts start from rest. */
+export async function counterSettled(page: Page, read: () => Promise<number>) {
+  let previous = await read();
+  await expect
+    .poll(
+      async () => {
+        const last = previous;
+        previous = await read();
+        return previous === last;
+      },
+      { intervals: [200] },
+    )
+    .toBe(true);
 }

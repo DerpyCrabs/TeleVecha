@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 import { openReady, selectAlice } from './helpers';
 
 test('shows chat history and shared-media counts while pinned loading is stalled', async ({

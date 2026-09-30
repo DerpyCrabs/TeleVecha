@@ -1,4 +1,5 @@
-import { expect, test, type Locator } from '@playwright/test';
+import { test, type Locator } from '@playwright/test';
+import { expect } from './expect';
 import { fixtureStats, openReady, selectAlice } from './helpers';
 
 async function expectDecodedImages(images: Locator, count: number) {

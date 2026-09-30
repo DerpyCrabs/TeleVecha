@@ -1,4 +1,4 @@
-import { list as renderList, Portal, defineTasks, resourceError, sequence, view } from 'effectweb';
+import { list, Portal, defineTasks, resourceError, sequence, view } from 'effectweb';
 import { Effect } from 'effect';
 import Crop from '@effectweb/lucide/icons/crop';
 import RotateCcw from '@effectweb/lucide/icons/rotate-ccw';
@@ -94,7 +94,7 @@ export const ImageAttachmentEditor = editing.view(
                 <span>
                   <Crop size={16} /> Crop
                 </span>
-                {renderList(sequence(crops), (_item) => {
+                {list(sequence(crops), (_item) => {
                   const [value, label] = _item;
                   return (
                     <button

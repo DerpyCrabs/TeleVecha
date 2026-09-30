@@ -1,4 +1,4 @@
-import { list as renderList } from 'effectweb';
+import { list } from 'effectweb';
 import type { TelegramWallpaper } from '../../telegram/types';
 import { idRows } from '../collections';
 import Check from '@effectweb/lucide/icons/check';
@@ -50,7 +50,7 @@ export const AppearanceSettings = view<
           </div>
         </div>
         <div class="desktop-theme-grid">
-          {renderList(idRows(THEME_OPTIONS), (theme) => (
+          {list(idRows(THEME_OPTIONS), (theme) => (
             <button
               class="desktop-theme-option"
               classList={{ selected: props.preferences.theme === theme.id }}
@@ -69,7 +69,7 @@ export const AppearanceSettings = view<
         </div>
 
         <div class="accent-color-list" aria-label="Accent color">
-          {renderList(sequence(ACCENT_COLORS), (color) => (
+          {list(sequence(ACCENT_COLORS), (color) => (
             <button
               class="accent-color-option"
               classList={{
@@ -127,7 +127,7 @@ export const AppearanceSettings = view<
           </div>
         </div>
         <div class="wallpaper-option-grid">
-          {renderList(idRows(WALLPAPER_OPTIONS), (wallpaper) => (
+          {list(idRows(WALLPAPER_OPTIONS), (wallpaper) => (
             <button
               class={`wallpaper-option wallpaper-${wallpaper.id}`}
               classList={{ selected: props.preferences.wallpaper === wallpaper.id }}
@@ -167,7 +167,7 @@ export const AppearanceSettings = view<
 
         {props.telegramWallpapers.length > 0 ? (
           <div class="telegram-wallpaper-list">
-            {renderList(idRows(props.telegramWallpapers.slice(0, 18)), (wallpaper, index) => (
+            {list(idRows(props.telegramWallpapers.slice(0, 18)), (wallpaper, index) => (
               <button
                 class="telegram-wallpaper-option"
                 classList={{

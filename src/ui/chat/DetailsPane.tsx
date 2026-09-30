@@ -1,4 +1,4 @@
-import { list as renderList } from 'effectweb';
+import { list } from 'effectweb';
 import type { ChatSummary } from '../../domain/models';
 import type { SharedMediaCounts, SharedMediaKind, TelegramGroupMember } from '../../telegram/types';
 import { peerRows } from '../collections';
@@ -246,7 +246,7 @@ export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
             </header>
             {!props.details.membersLoading ? (
               <>
-                {renderList(peerRows(props.details.members), (member) => (
+                {list(peerRows(props.details.members), (member) => (
                   <div class="group-member grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] px-2 py-2 hover:bg-[var(--surface-subtle)]">
                     <Avatar
                       identity={`${member.peer.id}:${member.avatarId ?? 'none'}`}

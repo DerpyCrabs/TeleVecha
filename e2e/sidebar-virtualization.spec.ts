@@ -1,4 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
+import { releaseHeldConnect } from './helpers';
 
 import type { TelegramDialog } from '../src/telegram/types';
 test('virtualizes a complete dialog list and reuses avatar observation', async ({ page }) => {
@@ -15,7 +17,7 @@ test('virtualizes a complete dialog list and reuses avatar observation', async (
   });
   await page.goto('/?scenario=held-connect');
   await expect(page.getByText('Connecting to Telegram')).toBeVisible();
-  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+  await releaseHeldConnect(page);
   await expect(page.getByText('Connecting to Telegram')).toHaveCount(0);
   await expect(page.getByTestId('chat-list')).toBeVisible();
   const observersBefore =

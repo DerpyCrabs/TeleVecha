@@ -1,5 +1,5 @@
 import {
-  list as renderList,
+  list,
   commandSlot,
   actionCommand,
   effectCommand,
@@ -279,7 +279,7 @@ const SharedMediaContent = component<
               {!loading() ? (
                 <>
                   {items()!.length ? (
-                    renderList(telegramMessageRows(items()), (message) =>
+                    list(telegramMessageRows(items()), (message) =>
                       visualKinds.has(props.initialKind) ? (
                         <article class="shared-media-tile relative min-h-36 overflow-hidden rounded-[0.65rem] bg-[#0e1115] [&_.media-attachment]:m-0 [&_.media-attachment]:h-full [&_.media-attachment]:min-h-36 [&_.media-attachment]:w-full [&_.media-attachment]:rounded-[inherit] [&_.media-visual]:h-full [&_.media-visual]:min-h-36 [&_.media-visual]:max-h-52 [&_.media-visual]:w-full [&_.media-visual]:rounded-[inherit] [&_.media-visual]:object-cover [&_img]:h-full [&_img]:min-h-36 [&_img]:max-h-52 [&_img]:w-full [&_img]:rounded-[inherit] [&_img]:object-cover [&_video]:h-full [&_video]:min-h-36 [&_video]:max-h-52 [&_video]:w-full [&_video]:rounded-[inherit] [&_video]:object-cover">
                           {message.media
@@ -316,7 +316,7 @@ const SharedMediaContent = component<
                             <Link size={18} />
                           </span>
                           <div class="grid min-w-0 gap-[0.18rem] [&_a]:truncate [&_a]:text-blue-300 [&_time]:text-[0.68rem] [&_time]:text-muted">
-                            {renderList(sequence(links(message.text)), (url) => {
+                            {list(sequence(links(message.text)), (url) => {
                               const href = safeExternalUrl(url);
                               return href ? (
                                 <a href={href} target="_blank" rel="noopener noreferrer">

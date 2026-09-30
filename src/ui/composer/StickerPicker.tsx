@@ -1,4 +1,4 @@
-import { list as renderList } from 'effectweb';
+import { list } from 'effectweb';
 import type { Effect } from 'effect';
 import type { TelegramSticker, TelegramStickerPack } from '../../telegram/types';
 import { idRows } from '../collections';
@@ -89,7 +89,7 @@ export const StickerPicker = component<
         {!props.loading ? (
           <>
             <nav class="sticker-pack-tabs" aria-label="Sticker packs" onWheel={scrollPackTabs}>
-              {renderList(idRows(props.packs), (pack) => (
+              {list(idRows(props.packs), (pack) => (
                 <button
                   classList={{ active: pack.id === activePack()?.id }}
                   onClick={(event) => {
@@ -124,7 +124,7 @@ export const StickerPicker = component<
               }
             >
               {results!.length ? (
-                renderList(idRows(results), (sticker) => (
+                list(idRows(results), (sticker) => (
                   <button
                     class="sticker-option"
                     disabled={!props.enabled}

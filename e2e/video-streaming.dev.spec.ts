@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
 test('video plays buffered bytes and opens autoplay fullscreen while the rest is held', async ({
   page,

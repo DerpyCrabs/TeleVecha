@@ -1,4 +1,4 @@
-import { list as renderList, commandSlot, effectCommand, component, Portal, view } from 'effectweb';
+import { list, commandSlot, effectCommand, component, Portal, view } from 'effectweb';
 import type { Snapshot } from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatSummary } from '../../domain/models';
@@ -113,10 +113,10 @@ export const ForwardMessageDialog = component<
               </label>
             ) : null}
             <div>
-              {renderList(idRows(localChats), (chat) => (
+              {list(idRows(localChats), (chat) => (
                 <button onClick={() => props.forward(chat.id)}>{chat.title}</button>
               ))}
-              {renderList(remotePeerRows(newRemoteResults), (result) => (
+              {list(remotePeerRows(newRemoteResults), (result) => (
                 <button onClick={() => props.forward(result.peer.id, result)}>
                   {result.title}
                   {result.username ? <small>@{result.username}</small> : null}

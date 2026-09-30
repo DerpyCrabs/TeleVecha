@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
 import type { TransportUpdate } from '../src/telegram/types';
 import { openReady, selectAlice } from './helpers';
@@ -432,10 +433,23 @@ test('loads a video thumbnail without downloading the full video until preview o
 test('loads the original photo instead of a Telegram thumbnail', async ({ page }) => {
   await openReady(page);
   await selectAlice(page);
-  const before = await page.evaluate(() => ({
-    preview: window.__televechaFixture?.stats.downloadMediaPreview ?? 0,
-    full: window.__televechaFixture?.stats.downloadMediaFull ?? 0,
-  }));
+  const downloads = () =>
+    page.evaluate(() => ({
+      preview: window.__televechaFixture?.stats.downloadMediaPreview ?? 0,
+      full: window.__televechaFixture?.stats.downloadMediaFull ?? 0,
+    }));
+  // The opened chat is still downloading its own media. Count from the point it has settled.
+  let before = await downloads();
+  await expect
+    .poll(
+      async () => {
+        const previous = before;
+        before = await downloads();
+        return before.preview === previous.preview && before.full === previous.full;
+      },
+      { intervals: [150] },
+    )
+    .toBe(true);
 
   await page.evaluate(() =>
     window.__televechaFixture?.emit({

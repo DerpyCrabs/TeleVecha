@@ -1,95 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
 import { openReady, selectAlice } from './helpers';
-
-test.beforeEach(async ({ page }) => {
-  await openReady(page);
-  await selectAlice(page);
-});
-
-test('dismisses message and formatting context menus outside and with Escape', async ({ page }) => {
-  await page.locator('article[data-message-id="79"]').click({ button: 'right' });
-  const messageMenu = page.getByRole('menu', { name: 'Message actions' });
-  await expect(messageMenu).toBeVisible();
-  await page.mouse.click(2, 2);
-  await expect(messageMenu).toHaveCount(0);
-
-  const input = page.getByRole('textbox', { name: 'Message' });
-  await input.fill('format me');
-  await input.evaluate((element) => (element as HTMLTextAreaElement).setSelectionRange(0, 6));
-  await input.dispatchEvent('contextmenu', { clientX: 400, clientY: 500 });
-  const formatMenu = page.getByRole('menu', { name: 'Message formatting' });
-  await expect(formatMenu).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(formatMenu).toHaveCount(0);
-});
-
-test('dismisses chat actions and every transient dialog consistently', async ({ page }) => {
-  const chat = page.getByRole('button', { name: /Alice Fixture/ });
-  await chat.click({ button: 'right' });
-  const chatMenu = page.getByRole('menu', { name: 'Chat actions' });
-  await expect(chatMenu).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(chatMenu).toHaveCount(0);
-
-  await page.getByRole('button', { name: 'Search messages' }).click();
-  const search = page.getByRole('dialog', { name: 'Message search' });
-  await page.keyboard.press('Escape');
-  await expect(search).toHaveCount(0);
-
-  await page
-    .locator('.details-pane')
-    .getByRole('button', { name: /Photos/ })
-    .click();
-  const shared = page.getByRole('dialog', { name: 'Shared photos' });
-  await page.keyboard.press('Escape');
-  await expect(shared).toHaveCount(0);
-
-  const message = page.locator('article[data-message-id="79"]');
-  await message.click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Delete' }).click();
-  const deletion = page.getByRole('dialog', { name: 'Delete message' });
-  await page.keyboard.press('Escape');
-  await expect(deletion).toHaveCount(0);
-
-  await message.click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Forward' }).click();
-  const forwarding = page.getByRole('dialog', { name: 'Forward message' });
-  await page.mouse.click(2, 2);
-  await expect(forwarding).toHaveCount(0);
-});
-
-test('keeps the composer minimal and combines emoji, GIFs, and stickers', async ({ page }) => {
-  await expect(page.getByLabel('Message formatting')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Choose GIF' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Choose sticker' })).toHaveCount(0);
-
-  const trigger = page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' });
-  await trigger.click();
-  const picker = page.getByRole('dialog', { name: 'Emoji, GIFs and stickers' });
-  await expect(picker.getByRole('button', { name: 'Emoji' })).toBeVisible();
-  await expect(picker.getByRole('button', { name: 'GIFs' })).toBeVisible();
-  await expect(picker.getByRole('button', { name: 'Stickers' })).toBeVisible();
-  await page.mouse.click(2, 2);
-  await expect(picker).toHaveCount(0);
-});
-
-test('styles vertical scrollbars and hides horizontal scrollbar tracks', async ({ page }) => {
-  await page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' }).click();
-  const picker = page.getByRole('dialog', { name: 'Emoji, GIFs and stickers' });
-  const emojiGrid = picker.locator('.emoji-grid');
-  await expect(emojiGrid).toBeVisible();
-  await expect
-    .poll(() => emojiGrid.evaluate((element) => getComputedStyle(element).scrollbarWidth))
-    .toBe('thin');
-
-  await picker.getByRole('button', { name: 'Stickers' }).click();
-  const packTabs = picker.locator('.sticker-pack-tabs');
-  await expect(packTabs).toBeVisible();
-  expect(await packTabs.evaluate((element) => getComputedStyle(element).scrollbarWidth)).toBe(
-    'none',
-  );
-});
 
 test('lays a 100-sticker pack out as a non-overlapping square grid', async ({ page }) => {
   await openReady(page, '/?scenario=large-sticker-pack');
@@ -187,53 +99,135 @@ test('lays a 100-sticker pack out as a non-overlapping square grid', async ({ pa
   expect(gridScroll.scrollWidth).toBeLessThanOrEqual(gridScroll.clientWidth + 1);
 });
 
-test('hides the chat-list scrollbar without disabling scrolling', async ({ page }) => {
-  const list = page.getByTestId('chat-list');
-  const result = await list.evaluate((element) => {
-    element.style.maxHeight = '120px';
-    element.scrollTop = 80;
-    return {
-      scrollbarWidth: getComputedStyle(element).scrollbarWidth,
-      scrollTop: element.scrollTop,
-    };
-  });
-  expect(result.scrollbarWidth).toBe('none');
-  expect(result.scrollTop).toBeGreaterThan(0);
-});
-
-test('an incoming media update never replaces the conversation with a loading screen', async ({
+test('dismisses transient menus and dialogs and keeps the conversation through updates', async ({
   page,
 }) => {
-  await page.evaluate(() =>
-    window.__televechaFixture?.emit({
-      type: 'new-message',
-      pts: 11,
-      ptsCount: 1,
-      message: {
-        id: 81,
-        peerId: 'u:101',
-        senderId: 'u:101',
-        text: 'Incoming image',
-        date: Math.floor(Date.now() / 1000),
-        outgoing: false,
-        media: { kind: 'photo', name: 'incoming.jpg', mimeType: 'image/jpeg' },
-      },
-    }),
-  );
-  await expect(page.locator('article[data-message-id="79"]')).toBeAttached();
-  await expect(page.locator('article[data-message-id="81"]')).toBeVisible();
-  await expect(page.getByText('Loading messages…')).toHaveCount(0);
-  const visual = page.locator('article[data-message-id="81"] .media-visual');
-  const box = await visual.boundingBox();
-  expect(box).not.toBeNull();
-  expect(box!.width).toBeLessThan(page.viewportSize()!.width / 2);
-  expect(box!.height).toBeLessThan(page.viewportSize()!.height / 2);
-});
+  await openReady(page);
+  await selectAlice(page);
+  await test.step('hides the chat-list scrollbar without disabling scrolling', async () => {
+    const list = page.getByTestId('chat-list');
+    const result = await list.evaluate((element) => {
+      element.style.maxHeight = '120px';
+      element.scrollTop = 80;
+      return {
+        scrollbarWidth: getComputedStyle(element).scrollbarWidth,
+        scrollTop: element.scrollTop,
+      };
+    });
+    expect(result.scrollbarWidth).toBe('none');
+    expect(result.scrollTop).toBeGreaterThan(0);
+  });
+  await test.step('keeps the composer minimal and combines emoji, GIFs, and stickers', async () => {
+    await expect(page.getByLabel('Message formatting')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Choose GIF' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Choose sticker' })).toHaveCount(0);
 
-test('background catch-up never reopens the full-screen connection loader', async ({ page }) => {
-  await page.evaluate(() => window.__televechaFixture?.emit({ type: 'too-long' }));
-  await expect(
-    page.getByRole('dialog', { name: /Loading chats|Connecting to Telegram/ }),
-  ).toHaveCount(0);
-  await expect(page.getByTestId('message-scroller')).toBeVisible();
+    const trigger = page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' });
+    await trigger.click();
+    const picker = page.getByRole('dialog', { name: 'Emoji, GIFs and stickers' });
+    await expect(picker.getByRole('button', { name: 'Emoji' })).toBeVisible();
+    await expect(picker.getByRole('button', { name: 'GIFs' })).toBeVisible();
+    await expect(picker.getByRole('button', { name: 'Stickers' })).toBeVisible();
+    await page.mouse.click(2, 2);
+    await expect(picker).toHaveCount(0);
+  });
+  await test.step('dismisses message and formatting context menus outside and with Escape', async () => {
+    await page.locator('article[data-message-id="79"]').click({ button: 'right' });
+    const messageMenu = page.getByRole('menu', { name: 'Message actions' });
+    await expect(messageMenu).toBeVisible();
+    await page.mouse.click(2, 2);
+    await expect(messageMenu).toHaveCount(0);
+
+    const input = page.getByRole('textbox', { name: 'Message' });
+    await input.fill('format me');
+    await input.evaluate((element) => (element as HTMLTextAreaElement).setSelectionRange(0, 6));
+    await input.dispatchEvent('contextmenu', { clientX: 400, clientY: 500 });
+    const formatMenu = page.getByRole('menu', { name: 'Message formatting' });
+    await expect(formatMenu).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(formatMenu).toHaveCount(0);
+  });
+  await test.step('dismisses chat actions and every transient dialog consistently', async () => {
+    const chat = page.getByRole('button', { name: /Alice Fixture/ });
+    await chat.click({ button: 'right' });
+    const chatMenu = page.getByRole('menu', { name: 'Chat actions' });
+    await expect(chatMenu).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(chatMenu).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Search messages' }).click();
+    const search = page.getByRole('dialog', { name: 'Message search' });
+    await page.keyboard.press('Escape');
+    await expect(search).toHaveCount(0);
+
+    await page
+      .locator('.details-pane')
+      .getByRole('button', { name: /Photos/ })
+      .click();
+    const shared = page.getByRole('dialog', { name: 'Shared photos' });
+    await page.keyboard.press('Escape');
+    await expect(shared).toHaveCount(0);
+
+    const message = page.locator('article[data-message-id="79"]');
+    await message.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Delete' }).click();
+    const deletion = page.getByRole('dialog', { name: 'Delete message' });
+    await page.keyboard.press('Escape');
+    await expect(deletion).toHaveCount(0);
+
+    await message.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Forward' }).click();
+    const forwarding = page.getByRole('dialog', { name: 'Forward message' });
+    await page.mouse.click(2, 2);
+    await expect(forwarding).toHaveCount(0);
+  });
+  await test.step('an incoming media update never replaces the conversation with a loading screen', async () => {
+    await page.evaluate(() =>
+      window.__televechaFixture?.emit({
+        type: 'new-message',
+        pts: 11,
+        ptsCount: 1,
+        message: {
+          id: 81,
+          peerId: 'u:101',
+          senderId: 'u:101',
+          text: 'Incoming image',
+          date: Math.floor(Date.now() / 1000),
+          outgoing: false,
+          media: { kind: 'photo', name: 'incoming.jpg', mimeType: 'image/jpeg' },
+        },
+      }),
+    );
+    await expect(page.locator('article[data-message-id="79"]')).toBeAttached();
+    await expect(page.locator('article[data-message-id="81"]')).toBeVisible();
+    await expect(page.getByText('Loading messages…')).toHaveCount(0);
+    const visual = page.locator('article[data-message-id="81"] .media-visual');
+    const box = await visual.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeLessThan(page.viewportSize()!.width / 2);
+    expect(box!.height).toBeLessThan(page.viewportSize()!.height / 2);
+  });
+  await test.step('background catch-up never reopens the full-screen connection loader', async () => {
+    await page.evaluate(() => window.__televechaFixture?.emit({ type: 'too-long' }));
+    await expect(
+      page.getByRole('dialog', { name: /Loading chats|Connecting to Telegram/ }),
+    ).toHaveCount(0);
+    await expect(page.getByTestId('message-scroller')).toBeVisible();
+  });
+  await test.step('styles vertical scrollbars and hides horizontal scrollbar tracks', async () => {
+    await page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' }).click();
+    const picker = page.getByRole('dialog', { name: 'Emoji, GIFs and stickers' });
+    const emojiGrid = picker.locator('.emoji-grid');
+    await expect(emojiGrid).toBeVisible();
+    await expect
+      .poll(() => emojiGrid.evaluate((element) => getComputedStyle(element).scrollbarWidth))
+      .toBe('thin');
+
+    await picker.getByRole('button', { name: 'Stickers' }).click();
+    const packTabs = picker.locator('.sticker-pack-tabs');
+    await expect(packTabs).toBeVisible();
+    expect(await packTabs.evaluate((element) => getComputedStyle(element).scrollbarWidth)).toBe(
+      'none',
+    );
+  });
 });

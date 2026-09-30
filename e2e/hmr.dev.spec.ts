@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 import { utimes } from 'node:fs/promises';
 
 import { openReady } from './helpers';

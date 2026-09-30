@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite-plus';
+import { effectwebLint } from '@effectweb/compiler/lint-preset';
 import { effectweb } from '@effectweb/compiler/vite';
 import { execFileSync } from 'node:child_process';
 
@@ -53,11 +54,10 @@ export default defineConfig({
   lint: {
     ignorePatterns: ['coverage/**', 'dist/**', 'test-results/**'],
     plugins: ['typescript', 'unicorn', 'oxc', 'effecttsgo'],
-    jsPlugins: ['@effectweb/compiler/oxlint'],
+    jsPlugins: effectwebLint.jsPlugins,
     options: { typeAware: true, typeCheck: true },
     rules: {
-      'effectweb/query-key': 'error',
-      'effectweb/identity': 'warn',
+      ...effectwebLint.rules,
       'effecttsgo/missing-effect-context': 'error',
       'effecttsgo/missing-effect-error': 'error',
       'effecttsgo/missing-layer-context': 'error',
@@ -78,29 +78,8 @@ export default defineConfig({
           minimumDescriptionLength: 10,
         },
       ],
-      'no-restricted-imports': [
-        'error',
-        {
-          paths: [
-            {
-              name: 'effectweb/dom',
-              message:
-                'Compiler implementation API. Use view, domMount, mountView, and owned application APIs.',
-            },
-            {
-              name: 'effectweb/jsx-runtime',
-              message: 'JSX compiler implementation API; authored modules use effectweb.',
-            },
-            {
-              name: 'effectweb/jsx-dev-runtime',
-              message: 'JSX compiler implementation API; authored modules use effectweb.',
-            },
-          ],
-        },
-      ],
       'effecttsgo/any-unknown-in-error-context': 'off',
       'effecttsgo/floating-effect': 'error',
-      'effectweb/valid-view': 'error',
       'no-console': ['error', { allow: ['debug', 'info', 'warn', 'error'] }],
     },
     overrides: [

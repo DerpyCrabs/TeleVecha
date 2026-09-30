@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test, type Page } from '@playwright/test';
+import { expect } from './expect';
 
 import { chatButton, fixtureStats } from './helpers';
 
@@ -52,23 +53,30 @@ async function expectAssignedChatBackground(page: Page) {
     .toMatch(/^url\("blob:/u);
 }
 
-test('restores pinned messages from cache before Telegram reconnects', async ({ page }) => {
+test('restores pinned messages and shared-media counts from cache before Telegram reconnects', async ({
+  page,
+}) => {
   await page.goto(CACHE_PATH);
   await releaseConnectionAndWaitUntilReady(page);
-  await expect(
-    page.getByRole('button', { name: /Pinned message 1 of 2.*Fixture message 79/ }),
-  ).toBeVisible();
+  const pinned = page.getByRole('button', { name: /Pinned message 1 of 2.*Fixture message 79/ });
+  const photos = page.locator('aside.details-pane').getByRole('button', { name: 'Photos 128' });
+  await expect(pinned).toBeVisible();
+  await expect(photos).toBeVisible();
   await expect.poll(() => fixtureStats(page).then((stats) => stats?.getPinnedMessages)).toBe(1);
+  await expect
+    .poll(() => fixtureStats(page).then((stats) => stats?.getSharedMediaCounts ?? 0))
+    .toBeGreaterThan(0);
 
   await page.reload();
   await waitForCachedWorkspace(page);
 
   await expect(page.getByTestId('conversation-header')).toContainText('Alice Fixture');
   await expect(page.getByTestId('message-scroller')).toContainText('Newest message from fixture');
-  await expect(
-    page.getByRole('button', { name: /Pinned message 1 of 2.*Fixture message 79/ }),
-  ).toBeVisible();
-  expect((await fixtureStats(page))?.getPinnedMessages).toBe(0);
+  await expect(pinned).toBeVisible();
+  await expect(photos).toBeVisible();
+  const stats = await fixtureStats(page);
+  expect(stats?.getPinnedMessages).toBe(0);
+  expect(stats?.getSharedMediaCounts).toBe(0);
 });
 
 test('repairs cached private-chat history behind the dialog head after reconnect', async ({
@@ -207,48 +215,24 @@ test('restores a selected Telegram background from cache before Telegram reconne
   expect((await fixtureStats(page))?.downloadWallpaper).toBe(0);
 });
 
-test('restores shared-media counts from cache before Telegram reconnects', async ({ page }) => {
-  await page.goto(CACHE_PATH);
-  await releaseConnectionAndWaitUntilReady(page);
-  const photos = page.locator('aside.details-pane').getByRole('button', { name: 'Photos 128' });
-  await expect(photos).toBeVisible();
-  await expect
-    .poll(() => fixtureStats(page).then((stats) => stats?.getSharedMediaCounts ?? 0))
-    .toBeGreaterThan(0);
-
-  await page.reload();
-  await waitForCachedWorkspace(page);
-
-  await expect(photos).toBeVisible();
-  expect((await fixtureStats(page))?.getSharedMediaCounts).toBe(0);
-});
-
-test('restores group members from cache before Telegram reconnects', async ({ page }) => {
+test('restores group members and bot commands from cache before Telegram reconnects', async ({
+  page,
+}) => {
   const scenario = 'held-connect';
   await page.goto(`/?scenario=${scenario}&chat=g%3A303`);
   await releaseConnectionAndWaitUntilReady(page, scenario);
   const members = page.locator('.group-members');
-  await expect(members).toContainText('Fixture Author');
-  await expect(members).toContainText('Another Member');
-
-  await page.reload();
-  await waitForCachedWorkspace(page, scenario);
-
-  await expect(members).toContainText('Fixture Author');
-  await expect(members).toContainText('Another Member');
-});
-
-test('restores bot commands from cache before Telegram reconnects', async ({ page }) => {
-  const scenario = 'held-connect';
-  await page.goto(`/?scenario=${scenario}&chat=g%3A303`);
-  await releaseConnectionAndWaitUntilReady(page, scenario);
-  await expect.poll(() => fixtureStats(page).then((stats) => stats?.getBotCommands)).toBe(1);
   const commands = page.getByRole('button', { name: 'Commands' });
+  await expect(members).toContainText('Fixture Author');
+  await expect(members).toContainText('Another Member');
+  await expect.poll(() => fixtureStats(page).then((stats) => stats?.getBotCommands)).toBe(1);
   await expect(commands).toBeVisible();
 
   await page.reload();
   await waitForCachedWorkspace(page, scenario);
 
+  await expect(members).toContainText('Fixture Author');
+  await expect(members).toContainText('Another Member');
   await expect(commands).toBeVisible();
   await commands.click();
   await expect(
@@ -481,7 +465,8 @@ test('keeps cached conversation metadata visible throughout reconnect synchroniz
     });
   });
   const headerStatus = page.getByTestId('conversation-header').getByRole('status');
-  await expect(headerStatus).toContainText('last seen today at');
+  // A minute ago is yesterday during the first minute of the day.
+  await expect(headerStatus).toContainText(/last seen (today|yesterday) at/);
   const expectedStatus = (await headerStatus.textContent()) ?? '';
   await expect(
     page.getByRole('button', { name: /Pinned message 1 of 2.*Fixture message 79/ }),

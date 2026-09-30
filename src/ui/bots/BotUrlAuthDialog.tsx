@@ -1,8 +1,9 @@
-import { list as renderList } from 'effectweb';
+import { list } from 'effectweb';
 import type { TelegramUrlAuthAcceptOptions, TelegramUrlAuthResult } from '../../telegram/types';
 import X from '@effectweb/lucide/icons/x';
-import { component, Portal, sequence, view } from 'effectweb';
+import { collection, component, Portal, view } from 'effectweb';
 import { modalMount } from '../shared/modalMount';
+const codeRows = collection<string>((code) => code).from;
 type UrlAuthRequest = Extract<TelegramUrlAuthResult, { kind: 'request' }>;
 interface BotUrlAuthDialogProps {
   request: UrlAuthRequest;
@@ -80,7 +81,7 @@ export const BotUrlAuthDialog = component<
             {props.request.matchCodes?.length ? (
               <fieldset class="bot-url-auth-codes">
                 <legend>Verification code</legend>
-                {renderList(sequence(props.request.matchCodes), (code) => (
+                {list(codeRows(props.request.matchCodes), (code) => (
                   <label>
                     <input
                       type="radio"

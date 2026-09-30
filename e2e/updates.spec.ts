@@ -1,69 +1,84 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
 import { chatButton, fixtureStats, openReady, selectAlice } from './helpers';
 
-test.beforeEach(async ({ page }) => {
+test('applies presence and incoming messages, and forwards to another chat', async ({ page }) => {
   await openReady(page);
   await selectAlice(page);
-});
-
-test('updates the header presence from Telegram status updates', async ({ page }) => {
-  const status = page.locator('.chat-header').getByRole('status');
-  const sidebarAvatar = chatButton(page, /Alice Fixture/).locator('.avatar-online-indicator');
-  const headerAvatar = page.locator('.chat-header .avatar-online-indicator');
-  await expect(status).toHaveText('status unavailable');
-  await expect(sidebarAvatar).toHaveCount(0);
-  await expect(headerAvatar).toHaveCount(0);
-  await page.evaluate(() =>
-    window.__televechaFixture?.emit({
-      type: 'presence-changed',
-      peerId: 'u:101',
-      presence: 'online',
-    }),
-  );
-  await expect(status).toHaveText('online');
-  await expect(sidebarAvatar).toBeVisible();
-  await expect(headerAvatar).toBeVisible();
-  await page.evaluate(() =>
-    window.__televechaFixture?.emit({
-      type: 'presence-changed',
-      peerId: 'u:101',
-      presence: 'recently',
-    }),
-  );
-  await expect(status).toHaveText('last seen recently');
-  await expect(sidebarAvatar).toHaveCount(0);
-  await expect(headerAvatar).toHaveCount(0);
-});
-
-test('applies a live incoming message, updates the preview, and marks it read', async ({
-  page,
-}) => {
-  const readsBefore = (await fixtureStats(page))?.readHistory ?? 0;
-  await page.evaluate(() =>
-    window.__televechaFixture?.emit({
-      type: 'new-message',
-      pts: 11,
-      ptsCount: 1,
-      message: {
-        id: 81,
+  await test.step('updates the header presence from Telegram status updates', async () => {
+    const status = page.locator('.chat-header').getByRole('status');
+    const sidebarAvatar = chatButton(page, /Alice Fixture/).locator('.avatar-online-indicator');
+    const headerAvatar = page.locator('.chat-header .avatar-online-indicator');
+    await expect(status).toHaveText('status unavailable');
+    await expect(sidebarAvatar).toHaveCount(0);
+    await expect(headerAvatar).toHaveCount(0);
+    await page.evaluate(() =>
+      window.__televechaFixture?.emit({
+        type: 'presence-changed',
         peerId: 'u:101',
-        senderId: 'u:101',
-        text: 'Live incoming fixture',
-        date: 1_700_002_000,
-        outgoing: false,
-      },
-    }),
-  );
+        presence: 'online',
+      }),
+    );
+    await expect(status).toHaveText('online');
+    await expect(sidebarAvatar).toBeVisible();
+    await expect(headerAvatar).toBeVisible();
+    await page.evaluate(() =>
+      window.__televechaFixture?.emit({
+        type: 'presence-changed',
+        peerId: 'u:101',
+        presence: 'recently',
+      }),
+    );
+    await expect(status).toHaveText('last seen recently');
+    await expect(sidebarAvatar).toHaveCount(0);
+    await expect(headerAvatar).toHaveCount(0);
+  });
+  await test.step('applies a live incoming message, updates the preview, and marks it read', async () => {
+    const readsBefore = (await fixtureStats(page))?.readHistory ?? 0;
+    await page.evaluate(() =>
+      window.__televechaFixture?.emit({
+        type: 'new-message',
+        pts: 11,
+        ptsCount: 1,
+        message: {
+          id: 81,
+          peerId: 'u:101',
+          senderId: 'u:101',
+          text: 'Live incoming fixture',
+          date: 1_700_002_000,
+          outgoing: false,
+        },
+      }),
+    );
 
-  await expect(page.getByTestId('message-scroller')).toContainText('Live incoming fixture');
-  await expect(chatButton(page, /Alice Fixture/)).toContainText('Live incoming fixture');
-  await expect
-    .poll(async () => (await fixtureStats(page))?.readHistory ?? 0)
-    .toBeGreaterThan(readsBefore);
+    await expect(page.getByTestId('message-scroller')).toContainText('Live incoming fixture');
+    await expect(chatButton(page, /Alice Fixture/)).toContainText('Live incoming fixture');
+    await expect
+      .poll(async () => (await fixtureStats(page))?.readHistory ?? 0)
+      .toBeGreaterThan(readsBefore);
+  });
+  await test.step('forwards a message to another chat from the context menu', async () => {
+    const message = page.locator('article[data-message-id="79"]');
+    await message.click({ button: 'right' });
+    await page
+      .getByRole('menu', { name: 'Message actions' })
+      .getByRole('menuitem', { name: 'Forward' })
+      .click();
+
+    const dialog = page.getByRole('dialog', { name: 'Forward message' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Release Channel' }).click();
+    await expect.poll(async () => (await fixtureStats(page))?.forwardMessage).toBe(1);
+
+    await chatButton(page, /Release Channel/).click();
+    await expect(page.locator('article.message').last()).toContainText('Fixture message 79');
+  });
 });
 
 test('does not mark a new message read while the window lacks focus', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await expect.poll(async () => (await fixtureStats(page))?.readHistory ?? 0).toBeGreaterThan(0);
   const readsBefore = (await fixtureStats(page))?.readHistory ?? 0;
   await page.evaluate(() => {
@@ -104,6 +119,8 @@ test('does not mark a new message read while the window lacks focus', async ({ p
 test('does not mark a new message read while the expression picker covers the chat', async ({
   page,
 }) => {
+  await openReady(page);
+  await selectAlice(page);
   await expect.poll(async () => (await fixtureStats(page))?.readHistory ?? 0).toBeGreaterThan(0);
   await page.waitForTimeout(50);
   const readsBefore = (await fixtureStats(page))?.readHistory ?? 0;
@@ -139,6 +156,8 @@ test('does not mark a new message read while the expression picker covers the ch
 });
 
 test('replaces an edited message instead of duplicating it', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() => {
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -181,6 +200,8 @@ test('replaces an edited message instead of duplicating it', async ({ page }) =>
 });
 
 test('removes deleted messages from the open conversation', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await expect(page.locator('article[data-message-id="79"]')).toBeVisible();
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
@@ -195,6 +216,8 @@ test('removes deleted messages from the open conversation', async ({ page }) => 
 });
 
 test('keeps a message menu through updates until its target disappears', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   const menu = page.getByRole('menu', { name: 'Message actions' });
   const target = page.locator('article[data-message-id="80"]');
 
@@ -248,6 +271,8 @@ test('keeps a message menu through updates until its target disappears', async (
 });
 
 test('renders a live photo caption and its standard reactions together', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -275,89 +300,99 @@ test('renders a live photo caption and its standard reactions together', async (
   await expect(message.getByRole('button', { name: 'Add 👍 reaction' })).toContainText('1');
 });
 
-test('deletes through the message context menu and restores the previous dialog preview', async ({
-  page,
-}) => {
-  const top = page.locator('article[data-message-id="80"]');
-  await top.click({ button: 'right' });
-  const menu = page.getByRole('menu', { name: 'Message actions' });
-  await expect(menu).toBeVisible();
-  await menu.getByRole('menuitem', { name: 'Delete' }).click();
-  await page
-    .getByRole('dialog', { name: 'Delete message' })
-    .getByRole('button', { name: 'Delete for everyone' })
-    .click();
+test('counts unread updates and edits and deletes from the message menu', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
+  await test.step('increments unread count and moves an inactive chat after a new message', async () => {
+    await page.evaluate(() =>
+      window.__televechaFixture?.emit({
+        type: 'new-message',
+        pts: 11,
+        ptsCount: 1,
+        message: {
+          id: 13,
+          peerId: 'g:303',
+          senderId: 'u:404',
+          text: 'Unread group update',
+          date: 1_700_003_000,
+          outgoing: false,
+        },
+      }),
+    );
 
-  await expect(top).toHaveCount(0);
-  await expect(chatButton(page, /Alice Fixture/)).toContainText('Fixture message 79');
-  expect((await fixtureStats(page))?.deleteMessages).toBe(1);
-});
-
-test('edits an outgoing message through the context menu without replacing its bubble', async ({
-  page,
-}) => {
-  const message = page.locator('article[data-message-id="80"]');
-  await message.evaluate((element) => {
-    element.dataset.editNode = 'preserved';
+    const group = chatButton(page, /Fixture Group/);
+    await expect(group).toContainText('Unread group update');
+    await expect(group).toContainText('3');
+    await expect(page.locator('[data-testid="chat-list"] .chat-row').first()).toContainText(
+      'Fixture Group',
+    );
+    await expect(page.getByTestId('message-scroller')).not.toContainText('Unread group update');
   });
-  await message.click({ button: 'right' });
-  await page
-    .getByRole('menu', { name: 'Message actions' })
-    .getByRole('menuitem', { name: 'Edit' })
-    .click();
-  await expect(page.getByTestId('composer-edit')).toBeVisible();
-  await page.getByRole('textbox', { name: 'Message' }).fill('Edited from context menu');
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await test.step('edits an outgoing message through the context menu without replacing its bubble', async () => {
+    const message = page.locator('article[data-message-id="80"]');
+    await message.evaluate((element) => {
+      element.dataset.editNode = 'preserved';
+    });
+    await message.click({ button: 'right' });
+    await page
+      .getByRole('menu', { name: 'Message actions' })
+      .getByRole('menuitem', { name: 'Edit' })
+      .click();
+    await expect(page.getByTestId('composer-edit')).toBeVisible();
+    await page.getByRole('textbox', { name: 'Message' }).fill('Edited from context menu');
+    await page.getByRole('button', { name: 'Send message' }).click();
 
-  await expect(message).toContainText('Edited from context menu');
-  await expect(message.locator('.message-edited')).toHaveText('edited');
-  await expect(message.locator('footer')).toHaveAttribute(
-    'aria-label',
-    /^Edited\. .+\. Message status: sent$/u,
-  );
-  await expect(message).toHaveAttribute('data-edit-node', 'preserved');
-  expect((await fixtureStats(page))?.editMessage).toBe(1);
+    await expect(message).toContainText('Edited from context menu');
+    await expect(message.locator('.message-edited')).toHaveText('edited');
+    await expect(message.locator('footer')).toHaveAttribute(
+      'aria-label',
+      /^Edited\. .+\. Message status: sent$/u,
+    );
+    await expect(message).toHaveAttribute('data-edit-node', 'preserved');
+    expect((await fixtureStats(page))?.editMessage).toBe(1);
+  });
+  await test.step('deletes through the message context menu and restores the previous dialog preview', async () => {
+    const top = page.locator('article[data-message-id="80"]');
+    await top.click({ button: 'right' });
+    const menu = page.getByRole('menu', { name: 'Message actions' });
+    await expect(menu).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Delete' }).click();
+    await page
+      .getByRole('dialog', { name: 'Delete message' })
+      .getByRole('button', { name: 'Delete for everyone' })
+      .click();
+
+    await expect(top).toHaveCount(0);
+    await expect(chatButton(page, /Alice Fixture/)).toContainText('Fixture message 79');
+    expect((await fixtureStats(page))?.deleteMessages).toBe(1);
+  });
 });
 
-test('forwards a message to another chat from the context menu', async ({ page }) => {
-  const message = page.locator('article[data-message-id="79"]');
-  await message.click({ button: 'right' });
-  await page
-    .getByRole('menu', { name: 'Message actions' })
-    .getByRole('menuitem', { name: 'Forward' })
-    .click();
-
-  const dialog = page.getByRole('dialog', { name: 'Forward message' });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole('button', { name: 'Release Channel' }).click();
-  await expect.poll(async () => (await fixtureStats(page))?.forwardMessage).toBe(1);
-
-  await chatButton(page, /Release Channel/).click();
-  await expect(page.locator('article.message').last()).toContainText('Fixture message 79');
-});
-
-test('increments unread count and moves an inactive chat after a new message', async ({ page }) => {
-  await page.evaluate(() =>
-    window.__televechaFixture?.emit({
-      type: 'new-message',
-      pts: 11,
-      ptsCount: 1,
-      message: {
-        id: 13,
-        peerId: 'g:303',
-        senderId: 'u:404',
-        text: 'Unread group update',
-        date: 1_700_003_000,
+test('shows every message that arrives while the opened chat is still loading', async ({
+  page,
+}) => {
+  await openReady(page, '/?chat=u%3A101');
+  await page.evaluate(() => {
+    for (const [index, id] of [81, 82].entries()) {
+      const message = {
+        id,
+        peerId: 'u:101',
+        senderId: 'u:101',
+        text: `Arrived while loading ${id}`,
+        date: Math.floor(Date.now() / 1000) + index,
         outgoing: false,
-      },
-    }),
-  );
-
-  const group = chatButton(page, /Fixture Group/);
-  await expect(group).toContainText('Unread group update');
-  await expect(group).toContainText('3');
-  await expect(page.locator('[data-testid="chat-list"] .chat-row').first()).toContainText(
-    'Fixture Group',
-  );
-  await expect(page.getByTestId('message-scroller')).not.toContainText('Unread group update');
+      };
+      // The server already has both messages, so the history page may contain the later
+      // one before the earlier update has been applied.
+      window.__televechaFixture!.setMessages([message]);
+      window.__televechaFixture!.emit({
+        type: 'new-message',
+        pts: 11 + index,
+        ptsCount: 1,
+        message,
+      });
+    }
+  });
+  await expect(page.locator('article[data-message-id="81"]')).toBeVisible();
+  await expect(page.locator('article[data-message-id="82"]')).toBeVisible();
 });

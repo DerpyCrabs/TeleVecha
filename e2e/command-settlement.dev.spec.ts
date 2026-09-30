@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
 for (const kind of ['success', 'failure', 'defect', 'throw'] as const) {
   test(`authentication becomes usable again after ${kind}`, async ({ page }) => {

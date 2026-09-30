@@ -1,52 +1,53 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
 import type { TransportUpdate } from '../src/telegram/types';
 import { fixtureStats, openReady } from './helpers';
 
-test('does not treat channels as bot-command chats', async ({ page }) => {
-  await openReady(page);
-  await page
-    .getByTestId('chat-list')
-    .getByRole('button', { name: /Release Channel/ })
-    .click();
-
-  await expect(page.getByRole('button', { name: 'Commands' })).toHaveCount(0);
-  await expect(page.locator('.bot-command-bar')).toHaveCount(0);
-  await expect(page.locator('.message-sender-avatar')).toHaveCount(1);
-  await expect(page.locator('.message-sender-avatar img')).toBeVisible();
-  const members = page.locator('.group-members');
-  await expect(members).toContainText('Fixture Author');
-  await expect(members).toContainText('Another Member');
-  await expect(members.locator('.member-role.owner')).toHaveText('owner');
-  await expect(members.locator('.member-role.admin')).toHaveText('moderator');
-  const owner = members.locator('.group-member').filter({ hasText: 'Fixture Author' });
-  await expect(owner.locator('small')).toHaveText('online');
-  await expect(owner.getByText('owner', { exact: true })).toHaveCount(1);
-  const detailsOrder = await page.locator('.details-pane').evaluate((details) => {
-    const links = [...details.querySelectorAll('.detail-row')].at(-1)?.getBoundingClientRect();
-    const membersBox = details.querySelector('.group-members')?.getBoundingClientRect();
-    if (!links || !membersBox) throw new Error('Details sections are missing');
-    return membersBox.top >= links.bottom;
-  });
-  expect(detailsOrder).toBe(true);
-  expect((await fixtureStats(page))?.getBotCommands).toBe(0);
-});
-
-test('does not show bot commands in an ordinary group without published commands', async ({
+test('shows no bot commands in channels or in groups without published commands', async ({
   page,
 }) => {
-  await openReady(page);
-  await page.evaluate(() => {
-    window.__televechaFixture?.setBotCommands('g:303', []);
-  });
-  await page
-    .getByTestId('chat-list')
-    .getByRole('button', { name: /Fixture Group/ })
-    .click();
+  await test.step('does not treat channels as bot-command chats', async () => {
+    await openReady(page);
+    await page
+      .getByTestId('chat-list')
+      .getByRole('button', { name: /Release Channel/ })
+      .click();
 
-  await expect.poll(async () => (await fixtureStats(page))?.getBotCommands).toBe(1);
-  await expect(page.getByRole('button', { name: 'Commands' })).toHaveCount(0);
-  await expect(page.locator('.bot-command-bar')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Commands' })).toHaveCount(0);
+    await expect(page.locator('.bot-command-bar')).toHaveCount(0);
+    await expect(page.locator('.message-sender-avatar')).toHaveCount(1);
+    await expect(page.locator('.message-sender-avatar img')).toBeVisible();
+    const members = page.locator('.group-members');
+    await expect(members).toContainText('Fixture Author');
+    await expect(members).toContainText('Another Member');
+    await expect(members.locator('.member-role.owner')).toHaveText('owner');
+    await expect(members.locator('.member-role.admin')).toHaveText('moderator');
+    const owner = members.locator('.group-member').filter({ hasText: 'Fixture Author' });
+    await expect(owner.locator('small')).toHaveText('online');
+    await expect(owner.getByText('owner', { exact: true })).toHaveCount(1);
+    const detailsOrder = await page.locator('.details-pane').evaluate((details) => {
+      const links = [...details.querySelectorAll('.detail-row')].at(-1)?.getBoundingClientRect();
+      const membersBox = details.querySelector('.group-members')?.getBoundingClientRect();
+      if (!links || !membersBox) throw new Error('Details sections are missing');
+      return membersBox.top >= links.bottom;
+    });
+    expect(detailsOrder).toBe(true);
+    expect((await fixtureStats(page))?.getBotCommands).toBe(0);
+  });
+  await test.step('does not show bot commands in an ordinary group without published commands', async () => {
+    await page.evaluate(() => {
+      window.__televechaFixture?.setBotCommands('g:303', []);
+    });
+    await page
+      .getByTestId('chat-list')
+      .getByRole('button', { name: /Fixture Group/ })
+      .click();
+
+    await expect.poll(async () => (await fixtureStats(page))?.getBotCommands).toBe(1);
+    await expect(page.getByRole('button', { name: 'Commands' })).toHaveCount(0);
+    await expect(page.locator('.bot-command-bar')).toHaveCount(0);
+  });
 });
 
 test('groups channel posts by author and keeps the avatar on the last post', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { list as renderList } from 'effectweb';
+import { list } from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
 import type { TelegramReactionPeople, TelegramReactionPerson } from '../../telegram/types';
@@ -81,7 +81,7 @@ const ReactionPeople = view<{
                   'Reactions are anonymous'
                 ) : page.people.length ? (
                   <>
-                    {renderList(peopleRows(page.people), (person) => (
+                    {list(peopleRows(page.people), (person) => (
                       <span class="reaction-person">
                         <span class="reaction-person-avatar" aria-hidden="true">
                           <Avatar
@@ -219,7 +219,7 @@ export const MessageActions = view<MessageActionsProps, never>((props, _send) =>
   };
   return (
     <div class="message-reactions">
-      {renderList(reactionRows(props.message.reactions ?? []), (reaction) => (
+      {list(reactionRows(props.message.reactions ?? []), (reaction) => (
         <ReactionButton
           message={props.message}
           reaction={reaction}
@@ -259,7 +259,7 @@ export const MessageActions = view<MessageActionsProps, never>((props, _send) =>
               aria-label="Choose reaction"
               use={placeReactionPicker}
             >
-              {renderList(sequence(['👍', '❤️', '😂', '😮', '😢', '🔥']), (emoji) => (
+              {list(sequence(['👍', '❤️', '😂', '😮', '😢', '🔥']), (emoji) => (
                 <button onClick={() => props.react(emoji)} aria-label={`React with ${emoji}`}>
                   {emoji}
                 </button>

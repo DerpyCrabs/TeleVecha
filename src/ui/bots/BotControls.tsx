@@ -1,4 +1,4 @@
-import { list as renderList } from 'effectweb';
+import { list } from 'effectweb';
 import type {
   TelegramBotButton,
   TelegramBotCommand,
@@ -65,7 +65,7 @@ export const BotControls = view<BotControlsProps, never>((props, _send) => {
                 </button>
               ) : null}
               {props.loadingCommands ? <span role="status">Loading commands…</span> : null}
-              {renderList(commandRows(props.commands), (command) => (
+              {list(commandRows(props.commands), (command) => (
                 <button
                   role="menuitem"
                   disabled={!props.enabled}

@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 import { chatButton, openReady, selectAlice } from './helpers';
 
 test('moving the pointer while pressing a compact chat avatar does not start a native drag', async ({

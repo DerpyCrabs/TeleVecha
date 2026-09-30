@@ -1,4 +1,5 @@
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { type Locator, type Page, test } from '@playwright/test';
+import { expect } from './expect';
 
 import { chatButton, fixtureStats, openReady, selectAlice } from './helpers';
 
@@ -86,45 +87,79 @@ async function startHistoryAnchorSampling(scroller: Locator) {
   );
 }
 
-test.beforeEach(async ({ page }) => {
+test('browses shared content, its viewers and jumps to the source message', async ({ page }) => {
   await openReady(page);
   await selectAlice(page);
-});
+  await test.step('opens the selected shared-content type directly with useful message context', async () => {
+    await page.getByRole('button', { name: /Photos.*128/ }).click();
+    let shared = page.getByRole('dialog', { name: 'Shared photos' });
+    await expect(shared.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
+    await expect(shared.getByRole('tablist')).toHaveCount(0);
+    await expect(shared.locator('.shared-media-tile').first()).toHaveCSS('min-height', '144px');
+    await expect(shared.getByRole('button', { name: /Go to media message/ }).first()).toBeVisible();
+    await shared.getByRole('button', { name: /Close shared photos/ }).click();
 
-test('opens the selected shared-content type directly with useful message context', async ({
-  page,
-}) => {
-  await page.getByRole('button', { name: /Photos.*128/ }).click();
-  let shared = page.getByRole('dialog', { name: 'Shared photos' });
-  await expect(shared.getByRole('img', { name: 'fixture.jpg', exact: true })).toBeVisible();
-  await expect(shared.getByRole('tablist')).toHaveCount(0);
-  await expect(shared.locator('.shared-media-tile').first()).toHaveCSS('min-height', '144px');
-  await expect(shared.getByRole('button', { name: /Go to media message/ }).first()).toBeVisible();
-  await shared.getByRole('button', { name: /Close shared photos/ }).click();
+    await page.getByRole('button', { name: /Links.*44/ }).click();
+    shared = page.getByRole('dialog', { name: 'Shared links' });
+    await expect(shared.getByRole('link', { name: /example.com/ }).first()).toBeVisible();
+    await expect(shared.locator('time').first()).toBeVisible();
+    await shared.getByRole('button', { name: /Close shared links/ }).click();
 
-  await page.getByRole('button', { name: /Links.*44/ }).click();
-  shared = page.getByRole('dialog', { name: 'Shared links' });
-  await expect(shared.getByRole('link', { name: /example.com/ }).first()).toBeVisible();
-  await expect(shared.locator('time').first()).toBeVisible();
-  await shared.getByRole('button', { name: /Close shared links/ }).click();
+    await page.getByRole('button', { name: /Files.*16/ }).click();
+    shared = page.getByRole('dialog', { name: 'Shared files' });
+    await expect(shared.getByText('fixture-document.pdf')).toBeVisible();
+    await expect(shared.getByText(/41 KB.*application\/pdf/)).toBeVisible();
+    await expect(
+      shared.getByRole('button', { name: 'Download fixture-document.pdf' }),
+    ).toBeVisible();
+    expect((await fixtureStats(page))?.getSharedMedia).toBeGreaterThanOrEqual(3);
+  });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Shared files' })).toHaveCount(0);
+  await test.step('Escape closes only the topmost media viewer before its shared-media dialog', async () => {
+    await page.getByRole('button', { name: /Photos.*128/ }).click();
+    const shared = page.getByRole('dialog', { name: 'Shared photos' });
+    const preview = shared.getByRole('button', { name: 'Open fixture.jpg fullscreen preview' });
+    await preview.click();
+    const viewer = page.getByRole('dialog', { name: 'Media preview: fixture.jpg' });
+    await expect(viewer).toBeVisible();
 
-  await page.getByRole('button', { name: /Files.*16/ }).click();
-  shared = page.getByRole('dialog', { name: 'Shared files' });
-  await expect(shared.getByText('fixture-document.pdf')).toBeVisible();
-  await expect(shared.getByText(/41 KB.*application\/pdf/)).toBeVisible();
-  await expect(shared.getByRole('button', { name: 'Download fixture-document.pdf' })).toBeVisible();
-  expect((await fixtureStats(page))?.getSharedMedia).toBeGreaterThanOrEqual(3);
-});
+    await page.keyboard.press('Escape');
+    await expect(viewer).toHaveCount(0);
+    await expect(shared).toBeVisible();
+    await expect(preview).toBeFocused();
 
-test('navigates through the complete shared-photo result set', async ({ page }) => {
-  await page.getByRole('button', { name: /Photos.*128/ }).click();
-  const shared = page.getByRole('dialog', { name: 'Shared photos' });
-  await shared.getByRole('button', { name: 'Open old-fixture.jpg fullscreen preview' }).click();
-  let viewer = page.getByRole('dialog', { name: 'Media preview: old-fixture.jpg' });
-  await expect(viewer.getByRole('button', { name: 'Previous attachment' })).toBeEnabled();
-  await viewer.getByRole('button', { name: 'Previous attachment' }).click();
-  viewer = page.getByRole('dialog', { name: 'Media preview: fixture.jpg' });
-  await expect(viewer).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(shared).toHaveCount(0);
+  });
+  await test.step('navigates through the complete shared-photo result set', async () => {
+    await page.getByRole('button', { name: /Photos.*128/ }).click();
+    const shared = page.getByRole('dialog', { name: 'Shared photos' });
+    await shared.getByRole('button', { name: 'Open old-fixture.jpg fullscreen preview' }).click();
+    let viewer = page.getByRole('dialog', { name: 'Media preview: old-fixture.jpg' });
+    await expect(viewer.getByRole('button', { name: 'Previous attachment' })).toBeEnabled();
+    await viewer.getByRole('button', { name: 'Previous attachment' }).click();
+    viewer = page.getByRole('dialog', { name: 'Media preview: fixture.jpg' });
+    await expect(viewer).toBeVisible();
+  });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: /Media preview:/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Shared photos' })).toHaveCount(0);
+  await test.step('shows a thumbnail in replies to media messages and jumps from shared media', async () => {
+    const reply = page.locator('article[data-message-id="79"] .message-reply');
+    await expect(reply.locator('img')).toBeVisible();
+    await page.getByRole('button', { name: /Photos.*128/ }).click();
+    await page.getByRole('button', { name: /Go to media message fixture.jpg from/ }).click();
+    await expect(page.getByRole('dialog', { name: 'Shared photos' })).toHaveCount(0);
+    await expect(page.locator('article[data-message-id="78"]')).toBeInViewport();
+  });
+  await test.step('loads and reveals old shared media outside the current history window', async () => {
+    await page.getByRole('button', { name: /Photos.*128/ }).click();
+    await page.getByRole('button', { name: /Go to media message old-fixture.jpg/ }).click();
+    await expect(page.locator('article[data-message-id="5"]')).toBeInViewport();
+    expect((await fixtureStats(page))?.getHistoryAround).toBe(1);
+  });
 });
 
 test('previews image documents directly from shared files with message actions', async ({
@@ -162,43 +197,6 @@ test('loads shared-video thumbnails without downloading the original file', asyn
   await expect
     .poll(async () => (await fixtureStats(page))?.downloadMediaFull ?? 0)
     .toBe((before?.downloadMediaFull ?? 0) + 1);
-});
-
-test('Escape closes only the topmost media viewer before its shared-media dialog', async ({
-  page,
-}) => {
-  await page.getByRole('button', { name: /Photos.*128/ }).click();
-  const shared = page.getByRole('dialog', { name: 'Shared photos' });
-  const preview = shared.getByRole('button', { name: 'Open fixture.jpg fullscreen preview' });
-  await preview.click();
-  const viewer = page.getByRole('dialog', { name: 'Media preview: fixture.jpg' });
-  await expect(viewer).toBeVisible();
-
-  await page.keyboard.press('Escape');
-  await expect(viewer).toHaveCount(0);
-  await expect(shared).toBeVisible();
-  await expect(preview).toBeFocused();
-
-  await page.keyboard.press('Escape');
-  await expect(shared).toHaveCount(0);
-});
-
-test('shows a thumbnail in replies to media messages and jumps from shared media', async ({
-  page,
-}) => {
-  const reply = page.locator('article[data-message-id="79"] .message-reply');
-  await expect(reply.locator('img')).toBeVisible();
-  await page.getByRole('button', { name: /Photos.*128/ }).click();
-  await page.getByRole('button', { name: /Go to media message fixture.jpg from/ }).click();
-  await expect(page.getByRole('dialog', { name: 'Shared photos' })).toHaveCount(0);
-  await expect(page.locator('article[data-message-id="78"]')).toBeInViewport();
-});
-
-test('loads and reveals old shared media outside the current history window', async ({ page }) => {
-  await page.getByRole('button', { name: /Photos.*128/ }).click();
-  await page.getByRole('button', { name: /Go to media message old-fixture.jpg/ }).click();
-  await expect(page.locator('article[data-message-id="5"]')).toBeInViewport();
-  expect((await fixtureStats(page))?.getHistoryAround).toBe(1);
 });
 
 test('a slow message jump cannot take over a newer chat selection', async ({ page }) => {
@@ -267,11 +265,14 @@ test('shows and incrementally fills a real gap after jumping far back in history
     .toBeLessThan(4);
 });
 
-test('loads all 1,000 messages only as the user reaches each older page', async ({ page }) => {
+test('loads all 1,000 messages page by page, only at the loaded boundary', async ({ page }) => {
+  const resizeErrors: string[] = [];
+  page.on('pageerror', (error) => {
+    if (error.message.includes('ResizeObserver')) resizeErrors.push(error.message);
+  });
   await page.goto('/?scenario=long-history');
   await page.getByRole('button', { name: /Long History/ }).click();
   const scroller = page.getByTestId('message-scroller');
-  await expect(scroller.getByText('Long history message 1000', { exact: true })).toBeVisible();
   await expect(scroller.getByText('Long history message 1000', { exact: true })).toBeVisible();
   for (const expected of Array.from({ length: 19 }, (_, index) => (index + 2) * 50)) {
     await scroller.evaluate((element) => {
@@ -280,55 +281,20 @@ test('loads all 1,000 messages only as the user reaches each older page', async 
     });
     await expect.poll(() => loadedMessageCount(page)).toBeGreaterThanOrEqual(expected);
     await expectLoadedWindowRendered(scroller);
+    if (expected !== 500) continue;
+    // Away from the boundary, scrolling requests nothing.
+    const historyRequests = (await fixtureStats(page))?.getHistory ?? 0;
+    await scroller.evaluate((element) => {
+      element.scrollTop = 100;
+    });
+    await page.waitForTimeout(100);
+    expect((await fixtureStats(page))?.getHistory ?? 0).toBe(historyRequests);
+    await expectLoadedWindowRendered(scroller);
   }
   expect(await loadedMessageCount(page)).toBe(1000);
   await expect(page.getByText('Long history message 1', { exact: true })).toBeAttached();
   await expectLoadedWindowRendered(scroller);
-});
-
-test('full message flow does not produce ResizeObserver loop errors', async ({ page }) => {
-  const resizeErrors: string[] = [];
-  page.on('pageerror', (error) => {
-    if (error.message.includes('ResizeObserver')) resizeErrors.push(error.message);
-  });
-  await page.goto('/?scenario=long-history');
-  await page.getByRole('button', { name: /Long History/ }).click();
-  const scroller = page.getByTestId('message-scroller');
-  await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
-    await scroller.evaluate((element) => {
-      element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-      element.scrollTop = 0;
-    });
-    await expect.poll(() => loadedMessageCount(page)).toBeGreaterThanOrEqual(100 + pageIndex * 50);
-    await expectLoadedWindowRendered(scroller);
-  }
   expect(resizeErrors).toEqual([]);
-});
-
-test('loads earlier history only when the viewport reaches the exact loaded boundary', async ({
-  page,
-}) => {
-  await page.goto('/?scenario=long-history');
-  await page.getByRole('button', { name: /Long History/ }).click();
-  const scroller = page.getByTestId('message-scroller');
-  await expect(scroller.getByText('Long history message 1000', { exact: true })).toBeVisible();
-  for (const expectedCount of [100, 150, 200, 250, 300, 350, 400, 450, 500]) {
-    await scroller.evaluate((element) => {
-      element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-      element.scrollTop = 0;
-    });
-    await expect.poll(() => loadedMessageCount(page)).toBeGreaterThanOrEqual(expectedCount);
-    await expectLoadedWindowRendered(scroller);
-  }
-  const historyRequests = (await fixtureStats(page))?.getHistory ?? 0;
-
-  await scroller.evaluate((element) => {
-    element.scrollTop = 100;
-  });
-  await page.waitForTimeout(100);
-  expect((await fixtureStats(page))?.getHistory ?? 0).toBe(historyRequests);
-  await expectLoadedWindowRendered(scroller);
 });
 
 test('continues cached history after reloading the remembered chat', async ({ page }) => {

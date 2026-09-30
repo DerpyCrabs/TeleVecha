@@ -1,15 +1,13 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 import { openReady, selectAlice } from './helpers';
-
-test.beforeEach(async ({ page }) => {
-  await openReady(page, '/?scenario=comments');
-  await selectAlice(page);
-});
 
 test('opens a public post internally from text, shows paginated comments and returns to the post', async ({
   page,
   context,
 }) => {
+  await openReady(page, '/?scenario=comments');
+  await selectAlice(page);
   await page
     .getByRole('link', { name: 'https://t.me/public_fixture_news/965', exact: true })
     .click();
@@ -33,6 +31,8 @@ test('opens a public post internally from text, shows paginated comments and ret
 test('opens a preview internally and handles empty or unavailable discussions', async ({
   page,
 }) => {
+  await openReady(page, '/?scenario=comments');
+  await selectAlice(page);
   await page.locator('a[href="https://t.me/public_fixture_news/965"]').last().click();
   await expect(page.getByTestId('conversation-header')).toContainText('Public Fixture News');
   await page
@@ -53,6 +53,8 @@ test('opens a preview internally and handles empty or unavailable discussions', 
 test('opens a specific comment and rejects a missing post without inserting a fake message', async ({
   page,
 }) => {
+  await openReady(page, '/?scenario=comments');
+  await selectAlice(page);
   const link = page.getByRole('link', {
     name: 'https://t.me/public_fixture_news/965',
     exact: true,
@@ -96,6 +98,8 @@ test('works on a narrow screen and retries a failed comment request', async ({ p
 test('channel preview stays out of the chat list after message updates and reload', async ({
   page,
 }) => {
+  await openReady(page, '/?scenario=comments');
+  await selectAlice(page);
   await page
     .getByRole('link', { name: 'https://t.me/public_fixture_news/965', exact: true })
     .click();

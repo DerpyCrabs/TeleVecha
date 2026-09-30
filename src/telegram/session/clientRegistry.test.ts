@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { initialEngineSnapshot } from '../core/engineState';
-import { makeClientRegistry } from './clientRegistry';
+import { applyConversationChange, makeClientRegistry } from './clientRegistry';
 
 describe('clientRegistry', () => {
   it('keeps one coherent record for a tab', () => {
@@ -112,4 +112,24 @@ it('keeps journals independent per client and ignores events for other peers', (
   registry.recordConversationChange({ type: 'message-upsert', message: message(2) });
   expect(first.complete(conversation(1))?.messages).toEqual([message(2)]);
   expect(second.complete({ ...conversation(1), activePeerId: 'peer-2' })?.messages).toEqual([]);
+});
+
+it('inserts a message that arrives after a newer one, but not into a history gap', () => {
+  const late = { type: 'message-upsert', message: message(2) } as const;
+  expect(applyConversationChange(conversation(1, 3), late).messages).toEqual([
+    message(1),
+    message(2),
+    message(3),
+  ]);
+  const gapped = {
+    ...conversation(1, 3),
+    historyGaps: [{ olderMaxMessageId: 1, newerMinMessageId: 3 }],
+  };
+  expect(applyConversationChange(gapped, late).messages).toEqual([message(1), message(3)]);
+  // An edit to a message older than everything loaded stays outside the view.
+  const old = { type: 'message-upsert', message: message(1) } as const;
+  expect(applyConversationChange(conversation(2, 3), old).messages).toEqual([
+    message(2),
+    message(3),
+  ]);
 });

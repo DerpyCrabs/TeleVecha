@@ -1,15 +1,7 @@
 import { findMention, filterMentionMembers, shiftFormats } from './mentions';
 import { patchModel } from 'effectweb/advanced';
 import type { TelegramGroupMember } from '../../telegram/types';
-import {
-  list as renderList,
-  commandSlot,
-  component,
-  domBinding,
-  sequence,
-  view,
-  actionCommand,
-} from 'effectweb';
+import { list, commandSlot, component, domBinding, sequence, view, actionCommand } from 'effectweb';
 import { Effect } from 'effect';
 import type { TelegramSticker, TelegramTextFormat } from '../../telegram/types';
 import { idRows } from '../collections';
@@ -580,7 +572,7 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
                 </button>
               </div>
             ) : null}
-            {renderList(idRows(props.composer.attachments), (attachment) => (
+            {list(idRows(props.composer.attachments), (attachment) => (
               <div
                 class="composer-attachment"
                 data-testid="composer-attachment"
@@ -683,7 +675,7 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
                 role="listbox"
                 aria-label="Mention a member"
               >
-                {renderList(
+                {list(
                   idRows(mentionMembers().map((member) => ({ ...member, id: member.peer.id }))),
                   (member) => (
                     <button
@@ -734,7 +726,7 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
                     aria-label="Message formatting"
                     style={{ left: `${position.x}px`, top: `${position.y}px` }}
                   >
-                    {renderList(
+                    {list(
                       sequence([
                         ['bold', 'Bold'],
                         ['italic', 'Italic'],

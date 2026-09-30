@@ -1,4 +1,5 @@
-import { expect, type Locator, test } from '@playwright/test';
+import { type Locator, test } from '@playwright/test';
+import { expect } from './expect';
 
 import { chatButton, fixtureStats, openReady, selectAlice } from './helpers';
 
@@ -31,38 +32,9 @@ async function waitForScrollToSettle(scroller: Locator) {
   );
 }
 
-test.beforeEach(async ({ page }) => {
+test('appending and prepending preserve text nodes and revealed spoilers', async ({ page }) => {
   await openReady(page);
   await selectAlice(page);
-});
-
-test('typing a draft does not replace messages, media, or unchanged chat rows', async ({
-  page,
-}) => {
-  const bubble = page.locator('article[data-message-id="79"]');
-  const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
-  const release = chatButton(page, /Release Channel/);
-  await mark(bubble, 'bubble');
-  await mark(image, 'image');
-  await mark(release, 'release');
-  const imageSource = await image.getAttribute('src');
-  const callsBefore = await fixtureStats(page);
-
-  await page
-    .getByRole('textbox', { name: 'Message' })
-    .pressSequentially('draft text', { delay: 5 });
-
-  await expectMarked(bubble, 'bubble');
-  await expectMarked(image, 'image');
-  await expectMarked(release, 'release');
-  await expect(image).toHaveAttribute('src', imageSource ?? '');
-  const callsAfter = await fixtureStats(page);
-  expect(callsAfter?.getDialogs).toBe(callsBefore?.getDialogs);
-  expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);
-  expect(callsAfter?.downloadMedia).toBe(callsBefore?.downloadMedia);
-});
-
-test('appending and prepending preserve text nodes and revealed spoilers', async ({ page }) => {
   const body = page.locator('article[data-message-id="76"] .message-body');
   const spoiler = body.locator('.spoiler');
   const unchangedText = page.locator('article[data-message-id="79"] .message-body span').first();
@@ -123,78 +95,11 @@ test('appending and prepending preserve text nodes and revealed spoilers', async
   await expectMarked(unchangedText, 'unchanged-text');
 });
 
-test('typing does not nudge the conversation on each input', async ({ page }) => {
-  const scroller = page.getByTestId('message-scroller');
-  const composer = page.getByRole('textbox', { name: 'Message' });
-  await waitForScrollToSettle(scroller);
-  const initial = await scroller.evaluate((element) => element.scrollTop);
-  await page.evaluate(() => {
-    const scrollElement = document.querySelector<HTMLElement>('[data-testid="message-scroller"]');
-    const input = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]');
-    if (!scrollElement || !input) throw new Error('Missing conversation controls');
-    const positions: number[] = [];
-    input.addEventListener('input', () => {
-      requestAnimationFrame(() => positions.push(scrollElement.scrollTop));
-    });
-    Object.assign(window, { __draftScrollPositions: positions });
-  });
-
-  await composer.pressSequentially('one stable line', { delay: 10 });
-  await page.waitForTimeout(50);
-  const positions = await page.evaluate(
-    () => (window as unknown as { __draftScrollPositions: number[] }).__draftScrollPositions,
-  );
-
-  expect(positions).toHaveLength('one stable line'.length);
-  expect(Math.max(initial, ...positions) - Math.min(initial, ...positions)).toBeLessThan(0.5);
-});
-
-test('opening and closing details does not replace the conversation or image', async ({ page }) => {
-  const bubble = page.locator('article[data-message-id="79"]');
-  const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
-  await mark(bubble, 'bubble');
-  await mark(image, 'image');
-
-  await page.getByRole('button', { name: 'Close details' }).click();
-  await page.getByRole('button', { name: 'Open details' }).click();
-
-  await expectMarked(bubble, 'bubble');
-  await expectMarked(image, 'image');
-});
-
-test('a read receipt updates checkmarks without replacing the bubble or its image', async ({
-  page,
-}) => {
-  const outgoingImageBubble = page.locator('article[data-message-id="78"]');
-  const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
-  const incomingBubble = page.locator('article[data-message-id="79"]');
-  await mark(outgoingImageBubble, 'outgoing-image-bubble');
-  await mark(image, 'image');
-  await mark(incomingBubble, 'incoming-bubble');
-
-  await page.evaluate(() =>
-    window.__televechaFixture?.emit({
-      type: 'read-history',
-      pts: 11,
-      ptsCount: 1,
-      peerId: 'u:101',
-      maxMessageId: 80,
-      direction: 'outbox',
-    }),
-  );
-
-  await expect(outgoingImageBubble.locator('footer')).toHaveAttribute(
-    'aria-label',
-    /Message status: read$/u,
-  );
-  await expectMarked(outgoingImageBubble, 'outgoing-image-bubble');
-  await expectMarked(image, 'image');
-  await expectMarked(incomingBubble, 'incoming-bubble');
-});
-
 test('an inactive-chat update preserves the open conversation and unchanged chat rows', async ({
   page,
 }) => {
+  await openReady(page);
+  await selectAlice(page);
   const bubble = page.locator('article[data-message-id="79"]');
   const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
   const alice = chatButton(page, /Alice Fixture/);
@@ -236,6 +141,8 @@ test('an inactive-chat update preserves the open conversation and unchanged chat
 });
 
 test('a new active-chat message appends without replacing existing bubbles', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   const oldBubble = page.locator('article[data-message-id="79"]');
   const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
   await mark(oldBubble, 'old-bubble');
@@ -267,6 +174,8 @@ test('a new active-chat message appends without replacing existing bubbles', asy
 });
 
 test('an incoming message does not move a viewport reading older messages', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   const scroller = page.getByTestId('message-scroller');
   const anchor = await scroller.evaluate(
     (element) =>
@@ -318,6 +227,8 @@ test('an incoming message does not move a viewport reading older messages', asyn
 });
 
 test('keeps following the present through staggered message layout growth', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   const scroller = page.getByTestId('message-scroller');
   const distanceFromPresent = () =>
     scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
@@ -348,6 +259,8 @@ test('keeps following the present through staggered message layout growth', asyn
 });
 
 test('a small upward wheel movement leaves present-follow mode', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   const scroller = page.getByTestId('message-scroller');
   const distanceFromPresent = () =>
     scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
@@ -382,45 +295,9 @@ test('a small upward wheel movement leaves present-follow mode', async ({ page }
   await expect.poll(distanceFromPresent).toBeLessThan(3);
 });
 
-test('replying and typing do not undo a small upward wheel movement', async ({ page }) => {
-  const scroller = page.getByTestId('message-scroller');
-  const distanceFromPresent = () =>
-    scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
-  await expect.poll(distanceFromPresent).toBeLessThan(0.5);
-
-  await scroller.hover();
-  await page.mouse.wheel(0, -4);
-  await expect.poll(distanceFromPresent).toBeGreaterThan(2);
-  await page.waitForTimeout(250);
-
-  const replyMessage = page.locator('article[data-message-id="79"]');
-  await replyMessage.hover();
-  await waitForScrollToSettle(scroller);
-  const anchor = await scroller.evaluate((element) => {
-    const top = element.getBoundingClientRect().top;
-    const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
-      (candidate) => candidate.getBoundingClientRect().bottom >= top,
-    );
-    if (!message?.dataset.messageId) throw new Error('Visible message anchor is missing');
-    return { id: message.dataset.messageId, top: message.getBoundingClientRect().top };
-  });
-
-  await replyMessage.getByRole('button', { name: 'Reply to message 79' }).click();
-  const composer = page.getByRole('textbox', { name: 'Message' });
-  await expect(composer).toBeFocused();
-  await composer.pressSequentially('Small-scroll draft', { delay: 5 });
-  await page.waitForTimeout(250);
-
-  const anchorMessage = page.locator(`article[data-message-id="${anchor.id}"]`);
-  expect(
-    Math.abs(
-      (await anchorMessage.evaluate((element) => element.getBoundingClientRect().top)) - anchor.top,
-    ),
-  ).toBeLessThan(3);
-  expect(await distanceFromPresent()).toBeGreaterThan(2);
-});
-
 test('replying and typing preserve the message being read above the present', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() => {
     for (let index = 0; index < 8; index += 1) {
       window.__televechaFixture?.emit({
@@ -486,6 +363,8 @@ test('replying and typing preserve the message being read above the present', as
 });
 
 test('a touch tap at the present does not disable following new messages', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   const scroller = page.getByTestId('message-scroller');
   const distanceFromPresent = () =>
     scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
@@ -528,6 +407,8 @@ test('a touch tap at the present does not disable following new messages', async
 });
 
 test('editing a message updates its text inside the same article node', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -568,71 +449,271 @@ test('editing a message updates its text inside the same article node', async ({
   await expectMarked(article, 'edited-article');
 });
 
-test('clicking the already-open chat performs no history or details requests', async ({ page }) => {
-  const bubble = page.locator('article[data-message-id="79"]');
-  await mark(bubble, 'bubble');
-  const callsBefore = await fixtureStats(page);
-
-  await chatButton(page, /Alice Fixture/).click();
-  await page.waitForTimeout(50);
-
-  await expectMarked(bubble, 'bubble');
-  const callsAfter = await fixtureStats(page);
-  expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);
-  expect(callsAfter?.getSharedMediaCounts).toBe(callsBefore?.getSharedMediaCounts);
-  expect(callsAfter?.readHistory).toBe(callsBefore?.readHistory);
-});
-
-test('switching away and back uses cached history and the same media URL', async ({ page }) => {
-  const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
-  const sourceBefore = await image.getAttribute('src');
-  const callsBefore = await fixtureStats(page);
-
-  await chatButton(page, /Release Channel/).click();
-  await expect(page.getByTestId('message-scroller')).toContainText('Release notes are ready');
-  await chatButton(page, /Alice Fixture/).click();
-  await expect(image).toBeVisible();
-
-  const callsAfter = await fixtureStats(page);
-  expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);
-  expect(callsAfter?.downloadMedia).toBe(callsBefore?.downloadMedia);
-  await expect(image).toHaveAttribute('src', sourceBefore ?? '');
-});
-
-test('a switched conversation is revealed at its final scroll position without later movement', async ({
+test('typing, details, chat switches and older history keep the rendered conversation', async ({
   page,
 }) => {
-  const scroller = page.getByTestId('message-scroller');
-  await chatButton(page, /Release Channel/).click();
-  await expect(scroller).toContainText('Release notes are ready');
-  await expect(scroller.locator('.conversation-ready')).toBeVisible();
+  await openReady(page);
+  await selectAlice(page);
+  await test.step('clicking the already-open chat performs no history or details requests', async () => {
+    const bubble = page.locator('article[data-message-id="79"]');
+    await mark(bubble, 'bubble');
+    const callsBefore = await fixtureStats(page);
 
-  const releasePosition = await scroller.evaluate((element) => ({
-    top: element.scrollTop,
-    height: element.scrollHeight,
-  }));
-  await page.waitForTimeout(250);
-  expect(
-    await scroller.evaluate((element) => ({
+    await chatButton(page, /Alice Fixture/).click();
+    await page.waitForTimeout(50);
+
+    await expectMarked(bubble, 'bubble');
+    const callsAfter = await fixtureStats(page);
+    expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);
+    expect(callsAfter?.getSharedMediaCounts).toBe(callsBefore?.getSharedMediaCounts);
+    expect(callsAfter?.readHistory).toBe(callsBefore?.readHistory);
+  });
+  await test.step('opening and closing details does not replace the conversation or image', async () => {
+    const bubble = page.locator('article[data-message-id="79"]');
+    const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
+    await mark(bubble, 'bubble');
+    await mark(image, 'image');
+
+    await page.getByRole('button', { name: 'Close details' }).click();
+    await page.getByRole('button', { name: 'Open details' }).click();
+
+    await expectMarked(bubble, 'bubble');
+    await expectMarked(image, 'image');
+  });
+  await test.step('typing a draft does not replace messages, media, or unchanged chat rows', async () => {
+    const bubble = page.locator('article[data-message-id="79"]');
+    const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
+    const release = chatButton(page, /Release Channel/);
+    await mark(bubble, 'bubble');
+    await mark(image, 'image');
+    await mark(release, 'release');
+    const imageSource = await image.getAttribute('src');
+    const callsBefore = await fixtureStats(page);
+
+    await page
+      .getByRole('textbox', { name: 'Message' })
+      .pressSequentially('draft text', { delay: 5 });
+
+    await expectMarked(bubble, 'bubble');
+    await expectMarked(image, 'image');
+    await expectMarked(release, 'release');
+    await expect(image).toHaveAttribute('src', imageSource ?? '');
+    const callsAfter = await fixtureStats(page);
+    expect(callsAfter?.getDialogs).toBe(callsBefore?.getDialogs);
+    expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);
+    expect(callsAfter?.downloadMedia).toBe(callsBefore?.downloadMedia);
+  });
+  await page.getByRole('textbox', { name: 'Message' }).clear();
+  await test.step('typing does not nudge the conversation on each input', async () => {
+    const scroller = page.getByTestId('message-scroller');
+    const composer = page.getByRole('textbox', { name: 'Message' });
+    await waitForScrollToSettle(scroller);
+    const initial = await scroller.evaluate((element) => element.scrollTop);
+    await page.evaluate(() => {
+      const scrollElement = document.querySelector<HTMLElement>('[data-testid="message-scroller"]');
+      const input = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]');
+      if (!scrollElement || !input) throw new Error('Missing conversation controls');
+      const positions: number[] = [];
+      input.addEventListener('input', () => {
+        requestAnimationFrame(() => positions.push(scrollElement.scrollTop));
+      });
+      Object.assign(window, { __draftScrollPositions: positions });
+    });
+
+    await composer.pressSequentially('one stable line', { delay: 10 });
+    await page.waitForTimeout(50);
+    const positions = await page.evaluate(
+      () => (window as unknown as { __draftScrollPositions: number[] }).__draftScrollPositions,
+    );
+
+    expect(positions).toHaveLength('one stable line'.length);
+    expect(Math.max(initial, ...positions) - Math.min(initial, ...positions)).toBeLessThan(0.5);
+  });
+  await page.getByRole('textbox', { name: 'Message' }).clear();
+  await test.step('fifty draft updates cause no message-list or chat-list child replacement', async () => {
+    await page.evaluate(() => {
+      const messages = document.querySelector('[data-testid="message-scroller"]');
+      const chats = document.querySelector('[data-testid="chat-list"]');
+      if (!messages || !chats) throw new Error('Missing fixture lists');
+      const removals = { messages: 0, chats: 0 };
+      new MutationObserver((records) => {
+        removals.messages += records.reduce(
+          (count, record) => count + record.removedNodes.length,
+          0,
+        );
+      }).observe(messages, { childList: true, subtree: true });
+      new MutationObserver((records) => {
+        removals.chats += records.reduce((count, record) => count + record.removedNodes.length, 0);
+      }).observe(chats, { childList: true, subtree: true });
+      Object.assign(window, { __uxRemovals: removals });
+    });
+    const callsBefore = await fixtureStats(page);
+
+    await page
+      .getByRole('textbox', { name: 'Message' })
+      .pressSequentially('1234567890'.repeat(5), { delay: 2 });
+    await page.waitForTimeout(200);
+
+    expect(
+      await page.evaluate(
+        () =>
+          (window as unknown as { __uxRemovals: { messages: number; chats: number } }).__uxRemovals,
+      ),
+    ).toEqual({ messages: 0, chats: 0 });
+    const callsAfter = await fixtureStats(page);
+    expect(callsAfter?.getDialogs).toBe(callsBefore?.getDialogs);
+    expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);
+  });
+  await page.getByRole('textbox', { name: 'Message' }).clear();
+  await test.step('switching away and back uses cached history and the same media URL', async () => {
+    const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
+    const sourceBefore = await image.getAttribute('src');
+    const callsBefore = await fixtureStats(page);
+
+    await chatButton(page, /Release Channel/).click();
+    await expect(page.getByTestId('message-scroller')).toContainText('Release notes are ready');
+    await chatButton(page, /Alice Fixture/).click();
+    await expect(image).toBeVisible();
+
+    const callsAfter = await fixtureStats(page);
+    expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);
+    expect(callsAfter?.downloadMedia).toBe(callsBefore?.downloadMedia);
+    await expect(image).toHaveAttribute('src', sourceBefore ?? '');
+  });
+  await test.step('a switched conversation is revealed at its final scroll position without later movement', async () => {
+    const scroller = page.getByTestId('message-scroller');
+    await chatButton(page, /Release Channel/).click();
+    await expect(scroller).toContainText('Release notes are ready');
+    await expect(scroller.locator('.conversation-ready')).toBeVisible();
+
+    const releasePosition = await scroller.evaluate((element) => ({
       top: element.scrollTop,
       height: element.scrollHeight,
-    })),
-  ).toEqual(releasePosition);
+    }));
+    await page.waitForTimeout(250);
+    expect(
+      await scroller.evaluate((element) => ({
+        top: element.scrollTop,
+        height: element.scrollHeight,
+      })),
+    ).toEqual(releasePosition);
 
-  await chatButton(page, /Alice Fixture/).click();
-  await expect(scroller.getByText('Newest message from fixture')).toBeVisible();
-  await expect(scroller.locator('.conversation-ready')).toBeVisible();
-  const alicePosition = await scroller.evaluate((element) => ({
-    top: element.scrollTop,
-    height: element.scrollHeight,
-  }));
-  await page.waitForTimeout(250);
-  expect(
-    await scroller.evaluate((element) => ({
+    await chatButton(page, /Alice Fixture/).click();
+    await expect(scroller.getByText('Newest message from fixture')).toBeVisible();
+    await expect(scroller.locator('.conversation-ready')).toBeVisible();
+    const alicePosition = await scroller.evaluate((element) => ({
       top: element.scrollTop,
       height: element.scrollHeight,
-    })),
-  ).toEqual(alicePosition);
+    }));
+    await page.waitForTimeout(250);
+    expect(
+      await scroller.evaluate((element) => ({
+        top: element.scrollTop,
+        height: element.scrollHeight,
+      })),
+    ).toEqual(alicePosition);
+  });
+  await test.step('a read receipt updates checkmarks without replacing the bubble or its image', async () => {
+    const outgoingImageBubble = page.locator('article[data-message-id="78"]');
+    const image = page.getByRole('img', { name: 'fixture.jpg', exact: true });
+    const incomingBubble = page.locator('article[data-message-id="79"]');
+    await mark(outgoingImageBubble, 'outgoing-image-bubble');
+    await mark(image, 'image');
+    await mark(incomingBubble, 'incoming-bubble');
+
+    await page.evaluate(() =>
+      window.__televechaFixture?.emit({
+        type: 'read-history',
+        pts: 11,
+        ptsCount: 1,
+        peerId: 'u:101',
+        maxMessageId: 80,
+        direction: 'outbox',
+      }),
+    );
+
+    await expect(outgoingImageBubble.locator('footer')).toHaveAttribute(
+      'aria-label',
+      /Message status: read$/u,
+    );
+    await expectMarked(outgoingImageBubble, 'outgoing-image-bubble');
+    await expectMarked(image, 'image');
+    await expectMarked(incomingBubble, 'incoming-bubble');
+  });
+  await test.step('replying and typing do not undo a small upward wheel movement', async () => {
+    const scroller = page.getByTestId('message-scroller');
+    const distanceFromPresent = () =>
+      scroller.evaluate(
+        (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+      );
+    await expect.poll(distanceFromPresent).toBeLessThan(0.5);
+
+    await scroller.hover();
+    await page.mouse.wheel(0, -4);
+    await expect.poll(distanceFromPresent).toBeGreaterThan(2);
+    await page.waitForTimeout(250);
+
+    const replyMessage = page.locator('article[data-message-id="79"]');
+    await replyMessage.hover();
+    await waitForScrollToSettle(scroller);
+    const anchor = await scroller.evaluate((element) => {
+      const top = element.getBoundingClientRect().top;
+      const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
+        (candidate) => candidate.getBoundingClientRect().bottom >= top,
+      );
+      if (!message?.dataset.messageId) throw new Error('Visible message anchor is missing');
+      return { id: message.dataset.messageId, top: message.getBoundingClientRect().top };
+    });
+
+    await replyMessage.getByRole('button', { name: 'Reply to message 79' }).click();
+    const composer = page.getByRole('textbox', { name: 'Message' });
+    await expect(composer).toBeFocused();
+    await composer.pressSequentially('Small-scroll draft', { delay: 5 });
+    await page.waitForTimeout(250);
+
+    const anchorMessage = page.locator(`article[data-message-id="${anchor.id}"]`);
+    expect(
+      Math.abs(
+        (await anchorMessage.evaluate((element) => element.getBoundingClientRect().top)) -
+          anchor.top,
+      ),
+    ).toBeLessThan(3);
+    expect(await distanceFromPresent()).toBeGreaterThan(2);
+  });
+  await test.step('prepending older history preserves the visible node in the loaded DOM window', async () => {
+    const scroller = page.getByTestId('message-scroller');
+    const anchor = await scroller.evaluate(
+      (element) =>
+        new Promise<{ id: string; top: number }>((resolve, reject) => {
+          element.addEventListener(
+            'scroll',
+            () => {
+              const viewportTop = element.getBoundingClientRect().top;
+              const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
+                (candidate) => candidate.getBoundingClientRect().bottom >= viewportTop,
+              );
+              if (!message?.dataset.messageId) {
+                reject(new Error('Visible message anchor is missing'));
+                return;
+              }
+              resolve({ id: message.dataset.messageId, top: message.getBoundingClientRect().top });
+            },
+            { once: true },
+          );
+          element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+          element.scrollTop = 0;
+        }),
+    );
+    const preserved = page.locator(`article[data-message-id="${anchor.id}"]`);
+    await expect
+      .poll(async () =>
+        Math.abs(
+          (await preserved.evaluate((element) => element.getBoundingClientRect().top)) - anchor.top,
+        ),
+      )
+      .toBeLessThan(3);
+    await expect.poll(() => scroller.locator('article.message').count()).toBeGreaterThan(50);
+  });
 });
 
 test('switching chats stays at the present after delayed media finishes layout', async ({
@@ -662,6 +743,8 @@ test('switching chats stays at the present after delayed media finishes layout',
 });
 
 test('unrelated state changes preserve the reading scroll position', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
   const scroller = page.getByTestId('message-scroller');
   const anchor = await scroller.evaluate(
     (element) =>
@@ -718,6 +801,8 @@ test('unrelated state changes preserve the reading scroll position', async ({ pa
 test('deleting any number of leading anchors preserves the first surviving message before paint', async ({
   page,
 }) => {
+  await openReady(page);
+  await selectAlice(page);
   const scroller = page.getByTestId('message-scroller');
   await scroller.hover();
   await page.mouse.wheel(0, -500);
@@ -798,75 +883,4 @@ test('deleting any number of leading anchors preserves the first surviving messa
   expect(frames.missing).toBe(0);
   expect(frames.offsets.length).toBeGreaterThan(0);
   expect(Math.max(...frames.offsets.map(Math.abs))).toBeLessThan(3);
-});
-
-test('fifty draft updates cause no message-list or chat-list child replacement', async ({
-  page,
-}) => {
-  await page.evaluate(() => {
-    const messages = document.querySelector('[data-testid="message-scroller"]');
-    const chats = document.querySelector('[data-testid="chat-list"]');
-    if (!messages || !chats) throw new Error('Missing fixture lists');
-    const removals = { messages: 0, chats: 0 };
-    new MutationObserver((records) => {
-      removals.messages += records.reduce((count, record) => count + record.removedNodes.length, 0);
-    }).observe(messages, { childList: true, subtree: true });
-    new MutationObserver((records) => {
-      removals.chats += records.reduce((count, record) => count + record.removedNodes.length, 0);
-    }).observe(chats, { childList: true, subtree: true });
-    Object.assign(window, { __uxRemovals: removals });
-  });
-  const callsBefore = await fixtureStats(page);
-
-  await page
-    .getByRole('textbox', { name: 'Message' })
-    .pressSequentially('1234567890'.repeat(5), { delay: 2 });
-  await page.waitForTimeout(200);
-
-  expect(
-    await page.evaluate(
-      () =>
-        (window as unknown as { __uxRemovals: { messages: number; chats: number } }).__uxRemovals,
-    ),
-  ).toEqual({ messages: 0, chats: 0 });
-  const callsAfter = await fixtureStats(page);
-  expect(callsAfter?.getDialogs).toBe(callsBefore?.getDialogs);
-  expect(callsAfter?.getHistory).toBe(callsBefore?.getHistory);
-});
-
-test('prepending older history preserves the visible node in the loaded DOM window', async ({
-  page,
-}) => {
-  const scroller = page.getByTestId('message-scroller');
-  const anchor = await scroller.evaluate(
-    (element) =>
-      new Promise<{ id: string; top: number }>((resolve, reject) => {
-        element.addEventListener(
-          'scroll',
-          () => {
-            const viewportTop = element.getBoundingClientRect().top;
-            const message = [...element.querySelectorAll<HTMLElement>('article.message')].find(
-              (candidate) => candidate.getBoundingClientRect().bottom >= viewportTop,
-            );
-            if (!message?.dataset.messageId) {
-              reject(new Error('Visible message anchor is missing'));
-              return;
-            }
-            resolve({ id: message.dataset.messageId, top: message.getBoundingClientRect().top });
-          },
-          { once: true },
-        );
-        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-        element.scrollTop = 0;
-      }),
-  );
-  const preserved = page.locator(`article[data-message-id="${anchor.id}"]`);
-  await expect
-    .poll(async () =>
-      Math.abs(
-        (await preserved.evaluate((element) => element.getBoundingClientRect().top)) - anchor.top,
-      ),
-    )
-    .toBeLessThan(3);
-  await expect.poll(() => scroller.locator('article.message').count()).toBeGreaterThan(50);
 });

@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
 import { fixtureStats, openReady } from './helpers';
 
@@ -35,29 +36,27 @@ test('handles two-step verification and allows retry after a wrong password', as
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
-test('keeps the phone form usable after Telegram rejects a number', async ({ page }) => {
-  await page.goto('/?scenario=auth');
-  await page.getByRole('textbox', { name: 'Phone' }).fill('+7000');
-  await page.getByRole('button', { name: 'Request code' }).click();
-  await expect(page.getByText(/Telegram could not send a login code/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Request code' })).toBeEnabled();
-});
+test('keeps the phone and code forms usable after Telegram rejects input', async ({ page }) => {
+  await test.step('keeps the phone form usable after Telegram rejects a number', async () => {
+    await page.goto('/?scenario=auth');
+    await page.getByRole('textbox', { name: 'Phone' }).fill('+7000');
+    await page.getByRole('button', { name: 'Request code' }).click();
+    await expect(page.getByText(/Telegram could not send a login code/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Request code' })).toBeEnabled();
+  });
+  await test.step('reports rejected codes and unsupported sign-up without leaving the code form', async () => {
+    await page.getByRole('textbox', { name: 'Phone' }).fill('+79991234567');
+    await page.getByRole('button', { name: 'Request code' }).click();
+    const code = page.getByRole('textbox', { name: 'Code' });
 
-test('reports rejected codes and unsupported sign-up without leaving the code form', async ({
-  page,
-}) => {
-  await page.goto('/?scenario=auth');
-  await page.getByRole('textbox', { name: 'Phone' }).fill('+79991234567');
-  await page.getByRole('button', { name: 'Request code' }).click();
-  const code = page.getByRole('textbox', { name: 'Code' });
-
-  await code.fill('00000');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByText(/Telegram rejected the login code/)).toBeVisible();
-  await code.fill('99999');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByText('TeleVecha signs in existing accounts only.')).toBeVisible();
-  await expect(code).toBeVisible();
+    await code.fill('00000');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.getByText(/Telegram rejected the login code/)).toBeVisible();
+    await code.fill('99999');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.getByText('TeleVecha signs in existing accounts only.')).toBeVisible();
+    await expect(code).toBeVisible();
+  });
 });
 
 test('shows a useful connection failure and retries without a fake close button', async ({

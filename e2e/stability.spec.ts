@@ -1,6 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
-import { chatButton, fixtureStats, openReady, selectAlice } from './helpers';
+import { chatButton, fixtureStats, openReady, releaseHeldConnect, selectAlice } from './helpers';
 
 test('completes a normal interaction sequence without page errors or console errors', async ({
   page,
@@ -63,7 +64,7 @@ test('keeps cached messages readable through a live disconnect and reconnect', a
 test('waits for a live reconnect before loading newly revealed media', async ({ page }) => {
   await page.goto('/?scenario=held-connect');
   await expect(page.getByText('Connecting to Telegram')).toBeVisible();
-  await page.evaluate(() => window.__televechaFixture?.releaseConnect());
+  await releaseHeldConnect(page);
   await selectAlice(page);
 
   await page.evaluate(() =>

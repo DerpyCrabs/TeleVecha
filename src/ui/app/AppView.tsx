@@ -1,6 +1,6 @@
 import { GlobalVoicePlayer } from '../media/GlobalVoicePlayer';
 import { CommentsPanel } from '../conversation/CommentsPanel';
-import { list as renderList, collection, view } from 'effectweb';
+import { list, collection, view } from 'effectweb';
 import { Effect } from 'effect';
 import { messageTextForClipboard } from '../../domain/messageText';
 import type { ChatMessage } from '../../domain/models';
@@ -553,7 +553,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                   </div>
                 ) : null}
                 {messageRows.messages!.length ? (
-                  renderList(messageEntries(messageRows.entries), (entry, index) => {
+                  list(messageEntries(messageRows.entries), (entry, index) => {
                     const message = entry.message;
                     const layout = (() => entry.layout)();
                     // Layout can change while the caption stays the same (for example,

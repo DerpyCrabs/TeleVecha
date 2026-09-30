@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 import { openReady, selectAlice } from './helpers';
 
 test('preserves search focus and typing when a deferred composer focus runs', async ({ page }) => {

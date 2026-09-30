@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 
 test('keeps chat navigation and details reachable on a phone', async ({ page }) => {
   await page.goto('/');

@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
+import { expect } from './expect';
 import { gzipSync } from 'node:zlib';
 
 test('avatar observation survives parent updates and is released on removal', async ({ page }) => {
