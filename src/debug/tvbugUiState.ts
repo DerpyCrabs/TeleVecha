@@ -1,5 +1,5 @@
 import type { TelegramChatAppearance, TelegramBaseTheme } from '../telegram/types';
-import type { AsyncResult } from 'effect/unstable/reactivity/AsyncResult';
+import type { AsyncResult } from 'effect/reactivity/AsyncResult';
 import { available, resourceError } from 'effectweb';
 import { Cause } from 'effect';
 

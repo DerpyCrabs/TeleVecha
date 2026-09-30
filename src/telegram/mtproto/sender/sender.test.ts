@@ -1,6 +1,6 @@
 import { BrowserCrypto } from '@effect/platform-browser';
 import { Effect, Fiber, PubSub, Stream } from 'effect';
-import * as Socket from 'effect/unstable/socket/Socket';
+import * as Socket from 'effect/socket/Socket';
 import { describe, expect, it } from 'vitest';
 
 import type { AuthKey } from '../auth';

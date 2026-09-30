@@ -248,7 +248,10 @@ describe('MessagingEngine lifecycle regressions', () => {
           date: 1,
           outgoing: false,
         };
-        const getPinnedMessages = vi.fn(() => Effect.never);
+        const pinnedStarted = yield* Deferred.make<void>();
+        const getPinnedMessages = vi.fn(() =>
+          Deferred.succeed(pinnedStarted, undefined).pipe(Effect.andThen(Effect.never)),
+        );
         const store = makeMemoryCacheStore();
         const engine = yield* makeMessagingEngine(
           { ...original, getPinnedMessages },
@@ -263,7 +266,7 @@ describe('MessagingEngine lifecycle regressions', () => {
         const loading = yield* engine
           .loadConversationPinnedMessages('u:101')
           .pipe(Effect.forkChild);
-        yield* Effect.yieldNow;
+        yield* Deferred.await(pinnedStarted);
         expect(getPinnedMessages).toHaveBeenCalledOnce();
         expect((yield* engine.loadConversationView('u:101')).messages.length).toBeGreaterThan(0);
         yield* TestClock.adjust('15 seconds');

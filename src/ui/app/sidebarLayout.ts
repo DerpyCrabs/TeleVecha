@@ -162,7 +162,7 @@ export function createSidebarLayout(options: { captureConversationAnchor: () => 
     options.captureConversationAnchor();
     saveWidth(nextWidth);
   };
-  scope.add(() => stopResize?.());
+  scope.own(() => stopResize?.());
   const actions = {
     setDetailsOpen: (value: boolean | ((previous: boolean) => boolean)) =>
       state.send({

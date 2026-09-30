@@ -263,8 +263,14 @@ describe('tab coordinator request and hydration regressions', () => {
           });
           yield* coordinator.start({ apiId: 1, apiHash: 'fixture' });
           yield* Effect.yieldNow;
+          const countsPublished = yield* Deferred.make<void>();
+          const stopCounts = yield* coordinator.client.subscribe((snapshot) => {
+            if (snapshot.sharedMediaCounts !== undefined)
+              Deferred.doneUnsafe(countsPublished, Effect.void);
+          });
           yield* coordinator.client.openConversation('u:101');
-          yield* Effect.yieldNow;
+          yield* Deferred.await(countsPublished).pipe(Effect.timeout('1 second'));
+          yield* stopCounts;
           expect(coordinator.client.snapshot().sharedMediaCounts).toBeDefined();
           const published = yield* Deferred.make<void>();
           const unsubscribe = yield* coordinator.client.subscribe((snapshot) => {
@@ -351,10 +357,16 @@ describe('tab coordinator request and hydration regressions', () => {
           const hello = RecordingChannel.latest.hello;
           const owner = { from: 'owner', version: hello.version };
           yield* coordinator.receive({ ...owner, type: 'owner', at: Date.now() });
+          const requestSent = yield* Deferred.make<void>();
+          const channel = RecordingChannel.latest;
+          vi.spyOn(channel, 'postMessage').mockImplementation((message) => {
+            channel.sent.push(message);
+            if (message.type === 'request') Deferred.doneUnsafe(requestSent, Effect.void);
+          });
           const pending = yield* coordinator.client
             .refreshUpdates()
             .pipe(Effect.result, Effect.forkChild);
-          yield* Effect.yieldNow;
+          yield* Deferred.await(requestSent).pipe(Effect.timeout('1 second'));
           yield* coordinator.receive({ ...owner, type: 'owner-gone' });
           const result = yield* Fiber.join(pending);
           expect(result).toMatchObject({

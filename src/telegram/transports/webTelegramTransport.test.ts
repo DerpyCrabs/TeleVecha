@@ -1,5 +1,5 @@
 import { Crypto, Effect, Fiber, PubSub, Stream } from 'effect';
-import * as Socket from 'effect/unstable/socket/Socket';
+import * as Socket from 'effect/socket/Socket';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { CreateMtprotoClientOptions, MtprotoClient } from '../mtproto';

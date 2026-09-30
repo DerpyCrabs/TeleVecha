@@ -1,6 +1,6 @@
 import { Effect, Stream } from 'effect';
 import type { Crypto } from 'effect';
-import * as Socket from 'effect/unstable/socket/Socket';
+import * as Socket from 'effect/socket/Socket';
 
 import { createAesCtr } from '../crypto';
 import { createMtprotoError } from '../errors';

@@ -7,7 +7,7 @@ import SmilePlus from '@effectweb/lucide/icons/smile-plus';
 import { TgsPlayer } from '../media/TgsPlayer';
 import { VisibilityVideo } from '../media/VisibilityVideo';
 import { Avatar } from '../shared/Avatar';
-import type * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
+import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import {
   available,
   collection,

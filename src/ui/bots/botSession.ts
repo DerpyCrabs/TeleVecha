@@ -209,8 +209,8 @@ export function createBotSession(
         : undefined;
     commandsResource.select(request ? dialog?.peer : undefined);
   };
-  scope.add(state.subscribe(refresh));
-  scope.add(
+  scope.own(state.subscribe(refresh));
+  scope.own(
     subscribeAtUi(
       options.runTask,
       options.resources.subscribeResources((event) => {
@@ -423,7 +423,7 @@ export function createBotSession(
         state.send({ type: 'UrlAuthBusy', value: false });
     }
   };
-  scope.add(() => {
+  scope.own(() => {
     if (noticeTimer) clearTimeout(noticeTimer);
   });
   const actions = {

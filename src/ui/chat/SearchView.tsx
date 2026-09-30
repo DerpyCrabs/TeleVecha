@@ -12,7 +12,7 @@ import {
   type SearchModel,
   type SearchResults,
 } from './searchProgram';
-import * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
+import * as AsyncResult from 'effect/reactivity/AsyncResult';
 
 const notSubmitted: SearchResults = AsyncResult.initial();
 

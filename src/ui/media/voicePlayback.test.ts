@@ -12,6 +12,7 @@ class FakeAudio extends EventTarget {
   ended = false;
   readyState = 1;
   playbackRate = 1;
+  defaultPlaybackRate = 1;
   play = vi.fn(async () => {
     this.paused = false;
     this.ended = false;
@@ -23,6 +24,8 @@ class FakeAudio extends EventTarget {
   }
   load() {
     this.currentTime = 0;
+    this.playbackRate = this.defaultPlaybackRate;
+    this.dispatchEvent(new Event('ratechange'));
   }
   removeAttribute() {
     this.src = '';

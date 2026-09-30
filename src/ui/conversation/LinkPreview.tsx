@@ -9,7 +9,7 @@ import {
   type Source,
 } from 'effectweb';
 import { Effect } from 'effect';
-import type * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
+import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import type { ChatMessage } from '../../domain/models';
 import { safeExternalUrl } from '../shared/safeUrl';
 const commandMedia = commandSlot('media');

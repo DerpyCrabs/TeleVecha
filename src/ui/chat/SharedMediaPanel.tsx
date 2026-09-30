@@ -16,7 +16,7 @@ import {
   type Source,
 } from 'effectweb';
 import type { InfiniteData } from '@effectweb/query';
-import type * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
+import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import { pageMessages, type SearchCursor } from '../app/queries';
 import { cachedLoad } from '../shared/cachedLoad';
 import { Effect } from 'effect';

@@ -1,6 +1,6 @@
 import { BrowserCrypto, BrowserSocket } from '@effect/platform-browser';
 import { Cause, Crypto, Effect, Fiber, FiberSet, Layer } from 'effect';
-import * as Socket from 'effect/unstable/socket/Socket';
+import * as Socket from 'effect/socket/Socket';
 
 import { createBrowserDebugReportRecorder } from '../../debug/tvbugReports';
 import type { TvBugUiSourceV2 } from '../../debug/tvbugFormat';

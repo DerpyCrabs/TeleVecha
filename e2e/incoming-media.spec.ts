@@ -433,24 +433,6 @@ test('loads a video thumbnail without downloading the full video until preview o
 test('loads the original photo instead of a Telegram thumbnail', async ({ page }) => {
   await openReady(page);
   await selectAlice(page);
-  const downloads = () =>
-    page.evaluate(() => ({
-      preview: window.__televechaFixture?.stats.downloadMediaPreview ?? 0,
-      full: window.__televechaFixture?.stats.downloadMediaFull ?? 0,
-    }));
-  // The opened chat is still downloading its own media. Count from the point it has settled.
-  let before = await downloads();
-  await expect
-    .poll(
-      async () => {
-        const previous = before;
-        before = await downloads();
-        return before.preview === previous.preview && before.full === previous.full;
-      },
-      { intervals: [150] },
-    )
-    .toBe(true);
-
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',
@@ -476,9 +458,12 @@ test('loads the original photo instead of a Telegram thumbnail', async ({ page }
 
   await expect(page.getByRole('img', { name: 'full-resolution.jpg' })).toBeVisible();
   await expect
-    .poll(() => page.evaluate(() => window.__televechaFixture?.stats.downloadMediaFull ?? 0))
-    .toBeGreaterThan(before.full);
-  expect(
-    await page.evaluate(() => window.__televechaFixture?.stats.downloadMediaPreview ?? 0),
-  ).toBe(before.preview);
+    .poll(() =>
+      page.evaluate(() =>
+        window.__televechaFixture?.stats.downloadMediaRequests
+          .filter((request) => request.peerId === 'u:101' && request.messageId === 92)
+          .map((request) => request.preview),
+      ),
+    )
+    .toEqual([false]);
 });

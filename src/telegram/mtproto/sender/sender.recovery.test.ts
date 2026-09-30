@@ -1,7 +1,7 @@
 import { BrowserCrypto } from '@effect/platform-browser';
 import { Effect, Queue, Stream } from 'effect';
 import { TestClock } from 'effect/testing';
-import * as Socket from 'effect/unstable/socket/Socket';
+import * as Socket from 'effect/socket/Socket';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AuthKey } from '../auth';

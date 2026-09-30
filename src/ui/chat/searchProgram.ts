@@ -11,7 +11,7 @@ import {
 } from 'effectweb';
 import { defineActions, type ActionMessage } from 'effectweb/advanced';
 import type { InfiniteData } from '@effectweb/query';
-import type * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
+import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import { Cause, Effect } from 'effect';
 import type { TelegramDialog, TelegramMessage, TelegramSearchPage } from '../../telegram/types';
 import { pageMessages, type MessageSearchArgs, type SearchCursor } from '../app/queries';

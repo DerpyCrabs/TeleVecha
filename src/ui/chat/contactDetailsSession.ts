@@ -55,7 +55,7 @@ export function createContactDetailsSession(
 ) {
   const scope = lifetime();
   const members = scope.own(infiniteResource(context.cache, groupMembers));
-  scope.add(members.subscribe(context.changed));
+  scope.own(members.subscribe(context.changed));
   let selected: TelegramPeer | undefined;
   let loadingMore = false;
   const userDetails = () => options.dialog()?.userDetails;
@@ -71,7 +71,7 @@ export function createContactDetailsSession(
     selected = peer;
     members.select(peer ? { peer } : undefined);
   };
-  scope.add(
+  scope.own(
     subscribeAtUi(
       options.runTask,
       options.source.subscribeResources((event) => {

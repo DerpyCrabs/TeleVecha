@@ -230,6 +230,7 @@ test('persists the current draft and active chat across reload', async ({ page }
   await openReady(page);
   await selectAlice(page);
   await chatButton(page, /Release Channel/).click();
+  await expect(page.getByTestId('conversation-header')).toContainText('Release Channel');
   await page.getByRole('textbox', { name: 'Message' }).fill('Persistent draft');
   await page.reload();
 

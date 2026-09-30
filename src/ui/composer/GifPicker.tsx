@@ -9,7 +9,7 @@ import {
   type Source,
 } from 'effectweb';
 import type { Effect } from 'effect';
-import type * as AsyncResult from 'effect/unstable/reactivity/AsyncResult';
+import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import type { TelegramSticker } from '../../telegram/types';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import { idRows } from '../collections';

@@ -5,7 +5,7 @@ import { createVoicePlayback, type VoiceService, type VoiceTrack } from '../medi
 import { parseTelegramLink, type TelegramLinkTarget } from '../shared/telegramLink';
 import type { CommentsState } from '../conversation/CommentsPanel';
 import { Effect } from 'effect';
-import * as Atom from 'effect/unstable/reactivity/Atom';
+import * as Atom from 'effect/reactivity/Atom';
 import { messageTextForClipboard } from '../../domain/messageText';
 import type { ChatMessage, ChatSummary } from '../../domain/models';
 import { telegramPeerColor } from '../../domain/peerColor';
@@ -292,7 +292,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     () => state.model().snapshot.dialogs,
   );
   const voicePlayback = createVoicePlayback();
-  scope.add(() => voicePlayback.dispose());
+  scope.own(() => voicePlayback.dispose());
   const voiceTrack = (message: TelegramMessage): VoiceTrack => {
     const dialog = engine.snapshot().dialogs.find(({ peer }) => peer.id === message.peerId);
     const peer: TelegramPeer = dialog?.peer ?? {
@@ -374,7 +374,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   let openMessageGeneration = 0;
   let viewport!: ReturnType<typeof createConversationViewport>;
   let history!: ReturnType<typeof createConversationHistorySession>;
-  scope.add(() => {
+  scope.own(() => {
     selectionGeneration += 1;
     conversationRetryGeneration += 1;
     openMessageGeneration += 1;
@@ -471,7 +471,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       document.title = chat.id === 'empty' ? 'TeleVecha' : `${chat.title} - TeleVecha`;
     },
   );
-  scope.add(() => {
+  scope.own(() => {
     document.title = 'TeleVecha';
   });
   const sharedCountsByPeer = selectors.select(
@@ -1385,7 +1385,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     if (credentials && engine.snapshot().phase === 'idle') {
       runInBackground(runEffect(engine.start(credentials)));
     }
-    scope.add(() => {
+    scope.own(() => {
       mounted = false;
       unsubscribe();
       unsubscribeResources();
@@ -1954,7 +1954,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     runInBackground(navigateTelegramLink(target));
   };
   document.addEventListener('click', telegramLinkClick);
-  scope.add(() => {
+  scope.own(() => {
     document.removeEventListener('click', telegramLinkClick);
     commentsGeneration += 1;
     linkGeneration += 1;
@@ -2232,10 +2232,10 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     ],
     changed,
   );
-  scope.add(() => model.dispose());
-  scope.add(() => state.dispose());
-  scope.add(() => drawerFocus.dispose());
-  scope.add(sessions.dispose);
+  scope.own(() => model.dispose());
+  scope.own(() => state.dispose());
+  scope.own(() => drawerFocus.dispose());
+  scope.own(sessions.dispose);
   publication.watch({ subscribe: subscribeModalVisibility });
   function refresh() {
     sessions.refresh();
@@ -2335,7 +2335,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     detailsOpen: detailsOpen(),
     chatAppearance: chatAppearance.diagnostics(),
   }));
-  if (detachDebugUi) scope.add(detachDebugUi);
+  if (detachDebugUi) scope.own(detachDebugUi);
   publication.start();
   return {
     model: publication.model,

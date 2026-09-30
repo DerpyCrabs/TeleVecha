@@ -80,7 +80,7 @@ export function createAppearanceSession(
   });
   const catalog = observeQuery(scope, context.cache, wallpaperCatalog, context.changed);
   const refresh = () => catalog.select(state.model().catalogRequested ? true : undefined);
-  scope.add(state.subscribe(refresh));
+  scope.own(state.subscribe(refresh));
   const telegramWallpapers = () => available(catalog.read()) ?? [];
   const catalogLoading = () => catalog.read().waiting;
   let loadGeneration = 0;
@@ -199,7 +199,7 @@ export function createAppearanceSession(
       loadStoredWallpaper(preferences).catch(() => undefined);
     }
   })();
-  scope.add(() => {
+  scope.own(() => {
     loadGeneration += 1;
     if (objectUrl) URL.revokeObjectURL(objectUrl);
   });

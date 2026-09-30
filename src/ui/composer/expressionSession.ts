@@ -98,8 +98,8 @@ export function createExpressionSession(
     stickers.select(state.model().stickerOpen ? true : undefined);
     savedGifs.select(state.model().gifOpen ? true : undefined);
   };
-  scope.add(state.subscribe(refresh));
-  scope.add(
+  scope.own(state.subscribe(refresh));
+  scope.own(
     subscribeAtUi(
       options.runTask,
       options.source.subscribeResources(({ kind }) => {

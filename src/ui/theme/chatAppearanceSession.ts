@@ -179,7 +179,7 @@ export function createChatAppearanceSession(
       reportAppearance(peer, appearance, preferences);
     }
   };
-  scope.add(() => {
+  scope.own(() => {
     if (wallpaperAsset) URL.revokeObjectURL(wallpaperAsset);
   });
   return {

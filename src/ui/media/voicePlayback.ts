@@ -217,7 +217,10 @@ export function createVoicePlayback(createAudio = () => document.createElement('
     },
     speed() {
       const rate = state.rate === 1 ? 1.5 : state.rate === 1.5 ? 2 : 1;
-      if (audio) audio.playbackRate = rate;
+      if (audio) {
+        audio.defaultPlaybackRate = rate;
+        audio.playbackRate = rate;
+      }
       publish({ rate });
     },
     stop,

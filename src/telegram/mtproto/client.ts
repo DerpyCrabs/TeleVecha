@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, PubSub, RcMap, Ref, Schedule, Schema, Stream } from 'effect';
 import { Crypto } from 'effect';
-import * as Socket from 'effect/unstable/socket/Socket';
+import * as Socket from 'effect/socket/Socket';
 
 import {
   createAuthorizationKey,

@@ -1,5 +1,5 @@
 import type { Crypto, Effect, Scope, Stream } from 'effect';
-import type * as Socket from 'effect/unstable/socket/Socket';
+import type * as Socket from 'effect/socket/Socket';
 
 import type { AuthKey } from '../auth';
 import type { PacketConnection } from '../connection';
