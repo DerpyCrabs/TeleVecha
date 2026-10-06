@@ -1,5 +1,5 @@
 import type { Snapshot } from 'effectweb';
-import { lifetime, available, program } from 'effectweb';
+import { modelOwner, available, program } from 'effectweb';
 import type { SessionContext } from '../app/sessionContext';
 import { Context, Effect } from 'effect';
 import type { EffectConversation } from '../../telegram/core/conversation';
@@ -63,7 +63,7 @@ export function createBotSession(
   options: BotSessionOptions,
   context: SessionContext<BotCommandSource>,
 ) {
-  const scope = lifetime();
+  const scope = modelOwner({});
   type BotSessionModel = {
     commandsRequested: string;
     menuOpen: boolean;

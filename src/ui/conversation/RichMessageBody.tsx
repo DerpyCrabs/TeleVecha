@@ -2,18 +2,19 @@ import { list } from 'effectweb';
 import type { RichBlock, RichCaption, RichText } from '../../domain/richMessage';
 import { component, sequence, view } from 'effectweb';
 import { safeExternalUrl } from '../shared/safeUrl';
-type SpoilerTextModel = { props: { child: RichText }; revealed: boolean };
+type SpoilerTextState = { revealed: boolean };
 type SpoilerTextMessage = { type: 'Revealed'; value: boolean };
-const SpoilerText = component<{ child: RichText }, SpoilerTextModel, SpoilerTextMessage>({
-  init: (props) => ({ props, revealed: false }),
-
-  update: (model, message) => {
-    switch (message.type) {
-      case 'Revealed':
-        return { model: { ...model, revealed: message.value } };
-    }
+const SpoilerText = component<{ child: RichText }, SpoilerTextState, SpoilerTextMessage>(
+  {
+    init: () => ({ revealed: false }),
+    update: (model, message) => {
+      switch (message.type) {
+        case 'Revealed':
+          return { model: { ...model, revealed: message.value } };
+      }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     return (
       <span
@@ -35,7 +36,7 @@ const SpoilerText = component<{ child: RichText }, SpoilerTextModel, SpoilerText
       </span>
     );
   }),
-});
+);
 const RichInline = view<{ value: RichText }, never>((props, _send) => {
   const value = () => props.value;
   return value().kind === 'text' ? (

@@ -60,6 +60,73 @@ const withTransport = <A, E>(
   );
 
 describe('web Telegram transport', () => {
+  it('recovers a chat theme pattern absent from the account wallpaper catalog', () => {
+    const document = Api.Document({
+      id: 10n,
+      accessHash: 11n,
+      fileReference: new Uint8Array([1]),
+      date: 1,
+      mimeType: 'image/png',
+      size: 3n,
+      dcId: 2,
+      attributes: [],
+    });
+    const invoke = vi.fn((request: unknown) => {
+      if (Api.account.GetWallPapers.is(request)) {
+        return Effect.succeed(createTl('account.wallPapers', { hash: 0n, wallpapers: [] }));
+      }
+      if (Api.account.GetChatThemes.is(request)) {
+        return Effect.succeed(
+          createTl('account.themes', {
+            hash: 0n,
+            themes: [
+              Api.Theme({
+                id: 20n,
+                accessHash: 21n,
+                slug: '',
+                title: 'Chat theme',
+                forChat: true,
+                settings: [
+                  Api.ThemeSettings({
+                    baseTheme: Api.BaseThemeTinted(),
+                    accentColor: 0x123456,
+                    wallpaper: Api.WallPaper({
+                      id: 30n,
+                      accessHash: 31n,
+                      slug: '',
+                      pattern: true,
+                      document,
+                    }),
+                  }),
+                ],
+              }),
+            ],
+          }),
+        );
+      }
+      return Effect.fail(createMtprotoError('protocol', 'Unexpected RPC'));
+    });
+    const download = vi.fn(() => Effect.succeed(new Uint8Array([1, 2, 3])));
+    return Effect.runPromise(
+      withTransport(
+        (target) =>
+          Effect.gen(function* () {
+            yield* target.connect({ apiId: 1, apiHash: 'hash' });
+            expect((yield* target.downloadWallpaper!('30')).size).toBe(3);
+            expect(download).toHaveBeenCalledWith(document, { workers: 1 });
+            expect(invoke).toHaveBeenCalledTimes(2);
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({
+              invoke: invoke as unknown as MtprotoClient['invoke'],
+              downloadMedia: download,
+            }),
+          ),
+      ),
+    );
+  });
+
   it.each([true, false])('preserves channel membership when fetching a dialog (left=%s)', (left) =>
     Effect.runPromise(
       withTransport(

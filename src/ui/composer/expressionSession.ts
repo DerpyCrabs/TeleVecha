@@ -1,5 +1,5 @@
 import { Context, Effect } from 'effect';
-import { lifetime, available, program, resourceError } from 'effectweb';
+import { modelOwner, available, program, resourceError } from 'effectweb';
 import type { SessionContext } from '../app/sessionContext';
 import type { EffectConversation } from '../../telegram/core/conversation';
 import type { MessagingError } from '../../telegram/core/messagingError';
@@ -72,7 +72,7 @@ export function createExpressionSession(
   },
   context: SessionContext<ExpressionSource>,
 ) {
-  const scope = lifetime();
+  const scope = modelOwner({});
   type Model = { stickerOpen: boolean; gifOpen: boolean; visible: boolean };
   type Message =
     | { type: 'Stickers' }

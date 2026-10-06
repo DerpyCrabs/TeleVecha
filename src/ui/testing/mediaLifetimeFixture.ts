@@ -1,5 +1,5 @@
 import { Effect } from 'effect';
-import { modelOwner, mountView, type View } from 'effectweb';
+import { modelOwner, mount as mountView, type View } from 'effectweb';
 import { ImageAttachmentEditor } from '../composer/ImageAttachmentEditor';
 import { MediaAttachment } from '../media/MediaAttachment';
 import { TgsPlayer } from '../media/TgsPlayer';

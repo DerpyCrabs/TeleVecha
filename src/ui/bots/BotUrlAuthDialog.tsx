@@ -11,8 +11,7 @@ interface BotUrlAuthDialogProps {
   close: () => void;
   confirm: (options: TelegramUrlAuthAcceptOptions) => void;
 }
-type BotUrlAuthDialogModel = {
-  props: BotUrlAuthDialogProps;
+type BotUrlAuthDialogState = {
   writeAllowed: boolean;
   sharePhoneNumber: boolean;
   matchCode: string;
@@ -23,22 +22,23 @@ type BotUrlAuthDialogMessage =
   | { type: 'MatchCode'; value: string };
 export const BotUrlAuthDialog = component<
   BotUrlAuthDialogProps,
-  BotUrlAuthDialogModel,
+  BotUrlAuthDialogState,
   BotUrlAuthDialogMessage
->({
-  init: (props) => ({ props, writeAllowed: false, sharePhoneNumber: false, matchCode: '' }),
-
-  update: (model, message) => {
-    switch (message.type) {
-      case 'WriteAllowed':
-        return { model: { ...model, writeAllowed: message.value } };
-      case 'SharePhoneNumber':
-        return { model: { ...model, sharePhoneNumber: message.value } };
-      case 'MatchCode':
-        return { model: { ...model, matchCode: message.value } };
-    }
+>(
+  {
+    init: () => ({ writeAllowed: false, sharePhoneNumber: false, matchCode: '' }),
+    update: (model, message) => {
+      switch (message.type) {
+        case 'WriteAllowed':
+          return { model: { ...model, writeAllowed: message.value } };
+        case 'SharePhoneNumber':
+          return { model: { ...model, sharePhoneNumber: message.value } };
+        case 'MatchCode':
+          return { model: { ...model, matchCode: message.value } };
+      }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const close = () => {
       if (!props.busy) props.close();
@@ -151,4 +151,4 @@ export const BotUrlAuthDialog = component<
       </Portal>
     );
   }),
-});
+);

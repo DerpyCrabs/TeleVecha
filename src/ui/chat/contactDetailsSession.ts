@@ -1,4 +1,4 @@
-import { available, lifetime } from 'effectweb';
+import { available, modelOwner } from 'effectweb';
 import { infiniteQuery, infiniteResource } from '@effectweb/query';
 import type { SessionContext } from '../app/sessionContext';
 import { Context, Effect } from 'effect';
@@ -53,7 +53,7 @@ export function createContactDetailsSession(
   },
   context: SessionContext<GroupMemberSource>,
 ) {
-  const scope = lifetime();
+  const scope = modelOwner({});
   const members = scope.own(infiniteResource(context.cache, groupMembers));
   scope.own(members.subscribe(context.changed));
   let selected: TelegramPeer | undefined;
@@ -87,7 +87,7 @@ export function createContactDetailsSession(
     loadingMore = true;
     context.changed();
     void options
-      .runEffect(members.loadNext())
+      .runEffect(members.fetchNextPage())
       .catch(() => undefined)
       .finally(() => {
         loadingMore = false;

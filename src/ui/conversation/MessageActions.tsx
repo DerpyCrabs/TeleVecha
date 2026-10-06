@@ -126,35 +126,30 @@ interface ReactionButtonProps {
 }
 const ReactionButton = component<
   ReactionButtonProps,
-  {
-    props: ReactionButtonProps;
-    hovered: boolean;
-    focused: boolean;
-    left: number;
-    top: number;
-    above: boolean;
-  },
+  { hovered: boolean; focused: boolean; left: number; top: number; above: boolean },
   { type: 'Hover' | 'Focus'; value: boolean; bounds?: DOMRect }
->({
-  init: (props) => ({ props, hovered: false, focused: false, left: 0, top: 0, above: false }),
-  update: (model, message) => {
-    const bounds = message.bounds;
-    const above = bounds ? bounds.bottom > window.innerHeight - 240 : model.above;
-    return {
-      model: {
-        ...model,
-        [message.type === 'Hover' ? 'hovered' : 'focused']: message.value,
-        ...(bounds
-          ? {
-              left: Math.max(8, Math.min(bounds.left, window.innerWidth - 248)),
-              top: above ? bounds.top : bounds.bottom,
-              above,
-            }
-          : {}),
-      },
-    };
+>(
+  {
+    init: () => ({ hovered: false, focused: false, left: 0, top: 0, above: false }),
+    update: (model, message) => {
+      const bounds = message.bounds;
+      const above = bounds ? bounds.bottom > window.innerHeight - 240 : model.above;
+      return {
+        model: {
+          ...model,
+          [message.type === 'Hover' ? 'hovered' : 'focused']: message.value,
+          ...(bounds
+            ? {
+                left: Math.max(8, Math.min(bounds.left, window.innerWidth - 248)),
+                top: above ? bounds.top : bounds.bottom,
+                above,
+              }
+            : {}),
+        },
+      };
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const reaction = props.reaction;
     const tooltipId = `reaction-people-${props.message.peerId}-${props.message.id}-${encodeURIComponent(reaction.emoji)}`;
@@ -210,7 +205,7 @@ const ReactionButton = component<
       </span>
     );
   }),
-});
+);
 export const MessageActions = view<MessageActionsProps, never>((props, _send) => {
   const reply = (event: { preventDefault(): void; currentTarget: HTMLButtonElement }) => {
     event.preventDefault();

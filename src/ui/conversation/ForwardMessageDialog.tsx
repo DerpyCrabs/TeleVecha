@@ -1,4 +1,4 @@
-import { list, commandSlot, effectCommand, component, Portal, view } from 'effectweb';
+import { list, component, Portal, view } from 'effectweb';
 import type { Snapshot } from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatSummary } from '../../domain/models';
@@ -8,7 +8,7 @@ import Search from '@effectweb/lucide/icons/search';
 import X from '@effectweb/lucide/icons/x';
 import type { Transition } from 'effectweb';
 import { modalMount } from '../shared/modalMount';
-const commandSearch = commandSlot('search');
+const commandSearch = 'search';
 
 interface ForwardMessageDialogProps {
   chats: ChatSummary[];
@@ -19,11 +19,13 @@ interface ForwardMessageDialogProps {
   label?: string | undefined;
   cancelLabel?: string | undefined;
 }
-type ForwardMessageDialogModel = {
-  props: ForwardMessageDialogProps;
+type ForwardMessageDialogState = {
   query: string;
   remoteResults: TelegramPeerSearchResult[];
   searching: boolean;
+};
+type ForwardMessageDialogModel = ForwardMessageDialogState & {
+  readonly props: ForwardMessageDialogProps;
 };
 type ForwardMessageDialogMessage =
   | { type: 'Query'; value: string }
@@ -37,35 +39,37 @@ function requestSearch(
   return {
     model: { ...model, remoteResults: [], searching: true },
     commands: [
-      effectCommand(
-        commandSearch,
-        () =>
-          Effect.sleep(180).pipe(Effect.andThen(Effect.suspend(() => model.props.search!(term)))),
-        {
-          policy: 'replace',
-          onSuccess: (value) => ({ type: 'RemoteResults', value }) as const,
-          onFailure: () => ({ type: 'RemoteResults', value: [] }) as const,
-        },
-      ),
+      {
+        key: commandSearch,
+        policy: 'replace',
+        effect: Effect.sleep(180).pipe(
+          Effect.andThen(Effect.suspend(() => model.props.search!(term))),
+          Effect.matchCause({
+            onSuccess: (value) => ({ type: 'RemoteResults', value }) as const,
+            onFailure: () => ({ type: 'RemoteResults', value: [] }) as const,
+          }),
+        ),
+      },
     ],
   };
 }
 export const ForwardMessageDialog = component<
   ForwardMessageDialogProps,
-  ForwardMessageDialogModel,
+  ForwardMessageDialogState,
   ForwardMessageDialogMessage
->({
-  init: (props) => ({ props, query: '', remoteResults: [], searching: false }),
-
-  update: (model, message) => {
-    switch (message.type) {
-      case 'Query':
-        return requestSearch({ ...model, query: message.value });
-      case 'RemoteResults':
-        return { model: { ...model, remoteResults: message.value, searching: false } };
-    }
+>(
+  {
+    init: () => ({ query: '', remoteResults: [], searching: false }),
+    update: (model, message) => {
+      switch (message.type) {
+        case 'Query':
+          return requestSearch({ ...model, query: message.value });
+        case 'RemoteResults':
+          return { model: { ...model, remoteResults: message.value, searching: false } };
+      }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const localChats = (() => {
       const term = model.query.trim().toLocaleLowerCase();
@@ -137,4 +141,4 @@ export const ForwardMessageDialog = component<
       </Portal>
     );
   }),
-});
+);

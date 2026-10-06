@@ -1,4 +1,4 @@
-import { list, commandSlot, effectCommand, component, sequence, view } from 'effectweb';
+import { list, component, sequence, view } from 'effectweb';
 import { cachedLoad } from '../shared/cachedLoad';
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
@@ -7,7 +7,7 @@ import { idRows } from '../collections';
 import type { MediaPreview } from '../media/MediaAttachment';
 import { MediaAttachment } from '../media/MediaAttachment';
 import { MediaViewer } from '../media/MediaViewer';
-const commandPreview = commandSlot('preview');
+const commandPreview = 'preview';
 
 interface MessageAlbumProps {
   messages: ChatMessage[];
@@ -39,8 +39,7 @@ function albumRows(messages: readonly ChatMessage[]) {
   }
   return result;
 }
-type MessageAlbumModel = {
-  props: MessageAlbumProps;
+type MessageAlbumState = {
   viewer: { index: number; message: ChatMessage; preview: MediaPreview } | undefined;
   viewerLoading: boolean;
 };
@@ -52,66 +51,67 @@ type MessageAlbumMessage =
       value: { index: number; message: ChatMessage; preview: MediaPreview } | undefined;
     }
   | { type: 'ViewerLoading'; value: boolean };
-export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, MessageAlbumMessage>({
-  init: (props) => ({ props, viewer: undefined, viewerLoading: false }),
-
-  update: (model, message) => {
-    switch (message.type) {
-      case 'CloseViewer':
-        return {
-          model: { ...model, viewer: undefined, viewerLoading: false },
-          cancel: [commandPreview],
-        };
-      case 'Navigate': {
-        const selected = model.props.messages.filter(
-          (item) =>
-            item.media?.kind === 'photo' ||
-            item.media?.kind === 'video' ||
-            (item.media?.kind === 'animation' && item.media.mimeType.startsWith('video/')),
-        )[message.index];
-        if (!selected?.media || model.viewerLoading) return { model };
-        const media = selected.media;
-        return {
-          model: { ...model, viewerLoading: true },
-          commands: [
-            effectCommand(
-              commandPreview,
-              () =>
-                cachedLoad(
+export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, MessageAlbumMessage>(
+  {
+    init: () => ({ viewer: undefined, viewerLoading: false }),
+    update: (model, message) => {
+      switch (message.type) {
+        case 'CloseViewer':
+          return {
+            model: { ...model, viewer: undefined, viewerLoading: false },
+            cancel: [commandPreview],
+          };
+        case 'Navigate': {
+          const selected = model.props.messages.filter(
+            (item) =>
+              item.media?.kind === 'photo' ||
+              item.media?.kind === 'video' ||
+              (item.media?.kind === 'animation' && item.media.mimeType.startsWith('video/')),
+          )[message.index];
+          if (!selected?.media || model.viewerLoading) return { model };
+          const media = selected.media;
+          return {
+            model: { ...model, viewerLoading: true },
+            commands: [
+              {
+                key: commandPreview,
+                policy: 'replace',
+                effect: cachedLoad(
                   () => model.props.cachedUrl(selected),
                   () =>
                     media.kind !== 'photo' && model.props.loadPlayback
                       ? model.props.loadPlayback(selected)
                       : model.props.load(selected),
+                ).pipe(
+                  Effect.matchCause({
+                    onSuccess: (url) =>
+                      ({
+                        type: 'Viewer',
+                        value: {
+                          index: message.index,
+                          message: selected,
+                          preview: {
+                            kind: media.kind === 'photo' ? 'image' : 'video',
+                            name: media.name,
+                            url,
+                          },
+                        },
+                      }) as const,
+                    onFailure: () => ({ type: 'ViewerLoading', value: false }) as const,
+                  }),
                 ),
-              {
-                policy: 'replace',
-                onSuccess: (url) =>
-                  ({
-                    type: 'Viewer',
-                    value: {
-                      index: message.index,
-                      message: selected,
-                      preview: {
-                        kind: media.kind === 'photo' ? 'image' : 'video',
-                        name: media.name,
-                        url,
-                      },
-                    },
-                  }) as const,
-                onFailure: () => ({ type: 'ViewerLoading', value: false }) as const,
               },
-            ),
-          ],
-        };
+            ],
+          };
+        }
+        case 'Viewer':
+          return { model: { ...model, viewer: message.value, viewerLoading: false } };
+        case 'ViewerLoading':
+          return { model: { ...model, viewerLoading: message.value } };
       }
-      case 'Viewer':
-        return { model: { ...model, viewer: message.value, viewerLoading: false } };
-      case 'ViewerLoading':
-        return { model: { ...model, viewerLoading: message.value } };
-    }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const previewableMessages = () =>
       props.messages.filter(
@@ -221,4 +221,4 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumModel, Mess
       </div>
     );
   }),
-});
+);

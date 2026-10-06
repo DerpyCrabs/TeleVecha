@@ -1011,6 +1011,17 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
                       ? message.media?.kind === 'voice' || message.media?.kind === 'round-video'
                       : message.media?.kind === 'animation',
         );
+        if (scenario === 'shared-media-pagination' || scenario === 'shared-media-short-pages') {
+          const template = found[0];
+          const shortPages = scenario === 'shared-media-short-pages';
+          const all = template
+            ? Array.from({ length: shortPages ? 3 : 205 }, (_, index) => ({
+                ...template,
+                id: 1000 - index,
+              }))
+            : [];
+          return messagePage(all, shortPages ? 1 : limit, offset, false);
+        }
         return messagePage(found, limit, offset, false);
       });
     }

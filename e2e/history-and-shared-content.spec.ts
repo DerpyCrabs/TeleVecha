@@ -162,6 +162,37 @@ test('browses shared content, its viewers and jumps to the source message', asyn
   });
 });
 
+for (const kind of ['photos', 'files', 'links'] as const) {
+  test(`scrolling shared ${kind} loads every page`, async ({ page }) => {
+    await openReady(page, '/?scenario=shared-media-pagination');
+    await selectAlice(page);
+    await page.getByRole('button', { name: new RegExp(`^${kind}`, 'iu') }).click();
+    const shared = page.getByRole('dialog', { name: `Shared ${kind}` });
+    const rows = shared.locator('article');
+    await expect(rows).toHaveCount(100);
+    expect((await fixtureStats(page))?.getSharedMedia).toBe(1);
+
+    for (const count of [200, 205]) {
+      await shared.locator('.shared-items').evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect(rows).toHaveCount(count);
+    }
+    await expect(shared.getByRole('button', { name: 'Load more', exact: true })).toHaveCount(0);
+    expect((await fixtureStats(page))?.getSharedMedia).toBe(3);
+  });
+}
+
+test('shared media fills the modal when successive pages do not overflow', async ({ page }) => {
+  await openReady(page, '/?scenario=shared-media-short-pages');
+  await selectAlice(page);
+  await page.getByRole('button', { name: /^Photos/u }).click();
+  const shared = page.getByRole('dialog', { name: 'Shared photos' });
+  await expect(shared.locator('article')).toHaveCount(3);
+  await expect(shared.getByRole('button', { name: 'Load more', exact: true })).toHaveCount(0);
+  expect((await fixtureStats(page))?.getSharedMedia).toBe(3);
+});
+
 test('previews image documents directly from shared files with message actions', async ({
   page,
 }) => {

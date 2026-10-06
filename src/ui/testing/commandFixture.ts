@@ -1,4 +1,4 @@
-import { modelOwner, mountView } from 'effectweb';
+import { modelOwner, mount } from 'effectweb';
 import { LinkPreview } from '../conversation/LinkPreview';
 import { Effect } from 'effect';
 import type { EngineSnapshot } from '../../telegram/types';
@@ -115,7 +115,7 @@ export function mountPreviewIdentityFixture(parent: HTMLElement) {
       ),
   };
   const owner = modelOwner(props);
-  const unmount = mountView(parent, LinkPreview, owner.source);
+  const unmount = mount(parent, LinkPreview, owner.source);
   return {
     starts: () => starts,
     releases: () => releases,

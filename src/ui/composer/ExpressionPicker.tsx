@@ -1,4 +1,4 @@
-import { list, localComponent, sequence, view } from 'effectweb';
+import { list, component, sequence, view } from 'effectweb';
 import type { Effect } from 'effect';
 import type { TelegramSticker, TelegramStickerPack } from '../../telegram/types';
 import { emojiRows } from '../collections';
@@ -26,9 +26,9 @@ interface ExpressionPickerProps {
   gifSearch?: ((text: string) => GifResults) | undefined;
   retryGifs: () => Effect.Effect<void, unknown>;
 }
-export const ExpressionPicker = localComponent<ExpressionPickerProps, { query: string }>({
-  init: () => ({ query: '' }),
-  view: view((model, send) => {
+export const ExpressionPicker = component<ExpressionPickerProps, { query: string }>(
+  { init: () => ({ query: '' }) },
+  view((model, send) => {
     const props = model.props;
     const matchingEmoji = (() => {
       const term = model.query.trim().toLocaleLowerCase();
@@ -113,4 +113,4 @@ export const ExpressionPicker = localComponent<ExpressionPickerProps, { query: s
       </div>
     );
   }),
-});
+);

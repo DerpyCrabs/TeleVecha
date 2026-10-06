@@ -124,7 +124,12 @@ export function activateFocusScope(options: FocusScopeOptions) {
     for (const element of inerted) releaseInert(element);
     if (options.modal) changeModalCount(-1);
     if (!wasTopmost) return;
+    const remainingScope = scopeStack.at(-1);
     requestAnimationFrame(() => {
+      // Closing a modal must not steal focus from a subsequent interaction or scope.
+      if (scopeStack.at(-1) !== remainingScope) return;
+      const active = document.activeElement;
+      if (active && active !== document.body && !options.root.contains(active)) return;
       const target = options.restoreFocus?.() ?? previouslyFocused;
       if (target?.isConnected) target.focus();
     });

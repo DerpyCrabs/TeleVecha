@@ -93,22 +93,23 @@ function textParts(message: ChatMessage): TextPart[] {
     ];
   });
 }
-type PartModel = { props: { part: TextPart }; spoilerRevealed: boolean; quoteExpanded: boolean };
+type PartState = { spoilerRevealed: boolean; quoteExpanded: boolean };
 type PartMessage =
   | { type: 'SpoilerRevealed'; value: boolean }
   | { type: 'QuoteExpanded'; value: boolean };
-const Part = component<{ part: TextPart }, PartModel, PartMessage>({
-  init: (props) => ({ props, spoilerRevealed: false, quoteExpanded: false }),
-
-  update: (model, message) => {
-    switch (message.type) {
-      case 'SpoilerRevealed':
-        return { model: { ...model, spoilerRevealed: message.value } };
-      case 'QuoteExpanded':
-        return { model: { ...model, quoteExpanded: message.value } };
-    }
+const Part = component<{ part: TextPart }, PartState, PartMessage>(
+  {
+    init: () => ({ spoilerRevealed: false, quoteExpanded: false }),
+    update: (model, message) => {
+      switch (message.type) {
+        case 'SpoilerRevealed':
+          return { model: { ...model, spoilerRevealed: message.value } };
+        case 'QuoteExpanded':
+          return { model: { ...model, quoteExpanded: message.value } };
+      }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const isSpoiler = () => props.part.formats.has('spoiler');
     const isExpandableQuote = () => props.part.formats.has('expandableBlockquote');
@@ -214,7 +215,7 @@ const Part = component<{ part: TextPart }, PartModel, PartMessage>({
       content(true)
     );
   }),
-});
+);
 export const MessageBody = view<
   {
     message: ChatMessage;

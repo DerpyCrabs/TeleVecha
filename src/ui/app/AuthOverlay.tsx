@@ -6,7 +6,8 @@ import LoaderCircle from '@effectweb/lucide/icons/loader-circle';
 import Phone from '@effectweb/lucide/icons/phone';
 import RotateCw from '@effectweb/lucide/icons/rotate-cw';
 import ShieldCheck from '@effectweb/lucide/icons/shield-check';
-import { Portal, defineTasks, submit, view } from 'effectweb';
+import { Portal, submit, view, component, ownerOf } from 'effectweb';
+import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import { modalMount } from '../shared/modalMount';
 interface AuthOverlayProps {
   open: boolean;
@@ -107,37 +108,38 @@ const AuthForm = view<
   );
 });
 const ignoreClose = () => undefined;
-const authentication = defineTasks({
-  init: (_props: Snapshot<AuthOverlayProps>) => ({ phone: '', code: '', password: '' }),
-}).tasks({
-  submit: {
-    policy: 'drop',
-    run: (model, step: AuthStep | 'retry'): Effect.Effect<void, unknown> => {
-      switch (step) {
-        case 'retry':
-          return model.props.onRetry();
-        case 'phone':
-          return model.props.onPhone(model.phone);
-        case 'code':
-          return model.props.onCode(model.code);
-        case 'password':
-          return model.props.onPassword(model.password);
-      }
-    },
+
+export const AuthOverlay = component(
+  {
+    init: (_props: Snapshot<AuthOverlayProps>) => ({
+      phone: '',
+      code: '',
+      password: '',
+      submitted: AsyncResult.initial() as AsyncResult.AsyncResult<void, unknown>,
+    }),
   },
-});
-export const AuthOverlay = authentication.view(
-  view((model, send) => {
+  view((model, patch) => {
     const props = model.props;
-    const controls = authentication.controls(send);
+    const authenticate = (step: AuthStep | 'retry') =>
+      ownerOf(patch).task(
+        'submitted',
+        step === 'retry'
+          ? props.onRetry()
+          : step === 'phone'
+            ? props.onPhone(model.phone)
+            : step === 'code'
+              ? props.onCode(model.code)
+              : props.onPassword(model.password),
+        'drop',
+      );
     const form = (step: AuthStep) => (
       <AuthForm
         step={step}
         value={model[step]}
-        busy={model.tasks.submit.waiting}
+        busy={model.submitted.waiting}
         codeViaApp={props.snapshot.codeViaApp}
-        change={(value) => controls.patch({ [step]: value })}
-        submit={() => controls.run('submit', step)}
+        change={(value) => patch({ [step]: value })}
+        submit={() => void authenticate(step)}
       />
     );
     const contents = () => {
@@ -159,8 +161,8 @@ export const AuthOverlay = authentication.view(
             <p class="mt-2 text-sm leading-5 text-[var(--muted)]">{props.snapshot.error}</p>
             <button
               class={submitClass}
-              disabled={model.tasks.submit.waiting}
-              onClick={() => controls.run('submit', 'retry')}
+              disabled={model.submitted.waiting}
+              onClick={() => authenticate('retry')}
             >
               <RotateCw size={17} /> Retry
             </button>

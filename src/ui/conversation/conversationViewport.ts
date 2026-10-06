@@ -1,4 +1,4 @@
-import { commandSlot, program, actionCommand } from 'effectweb';
+import { program } from 'effectweb';
 import { Effect } from 'effect';
 import type {
   ConversationViewportEffect,
@@ -9,7 +9,7 @@ import {
   initialConversationViewportState,
   transitionConversationViewport,
 } from './conversationViewportMachine';
-const commandDom = commandSlot('dom');
+const commandDom = 'dom';
 
 interface ConversationMessage {
   id: string;
@@ -57,15 +57,14 @@ export function createConversationViewport(options: ConversationViewportOptions)
       return {
         model,
         commands: [
-          actionCommand(
-            commandDom,
-            () =>
-              Effect.sync(() => {
-                applyEffects(next.effects, input.scroller);
-                options.reportVisibility();
-              }),
-            'replace',
-          ),
+          {
+            key: commandDom,
+            policy: 'replace',
+            effect: Effect.sync(() => {
+              applyEffects(next.effects, input.scroller);
+              options.reportVisibility();
+            }),
+          },
         ],
       };
     },

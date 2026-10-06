@@ -1,7 +1,7 @@
-import { commandSlot, effectCommand, component, domBinding, view } from 'effectweb';
+import { component, domBinding, view } from 'effectweb';
 import { Effect } from 'effect';
 import type { Send, Transition } from 'effectweb';
-const commandAvatar = commandSlot('avatar');
+const commandAvatar = 'avatar';
 
 const visibleAvatars = new Map<Element, () => void>();
 let avatarObserver: IntersectionObserver | undefined;
@@ -40,12 +40,12 @@ interface AvatarProps {
   loadCached?: (() => Effect.Effect<string | undefined, unknown>) | undefined;
   load?: (() => Effect.Effect<string | undefined, unknown>) | undefined;
 }
-interface AvatarModel {
-  props: AvatarProps;
+interface AvatarState {
   visible: boolean;
   requested: string;
   source: string | undefined;
 }
+type AvatarModel = AvatarState & { readonly props: AvatarProps };
 type AvatarMessage = { type: 'Visible' } | { type: 'Loaded'; source: string | undefined };
 function request(model: AvatarModel): Transition<AvatarModel, AvatarMessage> {
   const { props } = model;
@@ -54,28 +54,28 @@ function request(model: AvatarModel): Transition<AvatarModel, AvatarMessage> {
   return {
     model: { ...model, requested: key, source: undefined },
     commands: [
-      effectCommand(
-        commandAvatar,
-        () =>
-          Effect.gen(function* () {
-            const cached = yield* Effect.suspend(
-              () => props.loadCached?.() ?? Effect.succeed(undefined),
-            ).pipe(Effect.catch(() => Effect.succeed(undefined)));
-            if (cached || !props.load) return cached;
-            for (let attempt = 0; attempt < 3; attempt++) {
-              const source = yield* Effect.suspend(props.load).pipe(
-                Effect.catch(() => Effect.succeed(undefined)),
-              );
-              if (source) return source;
-            }
-            return undefined;
+      {
+        key: commandAvatar,
+        policy: 'replace',
+        effect: Effect.gen(function* () {
+          const cached = yield* Effect.suspend(
+            () => props.loadCached?.() ?? Effect.succeed(undefined),
+          ).pipe(Effect.catch(() => Effect.succeed(undefined)));
+          if (cached || !props.load) return cached;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const source = yield* Effect.suspend(props.load).pipe(
+              Effect.catch(() => Effect.succeed(undefined)),
+            );
+            if (source) return source;
+          }
+          return undefined;
+        }).pipe(
+          Effect.matchCause({
+            onSuccess: (source) => ({ type: 'Loaded', source }),
+            onFailure: (): AvatarMessage => ({ type: 'Loaded', source: undefined }),
           }),
-        {
-          policy: 'replace',
-          onSuccess: (source) => ({ type: 'Loaded', source }),
-          onFailure: (): AvatarMessage => ({ type: 'Loaded', source: undefined }),
-        },
-      ),
+        ),
+      },
     ],
   };
 }
@@ -89,14 +89,16 @@ function acquireVisibility(element: HTMLElement, input: () => Send<AvatarMessage
   return observeAvatar(element, () => input()({ type: 'Visible' }));
 }
 const visibility = (send: Send<AvatarMessage>) => domBinding(send, acquireVisibility);
-export const Avatar = component<AvatarProps, AvatarModel, AvatarMessage>({
-  init: (props) => ({ props, visible: false, requested: '', source: undefined }),
-  receive: (model, props) => request({ ...model, props }),
-  update: (model, message) =>
-    message.type === 'Visible'
-      ? request({ ...model, visible: true })
-      : { model: { ...model, source: message.source } },
-  view: view((model, send) => {
+export const Avatar = component<AvatarProps, AvatarState, AvatarMessage>(
+  {
+    init: () => ({ visible: false, requested: '', source: undefined }),
+    receive: (model) => request(model),
+    update: (model, message) =>
+      message.type === 'Visible'
+        ? request({ ...model, visible: true })
+        : { model: { ...model, source: message.source } },
+  },
+  view((model, send) => {
     const props = model.props;
     return (
       <div use={visibility(send)} class="relative shrink-0">
@@ -126,4 +128,4 @@ export const Avatar = component<AvatarProps, AvatarModel, AvatarMessage>({
       </div>
     );
   }),
-});
+);

@@ -1,12 +1,9 @@
 import {
   list,
-  commandSlot,
-  actionCommand,
-  effectCommand,
   available,
   collection,
   component,
-  defineTasks,
+  domBinding,
   observe,
   Portal,
   resourceError,
@@ -14,9 +11,10 @@ import {
   view,
   type Snapshot,
   type Source,
+  ownerOf,
 } from 'effectweb';
 import type { InfiniteData } from '@effectweb/query';
-import type * as AsyncResult from 'effect/reactivity/AsyncResult';
+import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import { pageMessages, type SearchCursor } from '../app/queries';
 import { cachedLoad } from '../shared/cachedLoad';
 import { Effect } from 'effect';
@@ -46,8 +44,8 @@ import {
 } from '../shared/panelStyles';
 import { safeExternalUrl } from '../shared/safeUrl';
 import { messageCapabilities } from '../../telegram/core/chatPermissions';
-const commandViewer = commandSlot('viewer');
-const commandDownload = commandSlot('download');
+const commandViewer = 'viewer';
+const commandDownload = 'download';
 
 interface SharedMediaPanelProps {
   initialKind: SharedMediaKind;
@@ -90,6 +88,26 @@ const labels: Record<SharedMediaKind, string> = {
   gifs: 'GIFs',
 };
 const visualKinds = new Set<SharedMediaKind>(['photos', 'videos', 'gifs']);
+function acquireMediaPagination(
+  button: HTMLButtonElement,
+  input: () => { readonly loading: boolean; readonly load: () => void },
+) {
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting) && !input().loading) input().load();
+    },
+    { root: button.closest('.shared-items'), rootMargin: '0px 0px 160px 0px' },
+  );
+  observer.observe(button);
+  return {
+    // Recheck after each page, including when the content still fits in the modal.
+    update: () => {
+      observer.unobserve(button);
+      observer.observe(button);
+    },
+    dispose: () => observer.disconnect(),
+  };
+}
 function messageTime(message: TelegramMessage) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
     new Date(message.date * 1000),
@@ -101,8 +119,7 @@ function fileSize(size?: number) {
   if (size < 1024 ** 2) return `${Math.round(size / 1024)} KB`;
   return `${(size / 1024 ** 2).toFixed(1)} MB`;
 }
-type SharedMediaContentModel = {
-  props: SharedMediaContentProps;
+type SharedMediaContentState = {
   viewer: { index: number; preview: MediaPreview; loading: boolean } | undefined;
 };
 type SharedMediaContentMessage =
@@ -115,109 +132,118 @@ type SharedMediaContentMessage =
     };
 const SharedMediaContent = component<
   SharedMediaContentProps,
-  SharedMediaContentModel,
+  SharedMediaContentState,
   SharedMediaContentMessage
->({
-  init: (props) => ({ props, viewer: undefined }),
-  identity: (props) => JSON.stringify([props.peerId, props.initialKind]),
-  update: (model, message) => {
-    switch (message.type) {
-      case 'Navigate': {
-        const selected = model.props.items.filter(
-          (item) => item.media && mediaPresentation(item.media).preview === 'image',
-        )[message.index];
-        if (!model.viewer || model.viewer.loading || !selected?.media) return { model };
-        const current = model.viewer,
-          media = selected.media;
-        return {
-          model: { ...model, viewer: { ...current, loading: true } },
-          commands: [
-            effectCommand(
-              commandViewer,
-              () =>
-                cachedLoad(
+>(
+  {
+    init: () => ({ viewer: undefined }),
+    identity: (props) => JSON.stringify([props.peerId, props.initialKind]),
+    update: (model, message) => {
+      switch (message.type) {
+        case 'Navigate': {
+          const selected = model.props.items.filter(
+            (item) => item.media && mediaPresentation(item.media).preview === 'image',
+          )[message.index];
+          if (!model.viewer || model.viewer.loading || !selected?.media) return { model };
+          const current = model.viewer,
+            media = selected.media;
+          return {
+            model: { ...model, viewer: { ...current, loading: true } },
+            commands: [
+              {
+                key: commandViewer,
+                policy: 'replace',
+                effect: cachedLoad(
                   () => model.props.cachedMedia(selected),
                   () => model.props.loadMedia(selected),
+                ).pipe(
+                  Effect.matchCause({
+                    onSuccess: (url): SharedMediaContentMessage => ({
+                      type: 'Viewer',
+                      value: {
+                        index: message.index,
+                        loading: false,
+                        preview: { kind: 'image', name: media.name, url },
+                      },
+                    }),
+                    onFailure: (): SharedMediaContentMessage => ({
+                      type: 'Viewer',
+                      value: current,
+                    }),
+                  }),
                 ),
-              {
-                policy: 'replace',
-                onSuccess: (url): SharedMediaContentMessage => ({
-                  type: 'Viewer',
-                  value: {
-                    index: message.index,
-                    loading: false,
-                    preview: { kind: 'image', name: media.name, url },
-                  },
-                }),
-                onFailure: (): SharedMediaContentMessage => ({ type: 'Viewer', value: current }),
               },
-            ),
-          ],
-        };
-      }
-      case 'Download': {
-        const item = message.message;
-        if (!item.media || item.protected) return { model };
-        const name = item.media.name;
-        return {
-          model,
-          commands: [
-            actionCommand(
-              commandDownload,
-              () =>
-                cachedLoad(
+            ],
+          };
+        }
+        case 'Download': {
+          const item = message.message;
+          if (!item.media || item.protected) return { model };
+          const name = item.media.name;
+          return {
+            model,
+            commands: [
+              {
+                key: commandDownload,
+                policy: 'replace',
+                effect: cachedLoad(
                   () => model.props.cachedMedia(item),
                   () => model.props.loadMedia(item),
-                ).pipe(Effect.tap((url) => Effect.sync(() => saveMediaUrl(url, name)))),
-              'replace',
-            ),
-          ],
-        };
-      }
-      case 'OpenFile': {
-        const item = message.message;
-        if (!item.media || mediaPresentation(item.media).preview !== 'image') return { model };
-        const name = item.media.name,
-          index = model.props.items
-            .filter((item) => item.media && mediaPresentation(item.media).preview === 'image')
-            .findIndex((candidate) => candidate.id === item.id);
-        return {
-          model,
-          commands: [
-            effectCommand(
-              commandViewer,
-              () =>
-                cachedLoad(
+                ).pipe(
+                  Effect.tap((url) => Effect.sync(() => saveMediaUrl(url, name))),
+                  // No reply message; a failed download is reported.
+                  Effect.asVoid,
+                  Effect.orDie,
+                ),
+              },
+            ],
+          };
+        }
+        case 'OpenFile': {
+          const item = message.message;
+          if (!item.media || mediaPresentation(item.media).preview !== 'image') return { model };
+          const name = item.media.name,
+            index = model.props.items
+              .filter((item) => item.media && mediaPresentation(item.media).preview === 'image')
+              .findIndex((candidate) => candidate.id === item.id);
+          return {
+            model,
+            commands: [
+              {
+                key: commandViewer,
+                policy: 'replace',
+                effect: cachedLoad(
                   () => model.props.cachedMedia(item),
                   () => model.props.loadMedia(item),
+                ).pipe(
+                  Effect.matchCause({
+                    onSuccess: (url): SharedMediaContentMessage => ({
+                      type: 'Viewer',
+                      value: {
+                        index: Math.max(0, index),
+                        loading: false,
+                        preview: { kind: 'image', name, url, origin: message.origin },
+                      },
+                    }),
+                    onFailure: (): SharedMediaContentMessage => ({
+                      type: 'Viewer',
+                      value: model.viewer,
+                    }),
+                  }),
                 ),
-              {
-                policy: 'replace',
-                onSuccess: (url): SharedMediaContentMessage => ({
-                  type: 'Viewer',
-                  value: {
-                    index: Math.max(0, index),
-                    loading: false,
-                    preview: { kind: 'image', name, url, origin: message.origin },
-                  },
-                }),
-                onFailure: (): SharedMediaContentMessage => ({
-                  type: 'Viewer',
-                  value: model.viewer,
-                }),
               },
-            ),
-          ],
-        };
+            ],
+          };
+        }
+        case 'Viewer':
+          return {
+            cancel: message.value ? [] : [commandViewer],
+            model: { ...model, viewer: message.value },
+          };
       }
-      case 'Viewer':
-        return {
-          cancel: message.value ? [] : [commandViewer],
-          model: { ...model, viewer: message.value },
-        };
-    }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const capabilities = (message: TelegramMessage) => {
       const dialog = props.dialogs.find((dialog) => dialog.peer.id === message.peerId);
@@ -398,7 +424,11 @@ const SharedMediaContent = component<
                   ) : null}
                   {hasMore() && !error() ? (
                     <button
-                      class={`panel-load-more ${panelLoadMoreClass}`}
+                      use={domBinding(
+                        { loading: loadingMore(), load: () => loadItems(true) },
+                        acquireMediaPagination,
+                      )}
+                      class={`panel-load-more col-span-full ${panelLoadMoreClass}`}
                       disabled={loadingMore()}
                       onClick={() => loadItems(true)}
                     >
@@ -474,21 +504,21 @@ const SharedMediaContent = component<
       </Portal>
     );
   }),
-});
-const sharedMedia = defineTasks({
-  init: (
-    _props: SharedMediaPanelProps & {
-      /** Cached pages of the selected kind. */
-      media: SharedMediaResults;
-      more: () => Effect.Effect<unknown, unknown>;
-      refresh: () => void;
-    },
-  ) => ({}),
-}).tasks({ more: { policy: 'drop', run: (model) => model.props.more() } });
-export const SharedMediaPanel = sharedMedia.view(
-  view((model, send) => {
+);
+
+export const SharedMediaPanel = component(
+  {
+    init: (
+      _props: SharedMediaPanelProps & {
+        /** Cached pages of the selected kind. */
+        media: SharedMediaResults;
+        more: () => Effect.Effect<unknown, unknown>;
+        refresh: () => void;
+      },
+    ) => ({ more: AsyncResult.initial() as AsyncResult.AsyncResult<unknown, unknown> }),
+  },
+  view((model, patch) => {
     const props = model.props;
-    const controls = sharedMedia.controls(send);
     return observe(props.media, (result) => {
       const page = available(result);
       return (
@@ -507,10 +537,12 @@ export const SharedMediaPanel = sharedMedia.view(
           close={props.close}
           items={pageMessages(page?.pages ?? [])}
           loading={result.waiting && !page}
-          loadingMore={model.tasks.more.waiting}
+          loadingMore={model.more.waiting}
           hasMore={page?.next !== undefined}
-          error={resourceError(model.tasks.more) || resourceError(result)}
-          loadPage={(append) => (append ? controls.run('more') : props.refresh())}
+          error={resourceError(model.more) ?? resourceError(result) ?? ''}
+          loadPage={(append) =>
+            append ? ownerOf(patch).task('more', props.more(), 'drop') : props.refresh()
+          }
         />
       );
     });

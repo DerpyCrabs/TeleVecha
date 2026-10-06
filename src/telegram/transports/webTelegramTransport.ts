@@ -1540,6 +1540,11 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       yield* getWallpapers();
       document = state.wallpaperDocuments.get(wallpaperId);
     }
+    if (!document) {
+      // Chat theme patterns may be absent from the account wallpaper catalog.
+      yield* getChatThemes();
+      document = state.wallpaperDocuments.get(wallpaperId);
+    }
     if (!document)
       return yield* Effect.fail(
         createMtprotoError('protocol', 'Reload the Telegram backgrounds and try again.'),

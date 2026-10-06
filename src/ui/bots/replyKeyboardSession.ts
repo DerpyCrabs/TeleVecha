@@ -1,5 +1,5 @@
 import type { Snapshot } from 'effectweb';
-import { lifetime, program } from 'effectweb';
+import { modelOwner, program } from 'effectweb';
 import type { EngineSnapshot } from '../../telegram/types';
 /** Owns reply-keyboard visibility, single-use dismissal, and forced replies. */
 export function createReplyKeyboardSession(options: {
@@ -9,7 +9,7 @@ export function createReplyKeyboardSession(options: {
   editing: () => unknown;
   forceReply: (messageId: number, preview: string) => void;
 }) {
-  const scope = lifetime();
+  const scope = modelOwner({});
   type ReplyKeyboardSessionModel = { dismissed: ReadonlySet<string> };
   type ReplyKeyboardSessionMessage = { type: 'Dismissed'; value: ReadonlySet<string> };
   const state = program<ReplyKeyboardSessionModel, ReplyKeyboardSessionMessage>({

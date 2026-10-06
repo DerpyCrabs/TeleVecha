@@ -1,23 +1,21 @@
 import {
-  commandSlot,
   available,
   collection,
-  effectCommand,
   program,
   resourceError,
-  actionCommand,
   type Snapshot,
   type Source,
+  type Transition,
 } from 'effectweb';
-import { defineActions, type ActionMessage } from 'effectweb/advanced';
+import { defineActions, type ActionMessage } from '../shared/composition';
 import type { InfiniteData } from '@effectweb/query';
 import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import { Cause, Effect } from 'effect';
 import type { TelegramDialog, TelegramMessage, TelegramSearchPage } from '../../telegram/types';
 import { pageMessages, type MessageSearchArgs, type SearchCursor } from '../app/queries';
 
-const commandHost = commandSlot('host');
-const commandMore = commandSlot('more');
+const commandHost = 'host';
+const commandMore = 'more';
 
 export type SearchResults = AsyncResult.AsyncResult<
   Snapshot<InfiniteData<TelegramSearchPage, SearchCursor>>,
@@ -36,7 +34,7 @@ export interface SearchPanelProps {
 export const messageIdentity = (message: TelegramMessage) => `${message.peerId}:${message.id}`;
 export const searchMessages = collection(messageIdentity);
 interface SearchInput {
-  readonly host: SearchPanelProps;
+  readonly host: Snapshot<SearchPanelProps>;
   readonly query: string;
   readonly global: boolean;
   readonly submitted: string;
@@ -60,11 +58,12 @@ export const searchArgs = (input: Snapshot<SearchInput>): MessageSearchArgs | un
 export const searchRows = (result: SearchResults) => pageMessages(available(result)?.pages ?? []);
 export const searchError = resourceError;
 
+type MoreMessage = { type: 'MoreLoaded' } | { type: 'MoreFailed'; error: string };
 const change = (
   model: Snapshot<SearchModel>,
   input: Partial<SearchInput>,
   refresh: boolean = false,
-) => {
+): Transition<SearchModel, never> => {
   const props = { ...model.props, ...input } as SearchInput;
   const args = searchArgs(props);
   const next = { props, loadingMore: false, moreError: '' };
@@ -73,22 +72,36 @@ const change = (
     ? {
         model: next,
         commands: [
-          actionCommand(commandHost, () => Effect.sync(() => props.host.refresh(args)), 'replace'),
+          {
+            key: commandHost,
+            policy: 'replace',
+            effect: Effect.sync(() => props.host.refresh(args)),
+          },
         ],
       }
     : { model: next };
 };
-const more = (model: Snapshot<SearchModel>) => {
+const more = (model: Snapshot<SearchModel>): Transition<SearchModel, MoreMessage> => {
   const args = searchArgs(model.props);
   return args
     ? {
         model: { ...model, loadingMore: true, moreError: '' },
         commands: [
-          effectCommand(commandMore, () => model.props.host.more(args), {
+          {
+            key: commandMore,
             policy: 'drop',
-            onSuccess: () => ({ type: 'MoreLoaded' }) as const,
-            onFailure: (cause) => ({ type: 'MoreFailed', error: failureMessage(cause) }) as const,
-          }),
+            effect: model.props.host
+              .more(args)
+              .pipe(
+                Effect.matchCause({
+                  onSuccess: (): MoreMessage => ({ type: 'MoreLoaded' }),
+                  onFailure: (cause): MoreMessage => ({
+                    type: 'MoreFailed',
+                    error: failureMessage(cause),
+                  }),
+                }),
+              ),
+          },
         ],
       }
     : { model };
@@ -103,7 +116,7 @@ export const searchActions = defineActions<SearchModel>()({
   Scope: (model, global: boolean) =>
     change(model, { global, submitted: model.props.query.trim() }, true),
   Submit: (model) => change(model, { submitted: model.props.query.trim() }, true),
-  Context: (model, host: SearchPanelProps) =>
+  Context: (model, host: Snapshot<SearchPanelProps>) =>
     change(model, {
       host,
       submitted:
@@ -120,11 +133,11 @@ export const searchActions = defineActions<SearchModel>()({
       model,
       commands: args
         ? [
-            actionCommand(
-              commandHost,
-              () => Effect.sync(() => model.props.host.refresh(args)),
-              'replace',
-            ),
+            {
+              key: commandHost,
+              policy: 'replace',
+              effect: Effect.sync(() => model.props.host.refresh(args)),
+            },
           ]
         : [],
     };
@@ -132,26 +145,23 @@ export const searchActions = defineActions<SearchModel>()({
   Open: (model, message: TelegramMessage) => ({
     model,
     commands: [
-      actionCommand(
-        commandHost,
-        () => Effect.sync(() => model.props.host.openResult(message)),
-        'replace',
-      ),
+      {
+        key: commandHost,
+        policy: 'replace',
+        effect: Effect.sync(() => model.props.host.openResult(message)),
+      },
     ],
   }),
   Close: (model) => ({
     model,
     commands: [
-      actionCommand(commandHost, () => Effect.sync(() => model.props.host.close()), 'replace'),
+      { key: commandHost, policy: 'replace', effect: Effect.sync(() => model.props.host.close()) },
     ],
   }),
 });
-export type SearchMessage =
-  | ActionMessage<typeof searchActions>
-  | { type: 'MoreLoaded' }
-  | { type: 'MoreFailed'; error: string };
+export type SearchMessage = ActionMessage<typeof searchActions> | MoreMessage;
 
-export function createSearchProgram(props: SearchPanelProps) {
+export function createSearchProgram(props: Snapshot<SearchPanelProps>) {
   return program<SearchModel, SearchMessage>({
     initial: {
       props: { host: props, query: '', global: false, submitted: '' },

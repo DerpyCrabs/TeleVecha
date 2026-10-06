@@ -13,7 +13,6 @@ interface Props {
 }
 const initial = () => ({ position: 0, duration: 0, playing: false, waiting: false, error: false });
 type Playback = ReturnType<typeof initial>;
-type Model = Playback & { props: Props };
 type Message = { type: 'Playback'; state: Playback } | { type: 'Error' };
 function acquireVideo(video: HTMLVideoElement, input: () => { send: Send<Message>; props: Props }) {
   let waiting = false;
@@ -63,18 +62,20 @@ function acquireVideo(video: HTMLVideoElement, input: () => { send: Send<Message
 function videoFor(element: HTMLElement) {
   return element.closest('.round-video-player')?.querySelector('video');
 }
-export const RoundVideoPlayer = component<Props, Model, Message>({
-  init: (props) => ({ props, ...initial() }),
-  receive: (model, props) => ({
-    model: { ...model, ...(props.source !== model.props.source ? initial() : {}), props },
-  }),
-  update: (model, message) => ({
-    model:
-      message.type === 'Playback'
-        ? { ...model, ...message.state }
-        : { ...model, error: true, waiting: false },
-  }),
-  view: view((model, send) => {
+export const RoundVideoPlayer = component<Props, Playback, Message>(
+  {
+    init: () => ({ ...initial() }),
+    receive: (model, previous) => ({
+      model: { ...model, ...(model.props.source !== previous.source ? initial() : {}) },
+    }),
+    update: (model, message) => ({
+      model:
+        message.type === 'Playback'
+          ? { ...model, ...message.state }
+          : { ...model, error: true, waiting: false },
+    }),
+  },
+  view((model, send) => {
     const duration = model.duration || model.props.duration || 0;
     const position = Math.min(duration, Math.max(0, model.position));
     const active = model.playing || model.waiting || position > 0;
@@ -160,4 +161,4 @@ export const RoundVideoPlayer = component<Props, Model, Message>({
       </div>
     );
   }),
-});
+);

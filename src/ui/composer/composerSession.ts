@@ -1,5 +1,5 @@
 import { shiftFormats } from './mentions';
-import { commandSlot, modelOwner } from 'effectweb';
+import { modelOwner } from 'effectweb';
 import type { Snapshot } from 'effectweb';
 import { Effect, Fiber } from 'effect';
 import type { ChatMessage } from '../../domain/models';
@@ -19,9 +19,9 @@ import { stageAttachment, type StagedAttachment } from './outgoingAttachments';
 import { prepareAttachment } from './attachmentMetadata';
 import { mediaPreview } from '../conversation/presentation';
 const DRAFT_WRITE_DELAY_MS = 120;
-const DRAFT_WRITE_TASK = commandSlot('composer:draft-write');
-const MENTION_MEMBERS_TASK = commandSlot('composer:members');
-const TYPING_TASK = commandSlot('composer:typing');
+const DRAFT_WRITE_TASK = 'composer:draft-write';
+const MENTION_MEMBERS_TASK = 'composer:members';
+const TYPING_TASK = 'composer:typing';
 interface ReplyTarget {
   messageId: number;
   preview: string;

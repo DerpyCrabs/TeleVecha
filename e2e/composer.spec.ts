@@ -307,6 +307,12 @@ test('restores persisted drafts on entry without mirroring later snapshot change
       ),
     )
     .toBe('Local draft survives');
+  // The snapshot changes before the draft reaches the device store. Draft writes are
+  // serialized per chat, so awaiting one more write means the earlier ones are stored.
+  await page.evaluate(async () => {
+    const runtime = window.__televechaRuntimes!.get('fixture:default')!;
+    await runtime.runEffect(runtime.engine.setDraft('u:101', 'Local draft survives'));
+  });
   await page.reload();
   await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Local draft survives');
 });

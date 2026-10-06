@@ -1,7 +1,7 @@
 import { findMention, filterMentionMembers, shiftFormats } from './mentions';
-import { patchModel } from 'effectweb/advanced';
+import { patchModel } from '../shared/composition';
 import type { TelegramGroupMember } from '../../telegram/types';
-import { list, commandSlot, component, domBinding, sequence, view, actionCommand } from 'effectweb';
+import { list, component, domBinding, sequence, view } from 'effectweb';
 import { Effect } from 'effect';
 import type { TelegramSticker, TelegramTextFormat } from '../../telegram/types';
 import { idRows } from '../collections';
@@ -29,10 +29,10 @@ import { ImageAttachmentEditor } from './ImageAttachmentEditor';
 import { canTransformImage } from './outgoingAttachments';
 import { fileImageMount } from '../shared/fileImageMount';
 import { formatMediaSize } from '../media/mediaPresentation';
-const commandExpressionVisibility = commandSlot('expression-visibility');
-const commandFocus = commandSlot('focus');
-const commandFormat = commandSlot('format');
-const commandInsert = commandSlot('insert');
+const commandExpressionVisibility = 'expression-visibility';
+const commandFocus = 'focus';
+const commandFormat = 'format';
+const commandInsert = 'insert';
 
 interface ChatComposerProps {
   conversationId: string;
@@ -87,9 +87,8 @@ const AttachmentThumbnail = view<{ file: File }, never>((props, _send) =>
     <FileText size={22} aria-hidden="true" />
   ),
 );
-type ChatComposerModel = {
+type ChatComposerState = {
   element: HTMLElement | undefined;
-  props: ChatComposerProps;
   editingAttachmentId: string;
   expressionOpen: boolean;
   expressionTab: ExpressionTab;
@@ -98,6 +97,7 @@ type ChatComposerModel = {
   mention: ReturnType<typeof findMention>;
   mentionIndex: number;
 };
+type ChatComposerModel = ChatComposerState & { readonly props: ChatComposerProps };
 type ChatComposerMessage =
   | { type: 'MentionChanged'; mention: ReturnType<typeof findMention> }
   | { type: 'SelectMention'; member: TelegramGroupMember }
@@ -156,14 +156,13 @@ function formatMenuPosition(x: number, y: number) {
   return { x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - 310) };
 }
 function visibilityCommand(props: ChatComposerProps, open: boolean): Command<ChatComposerMessage> {
-  return actionCommand(
-    commandExpressionVisibility,
-    () =>
-      Effect.sync(() => {
-        props.expressions.setVisible(open);
-      }),
-    'replace',
-  );
+  return {
+    key: commandExpressionVisibility,
+    policy: 'replace',
+    effect: Effect.sync(() => {
+      props.expressions.setVisible(open);
+    }),
+  };
 }
 function formatSelection(model: ChatComposerModel, kind: TelegramTextFormat['kind']) {
   const input = model.element?.querySelector('textarea');
@@ -230,65 +229,65 @@ function acquireComposer(element: HTMLElement, input: () => Send<ChatComposerMes
   };
 }
 const composerMount = (send: Send<ChatComposerMessage>) => domBinding(send, acquireComposer);
-export const ChatComposer = component<ChatComposerProps, ChatComposerModel, ChatComposerMessage>({
-  init: (props) => ({
-    props,
-    element: undefined,
-    editingAttachmentId: '',
-    expressionOpen: false,
-    expressionTab: 'emoji',
-    formatMenu: undefined,
-    expressionPointerType: '',
-    mention: undefined,
-    mentionIndex: 0,
-  }),
-  receive: (model, props) => {
-    const reset = props.conversationId !== model.props.conversationId;
-    const close = reset || !props.enabled;
-    const currentMention = model.mention && findMention(props.composer.draft, model.mention.end);
-    const dismissMention =
-      close ||
-      (model.mention &&
-        (currentMention?.offset !== model.mention.offset ||
-          currentMention?.query !== model.mention.query));
-    const next = {
-      ...model,
-      props,
-      ...(reset
-        ? { editingAttachmentId: '', formatMenu: undefined, expressionTab: 'emoji' as const }
-        : {}),
-      ...(close ? { expressionOpen: false } : {}),
-      ...(dismissMention ? { mention: undefined, mentionIndex: 0 } : {}),
-    };
-    return close && model.expressionOpen
-      ? { model: next, commands: [visibilityCommand(props, false)] }
-      : { model: next };
-  },
-  update: (model, message) => {
-    switch (message.type) {
-      case 'MentionChanged': {
-        const unchanged =
-          model.mention?.offset === message.mention?.offset &&
-          model.mention?.end === message.mention?.end &&
-          model.mention?.query === message.mention?.query;
-        return {
-          model: {
-            ...model,
-            mention: message.mention,
-            mentionIndex: unchanged ? model.mentionIndex : 0,
-          },
-        };
-      }
-      case 'SelectMention': {
-        const mention = model.mention;
-        if (!mention || !model.props.enabled) return { model };
-        return {
-          model: { ...model, mention: undefined, mentionIndex: 0 },
-          commands: [
-            actionCommand(
-              commandInsert,
-              () =>
-                Effect.sync(() => {
+export const ChatComposer = component<ChatComposerProps, ChatComposerState, ChatComposerMessage>(
+  {
+    init: () => ({
+      element: undefined,
+      editingAttachmentId: '',
+      expressionOpen: false,
+      expressionTab: 'emoji',
+      formatMenu: undefined,
+      expressionPointerType: '',
+      mention: undefined,
+      mentionIndex: 0,
+    }),
+    receive: (model, previous) => {
+      const reset = model.props.conversationId !== previous.conversationId;
+      const close = reset || !model.props.enabled;
+      const currentMention =
+        model.mention && findMention(model.props.composer.draft, model.mention.end);
+      const dismissMention =
+        close ||
+        (model.mention &&
+          (currentMention?.offset !== model.mention.offset ||
+            currentMention?.query !== model.mention.query));
+      const next = {
+        ...model,
+        ...(reset
+          ? { editingAttachmentId: '', formatMenu: undefined, expressionTab: 'emoji' as const }
+          : {}),
+        ...(close ? { expressionOpen: false } : {}),
+        ...(dismissMention ? { mention: undefined, mentionIndex: 0 } : {}),
+      };
+      return close && model.expressionOpen
+        ? { model: next, commands: [visibilityCommand(model.props, false)] }
+        : { model: next };
+    },
+    update: (model, message) => {
+      switch (message.type) {
+        case 'MentionChanged': {
+          const unchanged =
+            model.mention?.offset === message.mention?.offset &&
+            model.mention?.end === message.mention?.end &&
+            model.mention?.query === message.mention?.query;
+          return {
+            model: {
+              ...model,
+              mention: message.mention,
+              mentionIndex: unchanged ? model.mentionIndex : 0,
+            },
+          };
+        }
+        case 'SelectMention': {
+          const mention = model.mention;
+          if (!mention || !model.props.enabled) return { model };
+          return {
+            model: { ...model, mention: undefined, mentionIndex: 0 },
+            commands: [
+              {
+                key: commandInsert,
+                policy: 'replace',
+                effect: Effect.sync(() => {
                   const composer = model.props.composer;
                   const member = message.member;
                   const text = member.username
@@ -320,22 +319,21 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
                     );
                   });
                 }),
-              'replace',
-            ),
-          ],
-        };
-      }
-      case 'Mounted':
-        return { model: { ...model, element: message.element } };
-      case 'Dismiss':
-        return {
-          model: { ...model, expressionOpen: false, formatMenu: undefined },
-          commands: [
-            visibilityCommand(model.props, false),
-            actionCommand(
-              commandFocus,
-              () =>
-                Effect.sync(() => {
+              },
+            ],
+          };
+        }
+        case 'Mounted':
+          return { model: { ...model, element: message.element } };
+        case 'Dismiss':
+          return {
+            model: { ...model, expressionOpen: false, formatMenu: undefined },
+            commands: [
+              visibilityCommand(model.props, false),
+              {
+                key: commandFocus,
+                policy: 'replace',
+                effect: Effect.sync(() => {
                   if (message.restoreFocus)
                     model.element
                       ?.querySelector<HTMLButtonElement>(
@@ -343,67 +341,64 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
                       )
                       ?.focus();
                 }),
-              'replace',
-            ),
-          ],
-        };
-      case 'FocusExpressions':
-        return {
-          model,
-          commands: [
-            actionCommand(
-              commandFocus,
-              () =>
-                Effect.sync(() => {
+              },
+            ],
+          };
+        case 'FocusExpressions':
+          return {
+            model,
+            commands: [
+              {
+                key: commandFocus,
+                policy: 'replace',
+                effect: Effect.sync(() => {
                   queueMicrotask(() =>
                     model.element
                       ?.querySelector<HTMLInputElement>('.expression-search input')
                       ?.focus(),
                   );
                 }),
-              'replace',
-            ),
-          ],
-        };
-      case 'ApplyFormat':
-        return {
-          model,
-          commands: [
-            actionCommand(
-              commandFormat,
-              () =>
-                Effect.sync(() => {
+              },
+            ],
+          };
+        case 'ApplyFormat':
+          return {
+            model,
+            commands: [
+              {
+                key: commandFormat,
+                policy: 'replace',
+                effect: Effect.sync(() => {
                   formatSelection(model, message.kind);
                 }),
-              'replace',
-            ),
-          ],
-        };
-      case 'InsertEmoji':
-        return {
-          model: { ...model, expressionOpen: false },
-          commands: [
-            visibilityCommand(model.props, false),
-            actionCommand(
-              commandInsert,
-              () =>
-                Effect.sync(() => {
+              },
+            ],
+          };
+        case 'InsertEmoji':
+          return {
+            model: { ...model, expressionOpen: false },
+            commands: [
+              visibilityCommand(model.props, false),
+              {
+                key: commandInsert,
+                policy: 'replace',
+                effect: Effect.sync(() => {
                   insertAtSelection(model, message.emoji);
                 }),
-              'replace',
-            ),
-          ],
-        };
-      case 'ExpressionOpenState':
-        return {
-          model: { ...model, expressionOpen: message.value },
-          commands: [visibilityCommand(model.props, message.value)],
-        };
-      case 'Fields':
-        return { model: patchModel(model, message.fields) };
-    }
+              },
+            ],
+          };
+        case 'ExpressionOpenState':
+          return {
+            model: { ...model, expressionOpen: message.value },
+            commands: [visibilityCommand(model.props, message.value)],
+          };
+        case 'Fields':
+          return { model: patchModel(model, message.fields) };
+      }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const mentionMembers = () =>
       model.mention ? filterMentionMembers(props.composer.mentionMembers, model.mention.query) : [];
@@ -903,4 +898,4 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerModel, Chat
       </footer>
     );
   }),
-});
+);

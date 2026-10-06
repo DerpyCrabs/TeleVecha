@@ -1,5 +1,5 @@
 import type { Snapshot } from 'effectweb';
-import { lifetime, program } from 'effectweb';
+import { modelOwner, program } from 'effectweb';
 import type { ChatSummary } from '../../domain/models';
 import type { EngineSnapshot } from '../../telegram/types';
 function lastSeenStatus(timestamp: number) {
@@ -24,7 +24,7 @@ export function createConversationHeaderSession(options: {
   activePeerId: () => string;
   activePeerMatches: () => boolean;
 }) {
-  const scope = lifetime();
+  const scope = modelOwner({});
   type ConversationHeaderSessionModel = {
     pinnedSelection: { peerId: string; setKey: string; index: number };
   };

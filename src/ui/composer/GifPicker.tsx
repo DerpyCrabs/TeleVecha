@@ -1,8 +1,8 @@
 import {
+  available,
   list,
-  AsyncContent,
-  effectEvent,
   observe,
+  resourceError,
   slot,
   view,
   type Snapshot,
@@ -77,21 +77,23 @@ export const GifPicker = view<{
       return (
         <div role="alert">
           <p>{props.error}</p>
-          <button onClick={effectEvent('drop', () => props.retry())}>Retry GIFs</button>
+          <button onClick={() => props.retry()}>Retry GIFs</button>
         </div>
       );
     if (props.results)
-      return observe(props.results, (result) => (
-        <AsyncContent
-          result={result}
-          content={results}
-          pending={<p>Searching Telegram…</p>}
-          empty={<p>Searching Telegram…</p>}
-          failure={slot((_cause) => (
-            <p role="alert">Could not search GIFs. Try again.</p>
-          ))}
-        />
-      ));
+      return observe(props.results, (result) => {
+        const gifs = available(result);
+        const failed = !result.waiting && resourceError(result) !== undefined;
+        const failure = failed ? <p role="alert">Could not search GIFs. Try again.</p> : null;
+        if (gifs)
+          return (
+            <>
+              {results(gifs)}
+              {failure}
+            </>
+          );
+        return failure ?? <p>Searching Telegram…</p>;
+      });
     return results(props.query.trim() ? [] : props.gifs);
   };
   return (

@@ -31,7 +31,6 @@ interface PlaybackState {
   /** This message's track is the shared player's current track. */
   active: boolean;
 }
-type VoiceModel = PlaybackState & { props: VoicePlayerProps };
 type VoiceMessage = { type: 'Playback'; state: PlaybackState } | { type: 'Error' };
 const initialPlayback = (): PlaybackState => ({
   position: 0,
@@ -126,22 +125,25 @@ function playerAudio(element: HTMLElement) {
   return element.closest('.voice-player')?.querySelector('audio');
 }
 
-export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>({
-  init: (props) => ({ props, ...initialPlayback() }),
-  receive: (model, props) => ({
-    model: {
-      ...model,
-      ...(!props.control && props.source !== model.props.source ? initialPlayback() : {}),
-      props,
-    },
-  }),
-  update: (model, message) => ({
-    model:
-      message.type === 'Playback'
-        ? { ...model, ...message.state }
-        : { ...model, waiting: false, playing: false, error: true },
-  }),
-  view: view((model, send) => {
+export const VoicePlayer = component<VoicePlayerProps, PlaybackState, VoiceMessage>(
+  {
+    init: () => ({ ...initialPlayback() }),
+    receive: (model, previous) => ({
+      model: {
+        ...model,
+        ...(!model.props.control && model.props.source !== previous.source
+          ? initialPlayback()
+          : {}),
+      },
+    }),
+    update: (model, message) => ({
+      model:
+        message.type === 'Playback'
+          ? { ...model, ...message.state }
+          : { ...model, waiting: false, playing: false, error: true },
+    }),
+  },
+  view((model, send) => {
     const props = model.props;
     const duration = model.duration || props.duration || 0;
     const position = Math.min(duration, Math.max(0, model.position));
@@ -273,4 +275,4 @@ export const VoicePlayer = component<VoicePlayerProps, VoiceModel, VoiceMessage>
       </div>
     );
   }),
-});
+);

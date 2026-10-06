@@ -68,11 +68,9 @@ interface TgsPlayerProps {
   label: string;
 }
 
-export const TgsPlayer = component<TgsPlayerProps, { props: TgsPlayerProps }, never>({
-  identity: (props) => props.source,
-  init: (props) => ({ props }),
-  update: (model) => ({ model }),
-  view: view(({ props }) => (
+export const TgsPlayer = component<TgsPlayerProps, {}, never>(
+  { identity: (props) => props.source, init: () => ({}), update: (model) => ({ model }) },
+  view(({ props }) => (
     <div
       use={domBinding(props.source, acquireAnimation)}
       class="tgs-player"
@@ -80,4 +78,4 @@ export const TgsPlayer = component<TgsPlayerProps, { props: TgsPlayerProps }, ne
       aria-label={props.label}
     />
   )),
-});
+);

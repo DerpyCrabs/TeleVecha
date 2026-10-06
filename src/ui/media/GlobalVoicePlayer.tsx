@@ -11,8 +11,7 @@ import { formatMediaDuration } from './mediaPresentation';
 interface Props {
   player: VoicePlayback;
 }
-interface Model {
-  props: Props;
+interface State {
   state: VoicePlaybackState;
 }
 function acquire(
@@ -21,11 +20,12 @@ function acquire(
 ) {
   return input().player.subscribe(() => input().send(input().player.snapshot()));
 }
-export const GlobalVoicePlayer = component<Props, Model, VoicePlaybackState>({
-  init: (props) => ({ props, state: props.player.snapshot() }),
-  receive: (model, props) => ({ model: { ...model, props } }),
-  update: (model, state) => ({ model: { ...model, state } }),
-  view: view((model, send) => {
+export const GlobalVoicePlayer = component<Props, State, VoicePlaybackState>(
+  {
+    init: (props) => ({ state: props.player.snapshot() }),
+    update: (model, state) => ({ model: { ...model, state } }),
+  },
+  view((model, send) => {
     const { player } = model.props;
     const state = model.state;
     return (
@@ -103,4 +103,4 @@ export const GlobalVoicePlayer = component<Props, Model, VoicePlaybackState>({
       </div>
     );
   }),
-});
+);

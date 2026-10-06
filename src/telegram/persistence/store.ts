@@ -25,6 +25,9 @@ const PINNED_MESSAGES_KEY_PREFIX = 'pinned-messages:';
 const GROUP_MEMBERS_KEY_PREFIX = 'group-members:';
 const RESOURCE_METADATA_KEY_PREFIX = 'resource-metadata:';
 
+// Wallpaper IDs identify immutable appearance assets, not disposable message media.
+const isPersistentAppearanceAsset = (key: string) => key.startsWith('wallpaper:');
+
 export class CacheStoreError extends Schema.TaggedError<CacheStoreError>()('CacheStoreError', {
   operation: Schema.String,
   message: Schema.String,
@@ -891,18 +894,15 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
     return (yield* idbRequest(() => databaseHandle.get('files', key)))?.blob;
   });
   const saveBlob = Effect.fn('IndexedDbCacheStore.saveBlob')(function* (key: string, blob: Blob) {
-    const database = databaseHandle;
-    const record = { key, blob, savedAt: Date.now() };
-    yield* idbRequest(() => database.put('files', record)).pipe(
+    yield* writeBlob(key, blob).pipe(
       Effect.catch((error) =>
         Effect.gen(function* () {
           if (!isQuotaError(error)) return yield* Effect.fail(error);
           yield* evictOldestBlobs(QUOTA_BLOB_EVICTION_COUNT);
-          yield* idbRequest(() => database.put('files', record));
+          yield* writeBlob(key, blob);
         }),
       ),
     );
-    yield* pruneBlobCache();
   });
   const deleteBlob = Effect.fn('IndexedDbCacheStore.deleteBlob')(function* (key: string) {
     yield* idbRequest(() => databaseHandle.delete('files', key));
@@ -1025,27 +1025,42 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
           const records = yield* request(transaction.store.getAll());
           records.sort((left, right) => left.savedAt - right.savedAt);
           yield* Effect.all(
-            records.slice(0, count).map(({ key }) => request(transaction.store.delete(key))),
+            records
+              .filter(({ key }) => !isPersistentAppearanceAsset(key))
+              .slice(0, count)
+              .map(({ key }) => request(transaction.store.delete(key))),
           );
         }),
     );
   });
-  const pruneBlobCache = Effect.fn('IndexedDbCacheStore.pruneBlobCache')(function* () {
+  const writeBlob = Effect.fn('IndexedDbCacheStore.writeBlob')(function* (key: string, blob: Blob) {
     const database = databaseHandle;
     yield* runAtomicWrite(
       () => database.transaction('files', 'readwrite'),
       ({ transaction, request }) =>
         Effect.gen(function* () {
           const records = yield* request(transaction.store.getAll());
-          records.sort((left, right) => right.savedAt - left.savedAt);
+          // Serialize save order with the write, including saves from other connections.
+          // Wall-clock milliseconds alone tie frequently and can move backwards.
+          const savedAt = records.reduce(
+            (latest, record) => Math.max(latest, record.savedAt + 1),
+            Date.now(),
+          );
+          const record = { key, blob, savedAt };
+          yield* request(transaction.store.put(record));
+          const candidates = [record, ...records.filter((existing) => existing.key !== key)];
+          candidates.sort((left, right) => right.savedAt - left.savedAt);
           let retainedBytes = 0;
           const removals: string[] = [];
-          for (const [index, record] of records.entries()) {
+          let retainedCount = 0;
+          for (const record of candidates) {
+            if (isPersistentAppearanceAsset(record.key)) continue;
             const nextBytes = retainedBytes + record.blob.size;
-            if (index >= MAX_CACHED_BLOBS || nextBytes > MAX_CACHED_BLOB_BYTES) {
+            if (retainedCount >= MAX_CACHED_BLOBS || nextBytes > MAX_CACHED_BLOB_BYTES) {
               removals.push(record.key);
             } else {
               retainedBytes = nextBytes;
+              retainedCount += 1;
             }
           }
           yield* Effect.all(removals.map((key) => request(transaction.store.delete(key))));

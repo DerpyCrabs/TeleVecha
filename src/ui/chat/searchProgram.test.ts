@@ -1,6 +1,5 @@
 import { Context, Effect } from 'effect';
-import { uiRuntime } from 'effectweb';
-import { makeQueryCache } from '@effectweb/query';
+import { queryCache } from '@effectweb/query';
 import { describe, expect, it } from 'vitest';
 import type {
   TelegramMessage,
@@ -40,16 +39,14 @@ const unused = () => Effect.die('unused');
 
 /** A search host backed by a real query cache, as in the app. */
 function hostFor(search: Search): SearchPanelProps {
-  const cache = makeQueryCache(
-    uiRuntime(
-      Context.make(QueryLoaders, {
-        searchMessages: search,
-        reactionPeople: unused,
-        customEmoji: unused,
-        previewPhoto: unused,
-        sharedMedia: unused,
-      }),
-    ),
+  const cache = queryCache(
+    Context.make(QueryLoaders, {
+      searchMessages: search,
+      reactionPeople: unused,
+      customEmoji: unused,
+      previewPhoto: unused,
+      sharedMedia: unused,
+    }),
   );
   const sources = querySources(cache);
   return {

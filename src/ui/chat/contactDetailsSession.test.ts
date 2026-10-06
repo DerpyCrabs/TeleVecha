@@ -1,10 +1,9 @@
 import { Context, Effect } from 'effect';
-import { uiRuntime } from 'effectweb';
 import { expect, it, vi } from 'vitest';
 import { permissionsForDialog } from '../../telegram/core/chatPermissions';
 import type { TelegramDialog, TelegramGroupMemberPage } from '../../telegram/types';
 import { createContactDetailsSession, GroupMemberSource } from './contactDetailsSession';
-import { makeQueryCache } from '@effectweb/query';
+import { queryCache } from '@effectweb/query';
 
 it('clears member pages synchronously on cache reset and cancels their pending continuation', async () => {
   const dialog: TelegramDialog = {
@@ -40,7 +39,7 @@ it('clears member pages synchronously on cache reset and cancels their pending c
             return Effect.sync(cancelled);
           }),
   };
-  const cache = makeQueryCache(uiRuntime(Context.make(GroupMemberSource, members)));
+  const cache = queryCache(Context.make(GroupMemberSource, members));
   const session = createContactDetailsSession(
     {
       source: {

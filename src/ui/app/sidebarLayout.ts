@@ -1,4 +1,4 @@
-import { program, lifetime } from 'effectweb';
+import { program, modelOwner } from 'effectweb';
 const WIDTH_STORAGE_KEY = 'televecha:left-sidebar-width';
 const DETAILS_STORAGE_KEY = 'televecha:details-open';
 const DEFAULT_WIDTH = 320;
@@ -26,7 +26,7 @@ function storedDetailsOpen() {
 
 /** Owns responsive drawer state, persisted width, and pointer/keyboard resizing. */
 export function createSidebarLayout(options: { captureConversationAnchor: () => void }) {
-  const scope = lifetime();
+  const scope = modelOwner({});
   type SidebarLayoutModel = {
     detailsOpen: boolean;
     viewportWidth: number;

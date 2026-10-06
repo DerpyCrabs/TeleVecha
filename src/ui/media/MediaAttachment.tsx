@@ -1,4 +1,4 @@
-import { commandSlot, actionCommand, component, domBinding, view } from 'effectweb';
+import { component, domBinding, view } from 'effectweb';
 import { Cause, Effect, Queue, Stream } from 'effect';
 import type { ChatMessage } from '../../domain/models';
 import type { TelegramTransferProgress } from '../../telegram/types';
@@ -19,10 +19,10 @@ import {
   formatMediaSize,
   mediaPresentation,
 } from './mediaPresentation';
-const commandDisplay = commandSlot('display');
-const commandOriginal = commandSlot('original');
-const commandDownload = commandSlot('download');
-const commandOpen = commandSlot('open');
+const commandDisplay = 'display';
+const commandOriginal = 'original';
+const commandDownload = 'download';
+const commandOpen = 'open';
 
 interface MediaAttachmentProps {
   voiceControl?: VoiceControl | undefined;
@@ -49,9 +49,8 @@ export interface MediaPreview {
   url: string;
   origin?: DOMRect | undefined;
 }
-type MediaAttachmentModel = {
+type MediaAttachmentState = {
   identity: string;
-  props: MediaAttachmentProps;
   url: string;
   previousImageUrl: string;
   loading: boolean;
@@ -63,6 +62,7 @@ type MediaAttachmentModel = {
   spoilerRevealed: boolean;
   downloadProgress: number | undefined;
 };
+type MediaAttachmentModel = MediaAttachmentState & { readonly props: MediaAttachmentProps };
 type MediaAttachmentMessage =
   | { type: 'Load' }
   | { type: 'Original'; purpose: Purpose; origin?: DOMRect | undefined }
@@ -154,7 +154,7 @@ function startDisplay(
   if (model.url || model.loading) return { model };
   return {
     model: { ...model, loading: true, error: '', downloadProgress: 0 },
-    commands: [{ policy: 'replace', slot: commandDisplay, stream: transfer(model.props, true) }],
+    commands: [{ policy: 'replace', key: commandDisplay, stream: transfer(model.props, true) }],
   };
 }
 function automatic(model: MediaAttachmentModel) {
@@ -221,177 +221,177 @@ const playbackMount = (playing: boolean, source: string) =>
   domBinding({ playing, source }, acquirePlayback);
 export const MediaAttachment = component<
   MediaAttachmentProps,
-  MediaAttachmentModel,
+  MediaAttachmentState,
   MediaAttachmentMessage
->({
-  init: (props) => ({
-    props,
-    identity: identity(props),
-    url: cachedDisplayUrl(props),
-    previousImageUrl: '',
-    loading: false,
-    error: '',
-    standalonePreview: undefined,
-    inlineVideoUrl: '',
-    inlineVideoPlaying: false,
-    nearViewport: false,
-    spoilerRevealed: false,
-    downloadProgress: undefined,
-  }),
-  receive: (model, props) => {
-    const key = identity(props);
-    const changed = key !== model.identity;
-    const next = changed
-      ? {
-          ...model,
-          props,
-          identity: key,
-          url: cachedDisplayUrl(props),
-          previousImageUrl:
-            props.messageKey !== undefined &&
-            props.messageKey === model.props.messageKey &&
-            mediaPresentation(props.media).display === 'image' &&
-            mediaPresentation(model.props.media).display === 'image' &&
-            (!model.props.media.spoiler || model.spoilerRevealed) &&
-            !props.media.spoiler
-              ? model.url || model.previousImageUrl
-              : '',
-          error: '',
-          loading: false,
-          downloadProgress: undefined,
-          spoilerRevealed: false,
-          inlineVideoUrl: '',
-          inlineVideoPlaying: false,
-          standalonePreview: undefined,
-        }
-      : { ...model, props };
-    const transition = automatic(next);
-    return changed ? { ...transition, cancel: [commandDisplay, commandOriginal] } : transition;
-  },
-  update: (model, message) => {
-    switch (message.type) {
-      case 'Load':
-        return startDisplay({ ...model, error: '' });
-      case 'Cancel':
-        return {
-          model: { ...model, loading: false, downloadProgress: undefined },
-          cancel: [commandDisplay, commandOriginal],
-        };
-      case 'StopHover':
-        return { model: { ...model, inlineVideoPlaying: false } };
-      case 'PreviewOpened':
-        return {
-          model: message.standalone ? { ...model, standalonePreview: message.standalone } : model,
-        };
-      case 'Original': {
-        const kind = mediaPresentation(model.props.media).preview;
-        if (
-          (message.purpose === 'download' && model.props.protected) ||
-          (message.purpose === 'preview' &&
-            (!kind ||
-              model.props.decorative ||
-              (model.props.media.spoiler && !model.spoilerRevealed)))
-        )
-          return { model };
-        if (message.purpose === 'hover' && model.inlineVideoUrl)
-          return { model: { ...model, inlineVideoPlaying: true } };
-        return {
-          model: {
+>(
+  {
+    init: (props) => ({
+      identity: identity(props),
+      url: cachedDisplayUrl(props),
+      previousImageUrl: '',
+      loading: false,
+      error: '',
+      standalonePreview: undefined,
+      inlineVideoUrl: '',
+      inlineVideoPlaying: false,
+      nearViewport: false,
+      spoilerRevealed: false,
+      downloadProgress: undefined,
+    }),
+    receive: (model, previous) => {
+      const key = identity(model.props);
+      const changed = key !== model.identity;
+      const next = changed
+        ? {
             ...model,
-            loading: true,
+            identity: key,
+            url: cachedDisplayUrl(model.props),
+            previousImageUrl:
+              model.props.messageKey !== undefined &&
+              model.props.messageKey === previous.messageKey &&
+              mediaPresentation(model.props.media).display === 'image' &&
+              mediaPresentation(previous.media).display === 'image' &&
+              (!previous.media.spoiler || model.spoilerRevealed) &&
+              !model.props.media.spoiler
+                ? model.url || model.previousImageUrl
+                : '',
             error: '',
-            downloadProgress: 0,
-            inlineVideoPlaying: message.purpose === 'hover' || model.inlineVideoPlaying,
-          },
-          commands: [
-            {
-              policy: 'replace',
-              slot: commandOriginal,
-              stream: transfer(model.props, false, message.purpose, message.origin),
+            loading: false,
+            downloadProgress: undefined,
+            spoilerRevealed: false,
+            inlineVideoUrl: '',
+            inlineVideoPlaying: false,
+            standalonePreview: undefined,
+          }
+        : model;
+      const transition = automatic(next);
+      return changed ? { ...transition, cancel: [commandDisplay, commandOriginal] } : transition;
+    },
+    update: (model, message) => {
+      switch (message.type) {
+        case 'Load':
+          return startDisplay({ ...model, error: '' });
+        case 'Cancel':
+          return {
+            model: { ...model, loading: false, downloadProgress: undefined },
+            cancel: [commandDisplay, commandOriginal],
+          };
+        case 'StopHover':
+          return { model: { ...model, inlineVideoPlaying: false } };
+        case 'PreviewOpened':
+          return {
+            model: message.standalone ? { ...model, standalonePreview: message.standalone } : model,
+          };
+        case 'Original': {
+          const kind = mediaPresentation(model.props.media).preview;
+          if (
+            (message.purpose === 'download' && model.props.protected) ||
+            (message.purpose === 'preview' &&
+              (!kind ||
+                model.props.decorative ||
+                (model.props.media.spoiler && !model.spoilerRevealed)))
+          )
+            return { model };
+          if (message.purpose === 'hover' && model.inlineVideoUrl)
+            return { model: { ...model, inlineVideoPlaying: true } };
+          return {
+            model: {
+              ...model,
+              loading: true,
+              error: '',
+              downloadProgress: 0,
+              inlineVideoPlaying: message.purpose === 'hover' || model.inlineVideoPlaying,
             },
-          ],
-        };
-      }
-      case 'OriginalLoaded': {
-        const next = { ...model, loading: false, downloadProgress: undefined };
-        if (message.purpose === 'hover') return { model: { ...next, inlineVideoUrl: message.url } };
-        const props = model.props;
-        if (message.purpose === 'download')
+            commands: [
+              {
+                policy: 'replace',
+                key: commandOriginal,
+                stream: transfer(model.props, false, message.purpose, message.origin),
+              },
+            ],
+          };
+        }
+        case 'OriginalLoaded': {
+          const next = { ...model, loading: false, downloadProgress: undefined };
+          if (message.purpose === 'hover')
+            return { model: { ...next, inlineVideoUrl: message.url } };
+          const props = model.props;
+          if (message.purpose === 'download')
+            return {
+              model: next,
+              commands: [
+                {
+                  key: commandDownload,
+                  policy: 'replace',
+                  effect: Effect.sync(() => {
+                    if (!props.protected) saveMediaUrl(message.url, props.media.name);
+                  }),
+                },
+              ],
+            };
+          const kind = mediaPresentation(props.media).preview;
+          if (!kind) return { model: next };
+          const preview: MediaPreview = {
+            kind,
+            name: props.media.name,
+            url: message.url,
+            origin: message.origin,
+          };
           return {
             model: next,
             commands: [
-              actionCommand(
-                commandDownload,
-                () =>
-                  Effect.sync(() => {
-                    if (!props.protected) saveMediaUrl(message.url, props.media.name);
-                  }),
-                'replace',
-              ),
+              {
+                policy: 'replace',
+                key: commandOpen,
+                effect: Effect.sync((): MediaAttachmentMessage => ({
+                  type: 'PreviewOpened',
+                  standalone:
+                    props.onOpenPreview && props.onOpenPreview(preview) !== false
+                      ? undefined
+                      : preview,
+                })),
+              },
             ],
           };
-        const kind = mediaPresentation(props.media).preview;
-        if (!kind) return { model: next };
-        const preview: MediaPreview = {
-          kind,
-          name: props.media.name,
-          url: message.url,
-          origin: message.origin,
-        };
-        return {
-          model: next,
-          commands: [
-            {
-              policy: 'replace',
-              slot: commandOpen,
-              effect: Effect.sync((): MediaAttachmentMessage => ({
-                type: 'PreviewOpened',
-                standalone:
-                  props.onOpenPreview && props.onOpenPreview(preview) !== false
-                    ? undefined
-                    : preview,
-              })),
+        }
+        case 'Url':
+          return {
+            model: {
+              ...model,
+              url: message.value,
+              previousImageUrl: '',
+              loading: false,
+              downloadProgress: undefined,
             },
-          ],
-        };
+          };
+        case 'Loading':
+          return { model: { ...model, loading: message.value } };
+        case 'Error':
+          return {
+            model: {
+              ...model,
+              error: message.value,
+              previousImageUrl: '',
+              loading: false,
+              downloadProgress: undefined,
+            },
+          };
+        case 'StandalonePreview':
+          return { model: { ...model, standalonePreview: message.value } };
+        case 'InlineVideoUrl':
+          return { model: { ...model, inlineVideoUrl: message.value } };
+        case 'InlineVideoPlaying':
+          return { model: { ...model, inlineVideoPlaying: message.value } };
+        case 'NearViewport':
+          return automatic({ ...model, nearViewport: message.value });
+        case 'SpoilerRevealed':
+          return { model: { ...model, spoilerRevealed: message.value } };
+        case 'DownloadProgress':
+          return { model: { ...model, downloadProgress: message.value } };
       }
-      case 'Url':
-        return {
-          model: {
-            ...model,
-            url: message.value,
-            previousImageUrl: '',
-            loading: false,
-            downloadProgress: undefined,
-          },
-        };
-      case 'Loading':
-        return { model: { ...model, loading: message.value } };
-      case 'Error':
-        return {
-          model: {
-            ...model,
-            error: message.value,
-            previousImageUrl: '',
-            loading: false,
-            downloadProgress: undefined,
-          },
-        };
-      case 'StandalonePreview':
-        return { model: { ...model, standalonePreview: message.value } };
-      case 'InlineVideoUrl':
-        return { model: { ...model, inlineVideoUrl: message.value } };
-      case 'InlineVideoPlaying':
-        return { model: { ...model, inlineVideoPlaying: message.value } };
-      case 'NearViewport':
-        return automatic({ ...model, nearViewport: message.value });
-      case 'SpoilerRevealed':
-        return { model: { ...model, spoilerRevealed: message.value } };
-      case 'DownloadProgress':
-        return { model: { ...model, downloadProgress: message.value } };
-    }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const presentation = mediaPresentation(props.media);
     const isImage =
@@ -726,4 +726,4 @@ export const MediaAttachment = component<
       </div>
     );
   }),
-});
+);

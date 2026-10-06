@@ -1,5 +1,5 @@
 import { Context, Effect } from 'effect';
-import { lifetime, available } from 'effectweb';
+import { modelOwner, available } from 'effectweb';
 import type { SessionContext } from '../app/sessionContext';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type { TelegramChatAppearance, TelegramDialog, TelegramPeer } from '../../telegram/types';
@@ -80,7 +80,7 @@ export function createChatAppearanceSession(
   },
   context: SessionContext<ChatAppearanceSource>,
 ) {
-  const scope = lifetime();
+  const scope = modelOwner({});
   const appearanceResource = observeQuery(
     scope,
     context.cache,
@@ -163,7 +163,7 @@ export function createChatAppearanceSession(
     assetResource.select(current?.hasFile ? current.id : undefined);
     if (reconnected) {
       appearanceResource.refresh();
-      assetResource.refresh();
+      if (!available(assetResource.read())) assetResource.refresh();
     }
     const blob = available(assetResource.read());
     if (blob !== previousBlob) {

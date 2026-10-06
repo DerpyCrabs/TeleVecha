@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 
 import { Effect, Exit, Scope } from 'effect';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createIndexedDbCacheStore } from './store';
 import type { CachedDialog, CachedMessage, PendingSend, TelegramPeer } from '../types';
@@ -22,6 +22,7 @@ async function openStore(name: string) {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(scopes.splice(0).map((scope) => run(Scope.close(scope, Exit.void))));
 });
 
@@ -718,6 +719,44 @@ describe('IndexedDbCacheStore', () => {
     }
 
     expect(outcome).toBe('settled');
+  });
+
+  it('keeps immutable wallpapers across media eviction and reopening until explicitly cleared', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const name = databaseName();
+    const store = await openStore(name);
+    await run(store.saveBlob('wallpaper:chat-pattern', new Blob(['pattern'])));
+    for (let index = 0; index < 257; index += 1) {
+      await run(store.saveBlob(`media:${index}`, new Blob(['x'])));
+    }
+    const reopened = await openStore(name);
+    expect(await (await run(reopened.loadBlob('wallpaper:chat-pattern')))?.text()).toBe('pattern');
+    expect(await run(reopened.loadBlob('media:0'))).toBeUndefined();
+    expect(await run(reopened.loadBlob('media:256'))).toBeDefined();
+    await run(reopened.clearCacheData());
+    expect(await run(reopened.loadBlob('wallpaper:chat-pattern'))).toBeUndefined();
+  });
+
+  it('preserves save order across connections, overwrites, and a backwards clock', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const name = databaseName();
+    const store = await openStore(name);
+    for (let index = 0; index < 256; index += 1) {
+      await run(store.saveBlob(`media:${index}`, new Blob(['old'])));
+    }
+    const reopened = await openStore(name);
+    clock.mockReturnValue(500);
+    await run(reopened.saveBlob('media:0', new Blob(['refreshed'])));
+    await Promise.all([
+      run(store.saveBlob('new:a', new Blob(['a']))),
+      run(reopened.saveBlob('new:b', new Blob(['b']))),
+    ]);
+    expect(await (await run(store.loadBlob('media:0')))?.text()).toBe('refreshed');
+    expect(await run(store.loadBlob('media:1'))).toBeUndefined();
+    expect(await run(store.loadBlob('media:2'))).toBeUndefined();
+    expect(await run(store.loadBlob('media:3'))).toBeDefined();
+    expect(await run(store.loadBlob('new:a'))).toBeDefined();
+    expect(await run(store.loadBlob('new:b'))).toBeDefined();
   });
 
   it('bounds the binary cache by entry count', async () => {

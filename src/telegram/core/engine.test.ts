@@ -81,13 +81,15 @@ describe('MessagingEngine', () => {
     ));
 
   it.each([
-    { themed: false, imageCached: false },
-    { themed: true, imageCached: false },
-    { themed: false, imageCached: true },
-    { themed: true, imageCached: true },
+    { themed: false, imageCached: false, stale: false },
+    { themed: false, imageCached: false, stale: true },
+    { themed: true, imageCached: false, stale: false },
+    { themed: true, imageCached: false, stale: true },
+    { themed: false, imageCached: true, stale: false },
+    { themed: true, imageCached: true, stale: false },
   ])(
-    'restores wallpaper download references after reload (themed=$themed, imageCached=$imageCached)',
-    ({ themed, imageCached }) =>
+    'restores wallpaper download references after reload (themed=$themed, imageCached=$imageCached, stale=$stale)',
+    ({ themed, imageCached, stale }) =>
       Effect.runPromise(
         withEngine((engine, transport, cache) =>
           Effect.gen(function* () {
@@ -122,6 +124,16 @@ describe('MessagingEngine', () => {
               : { wallpaper };
             // Model persisted metadata with an empty transport document map after reload.
             yield* cache.saveMetadata(`chat-appearance:${peer.id}`, appearance);
+            if (stale) {
+              const loadMetadata = cache.loadMetadata;
+              vi.spyOn(cache, 'loadMetadata').mockImplementation((key) =>
+                loadMetadata(key).pipe(
+                  Effect.map((entry) =>
+                    entry ? { ...entry, savedAt: Date.now() - 5 * 24 * 60 * 60 * 1_000 } : entry,
+                  ),
+                ),
+              );
+            }
             const image = new Blob(['pattern'], { type: 'image/png' });
             if (imageCached) yield* cache.saveBlob(`wallpaper:${wallpaper.id}`, image);
             let documentAvailable = false;
@@ -145,6 +157,14 @@ describe('MessagingEngine', () => {
             expect(yield* cache.loadBlob(`wallpaper:${wallpaper.id}`)).toEqual(image);
             yield* engine.getChatAppearance(peer);
             expect(getAppearance).toHaveBeenCalledTimes(imageCached ? 0 : 1);
+            // Simulate losing the persisted asset and transport references after
+            // this session has already memoized the appearance.
+            yield* cache.deleteBlob(`wallpaper:${wallpaper.id}`);
+            documentAvailable = false;
+            yield* engine.getChatAppearance(peer);
+            expect(yield* engine.downloadWallpaper(wallpaper.id)).toEqual(image);
+            expect(getAppearance).toHaveBeenCalledTimes(imageCached ? 1 : 2);
+            expect(download).toHaveBeenCalledTimes(imageCached ? 1 : 2);
           }),
         ),
       ),

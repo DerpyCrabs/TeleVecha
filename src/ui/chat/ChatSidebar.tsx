@@ -1,4 +1,4 @@
-import { list, commandSlot, effectCommand, component, domBinding, sequence, view } from 'effectweb';
+import { list, component, domBinding, sequence, view } from 'effectweb';
 import { cachedLoad } from '../shared/cachedLoad';
 import type { Snapshot } from 'effectweb';
 import { Effect } from 'effect';
@@ -19,13 +19,13 @@ import Search from '@effectweb/lucide/icons/search';
 import Settings from '@effectweb/lucide/icons/settings';
 import Trash2 from '@effectweb/lucide/icons/trash-2';
 import type { MediaAssets } from '../media/mediaAssets';
-import type { Command, CommandSlot } from 'effectweb';
+import type { Command, RunKey } from 'effectweb';
 import type { Send, Transition } from 'effectweb';
 import { Avatar } from '../shared/Avatar';
 import type { ChatDirectory } from './chatDirectory';
 import { describeUnreadCount, formatUnreadCount, normalizeUnreadCount } from './unreadCount';
-const commandPeers = commandSlot('peers');
-const commandContextUser = commandSlot('context-user');
+const commandPeers = 'peers';
+const commandContextUser = 'context-user';
 
 type ChatFilter = 'all' | 'unread' | 'groups' | 'archived';
 const CHAT_ROW_HEIGHT = 64;
@@ -71,20 +71,20 @@ interface ChatSidebarProps {
   openSettings: () => void;
 }
 type ContextUser = NonNullable<ReturnType<ChatDirectory['cachedDetails']>>;
-type ChatSidebarModel = {
+type ChatSidebarState = {
   peers: TelegramPeerSearchResult[];
   peersLoading: boolean;
   peersError: boolean;
   searchKey: string;
   contextUser: ContextUser | undefined;
   contextUserKey: string;
-  props: ChatSidebarProps;
   query: string;
   filter: ChatFilter;
   listScrollTop: number;
   listViewportHeight: number;
   contextMenu: { chatId: string; x: number; y: number } | undefined;
 };
+type ChatSidebarModel = ChatSidebarState & { readonly props: ChatSidebarProps };
 type ChatSidebarMessage =
   | { type: 'RetrySearch' }
   | { type: 'Peers'; values: TelegramPeerSearchResult[]; error: boolean }
@@ -109,46 +109,41 @@ function refreshSidebar(
       ? model.contextMenu.chatId
       : '';
   const commands: Command<ChatSidebarMessage>[] = [],
-    cancel: CommandSlot[] = [];
+    cancel: RunKey[] = [];
   let next = model;
   if (retry || searchKey !== model.searchKey) {
     next = { ...next, searchKey, peers: [], peersError: false, peersLoading: Boolean(searchKey) };
     if (!searchKey) cancel.push(commandPeers);
     else
-      commands.push(
-        effectCommand(
-          commandPeers,
-          () =>
-            Effect.sleep(retry ? 0 : 250).pipe(
-              Effect.andThen(Effect.suspend(() => model.props.directory.search(term))),
-            ),
-          {
-            policy: 'replace',
+      commands.push({
+        key: commandPeers,
+        policy: 'replace',
+        effect: Effect.sleep(retry ? 0 : 250).pipe(
+          Effect.andThen(Effect.suspend(() => model.props.directory.search(term))),
+          Effect.matchCause({
             onSuccess: (values) => ({ type: 'Peers', values, error: false }) as const,
             onFailure: () => ({ type: 'Peers', values: [], error: true }) as const,
-          },
+          }),
         ),
-      );
+      });
   }
   if (userKey !== model.contextUserKey) {
     next = { ...next, contextUserKey: userKey, contextUser: undefined };
     if (!userKey) cancel.push(commandContextUser);
     else
-      commands.push(
-        effectCommand(
-          commandContextUser,
-          () =>
-            cachedLoad(
-              () => model.props.directory.cachedDetails(userKey),
-              () => model.props.directory.details(userKey),
-            ),
-          {
-            policy: 'replace',
+      commands.push({
+        key: commandContextUser,
+        policy: 'replace',
+        effect: cachedLoad(
+          () => model.props.directory.cachedDetails(userKey),
+          () => model.props.directory.details(userKey),
+        ).pipe(
+          Effect.matchCause({
             onSuccess: (value) => ({ type: 'ContextUser', value }) as const,
             onFailure: () => ({ type: 'ContextUser', value: undefined }) as const,
-          },
+          }),
         ),
-      );
+      });
   }
   return { model: next, commands, cancel };
 }
@@ -235,55 +230,56 @@ function acquireList(element: HTMLDivElement, input: () => Snapshot<ListInput>) 
   };
 }
 const listMount = (input: ListInput) => domBinding(input, acquireList);
-export const ChatSidebar = component<ChatSidebarProps, ChatSidebarModel, ChatSidebarMessage>({
-  init: (props) => ({
-    props,
-    peers: [],
-    peersLoading: false,
-    peersError: false,
-    searchKey: '',
-    contextUser: undefined,
-    contextUserKey: '',
-    query: '',
-    filter: 'all',
-    listScrollTop: 0,
-    listViewportHeight: 640,
-    contextMenu: undefined,
-  }),
-  receive: (model, props) =>
-    refreshSidebar({
-      ...model,
-      props,
-      contextMenu: props.activeChatId !== model.props.activeChatId ? undefined : model.contextMenu,
+export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSidebarMessage>(
+  {
+    init: () => ({
+      peers: [],
+      peersLoading: false,
+      peersError: false,
+      searchKey: '',
+      contextUser: undefined,
+      contextUserKey: '',
+      query: '',
+      filter: 'all',
+      listScrollTop: 0,
+      listViewportHeight: 640,
+      contextMenu: undefined,
     }),
-  update: (model, message) => {
-    switch (message.type) {
-      case 'RetrySearch':
-        return refreshSidebar(model, true);
-      case 'Peers':
-        return {
-          model: {
-            ...model,
-            peers: message.values,
-            peersError: message.error,
-            peersLoading: false,
-          },
-        };
-      case 'ContextUser':
-        return { model: { ...model, contextUser: message.value } };
-      case 'Query':
-        return refreshSidebar({ ...model, query: message.value, listScrollTop: 0 });
-      case 'Filter':
-        return refreshSidebar({ ...model, filter: message.value, listScrollTop: 0 });
-      case 'ListScrollTop':
-        return { model: { ...model, listScrollTop: message.value } };
-      case 'ListViewportHeight':
-        return { model: { ...model, listViewportHeight: message.value } };
-      case 'ContextMenu':
-        return refreshSidebar({ ...model, contextMenu: message.value });
-    }
+    receive: (model, previous) =>
+      refreshSidebar({
+        ...model,
+        contextMenu:
+          model.props.activeChatId !== previous.activeChatId ? undefined : model.contextMenu,
+      }),
+    update: (model, message) => {
+      switch (message.type) {
+        case 'RetrySearch':
+          return refreshSidebar(model, true);
+        case 'Peers':
+          return {
+            model: {
+              ...model,
+              peers: message.values,
+              peersError: message.error,
+              peersLoading: false,
+            },
+          };
+        case 'ContextUser':
+          return { model: { ...model, contextUser: message.value } };
+        case 'Query':
+          return refreshSidebar({ ...model, query: message.value, listScrollTop: 0 });
+        case 'Filter':
+          return refreshSidebar({ ...model, filter: message.value, listScrollTop: 0 });
+        case 'ListScrollTop':
+          return { model: { ...model, listScrollTop: message.value } };
+        case 'ListViewportHeight':
+          return { model: { ...model, listViewportHeight: message.value } };
+        case 'ContextMenu':
+          return refreshSidebar({ ...model, contextMenu: message.value });
+      }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const runInBackground = (task: Promise<unknown>) => {
       void task.catch(() => undefined);
@@ -740,4 +736,4 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarModel, ChatSid
       </aside>
     );
   }),
-});
+);

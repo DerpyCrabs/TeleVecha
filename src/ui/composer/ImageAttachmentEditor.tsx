@@ -1,4 +1,5 @@
-import { list, Portal, defineTasks, resourceError, sequence, view } from 'effectweb';
+import { list, Portal, resourceError, sequence, view, component, ownerOf } from 'effectweb';
+import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import { Effect } from 'effect';
 import Crop from '@effectweb/lucide/icons/crop';
 import RotateCcw from '@effectweb/lucide/icons/rotate-ccw';
@@ -20,35 +21,36 @@ const crops = [
   ['4:3', '4:3'],
   ['16:9', '16:9'],
 ] as const;
-const editing = defineTasks({
-  init: (_props: ImageAttachmentEditorProps) => ({
-    rotation: 0 as ImageRotation,
-    crop: 'original' as CropAspect,
-  }),
-  identity: (props) => props.attachment.id,
-}).tasks({
-  apply: {
-    policy: 'drop',
-    run: (model) =>
-      transformImageFile(model.props.attachment.file, model.rotation, model.crop).pipe(
-        Effect.tap((file) =>
-          Effect.sync(() => {
-            model.props.apply(file);
-            model.props.close();
-          }),
-        ),
-      ),
+
+export const ImageAttachmentEditor = component(
+  {
+    init: (_props: ImageAttachmentEditorProps) => ({
+      rotation: 0 as ImageRotation,
+      crop: 'original' as CropAspect,
+      applied: AsyncResult.initial() as AsyncResult.AsyncResult<File, unknown>,
+    }),
+    identity: (props) => props.attachment.id,
   },
-});
-export const ImageAttachmentEditor = editing.view(
-  view((model, send) => {
+  view((model, patch) => {
     const props = model.props;
-    const controls = editing.controls(send);
-    const error = model.tasks.apply.waiting ? '' : resourceError(model.tasks.apply);
+    const error = model.applied.waiting ? '' : resourceError(model.applied);
     const rotate = (step: number) => {
       const value = (model.rotation + step + 360) % 360;
-      controls.patch({ rotation: value as ImageRotation });
+      patch({ rotation: value as ImageRotation });
     };
+    const apply = () =>
+      ownerOf(patch).task(
+        'applied',
+        transformImageFile(props.attachment.file, model.rotation, model.crop).pipe(
+          Effect.tap((file) =>
+            Effect.sync(() => {
+              props.apply(file);
+              props.close();
+            }),
+          ),
+        ),
+        'drop',
+      );
     return (
       <Portal>
         <div
@@ -100,7 +102,7 @@ export const ImageAttachmentEditor = editing.view(
                     <button
                       type="button"
                       aria-pressed={model.crop === value}
-                      onClick={() => controls.patch({ crop: value })}
+                      onClick={() => patch({ crop: value })}
                     >
                       {label}
                     </button>
@@ -120,10 +122,10 @@ export const ImageAttachmentEditor = editing.view(
               <button
                 type="button"
                 class="primary"
-                disabled={model.tasks.apply.waiting}
-                onClick={() => controls.run('apply')}
+                disabled={model.applied.waiting}
+                onClick={apply}
               >
-                {model.tasks.apply.waiting ? 'Applying…' : 'Apply'}
+                {model.applied.waiting ? 'Applying…' : 'Apply'}
               </button>
             </footer>
           </section>

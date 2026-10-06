@@ -1,11 +1,11 @@
 import type { TelegramPeer, TelegramSearchOffset } from '../../telegram/types';
-import { projectionCache, projectionSource, sessionGroup, shareValue } from 'effectweb/advanced';
-import { lifetime, makeUiRuntime, makeProgram, domMount } from 'effectweb';
+import { projectionSource, shareValue } from 'effectweb/advanced';
+import { projectionCache, sessionGroup } from '../shared/composition';
+import { modelOwner, program, domMount } from 'effectweb';
 import { createVoicePlayback, type VoiceService, type VoiceTrack } from '../media/voicePlayback';
 import { parseTelegramLink, type TelegramLinkTarget } from '../shared/telegramLink';
 import type { CommentsState } from '../conversation/CommentsPanel';
 import { Effect } from 'effect';
-import * as Atom from 'effect/reactivity/Atom';
 import { messageTextForClipboard } from '../../domain/messageText';
 import type { ChatMessage, ChatSummary } from '../../domain/models';
 import { telegramPeerColor } from '../../domain/peerColor';
@@ -60,7 +60,7 @@ import { subscribeAtUi } from './appRuntime';
 import { createDrawerFocusSession } from './drawerFocusSession';
 import { retainPeerValue } from './retainedPeerValues';
 import { createSidebarLayout } from './sidebarLayout';
-import { makeQueryCache } from '@effectweb/query';
+import { queryCache } from '@effectweb/query';
 function whenChanged<A>(read: () => A, run: (value: A) => void) {
   let started = false,
     previous: A;
@@ -95,61 +95,66 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   const environment = props.environment;
   const { credentials, configurationError } = environment;
   const { engine, runEffect, runTask, runSharedEffect } = environment.runtime;
-  const scope = lifetime();
+  const scope = modelOwner({});
   yield* Effect.addFinalizer(() => Effect.sync(() => scope.dispose()));
-  const state = yield* makeProgram<AppControllerModel, AppControllerMessage>({
-    initial: {
-      snapshot: engine.snapshot(),
-      authOpen: engine.snapshot().phase !== 'ready',
-      activeChatId: 'empty',
-      activeConversation: undefined,
-      initialUnreadAfterId: undefined,
-      conversationLoadError: '',
-      conversationRetrying: false,
-      syncRetrying: false,
-      loggingOut: false,
-      clearingCache: false,
-      debugReportBusy: false,
-      debugReportError: '',
-      clipboardError: '',
-      settingsOpen: false,
-      selectedMessageIds: [],
-      selectionAnchor: undefined,
-      selectionAction: undefined,
-      selectionBusy: false,
-      pendingActionId: '',
-      reactionPickerMessageId: '',
-      messageContextMenu: undefined,
-      forwardingMessage: undefined,
-      searchOpen: false,
-      sharedMediaKind: undefined,
-      deleteTarget: undefined,
-      mediaViewer: undefined,
-      deleteChatTarget: undefined,
-    },
-    update: (model, message) => {
-      const changes: Partial<AppControllerModel> =
-        message.type === 'ConversationClosed'
-          ? {
-              selectedMessageIds: [],
-              selectionAnchor: undefined,
-              selectionAction: undefined,
-              activeChatId: 'empty',
-              activeConversation: undefined,
-              initialUnreadAfterId: undefined,
-              conversationLoadError: '',
-              conversationRetrying: false,
-            }
-          : message.changes;
-      return {
-        model: (Object.keys(changes) as (keyof AppControllerModel)[]).every((key) =>
-          Object.is(model[key], changes[key]),
-        )
-          ? model
-          : { ...model, ...changes },
-      };
-    },
-  });
+  const state = yield* Effect.acquireRelease(
+    Effect.sync(() =>
+      program<AppControllerModel, AppControllerMessage>({
+        initial: {
+          snapshot: engine.snapshot(),
+          authOpen: engine.snapshot().phase !== 'ready',
+          activeChatId: 'empty',
+          activeConversation: undefined,
+          initialUnreadAfterId: undefined,
+          conversationLoadError: '',
+          conversationRetrying: false,
+          syncRetrying: false,
+          loggingOut: false,
+          clearingCache: false,
+          debugReportBusy: false,
+          debugReportError: '',
+          clipboardError: '',
+          settingsOpen: false,
+          selectedMessageIds: [],
+          selectionAnchor: undefined,
+          selectionAction: undefined,
+          selectionBusy: false,
+          pendingActionId: '',
+          reactionPickerMessageId: '',
+          messageContextMenu: undefined,
+          forwardingMessage: undefined,
+          searchOpen: false,
+          sharedMediaKind: undefined,
+          deleteTarget: undefined,
+          mediaViewer: undefined,
+          deleteChatTarget: undefined,
+        },
+        update: (model, message) => {
+          const changes: Partial<AppControllerModel> =
+            message.type === 'ConversationClosed'
+              ? {
+                  selectedMessageIds: [],
+                  selectionAnchor: undefined,
+                  selectionAction: undefined,
+                  activeChatId: 'empty',
+                  activeConversation: undefined,
+                  initialUnreadAfterId: undefined,
+                  conversationLoadError: '',
+                  conversationRetrying: false,
+                }
+              : message.changes;
+          return {
+            model: (Object.keys(changes) as (keyof AppControllerModel)[]).every((key) =>
+              Object.is(model[key], changes[key]),
+            )
+              ? model
+              : { ...model, ...changes },
+          };
+        },
+      }),
+    ),
+    (running) => running.close(),
+  );
   type AppControllerModel = {
     snapshot: EngineSnapshot;
     authOpen: boolean;
@@ -232,7 +237,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
           Effect.fail(new Error('This chat is unavailable.')),
       ),
   };
-  const queryRuntime = yield* makeUiRuntime<
+  const queryContext = yield* Effect.context<
     | ExpressionSource
     | AppearanceSource
     | ChatAppearanceSource
@@ -247,7 +252,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     Effect.provideService(ChatAppearanceSource, engine),
     Effect.provideService(BotCommandSource, engine),
   );
-  const model = makeQueryCache(queryRuntime);
+  const model = queryCache(queryContext);
   const context = { cache: model, changed };
   const presentConversation = createConversationPresenter();
   const presentDialog = createDialogPresenter();
@@ -962,7 +967,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       voicePlayback.stop();
       mediaAssets.dispose();
       await runEffect(engine.clearCache());
-      Atom.batch(() => model.resetResources());
+      model.resetResources();
       conversationRetryGeneration += 1;
       state.send({ type: 'ConversationClosed' });
       closeConversationOverlays();
@@ -1320,17 +1325,15 @@ export const createAppController = Effect.fn('createAppController')(function* (p
         const authenticated = wasUnauthorized && next.phase === 'ready';
         if (next.phase === 'unauthorized') wasUnauthorized = true;
         if (authenticated) wasUnauthorized = false;
-        Atom.batch(() => {
-          mediaAssets.confirmUploads(state.model().snapshot.pending, next.messages);
-          state.send({ type: 'Changed', changes: { snapshot: next } });
-          if (clearedAccount) {
-            voicePlayback.stop();
-            mediaAssets.dispose();
-          }
-          if (next.activePeerId)
-            voicePlayback.updateQueue(next.activePeerId, voiceTracks(next.messages));
-          if (clearedAccount || authenticated) model.resetResources();
-        });
+        mediaAssets.confirmUploads(state.model().snapshot.pending, next.messages);
+        state.send({ type: 'Changed', changes: { snapshot: next } });
+        if (clearedAccount) {
+          voicePlayback.stop();
+          mediaAssets.dispose();
+        }
+        if (next.activePeerId)
+          voicePlayback.updateQueue(next.activePeerId, voiceTracks(next.messages));
+        if (clearedAccount || authenticated) model.resetResources();
         if (next.requiresReload) {
           state.send({ type: 'Changed', changes: { authOpen: true } });
         } else if (next.phase === 'unauthorized') {

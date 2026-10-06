@@ -90,8 +90,7 @@ export interface MediaViewerProps {
   delete?: (() => void) | undefined;
   goToMessage?: (() => void) | undefined;
 }
-type MediaViewerModel = {
-  props: MediaViewerProps;
+type MediaViewerState = {
   zoom: number;
   pan: { x: number; y: number };
   menu: { x: number; y: number } | undefined;
@@ -109,22 +108,23 @@ type MediaViewerMessage =
         | { pointerId: number; startX: number; startY: number; panX: number; panY: number }
         | undefined;
     };
-export const MediaViewer = component<MediaViewerProps, MediaViewerModel, MediaViewerMessage>({
-  init: (props) => ({ props, zoom: 1, pan: { x: 0, y: 0 }, menu: undefined, dragging: undefined }),
-
-  update: (model, message) => {
-    switch (message.type) {
-      case 'Zoom':
-        return { model: { ...model, zoom: message.value } };
-      case 'Pan':
-        return { model: { ...model, pan: message.value } };
-      case 'Menu':
-        return { model: { ...model, menu: message.value } };
-      case 'Dragging':
-        return { model: { ...model, dragging: message.value } };
-    }
+export const MediaViewer = component<MediaViewerProps, MediaViewerState, MediaViewerMessage>(
+  {
+    init: () => ({ zoom: 1, pan: { x: 0, y: 0 }, menu: undefined, dragging: undefined }),
+    update: (model, message) => {
+      switch (message.type) {
+        case 'Zoom':
+          return { model: { ...model, zoom: message.value } };
+        case 'Pan':
+          return { model: { ...model, pan: message.value } };
+        case 'Menu':
+          return { model: { ...model, menu: message.value } };
+        case 'Dragging':
+          return { model: { ...model, dragging: message.value } };
+      }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const resetView = () => {
       send({ type: 'Zoom', value: 1 });
@@ -378,4 +378,4 @@ export const MediaViewer = component<MediaViewerProps, MediaViewerModel, MediaVi
       </Portal>
     );
   }),
-});
+);

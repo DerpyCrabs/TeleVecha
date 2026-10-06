@@ -2752,27 +2752,26 @@ function makeMessagingEngineModule(
     if (!telegramTransport.getChatAppearance) return undefined;
     const cacheKey = `chat-appearance:${peer.id}`;
     const cachedMetadata = yield* readMetadata<TelegramChatAppearance | undefined>(cacheKey);
-    if (
-      cachedMetadata &&
-      (!currentSnapshot().online || metadataIsFresh(cachedMetadata.savedAt, 60 * 60 * 1_000))
-    ) {
+    let missingImage = false;
+    if (cachedMetadata) {
       if (!currentSnapshot().online) return cachedMetadata.value;
-      // Appearance metadata outlives the transport's in-memory wallpaper documents.
-      // If an image is missing, reload its source chat to restore download references
-      // (chat wallpapers are not necessarily in the account wallpaper catalog).
+      // A missing immutable asset needs fresh transport references even when
+      // the appearance is already memoized in this session.
       const appearance = cachedMetadata.value;
       const wallpapers = appearance?.wallpaper
         ? [appearance.wallpaper]
         : (appearance?.theme?.settings.flatMap(({ wallpaper }) => (wallpaper ? [wallpaper] : [])) ??
           []);
-      let missingImage = false;
       for (const wallpaper of wallpapers) {
         if (wallpaper.hasFile && !(yield* cacheStore.loadBlob(`wallpaper:${wallpaper.id}`))) {
           missingImage = true;
           break;
         }
       }
-      if (!missingImage) return appearance;
+      if (!missingImage && metadataIsFresh(cachedMetadata.savedAt, 60 * 60 * 1_000)) {
+        return appearance;
+      }
+      if (missingImage) yield* resourceCache.forget(cacheKey);
     }
     let legacy: TelegramChatAppearance | undefined;
     if (!cachedMetadata) {

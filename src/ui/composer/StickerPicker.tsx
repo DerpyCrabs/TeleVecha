@@ -31,18 +31,7 @@ const StickerImage = view<StickerImageProps, never>((props, _send) => (
     class="sticker-image"
   />
 ));
-type StickerPickerModel = {
-  props: {
-    packs: TelegramStickerPack[];
-    loading: boolean;
-    query: string;
-    load: (sticker: TelegramSticker) => Effect.Effect<string, unknown>;
-    cachedUrl: (sticker: TelegramSticker) => string | undefined;
-    send: (sticker: TelegramSticker) => void;
-    enabled: boolean;
-  };
-  activePackId: string;
-};
+type StickerPickerState = { activePackId: string };
 type StickerPickerMessage = { type: 'ActivePackId'; value: string };
 export const StickerPicker = component<
   {
@@ -54,18 +43,19 @@ export const StickerPicker = component<
     send: (sticker: TelegramSticker) => void;
     enabled: boolean;
   },
-  StickerPickerModel,
+  StickerPickerState,
   StickerPickerMessage
->({
-  init: (props) => ({ props, activePackId: 'recent' }),
-
-  update: (model, message) => {
-    switch (message.type) {
-      case 'ActivePackId':
-        return { model: { ...model, activePackId: message.value } };
-    }
+>(
+  {
+    init: () => ({ activePackId: 'recent' }),
+    update: (model, message) => {
+      switch (message.type) {
+        case 'ActivePackId':
+          return { model: { ...model, activePackId: message.value } };
+      }
+    },
   },
-  view: view((model, send) => {
+  view((model, send) => {
     const props = model.props;
     const activePack = () =>
       props.packs.find(({ id }) => id === model.activePackId) ?? props.packs[0];
@@ -150,4 +140,4 @@ export const StickerPicker = component<
       </div>
     );
   }),
-});
+);

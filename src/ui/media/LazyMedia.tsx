@@ -1,10 +1,10 @@
-import type { Effect } from 'effect';
-import { commandSlot, effectCommand, component, domBinding, view } from 'effectweb';
+import { Effect } from 'effect';
+import { component, domBinding, view } from 'effectweb';
 import { cachedLoad } from '../shared/cachedLoad';
 import type { Send, Transition } from 'effectweb';
 import { TgsPlayer } from './TgsPlayer';
 import { VisibilityVideo } from './VisibilityVideo';
-const commandAsset = commandSlot('asset');
+const commandAsset = 'asset';
 
 interface Props {
   identity: string;
@@ -17,12 +17,12 @@ interface Props {
   rootSelector?: string | undefined;
   class?: string | undefined;
 }
-interface Model {
-  props: Props;
+interface State {
   visible: boolean;
   requested: string | undefined;
   source: string | undefined;
 }
+type Model = State & { readonly props: Props };
 type Message = { type: 'Visible' } | { type: 'Loaded'; source: string | undefined };
 function request(model: Model): Transition<Model, Message> {
   if (!model.visible || model.requested === model.props.identity) return { model };
@@ -30,11 +30,16 @@ function request(model: Model): Transition<Model, Message> {
   return {
     model: { ...model, requested: props.identity, source: undefined },
     commands: [
-      effectCommand(commandAsset, () => cachedLoad(props.cachedUrl, props.load), {
+      {
+        key: commandAsset,
         policy: 'replace',
-        onSuccess: (source) => ({ type: 'Loaded', source }) as const,
-        onFailure: () => ({ type: 'Loaded', source: undefined }) as const,
-      }),
+        effect: cachedLoad(props.cachedUrl, props.load).pipe(
+          Effect.matchCause({
+            onSuccess: (source) => ({ type: 'Loaded', source }) as const,
+            onFailure: () => ({ type: 'Loaded', source: undefined }) as const,
+          }),
+        ),
+      },
     ],
   };
 }
@@ -58,25 +63,21 @@ function observe(
   observer.observe(element);
   return () => observer.disconnect();
 }
-export const LazyMedia = component<Props, Model, Message>({
-  init: (props) => ({
-    props,
-    visible: Boolean(props.eager),
-    requested: undefined,
-    source: undefined,
-  }),
-  receive: (model, props) =>
-    request({
-      ...model,
-      props,
-      visible: model.visible || Boolean(props.eager),
-      source: props.identity === model.props.identity ? model.source : undefined,
-    }),
-  update: (model, message) =>
-    message.type === 'Visible'
-      ? request({ ...model, visible: true })
-      : { model: { ...model, source: message.source } },
-  view: view((model, send) => (
+export const LazyMedia = component<Props, State, Message>(
+  {
+    init: (props) => ({ visible: Boolean(props.eager), requested: undefined, source: undefined }),
+    receive: (model, previous) =>
+      request({
+        ...model,
+        visible: model.visible || Boolean(model.props.eager),
+        source: model.props.identity === previous.identity ? model.source : undefined,
+      }),
+    update: (model, message) =>
+      message.type === 'Visible'
+        ? request({ ...model, visible: true })
+        : { model: { ...model, source: message.source } },
+  },
+  view((model, send) => (
     <span
       class={model.props.class}
       use={domBinding({ send, root: model.props.rootSelector }, observe)}
@@ -99,4 +100,4 @@ export const LazyMedia = component<Props, Model, Message>({
       )}
     </span>
   )),
-});
+);

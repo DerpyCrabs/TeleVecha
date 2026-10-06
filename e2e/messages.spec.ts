@@ -231,6 +231,8 @@ test('persists the current draft and active chat across reload', async ({ page }
   await selectAlice(page);
   await chatButton(page, /Release Channel/).click();
   await expect(page.getByTestId('conversation-header')).toContainText('Release Channel');
+  // The chat enters the URL once its conversation has opened; reload only after that.
+  await expect(page).toHaveURL(/chat=c%3A202/u);
   await page.getByRole('textbox', { name: 'Message' }).fill('Persistent draft');
   await page.reload();
 

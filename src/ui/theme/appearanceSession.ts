@@ -1,5 +1,5 @@
 import { Context, Effect } from 'effect';
-import { lifetime, available, program, resourceError } from 'effectweb';
+import { modelOwner, available, program, resourceError } from 'effectweb';
 import type { SessionContext } from '../app/sessionContext';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type { TelegramWallpaper } from '../../telegram/types';
@@ -30,7 +30,7 @@ export function createAppearanceSession(
   runEffect: UiEffectRunner,
   context: SessionContext<AppearanceSource>,
 ) {
-  const scope = lifetime();
+  const scope = modelOwner({});
   type AppearanceSessionModel = {
     appearance: ThemePreferences;
     catalogRequested: boolean;
