@@ -3,7 +3,6 @@ import {
   list,
   observe,
   resourceError,
-  slot,
   view,
   type Snapshot,
   type Source,
@@ -59,7 +58,7 @@ export const GifPicker = view<{
   enabled: boolean;
   retry: () => Effect.Effect<void, unknown>;
 }>((props) => {
-  const results = slot((gifs: readonly TelegramSticker[]) => {
+  const results = (gifs: readonly TelegramSticker[]) => {
     if (!gifs.length) return <p>No GIFs found</p>;
     return list(idRows(gifs), (gif) => (
       <GifOption
@@ -70,7 +69,7 @@ export const GifPicker = view<{
         enabled={props.enabled}
       />
     ));
-  });
+  };
   const contents = () => {
     if (props.loading) return <p>Loading GIF index…</p>;
     if (props.error)
