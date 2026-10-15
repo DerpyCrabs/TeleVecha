@@ -10,7 +10,7 @@ import { MediaViewer } from '../media/MediaViewer';
 const commandPreview = 'preview';
 
 interface MessageAlbumProps {
-  messages: ChatMessage[];
+  messages: readonly ChatMessage[];
   load: (
     message: ChatMessage,
     progress?: TelegramTransferProgress,

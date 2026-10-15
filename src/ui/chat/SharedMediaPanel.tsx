@@ -9,9 +9,7 @@ import {
   resourceError,
   sequence,
   view,
-  type Snapshot,
   type Source,
-  ownerOf,
 } from 'effectweb';
 import type { InfiniteData } from '@effectweb/query';
 import * as AsyncResult from 'effect/reactivity/AsyncResult';
@@ -65,7 +63,7 @@ interface SharedMediaPanelProps {
   close: () => void;
 }
 export type SharedMediaResults = Source<
-  AsyncResult.AsyncResult<Snapshot<InfiniteData<TelegramSearchPage, SearchCursor>>, unknown>
+  AsyncResult.AsyncResult<InfiniteData<TelegramSearchPage, SearchCursor>, unknown>
 >;
 interface SharedMediaContentProps extends SharedMediaPanelProps {
   items: readonly TelegramMessage[];
@@ -517,34 +515,35 @@ export const SharedMediaPanel = component(
       },
     ) => ({ more: AsyncResult.initial() as AsyncResult.AsyncResult<unknown, unknown> }),
   },
-  view((model, patch) => {
-    const props = model.props;
-    return observe(props.media, (result) => {
-      const page = available(result);
-      return (
-        <SharedMediaContent
-          initialKind={props.initialKind}
-          peerId={props.peerId}
-          loadPlayback={props.loadPlayback}
-          loadMedia={props.loadMedia}
-          loadMediaPreview={props.loadMediaPreview}
-          cachedMedia={props.cachedMedia}
-          cachedMediaPreview={props.cachedMediaPreview}
-          openMessage={props.openMessage}
-          forwardMessage={props.forwardMessage}
-          dialogs={props.dialogs}
-          deleteMessage={props.deleteMessage}
-          close={props.close}
-          items={pageMessages(page?.pages ?? [])}
-          loading={result.waiting && !page}
-          loadingMore={model.more.waiting}
-          hasMore={page?.next !== undefined}
-          error={resourceError(model.more) ?? resourceError(result) ?? ''}
-          loadPage={(append) =>
-            append ? ownerOf(patch).task('more', props.more(), 'drop') : props.refresh()
-          }
-        />
-      );
-    });
-  }),
+  (owner) =>
+    view((model) => {
+      const props = model.props;
+      return observe(props.media, (result) => {
+        const page = available(result);
+        return (
+          <SharedMediaContent
+            initialKind={props.initialKind}
+            peerId={props.peerId}
+            loadPlayback={props.loadPlayback}
+            loadMedia={props.loadMedia}
+            loadMediaPreview={props.loadMediaPreview}
+            cachedMedia={props.cachedMedia}
+            cachedMediaPreview={props.cachedMediaPreview}
+            openMessage={props.openMessage}
+            forwardMessage={props.forwardMessage}
+            dialogs={props.dialogs}
+            deleteMessage={props.deleteMessage}
+            close={props.close}
+            items={pageMessages(page?.pages ?? [])}
+            loading={result.waiting && !page}
+            loadingMore={model.more.waiting}
+            hasMore={page?.next !== undefined}
+            error={resourceError(model.more) ?? resourceError(result) ?? ''}
+            loadPage={(append) =>
+              append ? owner.task('more', props.more(), 'drop') : props.refresh()
+            }
+          />
+        );
+      });
+    }),
 );

@@ -25,18 +25,18 @@
   },
   "dependencies": {
     "@effect/platform-browser": "4.0.0",
-    "@effectweb/lucide": "0.10.0",
-    "@effectweb/query": "0.10.0",
+    "@effectweb/lucide": "0.12.0",
+    "@effectweb/query": "0.12.0",
     "@noble/ciphers": "^2.4.0",
     "effect": "4.0.0",
-    "effectweb": "0.10.0",
+    "effectweb": "0.12.0",
     "fflate": "^0.8.3",
     "idb": "8.0.3",
     "lottie-web": "^5.13.0"
   },
   "devDependencies": {
     "@effect/tsgo": "0.32.1",
-    "@effectweb/compiler": "0.10.0",
+    "@effectweb/compiler": "0.12.0",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "^26.2.0",

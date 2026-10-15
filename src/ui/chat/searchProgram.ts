@@ -3,7 +3,6 @@ import {
   collection,
   program,
   resourceError,
-  type Snapshot,
   type Source,
   type Transition,
 } from 'effectweb';
@@ -18,7 +17,7 @@ const commandHost = 'host';
 const commandMore = 'more';
 
 export type SearchResults = AsyncResult.AsyncResult<
-  Snapshot<InfiniteData<TelegramSearchPage, SearchCursor>>,
+  InfiniteData<TelegramSearchPage, SearchCursor>,
   unknown
 >;
 export interface SearchPanelProps {
@@ -34,7 +33,7 @@ export interface SearchPanelProps {
 export const messageIdentity = (message: TelegramMessage) => `${message.peerId}:${message.id}`;
 export const searchMessages = collection(messageIdentity);
 interface SearchInput {
-  readonly host: Snapshot<SearchPanelProps>;
+  readonly host: SearchPanelProps;
   readonly query: string;
   readonly global: boolean;
   readonly submitted: string;
@@ -46,7 +45,7 @@ export interface SearchModel {
 }
 
 /** The submitted search; global searches share results across chats. */
-export const searchArgs = (input: Snapshot<SearchInput>): MessageSearchArgs | undefined =>
+export const searchArgs = (input: SearchInput): MessageSearchArgs | undefined =>
   input.submitted
     ? {
         peerId: input.global ? '' : input.host.activePeerId,
@@ -60,7 +59,7 @@ export const searchError = resourceError;
 
 type MoreMessage = { type: 'MoreLoaded' } | { type: 'MoreFailed'; error: string };
 const change = (
-  model: Snapshot<SearchModel>,
+  model: SearchModel,
   input: Partial<SearchInput>,
   refresh: boolean = false,
 ): Transition<SearchModel, never> => {
@@ -81,7 +80,7 @@ const change = (
       }
     : { model: next };
 };
-const more = (model: Snapshot<SearchModel>): Transition<SearchModel, MoreMessage> => {
+const more = (model: SearchModel): Transition<SearchModel, MoreMessage> => {
   const args = searchArgs(model.props);
   return args
     ? {
@@ -116,7 +115,7 @@ export const searchActions = defineActions<SearchModel>()({
   Scope: (model, global: boolean) =>
     change(model, { global, submitted: model.props.query.trim() }, true),
   Submit: (model) => change(model, { submitted: model.props.query.trim() }, true),
-  Context: (model, host: Snapshot<SearchPanelProps>) =>
+  Context: (model, host: SearchPanelProps) =>
     change(model, {
       host,
       submitted:
@@ -161,7 +160,7 @@ export const searchActions = defineActions<SearchModel>()({
 });
 export type SearchMessage = ActionMessage<typeof searchActions> | MoreMessage;
 
-export function createSearchProgram(props: Snapshot<SearchPanelProps>) {
+export function createSearchProgram(props: SearchPanelProps) {
   return program<SearchModel, SearchMessage>({
     initial: {
       props: { host: props, query: '', global: false, submitted: '' },

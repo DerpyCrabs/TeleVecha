@@ -1,6 +1,5 @@
 import { shiftFormats } from './mentions';
 import { modelOwner } from 'effectweb';
-import type { Snapshot } from 'effectweb';
 import { Effect, Fiber } from 'effect';
 import type { ChatMessage } from '../../domain/models';
 import type { EffectConversation } from '../../telegram/core/conversation';
@@ -44,7 +43,7 @@ interface ComposerSessionOptions {
   getMentionMembers?: (peer: TelegramPeer) => Effect.Effect<TelegramGroupMemberPage, unknown>;
   conversation: () => EffectConversation | undefined;
   runTask: UiTaskRunner;
-  snapshot: () => Snapshot<EngineSnapshot>;
+  snapshot: () => EngineSnapshot;
   activePeerId: () => string;
   activeDialog: () => TelegramDialog | undefined;
   canSend: () => boolean;

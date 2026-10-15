@@ -1,20 +1,18 @@
-import { createSearchProgram, searchActions } from './searchProgram';
-import { controllerView, view, ViewBinding, type Snapshot } from 'effectweb';
-import type { SearchPanelProps } from './searchProgram';
+import { controllerView, view } from 'effectweb';
+import { createSearchProgram, searchActions, type SearchPanelProps } from './searchProgram';
 import { SearchView } from './SearchView';
 
 export const SearchPanel = controllerView(
   {
-    controller: (props: Snapshot<SearchPanelProps>) => {
-      const source = createSearchProgram(props);
+    controller: (props: SearchPanelProps) => {
+      const program = createSearchProgram(props);
       return {
-        source,
-        send: source.send,
-        receive: (next) => source.send(searchActions.message.Context(next)),
-        dispose: source.dispose,
-        close: source.close,
+        source: program,
+        lifetime: program,
+        receive: (next: SearchPanelProps) => program.send(searchActions.message.Context(next)),
+        send: program.send,
       };
     },
   },
-  view((model) => <ViewBinding view={SearchView} model={model} send={model.actions.send} />),
+  view((model) => <SearchView model={model} send={model.actions.send} />),
 );

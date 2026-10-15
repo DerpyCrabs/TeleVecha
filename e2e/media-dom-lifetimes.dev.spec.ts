@@ -2,6 +2,52 @@ import { test } from '@playwright/test';
 import { expect } from './expect';
 import { gzipSync } from 'node:zlib';
 
+test('lazy media replaces its observer only when the root selector changes', async ({ page }) => {
+  await page.goto('/e2e/fixtures/index.html');
+  const result = await page.evaluate(async () => {
+    const path = '/src/ui/testing/mediaLifetimeFixture.ts';
+    const { mountLazyMediaLifetimeFixture } = (await import(
+      path
+    )) as typeof import('../src/ui/testing/mediaLifetimeFixture');
+    const roots: string[] = [];
+    let disconnections = 0;
+    const NativeObserver = window.IntersectionObserver;
+    window.IntersectionObserver = class extends NativeObserver {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        super(callback, options);
+        roots.push((options?.root as HTMLElement | null)?.className ?? 'viewport');
+      }
+      override observe() {}
+      override disconnect() {
+        disconnections++;
+        super.disconnect();
+      }
+    };
+    const outer = document.createElement('div');
+    outer.className = 'first-root';
+    const inner = document.createElement('div');
+    inner.className = 'second-root';
+    outer.append(inner);
+    document.body.append(outer);
+    const fixture = mountLazyMediaLifetimeFixture(inner);
+    await new Promise(requestAnimationFrame);
+    fixture.patch({ label: 'New label' });
+    await new Promise(requestAnimationFrame);
+    const unchanged = { roots: [...roots], disconnections };
+    fixture.patch({ rootSelector: '.second-root' });
+    await new Promise(requestAnimationFrame);
+    const changed = { roots: [...roots], disconnections };
+    await fixture.close();
+    window.IntersectionObserver = NativeObserver;
+    return { unchanged, changed, disconnections };
+  });
+  expect(result).toEqual({
+    unchanged: { roots: ['first-root'], disconnections: 0 },
+    changed: { roots: ['first-root', 'second-root'], disconnections: 1 },
+    disconnections: 2,
+  });
+});
+
 test('avatar observation survives parent updates and is released on removal', async ({ page }) => {
   await page.goto('/e2e/fixtures/index.html');
   const result = await page.evaluate(async () => {

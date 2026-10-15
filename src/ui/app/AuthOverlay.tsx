@@ -1,4 +1,3 @@
-import type { Snapshot } from 'effectweb';
 import { Effect } from 'effect';
 import type { EngineSnapshot } from '../../telegram/types';
 import KeyRound from '@effectweb/lucide/icons/key-round';
@@ -6,7 +5,7 @@ import LoaderCircle from '@effectweb/lucide/icons/loader-circle';
 import Phone from '@effectweb/lucide/icons/phone';
 import RotateCw from '@effectweb/lucide/icons/rotate-cw';
 import ShieldCheck from '@effectweb/lucide/icons/shield-check';
-import { Portal, submit, view, component, ownerOf } from 'effectweb';
+import { Portal, view, component } from 'effectweb';
 import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import { modalMount } from '../shared/modalMount';
 interface AuthOverlayProps {
@@ -73,7 +72,12 @@ const AuthForm = view<
           : 'Check the delivery method shown by Telegram.'
         : 'Enter your Telegram cloud password.';
   return (
-    <form onSubmit={submit(props.submit)}>
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        return props.submit();
+      }}
+    >
       <h2 id="auth-title" class="text-xl font-semibold">
         {form.title}
       </h2>
@@ -111,126 +115,127 @@ const ignoreClose = () => undefined;
 
 export const AuthOverlay = component(
   {
-    init: (_props: Snapshot<AuthOverlayProps>) => ({
+    init: (_props: AuthOverlayProps) => ({
       phone: '',
       code: '',
       password: '',
       submitted: AsyncResult.initial() as AsyncResult.AsyncResult<void, unknown>,
     }),
   },
-  view((model, patch) => {
-    const props = model.props;
-    const authenticate = (step: AuthStep | 'retry') =>
-      ownerOf(patch).task(
-        'submitted',
-        step === 'retry'
-          ? props.onRetry()
-          : step === 'phone'
-            ? props.onPhone(model.phone)
-            : step === 'code'
-              ? props.onCode(model.code)
-              : props.onPassword(model.password),
-        'drop',
+  (owner) =>
+    view((model) => {
+      const props = model.props;
+      const authenticate = (step: AuthStep | 'retry') =>
+        owner.task(
+          'submitted',
+          step === 'retry'
+            ? props.onRetry()
+            : step === 'phone'
+              ? props.onPhone(model.phone)
+              : step === 'code'
+                ? props.onCode(model.code)
+                : props.onPassword(model.password),
+          'drop',
+        );
+      const form = (step: AuthStep) => (
+        <AuthForm
+          step={step}
+          value={model[step]}
+          busy={model.submitted.waiting}
+          codeViaApp={props.snapshot.codeViaApp}
+          change={(value) => owner.patch({ [step]: value })}
+          submit={() => void authenticate(step)}
+        />
       );
-    const form = (step: AuthStep) => (
-      <AuthForm
-        step={step}
-        value={model[step]}
-        busy={model.submitted.waiting}
-        codeViaApp={props.snapshot.codeViaApp}
-        change={(value) => patch({ [step]: value })}
-        submit={() => void authenticate(step)}
-      />
-    );
-    const contents = () => {
-      if (props.snapshot.phase === 'connecting' || props.snapshot.phase === 'syncing')
-        return (
-          <div class="py-8 text-center">
-            <LoaderCircle class="mx-auto animate-spin text-[var(--accent)]" size={28} />
-            <h2 id="auth-title" class="mt-4 font-semibold">
-              {props.snapshot.phase === 'syncing' ? 'Loading chats' : 'Connecting to Telegram'}
-            </h2>
-          </div>
-        );
-      if (props.snapshot.phase === 'error')
-        return (
-          <div>
-            <h2 id="auth-title" class="text-xl font-semibold">
-              Connection failed
-            </h2>
-            <p class="mt-2 text-sm leading-5 text-[var(--muted)]">{props.snapshot.error}</p>
-            <button
-              class={submitClass}
-              disabled={model.submitted.waiting}
-              onClick={() => authenticate('retry')}
-            >
-              <RotateCw size={17} /> Retry
-            </button>
-          </div>
-        );
-      // Each stage has its own branch lifetime so the new field receives autofocus.
-      switch (props.snapshot.authStep) {
-        case 'phone':
-          return form('phone');
-        case 'code':
-          return form('code');
-        case 'password':
-          return form('password');
-        case undefined:
-        default:
+      const contents = () => {
+        if (props.snapshot.phase === 'connecting' || props.snapshot.phase === 'syncing')
+          return (
+            <div class="py-8 text-center">
+              <LoaderCircle class="mx-auto animate-spin text-[var(--accent)]" size={28} />
+              <h2 id="auth-title" class="mt-4 font-semibold">
+                {props.snapshot.phase === 'syncing' ? 'Loading chats' : 'Connecting to Telegram'}
+              </h2>
+            </div>
+          );
+        if (props.snapshot.phase === 'error')
           return (
             <div>
               <h2 id="auth-title" class="text-xl font-semibold">
-                {props.configurationError
-                  ? 'Configuration required'
-                  : props.snapshot.phase === 'idle'
-                    ? 'Starting TeleVecha'
-                    : 'Telegram connected'}
+                Connection failed
               </h2>
-              <p class="mt-2 text-sm leading-5 text-[var(--muted)]">
-                {props.configurationError ??
-                  (props.snapshot.phase === 'idle'
-                    ? 'Waiting for this tab to join the active Telegram session.'
-                    : 'The application credentials came from the local Vite environment.')}
-              </p>
-              {props.configurationError && (
-                <>
-                  <pre class="mt-5 overflow-x-auto rounded-[0.7rem] border border-[var(--line-strong)] bg-surface p-3 text-xs leading-5 text-violet-300 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                    VITE_TELEGRAM_API_ID=123456{`\n`}VITE_TELEGRAM_API_HASH=…
-                  </pre>
-                  <p class="mt-3 text-xs leading-5 text-[var(--muted)]">
-                    Put these values in <code class="text-ink">.env</code>, then restart the dev
-                    server.
-                  </p>
-                </>
-              )}
+              <p class="mt-2 text-sm leading-5 text-[var(--muted)]">{props.snapshot.error}</p>
+              <button
+                class={submitClass}
+                disabled={model.submitted.waiting}
+                onClick={() => authenticate('retry')}
+              >
+                <RotateCw size={17} /> Retry
+              </button>
             </div>
           );
-      }
-    };
-    if (!props.open) return null;
-    return (
-      <Portal>
-        <div
-          use={modalMount(ignoreClose)}
-          class="fixed inset-0 z-50 grid place-items-center bg-[var(--overlay)] p-6 backdrop-blur-[14px]"
-          tabIndex={-1}
-        >
-          <section
-            class="relative max-h-[calc(100dvh-3rem)] w-full max-w-[25rem] overflow-y-auto rounded-[1.25rem] border border-[var(--line-strong)] bg-panel p-8 shadow-[0_24px_80px_var(--shadow)]"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="auth-title"
+        // Each stage has its own branch lifetime so the new field receives autofocus.
+        switch (props.snapshot.authStep) {
+          case 'phone':
+            return form('phone');
+          case 'code':
+            return form('code');
+          case 'password':
+            return form('password');
+          case undefined:
+          default:
+            return (
+              <div>
+                <h2 id="auth-title" class="text-xl font-semibold">
+                  {props.configurationError
+                    ? 'Configuration required'
+                    : props.snapshot.phase === 'idle'
+                      ? 'Starting TeleVecha'
+                      : 'Telegram connected'}
+                </h2>
+                <p class="mt-2 text-sm leading-5 text-[var(--muted)]">
+                  {props.configurationError ??
+                    (props.snapshot.phase === 'idle'
+                      ? 'Waiting for this tab to join the active Telegram session.'
+                      : 'The application credentials came from the local Vite environment.')}
+                </p>
+                {props.configurationError && (
+                  <>
+                    <pre class="mt-5 overflow-x-auto rounded-[0.7rem] border border-[var(--line-strong)] bg-surface p-3 text-xs leading-5 text-violet-300 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      VITE_TELEGRAM_API_ID=123456{`\n`}VITE_TELEGRAM_API_HASH=…
+                    </pre>
+                    <p class="mt-3 text-xs leading-5 text-[var(--muted)]">
+                      Put these values in <code class="text-ink">.env</code>, then restart the dev
+                      server.
+                    </p>
+                  </>
+                )}
+              </div>
+            );
+        }
+      };
+      if (!props.open) return null;
+      return (
+        <Portal>
+          <div
+            use={modalMount(ignoreClose)}
+            class="fixed inset-0 z-50 grid place-items-center bg-[var(--overlay)] p-6 backdrop-blur-[14px]"
+            tabIndex={-1}
           >
-            {contents()}
-            {props.snapshot.error && props.snapshot.phase !== 'error' && (
-              <p class="mt-4 rounded-[0.65rem] border border-red-400/20 bg-red-900/15 px-3 py-2.5 text-xs leading-[1.1rem] text-red-300">
-                {props.snapshot.error}
-              </p>
-            )}
-          </section>
-        </div>
-      </Portal>
-    );
-  }),
+            <section
+              class="relative max-h-[calc(100dvh-3rem)] w-full max-w-[25rem] overflow-y-auto rounded-[1.25rem] border border-[var(--line-strong)] bg-panel p-8 shadow-[0_24px_80px_var(--shadow)]"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="auth-title"
+            >
+              {contents()}
+              {props.snapshot.error && props.snapshot.phase !== 'error' && (
+                <p class="mt-4 rounded-[0.65rem] border border-red-400/20 bg-red-900/15 px-3 py-2.5 text-xs leading-[1.1rem] text-red-300">
+                  {props.snapshot.error}
+                </p>
+              )}
+            </section>
+          </div>
+        </Portal>
+      );
+    }),
 );

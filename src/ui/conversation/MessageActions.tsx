@@ -16,7 +16,6 @@ import {
   observe,
   sequence,
   view,
-  type Snapshot,
   type Source,
 } from 'effectweb';
 import type { CustomEmojiAsset } from '../app/queries';
@@ -24,7 +23,7 @@ const reactionRows = collection<NonNullable<ChatMessage['reactions']>[number]>(
   (reaction) => reaction.customEmojiId ?? reaction.emoji,
 ).from;
 // Optional details load without failing: an unavailable asset is `undefined`.
-type Optional<A> = Source<AsyncResult.AsyncResult<Snapshot<A> | undefined, never>>;
+type Optional<A> = Source<AsyncResult.AsyncResult<A | undefined, never>>;
 interface MessageActionsProps {
   message: ChatMessage;
   pickerOpen: boolean;
@@ -39,7 +38,7 @@ interface MessageActionsProps {
   reply: (article: HTMLElement) => void;
   customEmoji?: ((documentId: string) => Optional<CustomEmojiAsset>) | undefined;
 }
-const customReaction = (asset: Snapshot<CustomEmojiAsset> | undefined) =>
+const customReaction = (asset: CustomEmojiAsset | undefined) =>
   asset ? (
     asset.mimeType === 'application/x-tgsticker' ? (
       <TgsPlayer source={asset.url} label="Custom emoji reaction" />

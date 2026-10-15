@@ -1,11 +1,10 @@
-import type { Snapshot } from 'effectweb';
 import type { ChatMessage } from '../../domain/models';
 import type { EffectConversation } from '../../telegram/core/conversation';
 import type { EngineSnapshot, TelegramHistoryGap } from '../../telegram/types';
 import type { UiEffectRunner } from '../app/appRuntime';
 import type { ConversationViewport } from './conversationViewport';
 interface ConversationHistoryOptions {
-  snapshot: () => Snapshot<EngineSnapshot>;
+  snapshot: () => EngineSnapshot;
   activePeerId: () => string;
   conversation: () => EffectConversation | undefined;
   runEffect: UiEffectRunner;

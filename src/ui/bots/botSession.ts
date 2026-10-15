@@ -1,4 +1,3 @@
-import type { Snapshot } from 'effectweb';
 import { modelOwner, available, program } from 'effectweb';
 import type { SessionContext } from '../app/sessionContext';
 import { Context, Effect } from 'effect';
@@ -45,7 +44,7 @@ interface BotSessionOptions {
   conversation: () => EffectConversation | undefined;
   runEffect: UiEffectRunner;
   runTask: UiTaskRunner;
-  snapshot: () => Snapshot<EngineSnapshot>;
+  snapshot: () => EngineSnapshot;
   activePeerId: () => string;
   activeDialog: () => TelegramDialog | undefined;
   selectChat: (peerId: string) => Promise<boolean>;

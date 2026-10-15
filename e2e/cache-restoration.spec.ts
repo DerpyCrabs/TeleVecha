@@ -6,6 +6,26 @@ import { chatButton, fixtureStats } from './helpers';
 const CACHE_SCENARIO = 'held-connect+multiple-pins';
 const CACHE_PATH = `/?scenario=${encodeURIComponent(CACHE_SCENARIO)}&chat=u%3A101`;
 
+async function savedDraft(page: Page, scenario: string): Promise<unknown> {
+  return page.evaluate(async (scenario) => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(`televecha-e2e-${scenario}`);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise<unknown>((resolve, reject) => {
+        const transaction = database.transaction('drafts', 'readonly');
+        const request = transaction.objectStore('drafts').get('u:101');
+        transaction.oncomplete = () => resolve(request.result as unknown);
+        transaction.onabort = () => reject(transaction.error);
+      });
+    } finally {
+      database.close();
+    }
+  }, scenario);
+}
+
 async function waitForRuntime(page: Page) {
   await expect.poll(() => page.evaluate(() => Boolean(window.__televechaFixture))).toBe(true);
 }
@@ -322,6 +342,10 @@ test('restores reply context with a text draft after reload', async ({ page }) =
     )
     .toBe('Persistent reply draft');
 
+  await expect
+    .poll(() => savedDraft(page, scenario))
+    .toMatchObject({ text: 'Persistent reply draft', details: { reply: { messageId: 79 } } });
+
   await page.reload();
   await waitForCachedWorkspace(page, scenario);
 
@@ -362,6 +386,13 @@ test('restores draft formatting after reload', async ({ page }) => {
       ),
     )
     .toEqual([{ offset: 0, length: 10, kind: 'bold' }]);
+
+  await expect
+    .poll(() => savedDraft(page, scenario))
+    .toMatchObject({
+      text: 'Persistent bold draft',
+      details: { formats: [{ offset: 0, length: 10, kind: 'bold' }] },
+    });
 
   await page.reload();
   await waitForCachedWorkspace(page, scenario);

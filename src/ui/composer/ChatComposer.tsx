@@ -228,7 +228,10 @@ function acquireComposer(element: HTMLElement, input: () => Send<ChatComposerMes
     document.removeEventListener('keydown', escape);
   };
 }
-const composerMount = (send: Send<ChatComposerMessage>) => domBinding(send, acquireComposer);
+const composerMount = (send: Send<ChatComposerMessage>) => ({
+  ...domBinding(send, acquireComposer),
+  identity: send,
+});
 export const ChatComposer = component<ChatComposerProps, ChatComposerState, ChatComposerMessage>(
   {
     init: () => ({

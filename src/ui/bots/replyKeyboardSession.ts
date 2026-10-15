@@ -1,9 +1,8 @@
-import type { Snapshot } from 'effectweb';
 import { modelOwner, program } from 'effectweb';
 import type { EngineSnapshot } from '../../telegram/types';
 /** Owns reply-keyboard visibility, single-use dismissal, and forced replies. */
 export function createReplyKeyboardSession(options: {
-  snapshot: () => Snapshot<EngineSnapshot>;
+  snapshot: () => EngineSnapshot;
   activePeerId: () => string;
   reply: () => unknown;
   editing: () => unknown;

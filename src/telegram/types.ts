@@ -1,4 +1,3 @@
-import type { Snapshot } from 'effectweb';
 import type { RichMessage } from '../domain/richMessage';
 import type { Effect, Stream } from 'effect';
 import type { MtprotoError } from './mtproto/errors';
@@ -889,7 +888,7 @@ export interface TelegramHistoryGap {
   newerMinMessageId: number;
 }
 
-export type AccountSnapshot = Snapshot<{
+export type AccountSnapshot = {
   phase: 'idle' | 'connecting' | 'unauthorized' | 'syncing' | 'ready' | 'error';
   sync: 'current' | 'recovering' | 'stale';
   online: boolean;
@@ -903,9 +902,9 @@ export type AccountSnapshot = Snapshot<{
   operationError?: string | undefined;
   error?: string | undefined;
   requiresReload?: boolean | undefined;
-}>;
+};
 
-export type ConversationViewSnapshot = Snapshot<{
+export type ConversationViewSnapshot = {
   activePeerId?: string | undefined;
   messages: TelegramMessage[];
   loadingMessages: boolean;
@@ -916,6 +915,6 @@ export type ConversationViewSnapshot = Snapshot<{
   historyGaps: TelegramHistoryGap[];
   historyError?: string | undefined;
   historyRetryAt?: number | undefined;
-}>;
+};
 
 export interface EngineSnapshot extends AccountSnapshot, ConversationViewSnapshot {}

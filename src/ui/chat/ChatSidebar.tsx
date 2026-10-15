@@ -1,6 +1,5 @@
 import { list, component, domBinding, sequence, view } from 'effectweb';
 import { cachedLoad } from '../shared/cachedLoad';
-import type { Snapshot } from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatSummary } from '../../domain/models';
 import type { TelegramDialog, TelegramPeerSearchResult } from '../../telegram/types';
@@ -95,7 +94,7 @@ type ChatSidebarMessage =
   | { type: 'ListViewportHeight'; value: number }
   | { type: 'ContextMenu'; value: { chatId: string; x: number; y: number } | undefined };
 function refreshSidebar(
-  model: Snapshot<ChatSidebarModel>,
+  model: ChatSidebarModel,
   retry: boolean = false,
 ): Transition<ChatSidebarModel, ChatSidebarMessage> {
   const term = model.query.trim();
@@ -165,7 +164,7 @@ interface ListInput {
   filtered: ChatSummary[];
   send: Send<ChatSidebarMessage>;
 }
-function acquireList(element: HTMLDivElement, input: () => Snapshot<ListInput>) {
+function acquireList(element: HTMLDivElement, input: () => ListInput) {
   let previousQuery: string | undefined,
     previousFilter: ChatFilter | undefined,
     previousPeer: string | undefined;
@@ -286,9 +285,9 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
     };
     const compact = () => props.layout.compact && !props.layout.mobileOpen;
     const archiveOpen = () => model.filter === 'archived';
-    const peerResults = () => model.peers;
-    const searchingPeers = () => model.peersLoading;
-    const peerSearchFailed = () => model.peersError;
+    const peerResults = model.peers;
+    const searchingPeers = model.peersLoading;
+    const peerSearchFailed = model.peersError;
     const contextUser = () =>
       props.dialogs.find((dialog) => dialog.peer.id === model.contextMenu?.chatId)?.userDetails ??
       model.contextUser;
@@ -315,7 +314,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
     })();
     const visiblePeerResults = (() => {
       const localIds = new Set(filteredChats.map(({ id }) => id));
-      return peerResults().filter(
+      return peerResults.filter(
         (result) =>
           !localIds.has(result.peer.id) &&
           model.filter !== 'unread' &&
@@ -603,10 +602,10 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
               ))}
             </>
           ) : null}
-          {searchingPeers() ? (
+          {searchingPeers ? (
             <p class="px-4 py-5 text-center text-sm text-[var(--muted)]">Searching Telegram…</p>
           ) : null}
-          {peerSearchFailed() ? (
+          {peerSearchFailed ? (
             <div class="px-4 py-5 text-center text-sm text-[var(--muted)]" role="alert">
               <p>Telegram search is unavailable. Try again.</p>
               <button onClick={() => peerResource.refetch()}>Retry search</button>
@@ -614,8 +613,8 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
           ) : null}
           {filteredChats.length === 0 &&
           visiblePeerResults.length === 0 &&
-          !searchingPeers() &&
-          !peerSearchFailed() ? (
+          !searchingPeers &&
+          !peerSearchFailed ? (
             <p class="px-4 py-10 text-center text-sm text-[var(--muted)]">
               {archiveOpen() && !model.query.trim() ? 'No archived chats' : 'No chats found'}
             </p>

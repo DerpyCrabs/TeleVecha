@@ -372,14 +372,15 @@ const RichBlockView = view<{ block: RichBlock }, never>((props, _send) => {
     </>
   ) : null;
 });
-export const RichMessageBody = view<{ blocks: RichBlock[]; rtl?: boolean | undefined }, never>(
-  (props, _send) => {
-    return (
-      <section class="rich-message" dir={props.rtl ? 'rtl' : undefined}>
-        {list(sequence(props.blocks), (block) => (
-          <RichBlockView block={block} />
-        ))}
-      </section>
-    );
-  },
-);
+export const RichMessageBody = view<
+  { blocks: readonly RichBlock[]; rtl?: boolean | undefined },
+  never
+>((props, _send) => {
+  return (
+    <section class="rich-message" dir={props.rtl ? 'rtl' : undefined}>
+      {list(sequence(props.blocks), (block) => (
+        <RichBlockView block={block} />
+      ))}
+    </section>
+  );
+});

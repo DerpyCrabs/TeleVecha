@@ -1,5 +1,4 @@
 import { list, component, Portal, view } from 'effectweb';
-import type { Snapshot } from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatSummary } from '../../domain/models';
 import type { TelegramPeerSearchResult } from '../../telegram/types';
@@ -31,7 +30,7 @@ type ForwardMessageDialogMessage =
   | { type: 'Query'; value: string }
   | { type: 'RemoteResults'; value: TelegramPeerSearchResult[] };
 function requestSearch(
-  model: Snapshot<ForwardMessageDialogModel>,
+  model: ForwardMessageDialogModel,
 ): Transition<ForwardMessageDialogModel, ForwardMessageDialogMessage> {
   const term = model.query.trim();
   if (!term || !model.props.search)

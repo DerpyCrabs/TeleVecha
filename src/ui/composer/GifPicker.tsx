@@ -1,12 +1,4 @@
-import {
-  available,
-  list,
-  observe,
-  resourceError,
-  view,
-  type Snapshot,
-  type Source,
-} from 'effectweb';
+import { available, list, observe, resourceError, view, type Source } from 'effectweb';
 import type { Effect } from 'effect';
 import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import type { TelegramSticker } from '../../telegram/types';
@@ -42,9 +34,7 @@ const GifOption = view<
   );
 });
 /** Cached search results for one term. */
-export type GifResults = Source<
-  AsyncResult.AsyncResult<Snapshot<TelegramSticker[]>, MessagingError>
->;
+export type GifResults = Source<AsyncResult.AsyncResult<TelegramSticker[], MessagingError>>;
 export const GifPicker = view<{
   gifs: TelegramSticker[];
   loading: boolean;

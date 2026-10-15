@@ -1,17 +1,19 @@
 import { Effect } from 'effect';
-import { modelOwner, mount as mountView, type View } from 'effectweb';
+import { modelOwner, mount as mountView, type ModelOwner, type View } from 'effectweb';
 import { ImageAttachmentEditor } from '../composer/ImageAttachmentEditor';
 import { MediaAttachment } from '../media/MediaAttachment';
 import { TgsPlayer } from '../media/TgsPlayer';
 import { Avatar } from '../shared/Avatar';
+import { LazyMedia } from '../media/LazyMedia';
 import { createMediaStreaming } from '../media/mediaStreaming';
+
+type PropsOf<V> = V extends View<infer Props, never> ? Props : never;
 
 function mount<Props extends object>(
   parent: HTMLElement,
   definition: View<Props, never>,
-  initial: Props,
+  owner: ModelOwner<Props>,
 ) {
-  const owner = modelOwner(initial);
   const unmount = mountView(parent, definition, owner.source);
   return {
     patch: owner.patch,
@@ -20,11 +22,30 @@ function mount<Props extends object>(
 }
 
 export function mountAvatarLifetimeFixture(parent: HTMLElement) {
-  return mount(parent, Avatar, { identity: 'avatar', initials: 'A', color: '#123456' });
+  return mount(parent, Avatar, modelOwner({ identity: 'avatar', initials: 'A', color: '#123456' }));
+}
+
+export function mountLazyMediaLifetimeFixture(parent: HTMLElement) {
+  return mount(
+    parent,
+    LazyMedia,
+    modelOwner<PropsOf<typeof LazyMedia>>({
+      identity: 'lazy',
+      mimeType: 'image/png',
+      placeholder: 'Image',
+      rootSelector: '.first-root',
+      load: () => Effect.never,
+      cachedUrl: () => undefined,
+    }),
+  );
 }
 
 export function mountTgsLifetimeFixture(parent: HTMLElement) {
-  return mount(parent, TgsPlayer, { source: '/lifetime-first.tgs', label: 'First animation' });
+  return mount(
+    parent,
+    TgsPlayer,
+    modelOwner({ source: '/lifetime-first.tgs', label: 'First animation' }),
+  );
 }
 
 export function mountImageLifetimeFixture(parent: HTMLElement) {
@@ -33,11 +54,11 @@ export function mountImageLifetimeFixture(parent: HTMLElement) {
     file: new File(['first'], 'first.png', { type: 'image/png' }),
     sendAs: 'media' as const,
   };
-  const mounted = mount(parent, ImageAttachmentEditor, {
-    attachment,
-    close: () => {},
-    apply: () => {},
-  });
+  const mounted = mount(
+    parent,
+    ImageAttachmentEditor,
+    modelOwner({ attachment, close: () => {}, apply: () => {} }),
+  );
   return {
     ...mounted,
     replace: () =>
@@ -51,11 +72,15 @@ export function mountImageLifetimeFixture(parent: HTMLElement) {
 }
 
 export function mountVideoLifetimeFixture(parent: HTMLElement) {
-  return mount(parent, MediaAttachment, {
-    media: { kind: 'video', name: 'video.mp4', mimeType: 'video/mp4', size: 1 },
-    load: () => Effect.succeed('/lifetime-video.mp4'),
-    loadPreview: () => Effect.succeed('/lifetime-preview.png'),
-  });
+  return mount(
+    parent,
+    MediaAttachment,
+    modelOwner<PropsOf<typeof MediaAttachment>>({
+      media: { kind: 'video', name: 'video.mp4', mimeType: 'video/mp4', size: 1 },
+      load: () => Effect.succeed('/lifetime-video.mp4'),
+      loadPreview: () => Effect.succeed('/lifetime-preview.png'),
+    }),
+  );
 }
 
 export async function mountStreamingVideoFixture(parent: HTMLElement) {
@@ -73,17 +98,26 @@ export async function mountStreamingVideoFixture(parent: HTMLElement) {
     return bytes.slice(start, end + 1, 'video/mp4');
   });
   if (!url) throw new Error('Streaming is unavailable');
-  const fixture = mount(parent, MediaAttachment, {
-    media: { kind: 'video', name: 'streaming-video.mp4', mimeType: 'video/mp4', size: bytes.size },
-    load: () =>
-      Effect.sync(() => {
-        fullDownloads++;
-        return URL.createObjectURL(bytes);
-      }),
-    loadPlayback: () => Effect.succeed(url),
-    // Opening playback must not depend on the thumbnail finishing either.
-    loadPreview: () => Effect.never,
-  });
+  const fixture = mount(
+    parent,
+    MediaAttachment,
+    modelOwner<PropsOf<typeof MediaAttachment>>({
+      media: {
+        kind: 'video',
+        name: 'streaming-video.mp4',
+        mimeType: 'video/mp4',
+        size: bytes.size,
+      },
+      load: () =>
+        Effect.sync(() => {
+          fullDownloads++;
+          return URL.createObjectURL(bytes);
+        }),
+      loadPlayback: () => Effect.succeed(url),
+      // Opening playback must not depend on the thumbnail finishing either.
+      loadPreview: () => Effect.never,
+    }),
+  );
   return {
     url,
     requests,

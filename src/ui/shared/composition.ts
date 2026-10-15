@@ -1,12 +1,9 @@
 // Small composition utilities that used to ship in effectweb/advanced. They are ordinary
 // application code: message creators for a reducer, shallow patches, memoized selectors over
 // one explicit version, and a group of owned sessions.
-import { modelOwner, type Send, type Snapshot, type Transition } from 'effectweb';
+import { modelOwner, type Send, type Transition } from 'effectweb';
 
-type Handler<Model, R> = (
-  model: Snapshot<Model>,
-  ...args: never[]
-) => Transition<Model, unknown, R>;
+type Handler<Model, R> = (model: Model, ...args: never[]) => Transition<Model, unknown, R>;
 type Arguments<F> = F extends (model: never, ...args: infer Args) => unknown ? Args : never;
 type HandlerMessage<Handlers> = {
   [Name in keyof Handlers]: { readonly type: Name; readonly args: Arguments<Handlers[Name]> };
@@ -48,15 +45,11 @@ export function defineActions<Model, R = never>() {
         }
         return dispatch;
       },
-      update(
-        this: void,
-        model: Snapshot<Model>,
-        action: Message,
-      ): ReturnType<Handlers[keyof Handlers]> {
+      update(this: void, model: Model, action: Message): ReturnType<Handlers[keyof Handlers]> {
         if (!Object.hasOwn(handlers, action.type))
           throw new Error(`Unknown action: ${String(action.type)}`);
         const handler = handlers[action.type] as (
-          model: Snapshot<Model>,
+          model: Model,
           ...args: unknown[]
         ) => ReturnType<Handlers[keyof Handlers]>;
         // oxlint-disable-next-line typescript/no-unsafe-return -- The indexed handler and ReturnType refer to the same validated generic member.

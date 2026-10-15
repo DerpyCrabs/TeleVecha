@@ -1,4 +1,3 @@
-import type { Snapshot } from 'effectweb';
 import type { ChatMessage } from '../../domain/models';
 import type { EngineSnapshot, PendingAttachment, PendingSend } from '../../telegram/types';
 import { presentMessage, presentPendingAttachment, presentReply } from './presentation';
@@ -73,7 +72,7 @@ export function createConversationPresenter() {
     EngineSnapshot['messages'][number],
     { reply: EngineSnapshot['messages'][number] | undefined; read: boolean; view: ChatMessage }
   >();
-  return (snapshot: Snapshot<EngineSnapshot>, peerId: string) =>
+  return (snapshot: EngineSnapshot, peerId: string) =>
     presentConversation(snapshot, peerId, (message, readOutboxMaxId, reply) => {
       const read = message.outgoing && message.id <= readOutboxMaxId;
       const previous = cache.get(message);
@@ -85,7 +84,7 @@ export function createConversationPresenter() {
 }
 
 export function presentConversation(
-  snapshot: Snapshot<EngineSnapshot>,
+  snapshot: EngineSnapshot,
   peerId: string,
   project = presentMessage,
 ): KeyedMessageView[] {
