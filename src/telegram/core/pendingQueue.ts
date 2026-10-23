@@ -1,4 +1,4 @@
-import { Effect, Fiber, FiberMap, Option } from 'effect';
+import { Cause, Effect, Fiber, FiberMap, Option } from 'effect';
 
 import type { CacheStore } from '../persistence/store';
 import type { PendingSend } from '../types';
@@ -117,26 +117,35 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
     work: Effect.Effect<Value, Error, Requirements>,
   ) => tasks.serialize('outboxWrite', peerId, work);
 
+  const awaitDelivery = (id: string, fiber: Fiber.Fiber<void, unknown>) =>
+    Fiber.join(fiber).pipe(
+      Effect.catchCause((cause) =>
+        cancellations.has(id) && Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.failCause(cause),
+      ),
+    );
+
   const scheduleDelivery = <Error, Requirements>(
     pending: PendingSend,
     work: Effect.Effect<void, Error, Requirements>,
   ) =>
     Effect.gen(function* () {
       const current = yield* FiberMap.get(deliveries, pending.id);
-      if (Option.isSome(current)) return yield* Fiber.join(current.value);
+      if (Option.isSome(current)) return yield* awaitDelivery(pending.id, current.value);
       const fiber = yield* FiberMap.run(
         deliveries,
         pending.id,
-        tasks
-          .serialize('outboxDelivery', pending.peer.id, work)
-          .pipe(Effect.ensuring(Effect.sync(() => cancellations.delete(pending.id)))),
+        tasks.serialize('outboxDelivery', pending.peer.id, work),
       );
-      return yield* Fiber.join(fiber);
+      return yield* awaitDelivery(pending.id, fiber);
     });
 
   const delivery = (id: string) =>
     FiberMap.get(deliveries, id).pipe(
-      Effect.map((current) => (Option.isSome(current) ? Fiber.join(current.value) : undefined)),
+      Effect.map((current) =>
+        Option.isSome(current) ? awaitDelivery(id, current.value) : undefined,
+      ),
     );
 
   const clearRuntime = Effect.all(
@@ -163,7 +172,6 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
       Effect.gen(function* () {
         cancellations.add(id);
         yield* FiberMap.remove(deliveries, id);
-        cancellations.add(id);
       }),
     finishCancellation: (id: string) =>
       FiberMap.has(deliveries, id).pipe(

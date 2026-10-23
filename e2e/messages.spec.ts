@@ -193,7 +193,8 @@ test('keeps a failed message in the durable outbox with a visible failure state'
   await expect(failed.locator('footer')).toHaveAttribute('aria-label', /Message status: failed$/u);
   await expect.poll(async () => (await fixtureStats(page))?.sendText).toBe(2);
 
-  await failed.getByRole('button', { name: 'Cancel' }).click();
+  await failed.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
   await expect(failed).toHaveCount(0);
   await expect(page.getByText(/A message remains queued for retry/)).toHaveCount(0);
   await expect

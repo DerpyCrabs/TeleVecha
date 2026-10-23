@@ -149,8 +149,10 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
                 aria-label={`Album item ${message.media?.name ?? message.id}. Press Shift+F10 for actions.`}
                 onContextMenu={(event) => {
                   if (
-                    event.target instanceof HTMLImageElement ||
-                    event.target instanceof HTMLVideoElement
+                    message.status !== 'sending' &&
+                    message.status !== 'failed' &&
+                    (event.target instanceof HTMLImageElement ||
+                      event.target instanceof HTMLVideoElement)
                   ) {
                     event.stopPropagation();
                     return;

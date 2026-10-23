@@ -124,7 +124,6 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
   const bot = model.bot;
   const pendingActionId = model.pendingActionId;
   const retryPendingSend = model.retryPendingSend;
-  const cancelPendingSend = model.cancelPendingSend;
   const reactionPickerMessageId = model.reactionPickerMessageId;
   const setReactionPickerMessageId = model.setReactionPickerMessageId;
   const reactToMessage = model.reactToMessage;
@@ -1024,8 +1023,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   : undefined)!,
                               )
                             : null}
-                          {(message.status === 'failed' || message.status === 'sending') &&
-                          pendingSendForMessage(message.id)
+                          {message.status === 'failed' && pendingSendForMessage(message.id)
                             ? ((pending) => (
                                 <div
                                   class="pending-message-actions"
@@ -1044,9 +1042,6 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                       {pendingActionId === pending.id ? 'Retrying…' : 'Retry'}
                                     </button>
                                   ) : null}
-                                  <button onClick={() => void cancelPendingSend(pending.id)}>
-                                    Cancel
-                                  </button>
                                 </div>
                               ))(pendingSendForMessage(message.id)!)
                             : null}
@@ -1094,108 +1089,123 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                     : 'auto',
                               }}
                             >
-                              <button
-                                role="menuitem"
-                                onClick={() => {
-                                  const message = target;
-                                  setMessageContextMenu(undefined);
-                                  model.replyTo(message);
-                                }}
-                              >
-                                <Reply size={15} /> Reply
-                              </button>
-                              <button role="menuitem" onClick={() => model.selectMessage(target)}>
-                                <CheckCheck size={15} /> Select
-                              </button>
-                              {target.media && !target.protected ? (
-                                <button
-                                  role="menuitem"
-                                  onClick={() => void saveMessageMedia(target)}
-                                >
-                                  <Copy size={15} /> Save media as
-                                </button>
-                              ) : null}
-                              {target.media?.kind === 'file' ? (
-                                <button
-                                  role="menuitem"
-                                  onClick={() => void copyMediaFilename(target)}
-                                >
-                                  <Copy size={15} /> Copy filename
-                                </button>
-                              ) : null}
-                              {messageTextForClipboard(target) ? (
-                                <button
-                                  role="menuitem"
-                                  onClick={() => void copyMessageText(target)}
-                                >
-                                  <Copy size={15} /> Copy text
-                                </button>
-                              ) : null}
-                              {messageCapabilitiesForUi(target).canForward ? (
-                                <button
-                                  role="menuitem"
-                                  onClick={() => {
-                                    setMessageContextMenu(undefined);
-                                    setForwardingMessage(target);
-                                  }}
-                                >
-                                  <Forward size={15} /> Forward
-                                </button>
-                              ) : null}
-                              {messageCapabilitiesForUi(target).canPin ? (
-                                <button
-                                  role="menuitem"
-                                  onClick={() => {
-                                    const message = target;
-                                    setMessageContextMenu(undefined);
-                                    const conversation = activeConversation;
-                                    if (conversation) {
-                                      runInBackground(
-                                        runEffect(
-                                          conversation.setPinnedMessage(
-                                            Number(message.id),
-                                            !snapshot.pinnedMessages.some(
-                                              ({ id }) => id === Number(message.id),
-                                            ),
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  }}
-                                >
-                                  <Pin size={15} />
-                                  {snapshot.pinnedMessages.some(
-                                    ({ id }) => id === Number(target.id),
-                                  )
-                                    ? 'Unpin'
-                                    : 'Pin'}
-                                </button>
-                              ) : null}
-                              {messageCapabilitiesForUi(target).canEdit ? (
-                                <button
-                                  role="menuitem"
-                                  onClick={() => {
-                                    const message = target;
-                                    setMessageContextMenu(undefined);
-                                    composer.beginEdit(message);
-                                  }}
-                                >
-                                  <Pencil size={15} /> Edit
-                                </button>
-                              ) : null}
-                              {messageCapabilitiesForUi(target).canDelete ? (
+                              {pendingSendForMessage(target.id) ? (
                                 <button
                                   class="danger"
                                   role="menuitem"
-                                  onClick={() => {
-                                    const message = target;
-                                    setMessageContextMenu(undefined);
-                                    setDeleteTarget(message);
-                                  }}
+                                  onClick={() => void model.deleteMessage(target.id, false)}
                                 >
                                   <Trash2 size={15} /> Delete
                                 </button>
-                              ) : null}
+                              ) : (
+                                <>
+                                  <button
+                                    role="menuitem"
+                                    onClick={() => {
+                                      const message = target;
+                                      setMessageContextMenu(undefined);
+                                      model.replyTo(message);
+                                    }}
+                                  >
+                                    <Reply size={15} /> Reply
+                                  </button>
+                                  <button
+                                    role="menuitem"
+                                    onClick={() => model.selectMessage(target)}
+                                  >
+                                    <CheckCheck size={15} /> Select
+                                  </button>
+                                  {target.media && !target.protected ? (
+                                    <button
+                                      role="menuitem"
+                                      onClick={() => void saveMessageMedia(target)}
+                                    >
+                                      <Copy size={15} /> Save media as
+                                    </button>
+                                  ) : null}
+                                  {target.media?.kind === 'file' ? (
+                                    <button
+                                      role="menuitem"
+                                      onClick={() => void copyMediaFilename(target)}
+                                    >
+                                      <Copy size={15} /> Copy filename
+                                    </button>
+                                  ) : null}
+                                  {messageTextForClipboard(target) ? (
+                                    <button
+                                      role="menuitem"
+                                      onClick={() => void copyMessageText(target)}
+                                    >
+                                      <Copy size={15} /> Copy text
+                                    </button>
+                                  ) : null}
+                                  {messageCapabilitiesForUi(target).canForward ? (
+                                    <button
+                                      role="menuitem"
+                                      onClick={() => {
+                                        setMessageContextMenu(undefined);
+                                        setForwardingMessage(target);
+                                      }}
+                                    >
+                                      <Forward size={15} /> Forward
+                                    </button>
+                                  ) : null}
+                                  {messageCapabilitiesForUi(target).canPin ? (
+                                    <button
+                                      role="menuitem"
+                                      onClick={() => {
+                                        const message = target;
+                                        setMessageContextMenu(undefined);
+                                        const conversation = activeConversation;
+                                        if (conversation) {
+                                          runInBackground(
+                                            runEffect(
+                                              conversation.setPinnedMessage(
+                                                Number(message.id),
+                                                !snapshot.pinnedMessages.some(
+                                                  ({ id }) => id === Number(message.id),
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      <Pin size={15} />
+                                      {snapshot.pinnedMessages.some(
+                                        ({ id }) => id === Number(target.id),
+                                      )
+                                        ? 'Unpin'
+                                        : 'Pin'}
+                                    </button>
+                                  ) : null}
+                                  {messageCapabilitiesForUi(target).canEdit ? (
+                                    <button
+                                      role="menuitem"
+                                      onClick={() => {
+                                        const message = target;
+                                        setMessageContextMenu(undefined);
+                                        composer.beginEdit(message);
+                                      }}
+                                    >
+                                      <Pencil size={15} /> Edit
+                                    </button>
+                                  ) : null}
+                                  {messageCapabilitiesForUi(target).canDelete ? (
+                                    <button
+                                      class="danger"
+                                      role="menuitem"
+                                      onClick={() => {
+                                        const message = target;
+                                        setMessageContextMenu(undefined);
+                                        setDeleteTarget(message);
+                                      }}
+                                    >
+                                      <Trash2 size={15} /> Delete
+                                    </button>
+                                  ) : null}
+                                </>
+                              )}
                             </div>
                           ))(messageContextTarget!)
                         : null)(messageContextMenu!)

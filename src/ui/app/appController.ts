@@ -1549,6 +1549,12 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     if (conversation) await runEffect(conversation.toggleReaction(id, emoji));
   };
   const deleteMessage = async (messageId: string, revoke: boolean) => {
+    const pending = pendingSendForMessage(messageId);
+    if (pending) {
+      state.send({ type: 'Changed', changes: { messageContextMenu: undefined } });
+      await cancelPendingSend(pending.id);
+      return;
+    }
     const id = Number(messageId);
     const target =
       state.model().deleteTarget?.id === messageId
@@ -1706,8 +1712,9 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     }
   };
   const openMessageActions = (message: ChatMessage, event: MouseEvent) => {
-    if (message.service || !Number.isSafeInteger(Number(message.id))) return;
-    if (event.target instanceof HTMLImageElement) return;
+    const pending = pendingSendForMessage(message.id);
+    if (message.service || (!pending && !Number.isSafeInteger(Number(message.id)))) return;
+    if (!pending && event.target instanceof HTMLImageElement) return;
     event.preventDefault();
     event.stopPropagation();
     expressions.close();

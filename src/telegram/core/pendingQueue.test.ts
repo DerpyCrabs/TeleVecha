@@ -116,6 +116,40 @@ describe('PendingSendQueue coordination', () => {
       ),
     ));
 
+  it('completes cancellation waiters normally and releases the peer delivery lane', () =>
+    Effect.runPromise(
+      withQueue((queue) =>
+        Effect.gen(function* () {
+          const started = yield* Deferred.make<void>();
+          const stopped = vi.fn();
+          const first = yield* queue
+            .scheduleDelivery(
+              pending('first'),
+              Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(Effect.never),
+                Effect.ensuring(Effect.sync(stopped)),
+              ),
+            )
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(started);
+          yield* Effect.yieldNow;
+          const wait = yield* queue.delivery('first');
+          expect(wait).toBeDefined();
+          const waiter = yield* wait!.pipe(Effect.forkChild);
+          yield* Effect.yieldNow;
+          yield* queue.cancel('first');
+          yield* Fiber.join(first);
+          yield* Fiber.join(waiter);
+          expect(stopped).toHaveBeenCalledOnce();
+          const next = vi.fn<() => void>();
+          yield* queue.scheduleDelivery(pending('next'), Effect.sync(next));
+          expect(next).toHaveBeenCalledOnce();
+          yield* queue.finishCancellation('first');
+          expect(queue.isCancelled('first')).toBe(false);
+        }),
+      ),
+    ));
+
   it('owns cancellation and peer blocking state', () =>
     Effect.runPromise(
       withQueue((queue) =>
