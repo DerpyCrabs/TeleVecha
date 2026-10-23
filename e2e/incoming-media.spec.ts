@@ -430,6 +430,68 @@ test('loads a video thumbnail without downloading the full video until preview o
     .toBe(before.full + 1);
 });
 
+for (const grouped of [false, true]) {
+  test(`previews MP4 documents ${grouped ? 'in an album' : 'individually'} and only saves on download`, async ({
+    page,
+  }) => {
+    await openReady(page);
+    await selectAlice(page);
+    const downloads: string[] = [];
+    page.on('download', (download) => downloads.push(download.suggestedFilename()));
+    await page.evaluate((grouped) => {
+      for (let index = 0; index < (grouped ? 2 : 1); index++) {
+        window.__televechaFixture?.emit({
+          type: 'new-message',
+          pts: 11 + index,
+          ptsCount: 1,
+          message: {
+            id: 91 + index,
+            peerId: 'u:101',
+            senderId: 'u:101',
+            text: '',
+            date: 1_700_005_000,
+            outgoing: false,
+            ...(grouped ? { groupedId: 'video-documents' } : {}),
+            media: {
+              kind: 'file',
+              name: `document-${index}.mp4`,
+              mimeType: 'video/mp4',
+              size: 11_061_811,
+            },
+          },
+        });
+      }
+    }, grouped);
+
+    for (const label of ['Open document-0.mp4 fullscreen preview', 'Preview document-0.mp4']) {
+      await page.getByRole('button', { name: label, exact: true }).click();
+      const viewer = page.getByRole('dialog', {
+        name: 'Media preview: document-0.mp4',
+        exact: true,
+      });
+      await expect(viewer).toBeVisible();
+      await expect(viewer.locator('video')).toBeVisible();
+      expect(downloads).toEqual([]);
+      if (grouped) {
+        await viewer.getByRole('button', { name: 'Next attachment' }).click();
+        const next = page.getByRole('dialog', {
+          name: 'Media preview: document-1.mp4',
+          exact: true,
+        });
+        await expect(next).toBeVisible();
+        await expect(next.locator('video')).toBeVisible();
+      }
+      await page.getByRole('button', { name: 'Close media preview' }).click();
+    }
+    expect(downloads).toEqual([]);
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download document-0.mp4', exact: true }).click();
+    expect((await download).suggestedFilename()).toBe('document-0.mp4');
+    await expect(page.getByRole('dialog', { name: /Media preview:/ })).toHaveCount(0);
+    expect(downloads).toEqual(['document-0.mp4']);
+  });
+}
+
 test('loads the original photo instead of a Telegram thumbnail', async ({ page }) => {
   await openReady(page);
   await selectAlice(page);

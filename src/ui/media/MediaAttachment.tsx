@@ -4,6 +4,7 @@ import type { ChatMessage } from '../../domain/models';
 import type { TelegramTransferProgress } from '../../telegram/types';
 import Download from '@effectweb/lucide/icons/download';
 import FileText from '@effectweb/lucide/icons/file-text';
+import Play from '@effectweb/lucide/icons/play';
 import LoaderCircle from '@effectweb/lucide/icons/loader-circle';
 import X from '@effectweb/lucide/icons/x';
 import type { Send, Transition } from 'effectweb';
@@ -603,15 +604,21 @@ export const MediaAttachment = component<
           <>
             {previewKind ? (
               <>
-                <span class="media-file-thumbnail media-file-image-thumbnail" aria-hidden="true">
+                <button
+                  class="media-file-thumbnail media-file-image-thumbnail"
+                  onClick={(event) => openPreview(event.currentTarget)}
+                  aria-label={`Preview ${props.media.name}`}
+                >
                   {model.url ? (
                     <img draggable={false} src={model.url} alt="" />
                   ) : model.loading ? (
                     <LoaderCircle class="animate-spin" size={20} />
+                  ) : previewKind === 'video' ? (
+                    <Play size={20} />
                   ) : (
                     <FileText size={20} />
                   )}
-                </span>
+                </button>
                 <button
                   class="media-file-copy"
                   onClick={(event) => openPreview(event.currentTarget)}

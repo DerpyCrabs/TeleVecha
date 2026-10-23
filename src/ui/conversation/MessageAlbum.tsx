@@ -7,6 +7,7 @@ import { idRows } from '../collections';
 import type { MediaPreview } from '../media/MediaAttachment';
 import { MediaAttachment } from '../media/MediaAttachment';
 import { MediaViewer } from '../media/MediaViewer';
+import { mediaPresentation } from '../media/mediaPresentation';
 const commandPreview = 'preview';
 
 interface MessageAlbumProps {
@@ -63,10 +64,7 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
           };
         case 'Navigate': {
           const selected = model.props.messages.filter(
-            (item) =>
-              item.media?.kind === 'photo' ||
-              item.media?.kind === 'video' ||
-              (item.media?.kind === 'animation' && item.media.mimeType.startsWith('video/')),
+            (item) => item.media && mediaPresentation(item.media).preview,
           )[message.index];
           if (!selected?.media || model.viewerLoading) return { model };
           const media = selected.media;
@@ -91,7 +89,7 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
                           index: message.index,
                           message: selected,
                           preview: {
-                            kind: media.kind === 'photo' ? 'image' : 'video',
+                            kind: mediaPresentation(media).preview!,
                             name: media.name,
                             url,
                           },
@@ -114,12 +112,7 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
   view((model, send) => {
     const props = model.props;
     const previewableMessages = () =>
-      props.messages.filter(
-        (message) =>
-          message.media?.kind === 'photo' ||
-          message.media?.kind === 'video' ||
-          (message.media?.kind === 'animation' && message.media.mimeType.startsWith('video/')),
-      );
+      props.messages.filter((message) => message.media && mediaPresentation(message.media).preview);
     const openPreview = (message: ChatMessage, preview: MediaPreview) => {
       if (props.openPreview?.(message, preview) !== false && props.openPreview) return;
       const index = previewableMessages().findIndex(({ id }) => id === message.id);

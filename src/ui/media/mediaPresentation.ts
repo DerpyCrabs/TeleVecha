@@ -25,7 +25,11 @@ export function mediaPresentation(media: TelegramMedia): MediaPresentation {
   if (media.kind === 'sticker') return { display: 'image', preload: true };
   return {
     display: 'file',
-    ...(media.mimeType.startsWith('image/') ? { preview: 'image' as const } : {}),
+    ...(media.mimeType.startsWith('image/')
+      ? { preview: 'image' as const }
+      : media.mimeType.startsWith('video/')
+        ? { preview: 'video' as const }
+        : {}),
     // Telegram shows a thumbnail for image documents while keeping the document
     // filename and download affordance. Only non-visual files stay lazy.
     preload: media.mimeType.startsWith('image/'),

@@ -1790,6 +1790,10 @@
   background: rgb(255 255 255 / 0.08);
 }
 .media-file-image-thumbnail {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  cursor: zoom-in;
   width: 4.5rem;
   height: 4.5rem;
   grid-column: 1;
