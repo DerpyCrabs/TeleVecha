@@ -1024,23 +1024,27 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   : undefined)!,
                               )
                             : null}
-                          {message.status === 'failed' && pendingSendForMessage(message.id)
+                          {(message.status === 'failed' || message.status === 'sending') &&
+                          pendingSendForMessage(message.id)
                             ? ((pending) => (
                                 <div
                                   class="pending-message-actions"
-                                  aria-label="Failed message actions"
+                                  aria-label={
+                                    pending.lastError
+                                      ? 'Failed message actions'
+                                      : 'Sending message actions'
+                                  }
                                 >
-                                  <p>{pending.lastError}</p>
-                                  <button
-                                    disabled={Boolean(pendingActionId)}
-                                    onClick={() => void retryPendingSend(pending.id)}
-                                  >
-                                    {pendingActionId === pending.id ? 'Retrying…' : 'Retry'}
-                                  </button>
-                                  <button
-                                    disabled={Boolean(pendingActionId)}
-                                    onClick={() => void cancelPendingSend(pending.id)}
-                                  >
+                                  {pending.lastError ? <p>{pending.lastError}</p> : null}
+                                  {pending.lastError ? (
+                                    <button
+                                      disabled={Boolean(pendingActionId)}
+                                      onClick={() => void retryPendingSend(pending.id)}
+                                    >
+                                      {pendingActionId === pending.id ? 'Retrying…' : 'Retry'}
+                                    </button>
+                                  ) : null}
+                                  <button onClick={() => void cancelPendingSend(pending.id)}>
                                     Cancel
                                   </button>
                                 </div>

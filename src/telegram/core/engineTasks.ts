@@ -62,13 +62,18 @@ const makeEngineTasks = Effect.gen(function* () {
   const runTracked = <Value, Error, Requirements>(
     set: FiberSet.FiberSet<unknown, unknown>,
     effect: Effect.Effect<Value, Error, Requirements>,
+    interruptOnCancel = false,
   ) =>
-    Effect.gen(function* () {
-      const fiber = yield* FiberSet.run(set, Effect.exit(effect));
-      const result = yield* Fiber.join(fiber);
-      if (Exit.isSuccess(result)) return result.value;
-      return yield* Effect.failCause(result.cause);
-    });
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const fiber = yield* FiberSet.run(set, restore(Effect.exit(effect)));
+        const result = yield* restore(Fiber.join(fiber)).pipe(
+          Effect.onInterrupt(() => (interruptOnCancel ? Fiber.interrupt(fiber) : Effect.void)),
+        );
+        if (Exit.isSuccess(result)) return result.value;
+        return yield* Effect.failCause(result.cause);
+      }),
+    );
 
   return {
     runExclusive: <Error, Requirements>(
@@ -161,6 +166,7 @@ const makeEngineTasks = Effect.gen(function* () {
             Effect.flatMap((semaphore) => Semaphore.withPermit(semaphore)(operation)),
           ),
         ),
+        lane === 'outboxDelivery',
       ),
     drainSerial: (lanes: readonly EngineSerialLane[] = serialLanes) =>
       Effect.forEach(lanes, (lane) => FiberSet.awaitEmpty(serial[lane]), {

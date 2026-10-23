@@ -1012,13 +1012,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     }
   };
   const cancelPendingSend = async (id: string) => {
-    if (state.model().pendingActionId) return;
-    state.send({ type: 'Changed', changes: { pendingActionId: id } });
-    try {
-      await runEffect(engine.cancelPendingSend(id));
-    } finally {
-      state.send({ type: 'Changed', changes: { pendingActionId: '' } });
-    }
+    await runEffect(engine.cancelPendingSend(id));
   };
   reportConversationVisibility = () => {
     if (visibilityFrame !== undefined) return;

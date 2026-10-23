@@ -29,6 +29,51 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('MessagingEngine lifecycle regressions', () => {
+  it.each([false, true])(
+    'removes a cancelled attachment from memory and storage (active: %s)',
+    (active) =>
+      run(
+        Effect.gen(function* () {
+          const original = yield* createFixtureTelegramTransport();
+          const started = yield* Deferred.make<void>();
+          const stopped = yield* Deferred.make<void>();
+          const store = makeMemoryCacheStore();
+          const engine = yield* makeMessagingEngine(
+            {
+              ...original,
+              sendFile: () =>
+                Effect.gen(function* () {
+                  yield* Deferred.succeed(started, undefined);
+                  if (active) return yield* Effect.never;
+                  return yield* Effect.fail(createMtprotoError('protocol', 'Photo rejected'));
+                }).pipe(Effect.ensuring(Deferred.succeed(stopped, undefined))),
+            },
+            store,
+            { manageTabLease: false },
+          );
+          yield* engine.start(credentials);
+          const sending = yield* engine
+            .sendAttachments(
+              { id: 'u:101', kind: 'user' },
+              [{ file: new File(['photo'], 'photo.png', { type: 'image/png' }), sendAs: 'media' }],
+              'cancel this photo',
+            )
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(started);
+          yield* Effect.yieldNow;
+          if (!active) yield* Fiber.join(sending);
+          const pending = engine.snapshot().pending[0]!;
+          expect(pending).toBeDefined();
+          if (!active) expect(pending.lastError).toBeTruthy();
+          expect(yield* engine.cancelPendingSend(pending.id)).toBe(true);
+          if (active) expect(yield* Deferred.isDone(stopped)).toBe(true);
+          expect(engine.snapshot().pending).toEqual([]);
+          expect((yield* store.loadWorkspace()).pending).toEqual([]);
+          yield* engine.stop();
+        }),
+      ),
+  );
+
   it.each([
     { count: 1, mimeType: 'image/png', sendAs: 'media' as const },
     { count: 2, mimeType: 'image/png', sendAs: 'media' as const },

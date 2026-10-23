@@ -159,7 +159,12 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
     queueWrite,
     scheduleDelivery,
     delivery,
-    cancel: (id: string) => Effect.sync(() => cancellations.add(id)).pipe(Effect.asVoid),
+    cancel: (id: string) =>
+      Effect.gen(function* () {
+        cancellations.add(id);
+        yield* FiberMap.remove(deliveries, id);
+        cancellations.add(id);
+      }),
     finishCancellation: (id: string) =>
       FiberMap.has(deliveries, id).pipe(
         Effect.flatMap((active) =>

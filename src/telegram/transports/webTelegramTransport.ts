@@ -2,6 +2,7 @@ import { Crypto, Effect, Result, FiberMap, PubSub, ScopedRef, Semaphore, Stream 
 import * as Socket from 'effect/socket/Socket';
 import { telegramPeerColor } from '../../domain/peerColor';
 import { gunzipSync } from 'fflate';
+import { preparePhotoUpload } from '../photoUpload';
 import { decodeVoiceWaveform } from '../voiceWaveform';
 import type { RichBlock, RichCaption, RichText } from '../../domain/richMessage';
 import { reportDiagnostic } from '../core/diagnostics';
@@ -3566,16 +3567,26 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     asSticker: boolean,
     onProgress?: (progress: number) => Effect.Effect<void>,
   ) {
-    const uploaded = yield* (yield* getClient).uploadFile({
-      file,
-      workers: 2,
-      ...(onProgress ? { onProgress } : {}),
-    });
     const isPlainPhoto =
       sendAs === 'media' &&
       file.type.startsWith('image/') &&
       !asSticker &&
       file.type !== 'image/gif';
+    const upload = isPlainPhoto
+      ? yield* preparePhotoUpload(file).pipe(
+          Effect.mapError((cause) =>
+            createMtprotoError(
+              'protocol',
+              cause instanceof Error ? cause.message : 'Could not prepare the photo.',
+            ),
+          ),
+        )
+      : file;
+    const uploaded = yield* (yield* getClient).uploadFile({
+      file: upload,
+      workers: 2,
+      ...(onProgress ? { onProgress } : {}),
+    });
     if (isPlainPhoto) return Api.InputMediaUploadedPhoto({ file: uploaded });
     const attributes: Tl.TypeDocumentAttribute[] = [
       Api.DocumentAttributeFilename({ fileName: file.name }),
