@@ -2,6 +2,7 @@ import { Effect } from 'effect';
 
 // Keep ordinary photo uploads comfortably inside Telegram's photo limits.
 // Documents and animated images bypass this preparation in the transport.
+// Undefined means the original must be uploaded as a document instead.
 export const preparePhotoUpload = (file: File) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -23,9 +24,7 @@ export const preparePhotoUpload = (file: File) =>
       if (!bitmap.width || !bitmap.height)
         return yield* Effect.fail(new Error('The photo has invalid dimensions.'));
       if (Math.max(bitmap.width, bitmap.height) / Math.min(bitmap.width, bitmap.height) > 20)
-        return yield* Effect.fail(
-          new Error('This image is too wide or tall for a photo. Send it as a file.'),
-        );
+        return undefined;
       if (
         file.type === 'image/jpeg' &&
         file.size < 10_000_000 &&

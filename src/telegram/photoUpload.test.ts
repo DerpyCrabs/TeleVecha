@@ -18,7 +18,7 @@ it('normalizes an oversized PNG and releases its decoded bitmap', async () => {
   const file = new File([new Uint8Array(14_332_434)], 'photo.png', { type: 'image/png' });
   const result = await Effect.runPromise(preparePhotoUpload(file));
   expect([canvas.width, canvas.height]).toEqual([2560, 1707]);
-  expect([result.name, result.type, result.size]).toEqual(['photo.jpg', 'image/jpeg', 4]);
+  expect([result?.name, result?.type, result?.size]).toEqual(['photo.jpg', 'image/jpeg', 4]);
   expect(bitmap.close).toHaveBeenCalledOnce();
 });
 
@@ -30,14 +30,14 @@ it('preserves an already suitable JPEG', async () => {
   expect(close).toHaveBeenCalledOnce();
 });
 
-it('gives an actionable error for extreme aspect ratios and releases the bitmap', async () => {
+it.each([
+  [6000, 100],
+  [100, 6000],
+])('falls back to a document for %s × %s images and releases the bitmap', async (width, height) => {
   const close = vi.fn();
-  vi.stubGlobal(
-    'createImageBitmap',
-    vi.fn().mockResolvedValue({ width: 6000, height: 100, close }),
-  );
+  vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width, height, close }));
   await expect(
     Effect.runPromise(preparePhotoUpload(new File(['png'], 'wide.png'))),
-  ).rejects.toThrow('Send it as a file');
+  ).resolves.toBeUndefined();
   expect(close).toHaveBeenCalledOnce();
 });

@@ -1095,3 +1095,59 @@ it('sends username and named mentions with UTF-16 offsets and the selected user 
         ),
     ),
   ));
+
+it.each([
+  [6000, 100],
+  [100, 6000],
+  [800, 600],
+])('sends a %s × %s image with the appropriate Telegram media type', async (width, height) => {
+  const close = vi.fn();
+  vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width, height, close }));
+  const file = new File(['original image'], 'screenshot.jpg', { type: 'image/jpeg' });
+  const uploaded = Api.InputFile({ id: 1n, parts: 1, name: file.name, md5Checksum: '' });
+  const uploadFile = vi.fn(() => Effect.succeed(uploaded));
+  const invoke = vi.fn((request: unknown) => {
+    if (!Api.messages.SendMedia.is(request))
+      return Effect.fail(createMtprotoError('protocol', 'Unexpected RPC'));
+    expect(request.message).toBe('Caption');
+    expect(request.randomId).toBe(123n);
+    expect(request.media).toEqual(
+      width === 800
+        ? Api.InputMediaUploadedPhoto({ file: uploaded })
+        : Api.InputMediaUploadedDocument({
+            file: uploaded,
+            mimeType: file.type,
+            attributes: [Api.DocumentAttributeFilename({ fileName: file.name })],
+            forceFile: true,
+          }),
+    );
+    return Effect.succeed(
+      Api.UpdateShortSentMessage({ id: 42, pts: 1, ptsCount: 1, date: 1, out: true }),
+    );
+  });
+  try {
+    await Effect.runPromise(
+      withTransport(
+        (target) =>
+          Effect.gen(function* () {
+            yield* target.connect({ apiId: 1, apiHash: 'hash' });
+            return yield* target.sendFile({ id: 'g:303', kind: 'group' }, file, {
+              caption: 'Caption',
+              randomId: '123',
+              sendAs: 'media',
+              asSticker: false,
+            });
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({ uploadFile, invoke: invoke as unknown as MtprotoClient['invoke'] }),
+          ),
+      ),
+    );
+    expect(uploadFile).toHaveBeenCalledExactlyOnceWith({ file, workers: 2 });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

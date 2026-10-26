@@ -3572,7 +3572,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       file.type.startsWith('image/') &&
       !asSticker &&
       file.type !== 'image/gif';
-    const upload = isPlainPhoto
+    const photo = isPlainPhoto
       ? yield* preparePhotoUpload(file).pipe(
           Effect.mapError((cause) =>
             createMtprotoError(
@@ -3581,13 +3581,13 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
             ),
           ),
         )
-      : file;
+      : undefined;
     const uploaded = yield* (yield* getClient).uploadFile({
-      file: upload,
+      file: photo ?? file,
       workers: 2,
       ...(onProgress ? { onProgress } : {}),
     });
-    if (isPlainPhoto) return Api.InputMediaUploadedPhoto({ file: uploaded });
+    if (photo) return Api.InputMediaUploadedPhoto({ file: uploaded });
     const attributes: Tl.TypeDocumentAttribute[] = [
       Api.DocumentAttributeFilename({ fileName: file.name }),
     ];
@@ -3613,7 +3613,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       file: uploaded,
       mimeType: file.type || 'application/octet-stream',
       attributes,
-      ...(asSticker || sendAs === 'file' ? { forceFile: true as const } : {}),
+      ...(asSticker || sendAs === 'file' || isPlainPhoto ? { forceFile: true as const } : {}),
     });
   });
   const readVideoMetadata = Effect.fn('WebTelegramTransport.readVideoMetadata')(function* (
