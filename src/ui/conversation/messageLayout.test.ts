@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ChatMessage, ChatSummary } from '../../domain/models';
-import { layoutMessages } from './messageLayout';
+import { createMessageLayout, layoutMessages } from './messageLayout';
 
 const chat: ChatSummary = {
   id: 'channel:1',
@@ -189,4 +189,52 @@ describe('layoutMessages', () => {
     expect(layout?.className).toContain('message-image-document');
     expect(layout?.width).toBe('min(16.75rem, 100%)');
   });
+});
+
+it('caches layout inputs without hiding sender, date, album or status changes', () => {
+  const layout = createMessageLayout();
+  const messages = [message('1'), message('2')];
+  const dialogs: Parameters<typeof layoutMessages>[2] = [];
+  const initial = layout(messages, chat, dialogs);
+  expect(layout(messages, { ...chat, unread: 8, preview: 'Unrelated' }, dialogs)).toBe(initial);
+  expect(layout(messages, { ...chat, kind: 'user' }, dialogs)[0]!.author).toBe('');
+  const later = layout(
+    [messages[0]!, message('2', { date: 1_700_100_000, status: 'failed' })],
+    chat,
+    dialogs,
+  );
+  expect(later[1]!.showDateDivider).toBe(true);
+  expect(later[1]!.caption.status).toBe('failed');
+  const media = { kind: 'photo' as const, name: 'photo', mimeType: 'image/jpeg' };
+  const album = layout(
+    messages.map((entry) => ({ ...entry, media, groupedId: 'album' })),
+    chat,
+    dialogs,
+  );
+  expect(album[0]!.album).toHaveLength(2);
+  expect(album[1]!.hide).toBe(true);
+});
+
+it('updates sender titles but ignores read/unread metadata when caching layouts', () => {
+  const layout = createMessageLayout();
+  const messages = [message('1')];
+  const dialog = {
+    peer: { id: 'user:2', kind: 'user' as const },
+    title: 'Alice',
+    initials: 'A',
+    color: '#123456',
+    unreadCount: 0,
+    muted: false,
+    pinned: false,
+    topMessageId: 1,
+    readInboxMaxId: 1,
+    readOutboxMaxId: 1,
+    hasAvatar: false,
+  };
+  const initial = layout(messages, chat, [dialog]);
+  expect(initial[0]!.author).toBe('Alice');
+  expect(layout(messages, chat, [{ ...dialog, unreadCount: 10, readOutboxMaxId: 5 }])).toBe(
+    initial,
+  );
+  expect(layout(messages, chat, [{ ...dialog, title: 'Renamed' }])[0]!.author).toBe('Renamed');
 });

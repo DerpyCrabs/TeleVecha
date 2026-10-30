@@ -189,3 +189,27 @@ describe('cached conversation presentation', () => {
     expect(present(state, peer.id)[0]!.message.status).toBe('read');
   });
 });
+
+it('reuses complete history for unrelated snapshot changes and invalidates pending and peer inputs', () => {
+  const present = createConversationPresenter();
+  const initialState = snapshot([], [queued()]);
+  const initial = present(initialState, peer.id);
+  expect(
+    present(
+      {
+        ...initialState,
+        online: false,
+        dialogs: [{ ...dialog, title: 'Renamed', unreadCount: 5 }],
+      },
+      peer.id,
+    ),
+  ).toBe(initial);
+  const changed = present(
+    { ...initialState, pending: [queued({ text: 'Edited pending', uploadProgress: 0.5 })] },
+    peer.id,
+  );
+  expect(changed[0]!.message.body).toBe('Edited pending');
+  expect(present(initialState, 'user:2')).toEqual([]);
+  expect(present({ ...initialState, activePeerId: 'user:2' }, peer.id)).toEqual([]);
+  expect(present(initialState, peer.id)).toEqual(initial);
+});

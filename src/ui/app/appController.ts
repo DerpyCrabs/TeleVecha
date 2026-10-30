@@ -41,7 +41,7 @@ import {
   type KeyedMessageView,
 } from '../conversation/conversationPresentation';
 import { createConversationViewport } from '../conversation/conversationViewport';
-import { layoutMessages } from '../conversation/messageLayout';
+import { createMessageLayout, type layoutMessages } from '../conversation/messageLayout';
 import { createDialogPresenter } from '../conversation/presentation';
 import { saveMediaUrl } from '../media/mediaActions';
 import type { MediaAsset } from '../media/mediaAssets';
@@ -666,9 +666,19 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   const activeMessageEntries = selectors.select<KeyedMessageView[]>(() => {
     return presentConversation(state.model().snapshot, state.model().activeChatId);
   });
-  const activeMessages = selectors.select(() =>
-    activeMessageEntries().map(({ message }) => message),
-  );
+  let projectedEntries: KeyedMessageView[] | undefined;
+  let projectedMessages: ChatMessage[] = [];
+  const activeMessages = selectors.select(() => {
+    const entries = activeMessageEntries();
+    if (entries !== projectedEntries) {
+      projectedMessages = reuseArray(
+        projectedMessages,
+        entries.map(({ message }) => message),
+      ) as ChatMessage[];
+      projectedEntries = entries;
+    }
+    return projectedMessages;
+  });
   const initialUnreadMessageId = selectors.select(() => {
     const unreadAfterId = state.model().initialUnreadAfterId;
     if (unreadAfterId === undefined) return undefined;
@@ -721,12 +731,8 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       openingMessage = false;
     },
   });
-  const renderedMessages = selectors.select<ChatMessage[]>((previous) => {
-    const entries = activeMessageEntries();
-    const visibleEntries = entries;
-    const next = visibleEntries.map(({ message }) => message);
-    return reuseArray(previous, next) as ChatMessage[];
-  }, []);
+  const renderedMessages = activeMessages;
+  const messageLayouts = createMessageLayout();
   const messageRows = selectors.select<{
     entries: RenderedMessage[];
     messages: readonly ChatMessage[];
@@ -734,12 +740,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   }>((previous) => {
     const entries = activeMessageEntries();
     const messages = renderedMessages();
-    const layouts = layoutMessages(
-      messages,
-      activeChat(),
-      state.model().snapshot.dialogs,
-      previous?.layouts,
-    );
+    const layouts = messageLayouts(messages, activeChat(), state.model().snapshot.dialogs);
     if (previous?.messages === messages && previous.layouts === layouts) return previous;
     return {
       entries: entries.map((entry, index) => ({ ...entry, layout: layouts[index]! })),

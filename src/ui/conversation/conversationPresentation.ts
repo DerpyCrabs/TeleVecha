@@ -72,8 +72,29 @@ export function createConversationPresenter() {
     EngineSnapshot['messages'][number],
     { reply: EngineSnapshot['messages'][number] | undefined; read: boolean; view: ChatMessage }
   >();
-  return (snapshot: EngineSnapshot, peerId: string) =>
-    presentConversation(snapshot, peerId, (message, readOutboxMaxId, reply) => {
+  let previous:
+    | {
+        messages: EngineSnapshot['messages'];
+        pending: EngineSnapshot['pending'];
+        peerId: string;
+        activePeerId: string | undefined;
+        readOutboxMaxId: number;
+        result: KeyedMessageView[];
+      }
+    | undefined;
+  return (snapshot: EngineSnapshot, peerId: string) => {
+    const readOutboxMaxId =
+      snapshot.dialogs.find(({ peer }) => peer.id === peerId)?.readOutboxMaxId ?? 0;
+    if (
+      previous &&
+      previous.messages === snapshot.messages &&
+      previous.pending === snapshot.pending &&
+      previous.peerId === peerId &&
+      previous.activePeerId === snapshot.activePeerId &&
+      previous.readOutboxMaxId === readOutboxMaxId
+    )
+      return previous.result;
+    const result = presentConversation(snapshot, peerId, (message, readOutboxMaxId, reply) => {
       const read = message.outgoing && message.id <= readOutboxMaxId;
       const previous = cache.get(message);
       if (previous && previous.reply === reply && previous.read === read) return previous.view;
@@ -81,6 +102,16 @@ export function createConversationPresenter() {
       cache.set(message, { reply, read, view });
       return view;
     });
+    previous = {
+      messages: snapshot.messages,
+      pending: snapshot.pending,
+      peerId,
+      activePeerId: snapshot.activePeerId,
+      readOutboxMaxId,
+      result,
+    };
+    return result;
+  };
 }
 
 export function presentConversation(

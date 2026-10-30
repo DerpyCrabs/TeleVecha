@@ -1,4 +1,5 @@
-import { Crypto, Effect } from 'effect';
+import { SecureRandom, Digest } from 'effect/crypto';
+import { Effect } from 'effect';
 
 import {
   bigIntToBytes,
@@ -89,9 +90,10 @@ export const createEncryptedMessageState = Effect.fn('mtproto.sender.encryptedSt
     serverSalt?: bigint;
     timeOffset?: number;
   }) {
-    const crypto = yield* Crypto.Crypto;
-    const runCrypto = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>) =>
-      effect.pipe(Effect.provideService(Crypto.Crypto, crypto));
+    const crypto = yield* Effect.context<SecureRandom.SecureRandom | Digest.Digest>();
+    const runCrypto = <A, E>(
+      effect: Effect.Effect<A, E, SecureRandom.SecureRandom | Digest.Digest>,
+    ) => effect.pipe(Effect.provideContext(crypto));
     const now = options.now ?? Date.now;
     let currentSessionId = bytesToBigInt(yield* runCrypto(randomBytes(8)), {
       littleEndian: true,

@@ -1,5 +1,6 @@
+import { SecureRandom, Digest } from 'effect/crypto';
 import { Effect, Stream } from 'effect';
-import type { Crypto } from 'effect';
+
 import * as Socket from 'effect/socket/Socket';
 
 import { createAesCtr } from '../crypto';
@@ -22,7 +23,7 @@ export function createWebSocketPacketConnection(options: {
   url: string;
   createCipher?: StreamingCipherFactory;
   connectTimeoutMs?: number;
-}): PacketConnection<Crypto.Crypto | Socket.WebSocketConstructor> {
+}): PacketConnection<(SecureRandom.SecureRandom | Digest.Digest) | Socket.WebSocketConstructor> {
   return {
     packets: (outgoing) =>
       Stream.unwrap(

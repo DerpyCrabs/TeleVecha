@@ -1,4 +1,5 @@
-import { Crypto, Effect, Result, FiberMap, PubSub, ScopedRef, Semaphore, Stream } from 'effect';
+import { SecureRandom, Digest, Kdf } from 'effect/crypto';
+import { Effect, Result, FiberMap, PubSub, ScopedRef, Semaphore, Stream } from 'effect';
 import * as Socket from 'effect/socket/Socket';
 import { telegramPeerColor } from '../../domain/peerColor';
 import { gunzipSync } from 'fflate';
@@ -91,11 +92,11 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   store: TransportSessionStorage,
   dependencies: WebTelegramTransportDependencies = {},
 ) {
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* Effect.context<SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf>();
   const webSocket = yield* Socket.WebSocketConstructor;
   const provideRuntime = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(Crypto.Crypto, crypto),
+      Effect.provideContext(crypto),
       Effect.provideService(Socket.WebSocketConstructor, webSocket),
     );
   const optionalEnrichmentDeadlineMs =

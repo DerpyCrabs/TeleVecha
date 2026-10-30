@@ -884,3 +884,35 @@ test('deleting any number of leading anchors preserves the first surviving messa
   expect(frames.offsets.length).toBeGreaterThan(0);
   expect(Math.max(...frames.offsets.map(Math.abs))).toBeLessThan(3);
 });
+
+test('scrolling a settled history does not remeasure every loaded article', async ({ page }) => {
+  await openReady(page);
+  await selectAlice(page);
+  const scroller = page.getByTestId('message-scroller');
+  await scroller.hover();
+  await page.mouse.wheel(0, -300);
+  await waitForScrollToSettle(scroller);
+  const result = await scroller.evaluate(async (element) => {
+    // Prime any geometry invalidated by the initial history transition.
+    element.dispatchEvent(new Event('scroll'));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    // oxlint-disable-next-line typescript/unbound-method -- Saved for instrumentation; invoked with the measured element via call.
+    const original = Element.prototype.getBoundingClientRect;
+    let articleReads = 0;
+    Element.prototype.getBoundingClientRect = function () {
+      if (this.matches('article.message')) articleReads++;
+      return original.call(this);
+    };
+    try {
+      for (let step = 0; step < 10; step++) {
+        element.scrollTop -= 1;
+        element.dispatchEvent(new Event('scroll'));
+      }
+      return { articleReads, rows: element.querySelectorAll('article.message').length };
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+    }
+  });
+  expect(result.rows).toBeGreaterThan(10);
+  expect(result.articleReads).toBeLessThan(result.rows);
+});

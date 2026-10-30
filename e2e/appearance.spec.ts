@@ -195,7 +195,7 @@ test('uses the background explicitly assigned to a chat', async ({ page }) => {
       background: expect.stringMatching(/gradient/),
       backgroundSize: expect.stringMatching(/^cover/),
       mask: expect.stringMatching(/^url\("blob:/),
-      maskSize: '512px',
+      maskSize: expect.stringMatching(/^512px(?: auto)?$/),
       opacity: '0.6',
       base: 'linear-gradient(rgb(5, 7, 6), rgb(5, 7, 6))',
     });

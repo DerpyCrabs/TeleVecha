@@ -1,15 +1,6 @@
+import { SecureRandom, Digest, Kdf } from 'effect/crypto';
 import { gunzipSync, gzipSync } from 'fflate';
-import {
-  Cause,
-  Crypto,
-  Deferred,
-  Effect,
-  Result,
-  Fiber,
-  Queue,
-  Stream,
-  SubscriptionRef,
-} from 'effect';
+import { Cause, Deferred, Effect, Result, Fiber, Queue, Stream, SubscriptionRef } from 'effect';
 
 import {
   bigIntToBytes,
@@ -180,9 +171,10 @@ function senderError(error: unknown): MtprotoError {
 export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
   options: MtprotoSenderOptions,
 ) {
-  const crypto = yield* Crypto.Crypto;
-  const runCrypto = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>) =>
-    effect.pipe(Effect.provideService(Crypto.Crypto, crypto));
+  const crypto = yield* Effect.context<SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf>();
+  const runCrypto = <A, E>(
+    effect: Effect.Effect<A, E, SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf>,
+  ) => effect.pipe(Effect.provideContext(crypto));
   const requestTimeoutMs = Math.trunc(options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
   if (requestTimeoutMs <= 0) {
     return yield* Effect.fail(

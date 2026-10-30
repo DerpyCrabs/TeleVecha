@@ -87,7 +87,11 @@ const makeServer = Effect.gen(function* () {
     sent: { sessionId: bigint; messages: TlObject[] }[];
     closed: boolean;
   }[] = [];
-  const connection: PacketConnection<import('effect').Crypto.Crypto> = {
+  const connection: PacketConnection<
+    | import('effect/crypto').SecureRandom.SecureRandom
+    | import('effect/crypto').Digest.Digest
+    | import('effect/crypto').Kdf.Kdf
+  > = {
     packets: (outgoing) =>
       Stream.unwrap(
         Effect.gen(function* () {

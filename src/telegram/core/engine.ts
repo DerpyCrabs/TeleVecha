@@ -1,4 +1,5 @@
-import { Crypto, Deferred, Effect, Exit, Layer, Schedule, Scope, Stream } from 'effect';
+import { SecureRandom } from 'effect/crypto';
+import { Deferred, Effect, Exit, Layer, Schedule, Scope, Stream } from 'effect';
 
 import { reportDiagnostic } from './diagnostics';
 import {
@@ -144,7 +145,7 @@ function makeMessagingEngineModule(
   options: { manageTabLease?: boolean } = {},
   rootScope: Scope.Scope,
   resources: ResourceCache,
-  crypto: Crypto.Crypto,
+  crypto: SecureRandom.SecureRandom['Service'],
 ) {
   let telegramTransport = transport;
   let cacheStore = store;
@@ -160,17 +161,19 @@ function makeMessagingEngineModule(
   let resourceCache = resources;
   let versions = makeVersionIndex();
   const randomUuid = () =>
-    crypto.randomUUIDv4.pipe(
-      Effect.mapError(
-        (cause) => new Error('Could not generate a pending send identifier.', { cause }),
-      ),
-    );
+    crypto
+      .uuidV4()
+      .pipe(
+        Effect.catchDefect((cause) =>
+          Effect.fail(new Error('Could not generate a pending send identifier.', { cause })),
+        ),
+      );
   const randomId = Effect.fn('MessagingEngine.randomId')(function* () {
     const bytes = yield* crypto
       .randomBytes(8)
       .pipe(
-        Effect.mapError(
-          (cause) => new Error('Could not generate a Telegram random ID.', { cause }),
+        Effect.catchDefect((cause) =>
+          Effect.fail(new Error('Could not generate a Telegram random ID.', { cause })),
         ),
       );
     let value = 0n;
@@ -5918,7 +5921,7 @@ export const makeMessagingEngine = Effect.fn('MessagingEngine.make')(function* (
 ) {
   const state = yield* AccountState;
   const tasks = yield* EngineTasks;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const rootScope = yield* Scope.Scope;
   const commandReady = yield* Deferred.make<void, Error>();
   const accountReady = yield* Deferred.make<void, Error>();

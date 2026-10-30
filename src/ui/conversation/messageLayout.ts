@@ -73,6 +73,12 @@ function captionMediaWidth(parts: Array<string | undefined>) {
   return Math.min(24, 1.3 + longestLine * 0.48);
 }
 
+function dialogTitles(dialogs: readonly TelegramDialog[]) {
+  const titles = new Map<string, string>();
+  for (const { peer, title } of dialogs) if (!titles.has(peer.id)) titles.set(peer.id, title);
+  return titles;
+}
+
 export function layoutMessages(
   messages: ChatMessage[],
   chat: ChatSummary,
@@ -92,11 +98,10 @@ export function layoutMessages(
     }
     return grouped.length > 1 ? grouped : [];
   });
+  const titles = dialogTitles(dialogs);
   const author = (message: ChatMessage) => {
     if (message.outgoing || chat.kind === 'user') return '';
-    return (
-      dialogs.find(({ peer }) => peer.id === message.author)?.title || message.author || chat.title
-    );
+    return titles.get(message.author) || message.author || chat.title;
   };
   const previousVisible = (index: number) => {
     let previousIndex = index - 1;
@@ -203,4 +208,42 @@ export function layoutMessages(
     previous.every((layout, index) => layout === next[index])
     ? previous
     : next;
+}
+
+/** Layout depends on immutable messages and sender metadata, not composer or appearance state. */
+export function createMessageLayout() {
+  let previous:
+    | {
+        messages: ChatMessage[];
+        kind: ChatSummary['kind'];
+        title: string;
+        dialogs: readonly TelegramDialog[];
+        titles: Map<string, string>;
+        result: MessageLayout[];
+      }
+    | undefined;
+  return (messages: ChatMessage[], chat: ChatSummary, dialogs: readonly TelegramDialog[]) => {
+    const titles =
+      previous && previous.dialogs === dialogs ? previous.titles : dialogTitles(dialogs);
+    const previousTitles = previous?.titles;
+    const sameTitles =
+      previousTitles &&
+      (previousTitles === titles ||
+        (previousTitles.size === titles.size &&
+          [...titles].every(([id, title]) => previousTitles.get(id) === title)));
+    if (
+      previous &&
+      previous.messages === messages &&
+      previous.kind === chat.kind &&
+      previous.title === chat.title &&
+      sameTitles
+    ) {
+      previous.dialogs = dialogs;
+      previous.titles = titles;
+      return previous.result;
+    }
+    const result = layoutMessages(messages, chat, dialogs, previous?.result);
+    previous = { messages, kind: chat.kind, title: chat.title, dialogs, titles, result };
+    return result;
+  };
 }

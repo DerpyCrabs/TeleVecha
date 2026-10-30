@@ -24,34 +24,34 @@
     "test:all": "npm run check:telegram-tl && npm run check && npm run check:e2e && npm test && npm run test:e2e && npm run build"
   },
   "dependencies": {
-    "@effect/platform-browser": "4.0.0",
-    "@effectweb/lucide": "0.13.0",
-    "@effectweb/query": "0.13.0",
+    "@effect/platform-browser": "4.1.0",
+    "@effectweb/lucide": "0.15.0",
+    "@effectweb/query": "0.15.0",
     "@noble/ciphers": "^2.4.0",
-    "effect": "4.0.0",
-    "effectweb": "0.13.0",
+    "effect": "4.1.0",
+    "effectweb": "0.15.0",
     "fflate": "^0.8.3",
-    "idb": "8.0.3",
+    "idb": "8.0.4",
     "lottie-web": "^5.13.0"
   },
   "devDependencies": {
-    "@effect/tsgo": "0.32.1",
-    "@effectweb/compiler": "0.13.0",
-    "@playwright/test": "^1.62.1",
+    "@effect/tsgo": "0.63.0",
+    "@effectweb/compiler": "0.15.0",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "4.3.3",
-    "@types/node": "^26.2.0",
-    "@vitest/coverage-v8": "^4.1.10",
-    "@voidzero-dev/vite-plus-core": "0.2.9",
-    "fake-indexeddb": "^6.2.5",
-    "oxfmt": "0.62.0",
-    "oxlint": "1.77.0",
-    "oxlint-tsgolint": "7.0.2001",
+    "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "^5.0.5",
+    "@voidzero-dev/vite-plus-core": "1.4.0",
+    "fake-indexeddb": "^6.2.7",
+    "oxfmt": "0.75.0",
+    "oxlint": "1.90.0",
+    "oxlint-tsgolint": "7.0.2005",
     "tailwindcss": "4.3.3",
-    "typescript": "5.9.3",
-    "vite-plus": "0.2.9"
+    "typescript": "7.0.2",
+    "vite-plus": "1.4.0"
   },
   "overrides": {
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9"
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0"
   },
   "engines": {
     "node": ">=22.14"

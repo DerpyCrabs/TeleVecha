@@ -34,7 +34,13 @@ const providePlatform = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   ) as Effect.Effect<
     A,
     E,
-    Exclude<R, import('effect').Crypto.Crypto | Socket.WebSocketConstructor>
+    Exclude<
+      R,
+      | import('effect/crypto').SecureRandom.SecureRandom
+      | import('effect/crypto').Digest.Digest
+      | import('effect/crypto').Kdf.Kdf
+      | Socket.WebSocketConstructor
+    >
   >;
 
 const connectionDouble = Effect.gen(function* () {

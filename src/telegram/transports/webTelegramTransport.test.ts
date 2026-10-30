@@ -1,4 +1,5 @@
-import { Crypto, Effect, Fiber, PubSub, Stream } from 'effect';
+import { SecureRandom, Digest, Kdf } from 'effect/crypto';
+import { Effect, Fiber, PubSub, Stream } from 'effect';
 import * as Socket from 'effect/socket/Socket';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -9,19 +10,21 @@ import { Api, createTl } from '../mtproto/tl';
 import { makeMemoryCacheStore } from '../persistence/memoryStore';
 import { createWebTelegramTransport } from './webTelegramTransport';
 
-const testCrypto = Crypto.make({
-  randomBytes: (size) => new Uint8Array(size).fill(1),
-  digest: (_algorithm, data) => Effect.succeed(data.slice(0, 32)),
-});
+const testCrypto = SecureRandom.make((size) => new Uint8Array(size).fill(1));
 const unusedSocket = (() => {
   throw new Error('Unexpected WebSocket construction.');
 }) as Socket.WebSocketConstructor['Service'];
 
 const providePlatform = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
-    Effect.provideService(Crypto.Crypto, testCrypto),
+    Effect.provideService(SecureRandom.SecureRandom, testCrypto),
+    Effect.provide(Digest.layerWebCrypto),
     Effect.provideService(Socket.WebSocketConstructor, unusedSocket),
-  ) as Effect.Effect<A, E, Exclude<R, Crypto.Crypto | Socket.WebSocketConstructor>>;
+  ) as Effect.Effect<
+    A,
+    E,
+    Exclude<R, (SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf) | Socket.WebSocketConstructor>
+  >;
 
 const clientDouble = (overrides: Partial<MtprotoClient> = {}): MtprotoClient => ({
   apiId: 1,

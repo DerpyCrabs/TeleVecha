@@ -1,4 +1,5 @@
-import { Crypto, Effect, Schedule } from 'effect';
+import { SecureRandom } from 'effect/crypto';
+import { Effect, Schedule } from 'effect';
 
 import { createMtprotoError, errorMessage, isMtprotoError } from '../errors';
 import type { PacketCodec, StreamingCipherFactory } from './types';
@@ -53,10 +54,14 @@ function packetPrefix(payloadLength: number) {
 
 export const createObfuscatedAbridgedCodec = Effect.fn('mtproto.connection.abridged')(
   function* (options: { createCipher: StreamingCipherFactory }) {
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     const header = yield* crypto.randomBytes(HEADER_LENGTH).pipe(
-      Effect.mapError((cause) =>
-        createMtprotoError('crypto', 'Could not create an MTProto obfuscation header.', { cause }),
+      Effect.catchDefect((cause) =>
+        Effect.fail(
+          createMtprotoError('crypto', 'Could not create an MTProto obfuscation header.', {
+            cause,
+          }),
+        ),
       ),
       Effect.filterOrFail(validHeader, () =>
         createMtprotoError('crypto', 'Generated an invalid MTProto obfuscation header.'),

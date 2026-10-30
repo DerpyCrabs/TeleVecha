@@ -28,6 +28,7 @@ interface ConversationViewportOptions {
 interface ReadingAnchorPoint {
   element: HTMLElement;
   top: number;
+  bottom: number;
 }
 
 /**
@@ -76,7 +77,14 @@ export function createConversationViewport(options: ConversationViewportOptions)
   let prependHeight: number | undefined;
   let resizeObserver: ResizeObserver | undefined;
   let mutationObserver: MutationObserver | undefined;
+  let observedRows = new Set<HTMLElement>();
   let readingAnchors: ReadingAnchorPoint[] = [];
+  let geometry: ReadingAnchorPoint[] = [];
+  let geometryDirty = true;
+  let geometryOrdered = true;
+  let anchorIndex = 0;
+  let anchorScrollTop = 0;
+  let anchorViewportTop = 0;
   let touchY: number | undefined;
   let pointerScrollCandidate = false;
   const isScrollbarPointer = (scroller: HTMLDivElement, event: PointerEvent) => {
@@ -98,20 +106,58 @@ export function createConversationViewport(options: ConversationViewportOptions)
   };
   const captureReadingAnchors = (scroller: HTMLDivElement) => {
     const viewportTop = scroller.getBoundingClientRect().top;
-    const measured = [...scroller.querySelectorAll<HTMLElement>('article.message')].map(
-      (element) => ({ element, bounds: element.getBoundingClientRect() }),
-    );
-    const atOrAfterViewport = measured.filter(({ bounds }) => bounds.bottom >= viewportTop);
-    const beforeViewport = measured.filter(({ bounds }) => bounds.bottom < viewportTop).reverse();
-    readingAnchors = [...atOrAfterViewport, ...beforeViewport].map(({ element, bounds }) => ({
-      element,
-      top: bounds.top,
-    }));
+    const scrollTop = scroller.scrollTop;
+    if (geometryDirty) {
+      // Keep all fallback positions for arbitrarily large deletions, but measure only
+      // after layout changes. Scrolling changes viewport coordinates, not these offsets.
+      const rows = new Set(scroller.querySelectorAll<HTMLElement>('article.message'));
+      geometry = [...rows].flatMap((element) => {
+        const bounds = element.getBoundingClientRect();
+        if (bounds.width === 0 && bounds.height === 0) return [];
+        return [
+          {
+            element,
+            top: bounds.top - viewportTop + scrollTop,
+            bottom: bounds.bottom - viewportTop + scrollTop,
+          },
+        ];
+      });
+      for (const element of observedRows)
+        if (!rows.has(element)) resizeObserver?.unobserve(element);
+      for (const element of rows) if (!observedRows.has(element)) resizeObserver?.observe(element);
+      observedRows = rows;
+      geometryOrdered = geometry.every(
+        (point, index) => index === 0 || point.bottom >= geometry[index - 1]!.bottom,
+      );
+      geometryDirty = false;
+    }
+    readingAnchors = geometry;
+    anchorIndex = firstReadingAnchor(readingAnchors, scrollTop, geometryOrdered);
+    anchorScrollTop = scrollTop;
+    anchorViewportTop = viewportTop;
   };
   const preserveReadingAnchor = (scroller: HTMLDivElement) => {
-    const anchor = readingAnchors.find(({ element }) => element.isConnected);
+    // DOM order remains the fallback priority even for hidden or overlapping rows.
+    let anchor: ReadingAnchorPoint | undefined;
+    for (let index = anchorIndex; index < readingAnchors.length; index++) {
+      const candidate = readingAnchors[index]!;
+      if (candidate.bottom >= anchorScrollTop && candidate.element.isConnected) {
+        anchor = candidate;
+        break;
+      }
+    }
+    if (!anchor)
+      for (let index = readingAnchors.length - 1; index >= 0; index--) {
+        const candidate = readingAnchors[index]!;
+        if (candidate.bottom < anchorScrollTop && candidate.element.isConnected) {
+          anchor = candidate;
+          break;
+        }
+      }
     if (!anchor) return;
-    const delta = anchor.element.getBoundingClientRect().top - anchor.top;
+    const delta =
+      anchor.element.getBoundingClientRect().top -
+      (anchor.top - anchorScrollTop + anchorViewportTop);
     if (delta !== 0) scroller.scrollTop += delta;
   };
   const pinPresent = (scroller: HTMLDivElement) => {
@@ -142,6 +188,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
     event: ConversationViewportEvent,
     scroller: HTMLDivElement | undefined = options.scroller(),
   ) {
+    if (event.type === 'geometry-changed' || event.type === 'content-changed') geometryDirty = true;
     source.send({ type: 'Viewport', event, scroller });
   }
   let wasEmpty = false;
@@ -209,8 +256,12 @@ export function createConversationViewport(options: ConversationViewportOptions)
     });
     resizeObserver.observe(scroller);
     resizeObserver.observe(content);
-    mutationObserver = new MutationObserver(() => {
-      if (!followingPresent() && prependHeight !== undefined) {
+    mutationObserver = new MutationObserver((records) => {
+      if (
+        !followingPresent() &&
+        prependHeight !== undefined &&
+        records.some((record) => record.type === 'childList' && record.target === content)
+      ) {
         const addedHeight = scroller.scrollHeight - prependHeight;
         if (addedHeight !== 0) {
           scroller.scrollTop += addedHeight;
@@ -230,6 +281,8 @@ export function createConversationViewport(options: ConversationViewportOptions)
       window.removeEventListener('pointercancel', handlePointerEnd, true);
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
+      observedRows.clear();
+      geometryDirty = true;
       resizeObserver = undefined;
       mutationObserver = undefined;
     };
@@ -238,6 +291,10 @@ export function createConversationViewport(options: ConversationViewportOptions)
     positionedPeer = '';
     prependHeight = undefined;
     readingAnchors = [];
+    geometry = [];
+    for (const element of observedRows) resizeObserver?.unobserve(element);
+    observedRows.clear();
+    geometryDirty = true;
     dispatch({ type: 'peer-reset' });
   };
   const positionForPeer = (
@@ -289,6 +346,8 @@ export function createConversationViewport(options: ConversationViewportOptions)
         requestAnimationFrame(() => {
           if (options.activePeerId() !== peerId || !stillCurrent()) return;
           readingAnchors = [];
+          geometry = [];
+          geometryDirty = true;
           if (unreadTailFits()) {
             dispatch({ type: 'peer-positioned' }, scroller);
             return;
@@ -371,3 +430,22 @@ export function createConversationViewport(options: ConversationViewportOptions)
   };
 }
 export type ConversationViewport = ReturnType<typeof createConversationViewport>;
+
+export function firstReadingAnchor(
+  points: readonly { bottom: number }[],
+  top: number,
+  ordered: boolean,
+) {
+  if (!ordered) {
+    const index = points.findIndex((point) => point.bottom >= top);
+    return index < 0 ? points.length : index;
+  }
+  let low = 0;
+  let high = points.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (points[middle]!.bottom < top) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}

@@ -1,4 +1,5 @@
-import type { Crypto, Effect, Scope, Stream } from 'effect';
+import { SecureRandom, Digest, Kdf } from 'effect/crypto';
+import type { Effect, Scope, Stream } from 'effect';
 import type * as Socket from 'effect/socket/Socket';
 
 import type { AuthKey } from '../auth';
@@ -35,14 +36,20 @@ export interface MtprotoSender {
 
 export interface MtprotoSenderOptions {
   readonly dcId: number;
-  readonly connection: PacketConnection<Crypto.Crypto | Socket.WebSocketConstructor>;
+  readonly connection: PacketConnection<
+    (SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf) | Socket.WebSocketConstructor
+  >;
   readonly codec: TlCodec;
   readonly authKey?: AuthKey | undefined;
   readonly serverSalt?: bigint | undefined;
   readonly timeOffset?: number | undefined;
   readonly authorize: (
     transport: PlainMtprotoTransport,
-  ) => Effect.Effect<AuthorizationResult, MtprotoError, Crypto.Crypto>;
+  ) => Effect.Effect<
+    AuthorizationResult,
+    MtprotoError,
+    SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf
+  >;
   readonly onAuthKey: (result: AuthorizationResult) => Effect.Effect<void, MtprotoError>;
   readonly onAuthKeyInvalidated?: (() => Effect.Effect<void, MtprotoError>) | undefined;
   readonly now?: (() => number) | undefined;
@@ -53,4 +60,7 @@ export interface MtprotoSenderOptions {
     | undefined;
 }
 
-export type MtprotoSenderRequirements = Crypto.Crypto | Socket.WebSocketConstructor | Scope.Scope;
+export type MtprotoSenderRequirements =
+  | (SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf)
+  | Socket.WebSocketConstructor
+  | Scope.Scope;

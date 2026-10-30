@@ -1,5 +1,6 @@
+import { SecureRandom, Digest, Kdf } from 'effect/crypto';
 import { Context, Effect, Layer, PubSub, RcMap, Ref, Schedule, Schema, Stream } from 'effect';
-import { Crypto } from 'effect';
+
 import * as Socket from 'effect/socket/Socket';
 
 import {
@@ -93,7 +94,9 @@ export interface CreateMtprotoClientOptions {
         readonly port: number;
         readonly isTestServer: boolean;
         readonly purpose: MtprotoConnectionPurpose;
-      }) => PacketConnection<Crypto.Crypto | Socket.WebSocketConstructor>)
+      }) => PacketConnection<
+        (SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf) | Socket.WebSocketConstructor
+      >)
     | undefined;
   readonly now?: (() => number) | undefined;
 }
@@ -319,11 +322,11 @@ const keyParts = (key: SenderKey) => {
 export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
   options: CreateMtprotoClientOptions,
 ) {
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* Effect.context<SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf>();
   const webSocket = yield* Socket.WebSocketConstructor;
   const provideDependencies = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(Crypto.Crypto, crypto),
+      Effect.provideContext(crypto),
       Effect.provideService(Socket.WebSocketConstructor, webSocket),
     );
   const configuration = {
@@ -399,7 +402,7 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
         unresolvedConnection
           .packets(outgoing)
           .pipe(
-            Stream.provideService(Crypto.Crypto, crypto),
+            Stream.provideContext(crypto),
             Stream.provideService(Socket.WebSocketConstructor, webSocket),
           ),
     };
@@ -591,5 +594,8 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
 
 export const mtprotoClientLayer = (
   options: CreateMtprotoClientOptions,
-): Layer.Layer<MtprotoClient, MtprotoError, Crypto.Crypto | Socket.WebSocketConstructor> =>
-  Layer.effect(MtprotoClientService, createMtprotoClient(options));
+): Layer.Layer<
+  MtprotoClient,
+  MtprotoError,
+  (SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf) | Socket.WebSocketConstructor
+> => Layer.effect(MtprotoClientService, createMtprotoClient(options));

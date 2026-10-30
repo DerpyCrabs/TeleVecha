@@ -1,16 +1,14 @@
-import { Crypto, Effect } from 'effect';
+import { SecureRandom } from 'effect/crypto';
+import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
 
 import { createObfuscatedAbridgedCodec } from './abridged';
 
 const identityCipher = () => ({ transform: (data: Uint8Array) => data.slice() });
 const validHeader = () => Uint8Array.from({ length: 64 }, (_, index) => index + 1);
-const testCrypto = Crypto.make({
-  randomBytes: validHeader,
-  digest: (_algorithm, data) => Effect.succeed(data),
-});
-const run = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>) =>
-  Effect.runPromise(effect.pipe(Effect.provideService(Crypto.Crypto, testCrypto)));
+const testCrypto = SecureRandom.make(validHeader);
+const run = <A, E>(effect: Effect.Effect<A, E, SecureRandom.SecureRandom>) =>
+  Effect.runPromise(effect.pipe(Effect.provideService(SecureRandom.SecureRandom, testCrypto)));
 
 const concat = (...parts: readonly Uint8Array[]) => {
   const output = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));

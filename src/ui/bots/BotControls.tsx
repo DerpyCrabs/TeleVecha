@@ -31,7 +31,7 @@ export const BotControls = view<BotControlsProps, never>((props, _send) => {
       class="bot-controls"
       aria-label={props.isBot ? 'Bot controls' : 'Conversation reply keyboard'}
     >
-      {props.isBot && !props.started ? (
+      {props.isBot && (!props.started || props.starting) ? (
         <button
           class="bot-start-button"
           type="button"

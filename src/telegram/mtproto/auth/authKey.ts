@@ -1,4 +1,5 @@
-import { Crypto, Effect } from 'effect';
+import { SecureRandom, Digest } from 'effect/crypto';
+import { Effect } from 'effect';
 
 import { bigIntToBytes, bytesToBigInt, concatBytes } from '../bytes';
 import { createMtprotoError, type MtprotoError } from '../errors';
@@ -12,7 +13,7 @@ export interface AuthKey {
   readonly calculateNewNonceHash: (
     newNonce: bigint,
     number: 1 | 2 | 3,
-  ) => Effect.Effect<bigint, MtprotoError, Crypto.Crypto>;
+  ) => Effect.Effect<bigint, MtprotoError, SecureRandom.SecureRandom | Digest.Digest>;
 }
 
 export const createAuthKey = Effect.fn('mtproto.auth.createKey')(function* (bytes: Uint8Array) {

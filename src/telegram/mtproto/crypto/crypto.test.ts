@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { BrowserCrypto } from '@effect/platform-browser';
 import { Effect } from 'effect';
+import { Digest, Kdf, SecureRandom } from 'effect/crypto';
 
 import { bytesToHex, hexToBytes, utf8Bytes } from '../bytes';
-import { aesIgeDecrypt, aesIgeEncrypt, createAesCtr, pbkdf2Sha512, sha1, sha256 } from './index';
+import {
+  aesIgeDecrypt,
+  aesIgeEncrypt,
+  createAesCtr,
+  pbkdf2Sha512,
+  randomBytes,
+  sha1,
+  sha256,
+} from './index';
 
 describe('MTProto cryptography', () => {
   it('matches SHA and PBKDF2 published vectors', async () => {
@@ -21,6 +30,53 @@ describe('MTProto cryptography', () => {
       '867f70cf1ade02cff3752599a3a53dc4af34c7a669815ae5d513554e1c8cf252' +
         'c02d470a285a0501bad999bfe943c08f050235d7d68b1da55e63f73b60a57fce',
     );
+  });
+
+  it('turns provider digest defects into typed MTProto errors', async () => {
+    const failure = new Error('digest unavailable');
+    const result = await Effect.runPromise(
+      sha256(utf8Bytes('abc')).pipe(
+        Effect.provideService(
+          Digest.Digest,
+          Digest.Digest.of({
+            digest: () => Effect.die(failure),
+            digestHex: () => Effect.die(failure),
+          }),
+        ),
+        Effect.result,
+      ),
+    );
+    expect(result._tag).toBe('Failure');
+    if (result._tag === 'Failure')
+      expect(result.failure).toMatchObject({ kind: 'crypto', cause: failure });
+  });
+
+  it('turns random provider defects into typed MTProto errors', async () => {
+    const failure = new Error('random unavailable');
+    const result = await Effect.runPromise(
+      randomBytes(8).pipe(
+        Effect.provideService(
+          SecureRandom.SecureRandom,
+          SecureRandom.make(() => {
+            throw failure;
+          }),
+        ),
+        Effect.result,
+      ),
+    );
+    expect(result._tag).toBe('Failure');
+    if (result._tag === 'Failure')
+      expect(result.failure).toMatchObject({ kind: 'crypto', cause: failure });
+  });
+
+  it('rejects PBKDF2 parameters outside the backend limits as typed errors', async () => {
+    const result = await Effect.runPromise(
+      pbkdf2Sha512(utf8Bytes('p'), utf8Bytes('s'), 2 ** 31, 512).pipe(
+        Effect.provide(Kdf.layerWebCrypto),
+        Effect.result,
+      ),
+    );
+    expect(result._tag).toBe('Failure');
   });
 
   it('matches the NIST AES-CTR vector across uneven chunks', () => {

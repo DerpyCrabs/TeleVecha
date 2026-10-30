@@ -1,5 +1,5 @@
-import { Crypto, Effect } from 'effect';
-import { BrowserCrypto } from '@effect/platform-browser';
+import { SecureRandom, Digest, Kdf } from 'effect/crypto';
+import { Effect } from 'effect';
 
 import { createMtprotoError } from '../errors';
 
@@ -15,20 +15,24 @@ export const randomBytes = Effect.fn('mtproto.crypto.randomBytes')(function* (le
       ),
     );
   }
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   return yield* crypto
     .randomBytes(length)
-    .pipe(Effect.mapError(cryptoFailure('Random generation')));
+    .pipe(Effect.catchDefect((cause) => Effect.fail(cryptoFailure('Random generation')(cause))));
 });
 
 export const sha1 = Effect.fn('mtproto.crypto.sha1')(function* (data: Uint8Array) {
-  const crypto = yield* Crypto.Crypto;
-  return yield* crypto.digest('SHA-1', data).pipe(Effect.mapError(cryptoFailure('SHA-1')));
+  const crypto = yield* Digest.Digest;
+  return yield* crypto
+    .digest(Digest.sha1, data)
+    .pipe(Effect.catchDefect((cause) => Effect.fail(cryptoFailure('SHA-1')(cause))));
 });
 
 export const sha256 = Effect.fn('mtproto.crypto.sha256')(function* (data: Uint8Array) {
-  const crypto = yield* Crypto.Crypto;
-  return yield* crypto.digest('SHA-256', data).pipe(Effect.mapError(cryptoFailure('SHA-256')));
+  const crypto = yield* Digest.Digest;
+  return yield* crypto
+    .digest(Digest.sha256, data)
+    .pipe(Effect.catchDefect((cause) => Effect.fail(cryptoFailure('SHA-256')(cause))));
 });
 
 export const pbkdf2Sha512 = Effect.fn('mtproto.crypto.pbkdf2Sha512')(function* (
@@ -50,23 +54,8 @@ export const pbkdf2Sha512 = Effect.fn('mtproto.crypto.pbkdf2Sha512')(function* (
       ),
     );
   }
-  const crypto = yield* BrowserCrypto.WebCrypto;
-  return yield* Effect.tryPromise({
-    try: async () => {
-      const key = await crypto.subtle.importKey(
-        'raw',
-        new Uint8Array(password),
-        { name: 'PBKDF2' },
-        false,
-        ['deriveBits'],
-      );
-      const derived = await crypto.subtle.deriveBits(
-        { name: 'PBKDF2', hash: 'SHA-512', salt: new Uint8Array(salt), iterations },
-        key,
-        bits,
-      );
-      return new Uint8Array(derived);
-    },
-    catch: cryptoFailure('PBKDF2-SHA512'),
-  });
+  const kdf = yield* Kdf.Kdf;
+  return yield* kdf
+    .derive(Kdf.pbkdf2({ hash: Digest.sha512, iterations }), password, { salt, length: bits / 8 })
+    .pipe(Effect.mapError(cryptoFailure('PBKDF2-SHA512')));
 });

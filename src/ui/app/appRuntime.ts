@@ -1,5 +1,6 @@
+import { SecureRandom, Digest, Kdf } from 'effect/crypto';
 import { BrowserCrypto, BrowserSocket } from '@effect/platform-browser';
-import { Cause, Crypto, Effect, Fiber, FiberSet, Layer } from 'effect';
+import { Cause, Effect, Fiber, FiberSet, Layer } from 'effect';
 import * as Socket from 'effect/socket/Socket';
 
 import { createBrowserDebugReportRecorder } from '../../debug/tvbugReports';
@@ -120,7 +121,7 @@ const makeRuntime = Effect.fn('AppRuntime.make')(function* (
   runEffect: UiEffectRunner,
   runTask: UiTaskRunner,
 ) {
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* Effect.context<SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf>();
   const webSocket = yield* Socket.WebSocketConstructor;
   const accountState = yield* AccountState;
   const engineTasks = yield* EngineTasks;
@@ -177,13 +178,13 @@ const makeRuntime = Effect.fn('AppRuntime.make')(function* (
                 ),
               )
             : yield* createWebTelegramTransport(store).pipe(
-                Effect.provideService(Crypto.Crypto, crypto),
+                Effect.provideContext(crypto),
                 Effect.provideService(Socket.WebSocketConstructor, webSocket),
               );
         const engine = yield* makeMessagingEngine(transport, store, { manageTabLease: false }).pipe(
           Effect.provideService(AccountState, accountState),
           Effect.provideService(EngineTasks, engineTasks),
-          Effect.provideService(Crypto.Crypto, crypto),
+          Effect.provideContext(crypto),
         );
         return import.meta.env.VITE_TELEVECHA_E2E === '1'
           ? ({ engine, transport } satisfies TabCoordinatorOwner)

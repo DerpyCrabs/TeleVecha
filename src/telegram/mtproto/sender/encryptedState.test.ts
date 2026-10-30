@@ -1,5 +1,6 @@
+import { SecureRandom, Digest } from 'effect/crypto';
 import { describe, expect, it } from 'vitest';
-import { Crypto, Effect } from 'effect';
+import { Effect } from 'effect';
 
 import { bigIntToBytes, bytesToBigInt, concatBytes, writeInt32Le } from '../bytes';
 import type { AuthKey } from '../auth';
@@ -83,10 +84,15 @@ describe('encrypted MTProto message state', () => {
     Effect.runPromise(
       createEncryptedMessageState(options).pipe(
         Effect.provideService(
-          Crypto.Crypto,
-          Crypto.make({
-            randomBytes: (length) => crypto.randomBytes(length),
+          SecureRandom.SecureRandom,
+          SecureRandom.make((length) => crypto.randomBytes(length)),
+        ),
+        Effect.provideService(
+          Digest.Digest,
+          Digest.Digest.of({
             digest: (_algorithm, bytes) => Effect.promise(() => crypto.sha256(bytes)),
+            digestHex: (_algorithm, bytes) =>
+              Effect.promise(async () => Buffer.from(await crypto.sha256(bytes)).toString('hex')),
           }),
         ),
       ),
