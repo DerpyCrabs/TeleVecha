@@ -51,6 +51,12 @@ import { AuthOverlay } from './AuthOverlay';
 import { SettingsDialog } from './SettingsDialog';
 import type { AppViewModel, RenderedMessage } from './appController';
 const messageEntries = collection<RenderedMessage>((entry) => entry.key).from;
+function messageDateTime(timestamp: number | undefined) {
+  if (timestamp === undefined) return undefined;
+  const date = new Date(timestamp * 1000);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 function peerFromId(peerId: string): TelegramPeer {
   return {
     id: peerId,
@@ -982,7 +988,9 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                               {layout.caption.editedAt ? (
                                 <span class="message-edited">edited</span>
                               ) : null}
-                              <span>{layout.caption.time}</span>
+                              <span title={messageDateTime(layout.caption.date)}>
+                                {layout.caption.time}
+                              </span>
                               {message.outgoing ? (
                                 message.status === 'read' ? (
                                   <CheckCheck size={13} class="message-status-read" />
