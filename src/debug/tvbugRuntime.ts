@@ -231,14 +231,19 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
 
     client = {
       ...target,
+      subscribeConversationEvents: () => Effect.succeed(Effect.void),
       start: () => Effect.void,
       stop: () => Effect.void,
       retrySync: () => Effect.void,
       refreshUpdates: () => Effect.void,
       refreshReadReceipt: () => Effect.void,
       markMediaRead: () => Effect.void,
+      getUnreadNotifications: () => Effect.succeed([]),
+      markMessageNotificationsRead: () => Effect.void,
       retryMarkRead: () => Effect.void,
       clearOperationError: () => Effect.void,
+      beginQrLogin: () => Effect.void,
+      cancelQrLogin: () => Effect.void,
       requestCode: () => Effect.void,
       submitCode: () => Effect.succeed(undefined),
       submitPassword: () => Effect.void,
@@ -249,6 +254,9 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
       setTyping: () => Effect.void,
       sendDraft: () => Effect.void,
       sendAttachments: () => Effect.void,
+      sendContact: () => Effect.succeed(undefined),
+      sendPoll: () => Effect.succeed(undefined),
+      updatePoll: () => Effect.succeed(undefined),
       sendSticker: () => Effect.void,
       forwardMessage: () => Effect.succeed(undefined),
       editMessage: () =>
@@ -259,6 +267,15 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
           }),
         ),
       deleteMessage: () => Effect.succeed(false),
+      getPrivacy: (key) => Effect.succeed({ key, rules: [], peers: [] }),
+      setPrivacy: (key) => Effect.succeed({ key, rules: [], peers: [] }),
+      getReadTimePrivacy: () => Effect.succeed(false),
+      setReadTimePrivacy: (hidden) => Effect.succeed(hidden),
+      getActiveSessions: () => Effect.succeed({ sessions: [], ttlDays: 180 }),
+      terminateSession: () => Effect.succeed(undefined),
+      setSessionTtl: () => Effect.succeed(undefined),
+      getPollVotes: () => Effect.succeed({ people: [], count: 0 }),
+      getMessageReadReceipts: () => Effect.succeed({ state: 'unavailable' as const, people: [] }),
       getReactionPeople: () =>
         Effect.fail(
           new MessagingError({ message: 'Reaction details are unavailable in a bug report.' }),
@@ -321,12 +338,27 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
         return Effect.succeed(createTvBugWallpaperPlaceholder());
       },
       getRecentStickers: () => Effect.succeed([]),
+      searchStickers: () => Effect.succeed({ stickers: [] }),
+      getFavoriteStickers: () => Effect.succeed([]),
+      setStickerFavorite: () => Effect.succeed(undefined),
       getStickerPacks: () => Effect.succeed([]),
+      getStickerPack: () => Effect.die('Unavailable in debug replay'),
+      searchStickerPacks: () => Effect.succeed([]),
+      setStickerPackInstalled: () => Effect.succeed(undefined),
       getSavedGifs: () => Effect.succeed([]),
       searchGifs: () => Effect.succeed([]),
       getBotCommands: () => Effect.succeed([]),
       startBot: () => Effect.void,
       answerBotCallback: () => Effect.succeed(undefined),
+      getBotApp: () =>
+        Effect.fail(new MessagingError({ message: 'Unavailable in report playback.' })),
+      requestWebApp: () =>
+        Effect.fail(
+          new MessagingError({ message: 'Mini Apps are unavailable in report playback.' }),
+        ),
+      prolongWebApp: () => Effect.succeed(undefined),
+      sendWebAppData: () => Effect.succeed(undefined),
+      invokeWebAppMethod: () => Effect.succeed('{}'),
       requestUrlAuth: () => Effect.succeed(undefined),
       acceptUrlAuth: () => Effect.succeed(undefined),
     };

@@ -44,6 +44,8 @@ export function mountAuthCommandFixture(
     open: true,
     snapshot,
     onRetry: action,
+    onQr: action,
+    onCancelQr: action,
     onPhone: action,
     onCode: action,
     onPassword: action,

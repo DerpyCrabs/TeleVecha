@@ -31,7 +31,7 @@ for (const kind of ['image-file', 'video', 'video-album'] as const) {
     const count = kind === 'video-album' ? 2 : 1;
     await page.evaluate(() => window.__televechaFixture?.holdNextUpload());
     await page
-      .locator('input[type="file"]')
+      .locator('.chat-composer input[type="file"]')
       .setInputFiles(Array.from({ length: count }, () => path));
     if (video) {
       const previews = page.getByTestId('composer-attachment').locator('video');
@@ -60,27 +60,30 @@ for (const kind of ['image-file', 'video', 'video-album'] as const) {
         .poll(() => preview.evaluate((video) => (video as HTMLVideoElement).paused))
         .toBe(true);
       const attachments = page.getByTestId('composer-attachment');
-      await expect(attachments.first().locator('small')).toHaveText(/^[\d.]+ (B|KB|MB|GB)$/u);
+      await expect(
+        attachments.first().getByRole('button', { name: /Remove attachment/ }),
+      ).toBeVisible();
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 800 });
         const geometry = await preview.evaluate((element) => {
           const { width, height, right } = element.getBoundingClientRect();
           return { width, height, right, viewport: window.innerWidth };
         });
-        expect(geometry.width).toBeGreaterThan(200);
-        expect(geometry.height).toBeGreaterThanOrEqual(150);
+        expect(geometry.width).toBeGreaterThan(140);
+        expect(geometry.height).toBeGreaterThanOrEqual(100);
         expect(geometry.right).toBeLessThanOrEqual(geometry.viewport);
       }
       await page.setViewportSize({ width: 1280, height: 720 });
       expect((await fixtureStats(page))?.sendFile).toBe(0);
     }
-    if (!video)
-      await page
-        .getByTestId('composer-attachment')
-        .getByRole('button', { name: 'File', exact: true })
-        .click();
-    await page.getByRole('textbox', { name: 'Message' }).fill(`Cached ${kind}`);
-    await page.getByRole('button', { name: 'Send message' }).click();
+    if (!video) await page.getByRole('checkbox', { name: 'Send as files' }).check();
+    await page.getByRole('textbox', { name: 'Attachment caption' }).fill(`Cached ${kind}`);
+    const send = page
+      .locator('.attachment-send-dialog')
+      .getByRole('button', { name: /^(Send|Save)$/ });
+    await send.focus();
+    await page.mouse.move(0, 0);
+    await send.press('Enter');
     const message = page.locator('article').filter({ hasText: `Cached ${kind}` });
     await expect(message.locator('.media-upload-status')).toHaveCount(count);
     const images = message.locator(video ? '.media-visual > img' : '.media-file-thumbnail img');
@@ -182,10 +185,15 @@ test('keeps a replacement image visible and cached without downloading it again'
   await expectDecodedImages(message.locator('.media-visual > img'), 1);
   await message.locator('.message-copy').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Edit', exact: true }).click();
-  await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/outgoing-media.png');
-  await page.getByRole('textbox', { name: 'Message' }).fill('Cached replacement');
+  await page
+    .locator('.chat-composer input[type="file"]')
+    .setInputFiles('e2e/fixtures/outgoing-media.png');
+  await page.getByRole('textbox', { name: 'Attachment caption' }).fill('Cached replacement');
   await page.evaluate(() => window.__televechaFixture?.holdNextEdit());
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await page
+    .locator('.attachment-send-dialog')
+    .getByRole('button', { name: /^(Send|Save)$/ })
+    .click();
   await expect.poll(async () => (await fixtureStats(page))?.editMessage).toBe(1);
   const blankFrames = await message.evaluate(async (element) => {
     let blankFrames = 0;

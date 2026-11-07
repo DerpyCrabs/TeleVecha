@@ -79,9 +79,9 @@
   max-height: min(34rem, calc(100dvh - 2rem));
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid #343843;
+  border: 1px solid var(--line-strong);
   border-radius: 0.9rem;
-  background: #17191f;
+  background: var(--panel);
   box-shadow: 0 24px 70px rgb(0 0 0 / 0.5);
 }
 .forward-dialog header {
@@ -368,4 +368,275 @@
   display: block;
   width: 100% !important;
   height: 100% !important;
+}
+
+.sticker-cell {
+  position: relative;
+  min-width: 0;
+}
+.sticker-empty {
+  grid-column: 1 / -1;
+  padding: 1.5rem 0.5rem;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.8rem;
+}
+.sticker-catalog-error {
+  grid-column: 1 / -1;
+  z-index: 1;
+  padding: 0.5rem;
+  background: var(--panel);
+  color: #fca5a5;
+  font-size: 0.8rem;
+}
+.sticker-catalog-error button {
+  margin-left: 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+}
+.sticker-preview-dialog {
+  width: min(24rem, calc(100vw - 2rem));
+}
+.sticker-preview-image {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 1.5rem;
+  overflow: hidden;
+}
+.sticker-preview-image > * {
+  width: min(16rem, 55vw);
+  height: min(16rem, 55vw);
+}
+.sticker-preview-image :is(img, video, svg, .tgs-player) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.sticker-preview-actions {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.8rem;
+  flex-shrink: 0;
+}
+.sticker-preview-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  min-height: 2.75rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+.sticker-preview-actions button.primary {
+  background: var(--accent);
+  color: white;
+}
+.sticker-preview-actions button:disabled {
+  opacity: 0.5;
+}
+.sticker-preview-actions button:focus-visible,
+.sticker-preview-error {
+  margin: 0;
+  padding: 0 1rem;
+  color: #fca5a5;
+  font-size: 0.8rem;
+}
+.sticker-picker:has(.sticker-catalog-error) {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.sticker-picker:has(.sticker-catalog-error) .sticker-catalog-error {
+  grid-row: 1;
+}
+.sticker-picker:has(.sticker-catalog-error) .sticker-pack-grid {
+  grid-row: 2;
+}
+.sticker-picker:has(.sticker-catalog-error) .sticker-pack-tabs {
+  grid-row: 3;
+}
+.sticker-pack-tabs .sticker-manage-packs {
+  position: sticky;
+  right: 0;
+  margin-left: auto;
+  background: var(--panel);
+  box-shadow: -4px 0 8px var(--panel);
+}
+.sticker-pack-manager {
+  width: min(30rem, calc(100vw - 2rem));
+}
+.sticker-pack-search {
+  display: block;
+  flex-shrink: 0;
+  padding: 0.8rem;
+}
+.sticker-pack-search input {
+  width: 100%;
+  min-height: 2.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  padding: 0.6rem;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.sticker-pack-list {
+  min-height: 8rem;
+  overflow-y: auto;
+  padding: 0 0.6rem 0.6rem;
+}
+.sticker-pack-list > p {
+  padding: 1rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.sticker-pack-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.6rem;
+  border: 0;
+  border-radius: 0.5rem;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+}
+.sticker-pack-row:hover {
+  background: var(--accent-soft);
+}
+.sticker-pack-row > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+.sticker-pack-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+.sticker-pack-row small {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.sticker-pack-icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  flex-shrink: 0;
+}
+.sticker-pack-icon :is(img, video, .tgs-player),
+.sticker-pack-icon > div {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.sticker-set-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  padding: 0.8rem;
+  overflow-y: auto;
+  min-height: 8rem;
+}
+.sticker-set-item {
+  min-width: 0;
+  aspect-ratio: 1;
+}
+.sticker-set-item :is(img, video, .tgs-player),
+.sticker-set-item > div {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.sticker-pack-back {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem;
+  padding: 0.5rem;
+  align-self: start;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.sticker-pack-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem;
+  flex-shrink: 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.sticker-pack-footer button {
+  min-height: 2.75rem;
+  border: 0;
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  color: white;
+  background: var(--accent);
+}
+.sticker-pack-manager button:disabled {
+  opacity: 0.5;
+}
+.sticker-pack-manager :is(button, input):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.sticker-search-status,
+.sticker-search-more {
+  grid-column: 1 / -1;
+  padding: 0.75rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.sticker-search-more,
+.sticker-search-status button {
+  min-height: 2.75rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.sticker-search-more:disabled {
+  opacity: 0.5;
+}
+
+.sticker-hold-preview {
+  position: fixed;
+  z-index: 150;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: rgb(0 0 0 / 0.25);
+}
+.sticker-hold-preview > .sticker-image {
+  width: min(20rem, 80vw);
+  height: min(20rem, 65dvh);
+  filter: drop-shadow(0 8px 24px rgb(0 0 0 / 0.3));
+}
+.sticker-option {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.sticker-hold-preview .sticker-image > img,
+.sticker-hold-preview .sticker-image > video,
+.sticker-hold-preview .sticker-image > .tgs-player {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }

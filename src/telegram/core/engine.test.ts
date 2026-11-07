@@ -1,5 +1,5 @@
 import { BrowserCrypto } from '@effect/platform-browser';
-import { Effect } from 'effect';
+import { Effect, Stream } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { makeMemoryCacheStore } from '../persistence/memoryStore';
@@ -35,6 +35,86 @@ afterEach(() => {
 });
 
 describe('MessagingEngine', () => {
+  it('searches group senders without replacing the complete member cache', () =>
+    Effect.runPromise(
+      withEngine((engine, transport) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          const peer = { id: 'g:303', kind: 'group' as const };
+          const full = yield* engine.getGroupMembers(peer);
+          expect(full.members).toHaveLength(2);
+          const spy = vi.spyOn(transport, 'getGroupMembers');
+          const filtered = yield* engine.getGroupMembers(peer, 1, 0, '  member  ');
+          expect(filtered.members.map((member) => member.peer.id)).toEqual(['u:405']);
+          expect(spy).toHaveBeenCalledWith(peer, 1, 0, 'member');
+          expect((yield* engine.getGroupMembers(peer)).members).toEqual(full.members);
+          const first = yield* engine.getGroupMembers(peer, 1, 0, '');
+          expect(first.nextOffset).toBe(1);
+          const second = yield* engine.getGroupMembers(peer, 1, first.nextOffset, '');
+          expect(second.members[0]?.peer.id).toBe('u:405');
+          expect(second.hasMore).toBe(false);
+        }),
+      ),
+    ));
+
+  it('cancels QR token work when switching to phone login and clears the token', () =>
+    Effect.runPromise(
+      withEngine((engine, transport) =>
+        Effect.gen(function* () {
+          vi.spyOn(transport, 'isAuthorized').mockReturnValue(Effect.succeed(false));
+          let cancelled = 0;
+          transport.watchQrLogin = () =>
+            Stream.concat(
+              Stream.make({
+                type: 'token' as const,
+                url: 'tg://login?token=test',
+                expires: 9999999999,
+              }),
+              Stream.never,
+            ).pipe(
+              Stream.ensuring(
+                Effect.sync(() => {
+                  cancelled++;
+                }),
+              ),
+            );
+          yield* engine.start(credentials);
+          yield* engine.beginQrLogin();
+          yield* Effect.yieldNow;
+          expect(engine.snapshot()).toMatchObject({
+            authStep: 'qr',
+            qrLogin: { url: 'tg://login?token=test' },
+          });
+          yield* engine.cancelQrLogin();
+          expect(engine.snapshot().authStep).toBe('phone');
+          expect(engine.snapshot().qrLogin).toBeUndefined();
+          expect(cancelled).toBe(1);
+          yield* engine.beginQrLogin();
+          yield* engine.requestCode('+123456789');
+          expect(engine.snapshot().authStep).toBe('code');
+          expect(engine.snapshot().qrLogin).toBeUndefined();
+          expect(cancelled).toBe(2);
+        }),
+      ),
+    ));
+  it('routes QR password requirements through the existing 2FA flow', () =>
+    Effect.runPromise(
+      withEngine((engine, transport) =>
+        Effect.gen(function* () {
+          vi.spyOn(transport, 'isAuthorized').mockReturnValue(Effect.succeed(false));
+          transport.watchQrLogin = () => Stream.make({ type: 'password-required' as const });
+          yield* engine.start(credentials);
+          yield* engine.beginQrLogin();
+          yield* Effect.yieldNow;
+          expect(engine.snapshot().authStep).toBe('password');
+          expect(engine.snapshot().qrLogin).toBeUndefined();
+          yield* engine.submitPassword('fixture-password');
+          expect(engine.snapshot().phase).toBe('ready');
+          expect(engine.snapshot().authStep).toBeUndefined();
+        }),
+      ),
+    ));
+
   it('downloads independent video ranges without caching a partial file as the original', () =>
     Effect.runPromise(
       withEngine((engine, transport, cache) =>
@@ -328,6 +408,98 @@ describe('MessagingEngine', () => {
       ),
     ));
 
+  it('protects the current session while terminating other devices and changing expiry', () =>
+    Effect.runPromise(
+      withEngine((engine, transport) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          const reset = vi.spyOn(transport, 'terminateSession');
+          expect((yield* engine.terminateSession('0').pipe(Effect.result))._tag).toBe('Failure');
+          expect(reset).not.toHaveBeenCalled();
+          yield* engine.terminateSession('1234567890123456789');
+          expect((yield* engine.getActiveSessions()).sessions.map((session) => session.id)).toEqual(
+            ['0', '-234567890123456789'],
+          );
+          yield* engine.terminateSession();
+          expect((yield* engine.getActiveSessions()).sessions.map((session) => session.id)).toEqual(
+            ['0'],
+          );
+          yield* engine.setSessionTtl(30);
+          expect((yield* engine.getActiveSessions()).ttlDays).toBe(30);
+          expect((yield* engine.setSessionTtl(0).pipe(Effect.result))._tag).toBe('Failure');
+        }),
+      ),
+    ));
+
+  it('loads read receipts only for outgoing messages', () =>
+    Effect.runPromise(
+      withEngine((engine, transport) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          yield* engine.loadConversationView('u:101');
+          const read = vi.spyOn(transport, 'getMessageReadReceipts');
+          const peer = { id: 'u:101', kind: 'user' as const };
+          expect(yield* engine.getMessageReadReceipts(peer, 79)).toEqual({
+            state: 'unavailable',
+            people: [],
+          });
+          expect(read).not.toHaveBeenCalled();
+          expect((yield* engine.getMessageReadReceipts(peer, 80)).people[0]?.name).toBe(
+            'Alice Fixture',
+          );
+          expect(read).toHaveBeenCalledTimes(1);
+        }),
+      ),
+    ));
+
+  it('persists contact cards before sending and retains them in conversation history', () =>
+    Effect.runPromise(
+      withEngine((engine, transport, cache) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          yield* engine.loadConversationView('u:101');
+          const send = vi.spyOn(transport, 'sendContact');
+          const save = vi.spyOn(cache, 'commitOutbox');
+          const peer = { id: 'u:101', kind: 'user' } as const;
+          const contact = {
+            firstName: 'Ada',
+            lastName: 'Lovelace',
+            phoneNumber: '+123456789',
+            vcard: '',
+            peer,
+          };
+          yield* engine.sendContact(peer, contact);
+          expect(save.mock.calls[0]?.[0]).toMatchObject({ text: '', contact });
+          expect(send).toHaveBeenCalledWith(peer, contact, expect.any(String));
+          expect(engine.snapshot().pending).toEqual([]);
+          expect(
+            engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)?.topMessage
+              ?.contact,
+          ).toEqual(contact);
+        }),
+      ),
+    ));
+
+  it('carries forwarding privacy options through the durable queue to the transport', () =>
+    Effect.runPromise(
+      withEngine((engine, transport, cache) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          yield* engine.loadConversationView('u:101');
+          const forward = vi.spyOn(transport, 'forwardMessage');
+          const save = vi.spyOn(cache, 'commitOutbox');
+          const peer = { id: 'u:101', kind: 'user' } as const;
+          const options = { hideAuthor: true, hideCaption: true };
+          yield* engine.forwardMessage(peer, peer, 78, options);
+          expect(save.mock.calls[0]?.[0]).toMatchObject({
+            text: '',
+            forward: { messageId: 78, options },
+          });
+          expect(forward).toHaveBeenCalledWith(peer, peer, 78, expect.any(String), options);
+        }),
+      ),
+    ));
+
   it('sends through the transport without a Promise registry', () =>
     Effect.runPromise(
       withEngine((engine) =>
@@ -381,6 +553,26 @@ describe('MessagingEngine', () => {
           const groupWithAmbiguousId = yield* engine.loadConversationView('g:303');
           expect(userWithAmbiguousId.messages.some(({ id }) => id === 12)).toBe(true);
           expect(groupWithAmbiguousId.messages.some(({ id }) => id === 12)).toBe(true);
+        }),
+      ),
+    ));
+
+  it('delivers Mini App completion to subscribers without losing the query id', () =>
+    Effect.runPromise(
+      withEngine((engine) =>
+        Effect.gen(function* () {
+          const received: unknown[] = [];
+          const unsubscribe = yield* engine.subscribeResources((event) => {
+            if (event.kind === 'web-app-result') received.push(event);
+          });
+          yield* engine.start(credentials);
+          window.__televechaFixture?.emit({
+            type: 'web-app-result',
+            queryId: '9223372036854775806',
+          });
+          yield* Effect.yieldNow;
+          yield* unsubscribe;
+          expect(received).toEqual([{ kind: 'web-app-result', queryId: '9223372036854775806' }]);
         }),
       ),
     ));

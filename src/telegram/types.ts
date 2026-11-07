@@ -19,6 +19,7 @@ export interface TelegramChatPermissions {
   canSendMessages: boolean;
   canSendMedia: boolean;
   canSendStickers: boolean;
+  canSendPolls?: boolean | undefined;
   canSendGifs: boolean;
   canPinMessages: boolean;
   canEditMessages: boolean;
@@ -50,6 +51,8 @@ export interface TelegramDialog {
   topMessageId: number;
   topMessage?: TelegramMessage | undefined;
   unreadCount: number;
+  unreadMentionsCount?: number | undefined;
+  unreadReactionsCount?: number | undefined;
   readInboxMaxId: number;
   readOutboxMaxId: number;
   muted: boolean;
@@ -79,6 +82,8 @@ export interface TelegramPeerSearchResult {
 }
 
 export interface TelegramUserDetails {
+  botMenu?: { text: string; url: string } | undefined;
+  botHasMainApp?: boolean | undefined;
   firstName?: string | undefined;
   lastName?: string | undefined;
   phone?: string | undefined;
@@ -117,6 +122,54 @@ export interface TelegramDiscussion {
   unreadCount: number;
 }
 
+export interface TelegramPollDraft {
+  question: string;
+  answers: readonly string[];
+  publicVoters: boolean;
+  multipleChoice: boolean;
+  quiz: boolean;
+  correctAnswer?: number | undefined;
+  solution: string;
+}
+export interface TelegramPollResults {
+  min?: boolean | undefined;
+  totalVoters?: number | undefined;
+  solution?: string | undefined;
+  answers?:
+    | readonly {
+        option: string;
+        voters: number;
+        chosen?: boolean | undefined;
+        correct?: boolean | undefined;
+      }[]
+    | undefined;
+}
+export interface TelegramPoll {
+  id: string;
+  hash: string;
+  question: string;
+  answers: readonly { option: string; text: string }[];
+  closed: boolean;
+  publicVoters: boolean;
+  multipleChoice: boolean;
+  quiz: boolean;
+  revotingDisabled: boolean;
+  hideResultsUntilClose: boolean;
+  closeDate?: number | undefined;
+  results: TelegramPollResults;
+}
+export type TelegramPollAction = 'vote' | 'refresh' | 'close';
+
+export interface TelegramContact {
+  phoneNumber: string;
+  firstName: string;
+  lastName: string;
+  vcard: string;
+  peer?: TelegramPeer | undefined;
+  hasAvatar?: boolean | undefined;
+  avatarId?: string | undefined;
+}
+
 export interface TelegramMessage {
   id: number;
   peerId: string;
@@ -135,6 +188,8 @@ export interface TelegramMessage {
   date: number;
   outgoing: boolean;
   mediaUnread?: boolean | undefined;
+  unreadMention?: boolean | undefined;
+  unreadReaction?: boolean | undefined;
   protected?: boolean | undefined;
   editedAt?: number | undefined;
   replyToId?: number | undefined;
@@ -144,6 +199,8 @@ export interface TelegramMessage {
   groupedId?: string | undefined;
   forwardedFrom?: TelegramForwardedFrom | undefined;
   service?: TelegramServiceMessage | undefined;
+  contact?: TelegramContact | undefined;
+  poll?: TelegramPoll | undefined;
   botKeyboard?: TelegramBotKeyboard | undefined;
   media?: TelegramMedia | undefined;
   reactions?: readonly TelegramReaction[] | undefined;
@@ -164,6 +221,31 @@ export interface TelegramForwardedFrom {
   color?: string | undefined;
 }
 
+export interface TelegramWebAppRequest {
+  peer: TelegramPeer;
+  bot: TelegramPeer;
+  mode: 'simple' | 'inline' | 'menu' | 'main' | 'app';
+  app?: { id: string; accessHash: string } | undefined;
+  writeAllowed?: boolean | undefined;
+  displayMode?: 'compact' | 'fullscreen' | undefined;
+  url?: string | undefined;
+  startParam?: string | undefined;
+  theme: Readonly<Record<string, string>>;
+}
+export interface TelegramBotAppInfo {
+  id: string;
+  accessHash: string;
+  title: string;
+  description: string;
+  requestWriteAccess: boolean;
+}
+export interface TelegramWebApp {
+  url: string;
+  queryId?: string | undefined;
+  fullsize: boolean;
+  fullscreen: boolean;
+}
+
 export interface TelegramBotCommand {
   command: string;
   description: string;
@@ -179,6 +261,8 @@ export type TelegramBotButtonKind =
   | 'callback'
   | 'copy'
   | 'switch-inline'
+  | 'web-app'
+  | 'simple-web-app'
   | 'unsupported';
 
 export interface TelegramBotButton {
@@ -191,6 +275,7 @@ export interface TelegramBotButton {
   query?: string | undefined;
   samePeer?: boolean | undefined;
   botUsername?: string | undefined;
+  bot?: TelegramPeer | undefined;
 }
 
 export interface TelegramBotKeyboard {
@@ -310,6 +395,14 @@ export interface TelegramTextFormat {
   oldText?: string | undefined;
 }
 
+export interface TelegramSearchFilters {
+  kind?: SharedMediaKind | undefined;
+  fromPeer?: TelegramPeer | undefined;
+  minDate?: number | undefined;
+  maxDate?: number | undefined;
+  chatType?: 'users' | 'groups' | 'channels' | undefined;
+}
+
 export interface TelegramSearchPage {
   messages: TelegramMessage[];
   hasMore: boolean;
@@ -326,11 +419,13 @@ export interface TelegramSearchOffset {
 export type SharedMediaKind = 'photos' | 'videos' | 'files' | 'audio' | 'links' | 'voice' | 'gifs';
 export type TelegramResourceKind =
   | 'expressions'
+  | 'web-app-result'
   | 'bot-commands'
   | 'group-members'
   | 'peer-metadata';
 export interface TelegramResourceInvalidation {
   kind: TelegramResourceKind;
+  queryId?: string | undefined;
   peerId?: string | undefined;
 }
 export type TelegramConversationEvent =
@@ -366,6 +461,93 @@ export interface TelegramReactionPerson {
   avatarId?: string | undefined;
 }
 
+export type TelegramPrivacyKey =
+  | 'phone-number'
+  | 'added-by-phone'
+  | 'last-seen'
+  | 'profile-photo'
+  | 'about'
+  | 'birthday'
+  | 'forwards'
+  | 'calls'
+  | 'p2p'
+  | 'invites'
+  | 'voice-messages'
+  | 'saved-music';
+export type TelegramPrivacyAudience = 'everyone' | 'contacts' | 'nobody';
+export type TelegramPrivacyRule =
+  | {
+      kind:
+        | 'allow-all'
+        | 'deny-all'
+        | 'allow-contacts'
+        | 'deny-contacts'
+        | 'allow-premium'
+        | 'allow-bots'
+        | 'deny-bots'
+        | 'allow-close-friends'
+        | 'unsupported';
+    }
+  | { kind: 'allow-users' | 'deny-users'; users: readonly TelegramPeer[] }
+  | { kind: 'allow-chats' | 'deny-chats'; chats: readonly string[] };
+export interface TelegramPrivacySetting {
+  key: TelegramPrivacyKey;
+  rules: readonly TelegramPrivacyRule[];
+  peers: TelegramPeerSearchResult[];
+}
+export interface TelegramPrivacyChange {
+  audience?: TelegramPrivacyAudience | undefined;
+  exceptions?:
+    | readonly { peer: TelegramPeer; allow: boolean; remove?: boolean | undefined }[]
+    | undefined;
+}
+
+export interface TelegramActiveSession {
+  id: string;
+  current: boolean;
+  device: string;
+  platform: string;
+  systemVersion: string;
+  appName: string;
+  appVersion: string;
+  createdAt: number;
+  activeAt: number;
+  ip: string;
+  country: string;
+  region: string;
+  passwordPending: boolean;
+  unconfirmed: boolean;
+}
+export interface TelegramActiveSessions {
+  sessions: TelegramActiveSession[];
+  ttlDays: number;
+}
+
+export interface TelegramPollVoter extends TelegramReactionPerson {
+  options: string[];
+  date: number;
+}
+export interface TelegramPollVotes {
+  unavailable?: 'broadcast' | 'vote-required' | 'deleted' | undefined;
+  people: TelegramPollVoter[];
+  count: number;
+  nextOffset?: string | undefined;
+}
+export interface TelegramReadParticipant extends TelegramReactionPerson {
+  readAt: number;
+}
+export interface TelegramReadReceipts {
+  state:
+    | 'available'
+    | 'unread'
+    | 'expired'
+    | 'privacy'
+    | 'own-privacy'
+    | 'too-large'
+    | 'unavailable';
+  people: TelegramReadParticipant[];
+}
+
 export interface TelegramReactionPeople {
   people: TelegramReactionPerson[];
   count: number;
@@ -392,8 +574,17 @@ export interface TelegramSticker {
   inlineResultId?: string | undefined;
 }
 
+export interface TelegramStickerSearchPage {
+  stickers: TelegramSticker[];
+  nextOffset?: number | undefined;
+}
+
 export interface TelegramStickerPack {
   id: string;
+  accessHash?: string | undefined;
+  shortName?: string | undefined;
+  installed?: boolean | undefined;
+  count?: number | undefined;
   title: string;
   stickers: TelegramSticker[];
 }
@@ -425,6 +616,7 @@ export interface TelegramDownloadOptions {
 export type TransportUpdate =
   | {
       type: 'read-message-contents';
+      expectedReactionVersion?: number | undefined;
       peerId?: string | undefined;
       messageIds: number[];
       pts: number;
@@ -473,9 +665,18 @@ export type TransportUpdate =
       direction: 'inbox' | 'outbox';
       stillUnreadCount?: number | undefined;
     }
+  | {
+      type: 'poll-changed';
+      pollId: string;
+      peerId?: string | undefined;
+      messageId?: number | undefined;
+      poll?: TelegramPoll | undefined;
+      results: TelegramPollResults;
+    }
   | { type: 'dialog-changed'; dialog: TelegramDialog }
   | {
       type: 'reaction-changed';
+      unreadReaction?: boolean | undefined;
       peerId: string;
       messageId: number;
       reactions: readonly TelegramReaction[];
@@ -506,6 +707,7 @@ export type TransportUpdate =
       ptsCount: number;
       folders: { peerId: string; folderId: number }[];
     }
+  | { type: 'web-app-result'; queryId: string }
   | { type: 'bot-commands-changed'; peerId: string; botId?: string | undefined }
   | { type: 'pts-advanced'; pts: number; ptsCount: number; channelScoped?: boolean | undefined }
   | { type: 'dialog-list-invalidated' }
@@ -624,7 +826,13 @@ export interface TelegramChatAppearance {
 export type TelegramTransportError = MtprotoError;
 type TransportEffect<Value> = Effect.Effect<Value, TelegramTransportError>;
 
+export type TelegramQrLogin =
+  | { type: 'token'; url: string; expires: number }
+  | { type: 'authorized' }
+  | { type: 'password-required' };
+
 export interface TelegramTransport {
+  watchQrLogin?(): Stream.Stream<TelegramQrLogin, TelegramTransportError>;
   connect(credentials: TelegramCredentials): TransportEffect<void>;
   disconnect(): TransportEffect<void>;
   logOut(): TransportEffect<void>;
@@ -666,6 +874,10 @@ export interface TelegramTransport {
     messageId: number,
     limit: number,
   ): TransportEffect<HistoryAroundPage>;
+  getUnreadNotifications?(
+    peer: TelegramPeer,
+    kind: 'mention' | 'reaction',
+  ): TransportEffect<{ messages: TelegramMessage[]; count: number }>;
   readHistory(peer: TelegramPeer, maxMessageId: number): TransportEffect<TransportMutationResult>;
   readMessageContents(
     peer: TelegramPeer,
@@ -684,6 +896,7 @@ export interface TelegramTransport {
     peer?: TelegramPeer,
     limit?: number,
     offset?: TelegramSearchOffset,
+    filters?: TelegramSearchFilters,
   ): TransportEffect<TelegramSearchPage>;
   getPinnedMessages(peer: TelegramPeer): TransportEffect<TelegramMessage[]>;
   getUserDetails(peer: TelegramPeer): TransportEffect<TelegramUserDetails>;
@@ -698,6 +911,7 @@ export interface TelegramTransport {
     peer: TelegramPeer,
     limit?: number,
     offset?: number,
+    query?: string,
   ): TransportEffect<TelegramGroupMemberPage>;
   setMuted(peer: TelegramPeer, muted: boolean): TransportEffect<void>;
   setBlocked(peer: TelegramPeer, blocked: boolean): TransportEffect<void>;
@@ -713,6 +927,23 @@ export interface TelegramTransport {
     pinned: boolean,
   ): TransportEffect<TransportMutationResult>;
   setTyping(peer: TelegramPeer, kind?: TelegramActivityKind): TransportEffect<void>;
+  updatePoll?(
+    peer: TelegramPeer,
+    messageId: number,
+    poll: TelegramPoll,
+    action: TelegramPollAction,
+    options: readonly string[],
+  ): TransportEffect<TransportMutationResult>;
+  sendPoll?(
+    peer: TelegramPeer,
+    draft: TelegramPollDraft,
+    randomId: string,
+  ): TransportEffect<SendTextResult>;
+  sendContact?(
+    peer: TelegramPeer,
+    contact: TelegramContact,
+    randomId: string,
+  ): TransportEffect<SendTextResult>;
   sendText(
     peer: TelegramPeer,
     text: string,
@@ -736,12 +967,28 @@ export interface TelegramTransport {
   getWallpapers?(): TransportEffect<TelegramWallpaper[]>;
   getChatAppearance?(peer: TelegramPeer): TransportEffect<TelegramChatAppearance | undefined>;
   downloadWallpaper?(wallpaperId: string): TransportEffect<Blob>;
+  searchStickers?(query: string, offset?: number): TransportEffect<TelegramStickerSearchPage>;
   getRecentStickers(): TransportEffect<TelegramSticker[]>;
+  getFavoriteStickers?(): TransportEffect<TelegramSticker[]>;
+  setStickerFavorite?(sticker: TelegramSticker, favorite: boolean): TransportEffect<boolean>;
   getStickerPacks(): TransportEffect<TelegramStickerPack[]>;
+  getStickerPack?(shortName: string): TransportEffect<TelegramStickerPack>;
+  searchStickerPacks?(query: string): TransportEffect<TelegramStickerPack[]>;
+  setStickerPackInstalled?(pack: TelegramStickerPack, installed: boolean): TransportEffect<boolean>;
   getSavedGifs(): TransportEffect<TelegramSticker[]>;
   searchGifs?(peer: TelegramPeer, query: string): TransportEffect<TelegramSticker[]>;
   downloadSticker(sticker: TelegramSticker): TransportEffect<Blob>;
   downloadCustomEmoji?(documentId: string): TransportEffect<Blob>;
+  getBotApp?(bot: TelegramPeer, shortName: string): TransportEffect<TelegramBotAppInfo>;
+  requestWebApp?(request: TelegramWebAppRequest): TransportEffect<TelegramWebApp>;
+  prolongWebApp?(peer: TelegramPeer, bot: TelegramPeer, queryId: string): TransportEffect<void>;
+  sendWebAppData?(
+    bot: TelegramPeer,
+    buttonText: string,
+    data: string,
+    randomId: string,
+  ): TransportEffect<void>;
+  invokeWebAppMethod?(bot: TelegramPeer, method: string, params: string): TransportEffect<string>;
   getBotCommands?(peer: TelegramPeer): TransportEffect<TelegramBotCommand[]>;
   startBot?(
     peer: TelegramPeer,
@@ -770,6 +1017,26 @@ export interface TelegramTransport {
     randomId: string,
     reply?: TelegramReplyTarget,
   ): TransportEffect<SendTextResult>;
+  getPrivacy?(key: TelegramPrivacyKey): TransportEffect<TelegramPrivacySetting>;
+  setPrivacy?(
+    key: TelegramPrivacyKey,
+    change: TelegramPrivacyChange,
+  ): TransportEffect<TelegramPrivacySetting>;
+  getReadTimePrivacy?(): TransportEffect<boolean>;
+  setReadTimePrivacy?(hidden: boolean): TransportEffect<boolean>;
+  getActiveSessions?(): TransportEffect<TelegramActiveSessions>;
+  terminateSession?(hash?: string): TransportEffect<void>;
+  setSessionTtl?(days: number): TransportEffect<void>;
+  getPollVotes?(
+    peer: TelegramPeer,
+    messageId: number,
+    option?: string,
+    offset?: string,
+  ): TransportEffect<TelegramPollVotes>;
+  getMessageReadReceipts?(
+    peer: TelegramPeer,
+    messageId: number,
+  ): TransportEffect<TelegramReadReceipts>;
   getReactionPeople?(
     peer: TelegramPeer,
     messageId: number,
@@ -797,6 +1064,7 @@ export interface TelegramTransport {
     toPeer: TelegramPeer,
     messageId: number,
     randomId: string,
+    options?: TelegramForwardOptions,
   ): TransportEffect<SendTextResult>;
   readonly updates: Stream.Stream<TransportUpdateBatch, TelegramTransportError>;
 }
@@ -853,6 +1121,11 @@ export interface PendingAlbumAttachment extends PendingAttachment {
   sendAs: 'media';
 }
 
+export interface TelegramForwardOptions {
+  hideAuthor?: boolean | undefined;
+  hideCaption?: boolean | undefined;
+}
+
 export interface PendingSend {
   id: string;
   accountId?: string | undefined;
@@ -867,8 +1140,15 @@ export interface PendingSend {
   reply?: TelegramReplyTarget | undefined;
   formats?: readonly TelegramTextFormat[] | undefined;
   sticker?: TelegramSticker | undefined;
+  contact?: TelegramContact | undefined;
+  pollDraft?: TelegramPollDraft | undefined;
   forward?:
-    | { fromPeer: TelegramPeer; messageId: number; mediaKind?: TelegramMedia['kind'] | undefined }
+    | {
+        fromPeer: TelegramPeer;
+        messageId: number;
+        mediaKind?: TelegramMedia['kind'] | undefined;
+        options?: TelegramForwardOptions | undefined;
+      }
     | undefined;
   botStart?: { startParam: string } | undefined;
   attachment?: PendingAttachment | undefined;
@@ -897,7 +1177,8 @@ export type AccountSnapshot = {
   draftDetails: Record<string, TelegramDraftDetails>;
   pending: PendingSend[];
   activities: TelegramActivity[];
-  authStep?: 'phone' | 'code' | 'password' | undefined;
+  authStep?: 'phone' | 'code' | 'password' | 'qr' | undefined;
+  qrLogin?: { url: string; expires: number } | undefined;
   codeViaApp?: boolean | undefined;
   operationError?: string | undefined;
   error?: string | undefined;

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   EngineState,
+  accountSnapshot,
   EngineStateLayer,
   initialEngineSnapshot,
   mergeAccountSnapshot,
@@ -14,6 +15,22 @@ const run = <Value>(effect: Effect.Effect<Value, never, EngineState>) =>
   Effect.runPromise(effect.pipe(Effect.provide(EngineStateLayer)));
 
 describe('EngineState', () => {
+  it('propagates rotated QR tokens to other tabs and clears them on leaving QR login', () => {
+    const previous = {
+      ...initialEngineSnapshot(),
+      authStep: 'qr' as const,
+      qrLogin: { url: 'tg://login?token=old', expires: 10 },
+    };
+    const next = { ...previous, qrLogin: { url: 'tg://login?token=new', expires: 40 } };
+    expect(mergeAccountSnapshot(previous, accountSnapshot(next)).qrLogin).toEqual(next.qrLogin);
+    expect(
+      mergeAccountSnapshot(
+        next,
+        accountSnapshot({ ...next, authStep: 'phone', qrLogin: undefined }),
+      ).qrLogin,
+    ).toBeUndefined();
+  });
+
   it('shares equal fields and returns the previous snapshot for a no-op replacement', () => {
     const previous = {
       ...initialEngineSnapshot(),

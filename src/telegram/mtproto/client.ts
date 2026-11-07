@@ -109,6 +109,7 @@ export interface MtprotoClient {
   readonly invoke: <Request extends Tl.AnyRequest>(
     request: Request,
   ) => Effect.Effect<Tl.ResultOf<Request>, MtprotoError>;
+  readonly switchDc: (dcId: number) => Effect.Effect<void, MtprotoError>;
   readonly getMe: Effect.Effect<Tl.User | undefined, MtprotoError>;
   readonly uploadFile: (
     options: UploadFileOptions,
@@ -573,6 +574,13 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
       ),
     ),
     invoke,
+    switchDc: (dcId) =>
+      Effect.gen(function* () {
+        yield* endpoint(dcId);
+        const snapshot = yield* session.snapshot;
+        yield* session.setMainDc(dcId, snapshot.isTest === true);
+        yield* Effect.scoped(sender(keyFor('api', dcId)));
+      }).pipe(Effect.asVoid),
     getMe: invoke(Api.users.GetUsers({ id: [Api.InputUserSelf({})] })).pipe(
       Effect.map((users) => users.find((value) => Api.User.is(value))),
     ),

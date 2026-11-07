@@ -152,3 +152,90 @@ test('channel preview stays out of the chat list after message updates and reloa
     page.getByTestId('chat-list').getByRole('button', { name: /Release Channel/ }),
   ).toBeVisible();
 });
+
+test('updates open discussions without a refresh button and retains loaded older comments', async ({
+  page,
+}) => {
+  await openReady(page, '/?scenario=comments&chat=u:101');
+  await page
+    .getByRole('link', { name: 'https://t.me/public_fixture_news/965', exact: true })
+    .click();
+  await page.getByRole('button', { name: '75 comments' }).click();
+  const panel = page.getByRole('dialog', { name: 'Comments', exact: true });
+  await panel.getByRole('button', { name: 'Load older comments' }).click();
+  await expect(panel.locator('[data-comment-id="100"]')).toHaveCount(1);
+  await expect(panel.getByRole('button', { name: /Refresh/ })).toHaveCount(0);
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 175,
+        peerId: 'c:909',
+        senderId: 'u:101',
+        text: 'Live comment',
+        date: 1_700_002_000,
+        outgoing: false,
+        replyToId: 174,
+      },
+    }),
+  );
+  await expect(panel.locator('[data-comment-id="175"]')).toContainText('Live comment');
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'edit-message',
+      pts: 12,
+      ptsCount: 1,
+      message: {
+        id: 175,
+        peerId: 'c:909',
+        senderId: 'u:101',
+        text: 'Edited comment',
+        date: 1_700_002_000,
+        outgoing: false,
+        replyToId: 174,
+      },
+    }),
+  );
+  await expect(panel.locator('[data-comment-id="175"]')).toContainText('Edited comment');
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'delete-messages',
+      pts: 13,
+      ptsCount: 1,
+      peerId: 'c:909',
+      messageIds: [175],
+    }),
+  );
+  await expect(panel.locator('[data-comment-id="175"]')).toHaveCount(0);
+  await expect(panel.locator('[data-comment-id="100"]')).toHaveCount(1);
+});
+
+for (const width of [375, 768, 1280]) {
+  test(`comments show author avatars and compact timestamps at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await openReady(page, '/?scenario=comments&chat=u:101');
+    await page.setViewportSize({ width, height: 800 });
+    await page
+      .getByRole('link', { name: 'https://t.me/public_fixture_news/965', exact: true })
+      .click();
+    await page.getByRole('button', { name: '75 comments' }).click();
+    const panel = page.getByRole('dialog', { name: 'Comments', exact: true });
+    const first = panel.locator('[data-comment-id]').first();
+    await expect(first.locator('[data-avatar-identity]')).toBeVisible();
+    await expect(first.locator('.comment-avatar')).toHaveAttribute('title', 'Alice Fixture');
+    await expect(first.locator('time')).toHaveAttribute('datetime', /2023-/);
+    await expect(first.locator('time')).toHaveAttribute('title', /2023/);
+    const geometry = await panel.evaluate((element) => ({
+      width: element.scrollWidth,
+      client: element.clientWidth,
+    }));
+    expect(geometry.width).toBeLessThanOrEqual(geometry.client);
+    await page.screenshot({
+      animations: 'disabled',
+      path: testInfo.outputPath('comment-avatars.png'),
+    });
+  });
+}

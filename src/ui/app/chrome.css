@@ -84,3 +84,356 @@
 .conversation-content {
   gap: 0.34rem;
 }
+
+.unread-notifications {
+  position: absolute;
+  z-index: 15;
+  right: 1rem;
+  bottom: 4.3rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+.unread-notification-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface-raised);
+  box-shadow: 0 5px 18px var(--shadow);
+}
+.unread-notification-button:hover {
+  background: var(--surface-hover);
+}
+.unread-notification-button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.settings-navigation-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 1rem 1.25rem;
+  min-height: 3.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.settings-navigation-row span {
+  flex: 1;
+}
+.settings-navigation-row:hover,
+.device-row:not(:disabled):hover {
+  background: var(--surface-hover);
+}
+.active-sessions section {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.active-sessions h3 {
+  padding: 0.7rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.85rem 1.25rem;
+  text-align: left;
+}
+.device-row:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.device-icon {
+  width: 3rem;
+  height: 3rem;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: white;
+  background: var(--accent);
+}
+.device-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+}
+.device-copy strong,
+.device-copy span {
+  overflow-wrap: anywhere;
+}
+.device-copy small {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.device-notice {
+  margin: 0;
+  padding: 0.75rem 1.25rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.terminate-all {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 3.5rem;
+  width: 100%;
+  padding: 0.8rem 1.25rem;
+  color: #e46868;
+  text-align: left;
+}
+.session-expiry label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1.25rem;
+  font-size: 0.85rem;
+}
+.session-expiry select {
+  max-width: 50%;
+  background: var(--panel);
+  color: var(--accent);
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+}
+.session-confirm-dialog {
+  width: min(25rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  border-radius: 0.9rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 1rem;
+}
+.session-confirm-dialog > strong,
+.session-confirm-dialog > p {
+  display: block;
+  margin: 1rem 0.5rem;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+.session-confirm-dialog dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.7rem 1rem;
+  margin: 1rem 0.5rem;
+  font-size: 0.8rem;
+}
+.session-confirm-dialog dt {
+  color: var(--muted);
+}
+.session-confirm-dialog dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.session-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+.session-confirm-actions button {
+  min-height: 2.75rem;
+  padding: 0.6rem;
+  color: var(--accent);
+}
+.session-confirm-actions button.danger {
+  color: #e46868;
+}
+
+.privacy-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 3.4rem;
+  width: 100%;
+  padding: 0.8rem 1.25rem;
+  text-align: left;
+}
+.privacy-setting-row > span {
+  flex: 1;
+}
+.privacy-setting-row small {
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+.privacy-setting-row:hover {
+  background: var(--surface-hover);
+}
+.privacy-read-time {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--line);
+}
+.privacy-read-time input,
+.privacy-radio input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+.privacy-editor {
+  display: flex;
+  flex-direction: column;
+  width: min(26rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: var(--panel);
+}
+.privacy-editor h3 {
+  padding: 0.8rem 1.25rem;
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+.privacy-editor fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.privacy-radio {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 3rem;
+  padding: 0.6rem 1.25rem;
+  font-size: 0.9rem;
+}
+.privacy-exceptions {
+  border-top: 1px solid var(--line);
+  margin-top: 0.7rem;
+}
+.privacy-exception-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1.25rem;
+  width: 100%;
+  min-height: 2.75rem;
+  font-size: 0.85rem;
+}
+.privacy-exception-heading span:last-child {
+  color: var(--accent);
+}
+.privacy-exception-person {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 1.25rem;
+}
+.privacy-exception-person > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+.privacy-exception-person > button {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+}
+.privacy-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  position: sticky;
+  bottom: 0;
+  background: var(--panel);
+}
+.privacy-editor-actions button {
+  min-height: 2.75rem;
+  padding: 0.6rem;
+  color: var(--accent);
+}
+
+.auth-alternate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 16px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+.auth-alternate:hover {
+  background: var(--accent-soft);
+}
+.auth-qr-code {
+  display: grid;
+  place-items: center;
+  width: min(240px, 100%);
+  aspect-ratio: 1;
+  margin: 0 auto 24px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #fff;
+}
+.auth-qr-code canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.auth-qr h2 {
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+}
+.auth-qr ol {
+  list-style-type: decimal;
+  margin: 20px 0 0;
+  padding-left: 22px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.auth-qr li {
+  padding-left: 6px;
+  margin-bottom: 12px;
+}
+.auth-qr li::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+.privacy-exception-list {
+  overflow: hidden;
+}
+.privacy-exception-list > header,
+.privacy-exception-list > button,
+.privacy-exception-list > p,
+.privacy-exception-list > .privacy-editor-actions {
+  flex-shrink: 0;
+}
+.privacy-exception-scroll {
+  overflow-y: auto;
+  min-height: 0;
+}

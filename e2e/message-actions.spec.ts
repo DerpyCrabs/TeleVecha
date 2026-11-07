@@ -121,6 +121,9 @@ test('forwards selected messages in chronological order and clears selection on 
   const dialog = page.getByRole('dialog', { name: 'Forward selected messages' });
   await dialog.getByRole('button', { name: 'Alice Fixture', exact: true }).click();
   await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Forwarding options', exact: true })).toBeVisible();
+  expect((await fixtureStats(page))?.forwardMessage ?? 0).toBe(0);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect.poll(async () => (await fixtureStats(page))?.forwardMessage).toBe(2);
   await expect(page.locator('article[data-message-id="81"]')).toContainText('Fixture message 79');
   await expect(page.locator('article[data-message-id="82"]')).toContainText(
@@ -226,4 +229,33 @@ test('selects album members together and deletes a selection', async ({ page }) 
     await expect(page.locator('article[data-message-id="78"]')).toBeVisible();
     await expect(page.getByRole('toolbar', { name: 'Selected messages' })).toHaveCount(0);
   });
+});
+
+test('changes forwarding recipient and removes a message without sending early', async ({
+  page,
+}) => {
+  await openReady(page);
+  await selectAlice(page);
+  await page.locator('article[data-message-id="80"]').click({ modifiers: ['Control'] });
+  await page.locator('article[data-message-id="79"]').click();
+  await page.getByRole('button', { name: 'Forward selected' }).click();
+  await page
+    .getByRole('dialog', { name: 'Forward selected messages' })
+    .getByRole('button', { name: 'Alice Fixture', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'Forwarding options', exact: true }).click();
+  const options = page.getByRole('dialog', { name: 'Forwarding options' });
+  await options.getByRole('button', { name: 'Remove message 80 from forwarding' }).click();
+  await options.getByRole('checkbox', { name: 'Hide sender names' }).check();
+  await options.getByRole('button', { name: 'Change recipient' }).click();
+  await page
+    .getByRole('dialog', { name: 'Change forwarding recipient' })
+    .getByRole('button', { name: 'Release Channel', exact: true })
+    .click();
+  await expect(page.locator('.composer-forward')).toContainText('Sender names hidden');
+  expect((await fixtureStats(page))?.forwardMessage ?? 0).toBe(0);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect.poll(async () => (await fixtureStats(page))?.forwardMessage).toBe(1);
+  await expect(page.locator('article.message').last()).toContainText('Fixture message 79');
+  await expect(page.locator('.composer-forward')).toHaveCount(0);
 });

@@ -36,6 +36,7 @@ const clientDouble = (overrides: Partial<MtprotoClient> = {}): MtprotoClient => 
       createMtprotoError('protocol', 'Unexpected RPC'),
     )) as unknown as MtprotoClient['invoke'],
   getMe: Effect.succeed(undefined),
+  switchDc: () => Effect.void,
   uploadFile: () => Effect.fail(createMtprotoError('protocol', 'Unexpected upload')),
   downloadFile: () => Effect.fail(createMtprotoError('protocol', 'Unexpected download')),
   downloadMedia: () => Effect.succeed(undefined),
@@ -63,6 +64,1005 @@ const withTransport = <A, E>(
   );
 
 describe('web Telegram transport', () => {
+  it('searches participants with a server cursor even when an entity is unavailable', () => {
+    const invoke = vi.fn((_request: unknown) =>
+      Effect.succeed(
+        Api.channels.ChannelParticipants({
+          count: 4,
+          participants: [Api.ChannelParticipant({ userId: 10n, date: 1 })],
+          users: [],
+          chats: [],
+        }),
+      ),
+    );
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const page = yield* transport.getGroupMembers!(
+              { id: 'c:1', kind: 'channel', accessHash: '2' },
+              1,
+              2,
+              ' Alice ',
+            );
+            expect(invoke.mock.calls[0]?.[0]).toMatchObject({
+              filter: Api.ChannelParticipantsSearch({ q: 'Alice' }),
+              offset: 2,
+              limit: 1,
+            });
+            expect(page).toEqual({ members: [], totalCount: 4, hasMore: true, nextOffset: 3 });
+          }),
+        () =>
+          Effect.succeed(clientDouble({ invoke: invoke as unknown as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+  it('stops participant pagination when Telegram returns an empty page with a stale count', () => {
+    const invoke = vi.fn((_request: unknown) =>
+      Effect.succeed(
+        Api.channels.ChannelParticipants({ count: 4, participants: [], users: [], chats: [] }),
+      ),
+    );
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const page = yield* transport.getGroupMembers!(
+              { id: 'c:1', kind: 'channel', accessHash: '2' },
+              50,
+              0,
+              '',
+            );
+            expect(page).toEqual({ members: [], totalCount: 4, hasMore: false });
+          }),
+        () =>
+          Effect.succeed(clientDouble({ invoke: invoke as unknown as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it.each([
+    ['happy cats', 'happy cats', ''],
+    ['👍🎉', '', '👍 🎉'],
+    ['🇷🇺', '', '🇷🇺'],
+  ])(
+    'searches individual stickers for %s with the appropriate query fields',
+    (query, q, emoticon) => {
+      const invoke = vi.fn((_request: unknown) =>
+        Effect.succeed(Api.messages.FoundStickers({ hash: 0n, stickers: [], nextOffset: 10 })),
+      );
+      return Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              const page = yield* transport.searchStickers!(query, 0);
+              expect(page.nextOffset).toBe(10);
+              expect(invoke.mock.calls[0]?.[0]).toMatchObject({
+                q,
+                emoticon,
+                offset: 0,
+                limit: 50,
+                langCode: [],
+              });
+              const last = yield* transport.searchStickers!(query, 10);
+              expect(last.nextOffset).toBeUndefined();
+            }),
+          () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+        ),
+      );
+    },
+  );
+
+  it('loads pack metadata and installs or removes its exact Telegram identity', () => {
+    const set = Api.StickerSet({
+      id: 9223372036854775806n,
+      accessHash: 9223372036854775805n,
+      title: 'Cats',
+      shortName: 'CatsPack',
+      count: 3,
+      hash: 1,
+      installedDate: 1700000000,
+    });
+    const invoke = vi.fn((request: unknown) => {
+      if (Api.messages.GetStickerSet.is(request))
+        return Effect.succeed(
+          Api.messages.StickerSet({ set, documents: [], packs: [], keywords: [] }),
+        );
+      if (Api.messages.InstallStickerSet.is(request))
+        return Effect.succeed(Api.messages.StickerSetInstallResultSuccess());
+      return Effect.succeed(true);
+    });
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const pack = yield* transport.getStickerPack!('CatsPack');
+            expect(pack).toMatchObject({
+              id: '9223372036854775806',
+              accessHash: '9223372036854775805',
+              shortName: 'CatsPack',
+              installed: true,
+              count: 3,
+            });
+            yield* transport.setStickerPackInstalled!(pack, false);
+            yield* transport.setStickerPackInstalled!(pack, true);
+            expect(Api.messages.UninstallStickerSet.is(invoke.mock.calls[1]?.[0])).toBe(true);
+            expect(invoke.mock.calls[2]?.[0]).toMatchObject({
+              archived: false,
+              stickerset: { id: 9223372036854775806n, accessHash: 9223372036854775805n },
+            });
+            const invalid = yield* transport.getStickerPack!('../bad').pipe(Effect.result);
+            expect(invalid._tag).toBe('Failure');
+            expect(invoke).toHaveBeenCalledTimes(3);
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it.each([true, false])(
+    'sets server sticker favorite=%s using full document identity',
+    (favorite) => {
+      const invoke = vi.fn((_request: unknown) => Effect.succeed(true));
+      return Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              yield* transport.setStickerFavorite!(
+                {
+                  id: '9223372036854775806',
+                  accessHash: '9223372036854775805',
+                  fileReference: new Uint8Array([1, 2]),
+                  emoji: '⭐',
+                  mimeType: 'image/webp',
+                },
+                favorite,
+              );
+              const request = invoke.mock.calls[0]?.[0];
+              expect(Api.messages.FaveSticker.is(request)).toBe(true);
+              expect(request).toMatchObject({
+                unfave: !favorite,
+                id: {
+                  id: 9223372036854775806n,
+                  accessHash: 9223372036854775805n,
+                  fileReference: new Uint8Array([1, 2]),
+                },
+              });
+            }),
+          () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+        ),
+      );
+    },
+  );
+
+  it('passes media, sender, dates and pagination to Telegram instead of filtering a loaded page', () => {
+    const invoke = vi.fn((_request: unknown) =>
+      Effect.succeed(Api.messages.Messages({ messages: [], topics: [], users: [], chats: [] })),
+    );
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            yield* transport.searchMessages(
+              '',
+              { id: 'g:303', kind: 'group' },
+              50,
+              { messageId: 42 },
+              {
+                kind: 'photos',
+                fromPeer: { id: 'u:101', kind: 'user', accessHash: '123' },
+                minDate: 1700000000,
+                maxDate: 1700086399,
+              },
+            );
+            const request = invoke.mock.calls[0]?.[0];
+            expect(Api.messages.Search.is(request)).toBe(true);
+            expect(request).toMatchObject({
+              peer: { chatId: 303n },
+              fromId: { userId: 101n, accessHash: 123n },
+              q: '',
+              minDate: 1700000000,
+              maxDate: 1700086399,
+              offsetId: 42,
+              limit: 51,
+            });
+            if (Api.messages.Search.is(request))
+              expect(Api.InputMessagesFilterPhotos.is(request.filter)).toBe(true);
+            yield* transport.searchMessages(
+              'budget',
+              undefined,
+              50,
+              { messageId: 9, rate: 12, peer: { id: 'g:303', kind: 'group' } },
+              { kind: 'files', chatType: 'groups', minDate: 1700000000 },
+            );
+            const global = invoke.mock.calls[1]?.[0];
+            expect(Api.messages.SearchGlobal.is(global)).toBe(true);
+            expect(global).toMatchObject({
+              groupsOnly: true,
+              q: 'budget',
+              offsetId: 9,
+              offsetRate: 12,
+              minDate: 1700000000,
+              maxDate: 0,
+            });
+            if (Api.messages.SearchGlobal.is(global)) {
+              expect(Api.InputMessagesFilterDocument.is(global.filter)).toBe(true);
+              expect(global.usersOnly).toBeUndefined();
+              expect(global.broadcastsOnly).toBeUndefined();
+            }
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it.each([false, true])(
+    'opens named Mini Apps and grants write access only when selected: %s',
+    (writeAllowed) => {
+      const invoke = vi.fn((_request: unknown) =>
+        Effect.succeed(Api.WebViewResultUrl({ url: 'https://mini.test/#signed' })),
+      );
+      return Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              const bot = { id: 'u:101', kind: 'user' as const, accessHash: '123' };
+              yield* transport.requestWebApp!({
+                peer: { id: 'g:303', kind: 'group' },
+                bot,
+                mode: 'app',
+                app: { id: '9223372036854775806', accessHash: '9223372036854775805' },
+                startParam: 'order_123',
+                displayMode: 'compact',
+                writeAllowed,
+                theme: {},
+              });
+              const request = invoke.mock.calls[0]?.[0];
+              expect(Api.messages.RequestAppWebView.is(request)).toBe(true);
+              expect(request).toMatchObject({
+                peer: { chatId: 303n },
+                app: { id: 9223372036854775806n, accessHash: 9223372036854775805n },
+                startParam: 'order_123',
+                compact: true,
+              });
+              if (Api.messages.RequestAppWebView.is(request))
+                expect(request.writeAllowed).toBe(writeAllowed ? true : undefined);
+            }),
+          () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+        ),
+      );
+    },
+  );
+
+  it('maps Mini App completion updates with full query id precision', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        providePlatform(
+          Effect.gen(function* () {
+            const events = yield* PubSub.sliding<MtprotoClientEvent>(8);
+            const transport = yield* createWebTelegramTransport(makeMemoryCacheStore(), {
+              createClient: () =>
+                Effect.succeed(clientDouble({ events: Stream.fromPubSub(events) })),
+            });
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const received = yield* transport.updates.pipe(
+              Stream.runHead,
+              Effect.forkChild({ startImmediately: true }),
+            );
+            yield* PubSub.publish(
+              events,
+              updateEvent(Api.UpdateWebViewResultSent({ queryId: 9223372036854775806n })),
+            );
+            const result = yield* Fiber.join(received);
+            expect(result._tag).toBe('Some');
+            if (result._tag === 'Some')
+              expect(result.value.updates).toEqual([
+                { type: 'web-app-result', queryId: '9223372036854775806' },
+              ]);
+          }),
+        ),
+      ),
+    ));
+
+  it.each(['simple', 'inline', 'menu', 'main'] as const)(
+    'launches %s Mini Apps with the appropriate RPC and preserves 64-bit query ids',
+    (mode) => {
+      const invoke = vi.fn((_request: unknown) =>
+        Effect.succeed(
+          Api.WebViewResultUrl({
+            url: 'https://mini.test/#tgWebAppData=signed',
+            queryId: 9223372036854775806n,
+          }),
+        ),
+      );
+      return Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              const peer = { id: 'u:101', kind: 'user' as const, accessHash: '123' };
+              const result = yield* transport.requestWebApp!({
+                peer,
+                bot: peer,
+                mode,
+                url: 'https://mini.test/',
+                theme: { bg_color: '#ffffff' },
+              });
+              expect(result.queryId).toBe('9223372036854775806');
+              const request = invoke.mock.calls[0]?.[0];
+              if (mode === 'simple')
+                expect(Api.messages.RequestSimpleWebView.is(request)).toBe(true);
+              else if (mode === 'main')
+                expect(Api.messages.RequestMainWebView.is(request)).toBe(true);
+              else expect(Api.messages.RequestWebView.is(request)).toBe(true);
+              expect(request).toMatchObject({
+                platform: 'web',
+                bot: { userId: 101n, accessHash: 123n },
+              });
+              if (mode === 'menu') expect(request).toMatchObject({ fromBotMenu: true });
+            }),
+          () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+        ),
+      );
+    },
+  );
+  it('rejects unsafe Mini App links and oversized UTF-8 data before issuing an RPC', () => {
+    const invoke = vi.fn((_request: unknown) => Effect.succeed(true));
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const bot = { id: 'u:101', kind: 'user' as const };
+            expect(
+              (yield* transport.requestWebApp!({
+                peer: bot,
+                bot,
+                mode: 'simple',
+                url: 'javascript:alert(1)',
+                theme: {},
+              }).pipe(Effect.result))._tag,
+            ).toBe('Failure');
+            expect(
+              (yield* transport.sendWebAppData!(bot, 'Open', '🙂'.repeat(1025), '1').pipe(
+                Effect.result,
+              ))._tag,
+            ).toBe('Failure');
+            expect(invoke).not.toHaveBeenCalled();
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it('reads current privacy before saving and keeps exceptions from other clients', () => {
+    const requests: unknown[] = [];
+    const current = Api.account.PrivacyRules({
+      rules: [
+        Api.PrivacyValueDisallowUsers({ users: [101n] }),
+        Api.PrivacyValueAllowPremium(),
+        Api.PrivacyValueAllowAll(),
+      ],
+      users: [Api.User({ id: 101n, accessHash: 9223372036854775806n, firstName: 'Alice' })],
+      chats: [],
+    });
+    const invoke = (request: unknown) => {
+      requests.push(request);
+      return Effect.succeed(current);
+    };
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            yield* transport.setPrivacy!('phone-number', { audience: 'contacts' });
+            expect(Api.account.GetPrivacy.is(requests[0])).toBe(true);
+            const write = requests[1];
+            expect(Api.account.SetPrivacy.is(write)).toBe(true);
+            if (Api.account.SetPrivacy.is(write)) {
+              expect(write.rules).toHaveLength(4);
+              expect(write.rules[0]).toMatchObject({
+                users: [{ userId: 101n, accessHash: 9223372036854775806n }],
+              });
+              expect(Api.InputPrivacyValueAllowPremium.is(write.rules[1])).toBe(true);
+              expect(Api.InputPrivacyValueAllowContacts.is(write.rules[2])).toBe(true);
+              expect(Api.InputPrivacyValueDisallowAll.is(write.rules[3])).toBe(true);
+            }
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+  it('changes read-time privacy without resetting unrelated global privacy flags', () => {
+    const current = Api.GlobalPrivacySettings({
+      hideReadMarks: true,
+      archiveAndMuteNewNoncontactPeers: true,
+      newNoncontactPeersRequirePremium: true,
+      noncontactPeersPaidStars: 123n,
+    });
+    const invoke = (request: unknown) => {
+      if (Api.account.GetGlobalPrivacySettings.is(request)) return Effect.succeed(current);
+      expect(Api.account.SetGlobalPrivacySettings.is(request)).toBe(true);
+      if (Api.account.SetGlobalPrivacySettings.is(request)) {
+        expect(request.settings).toMatchObject({
+          archiveAndMuteNewNoncontactPeers: true,
+          newNoncontactPeersRequirePremium: true,
+          noncontactPeersPaidStars: 123n,
+        });
+        expect(request.settings.hideReadMarks).toBeUndefined();
+        return Effect.succeed(request.settings);
+      }
+      return Effect.succeed(current);
+    };
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            expect(yield* transport.setReadTimePrivacy!(false)).toBe(false);
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it('maps active devices without losing 64-bit authorization hashes', () => {
+    const invoke = (request: unknown) => {
+      expect(Api.account.GetAuthorizations.is(request)).toBe(true);
+      const fields = {
+        deviceModel: 'Desktop',
+        platform: 'Linux',
+        systemVersion: '6',
+        apiId: 1,
+        appName: 'TeleVecha',
+        appVersion: '0.1',
+        dateCreated: 100,
+        dateActive: 200,
+        ip: '192.0.2.1',
+        country: 'Fixture',
+        region: 'Test',
+      };
+      return Effect.succeed(
+        Api.account.Authorizations({
+          authorizationTtlDays: 180,
+          authorizations: [
+            Api.Authorization({ ...fields, hash: 9223372036854775806n }),
+            Api.Authorization({ ...fields, hash: 0n, current: true }),
+          ],
+        }),
+      );
+    };
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const page = yield* transport.getActiveSessions!();
+            expect(page.ttlDays).toBe(180);
+            expect(page.sessions[0]).toMatchObject({ id: '0', current: true });
+            expect(page.sessions[1]).toMatchObject({
+              id: '9223372036854775806',
+              device: 'Desktop',
+              ip: '192.0.2.1',
+              activeAt: 200,
+            });
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+  it('uses distinct RPCs for one device, all other devices and expiry', () => {
+    const invoke = vi.fn((_request: unknown) => Effect.succeed(true));
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            yield* transport.terminateSession!('-9223372036854775807');
+            yield* transport.terminateSession!();
+            yield* transport.setSessionTtl!(30);
+            expect(invoke.mock.calls[0]?.[0]).toMatchObject({ hash: -9223372036854775807n });
+            expect(Api.account.ResetAuthorization.is(invoke.mock.calls[0]?.[0])).toBe(true);
+            expect(Api.auth.ResetAuthorizations.is(invoke.mock.calls[1]?.[0])).toBe(true);
+            expect(invoke.mock.calls[2]?.[0]).toMatchObject({ authorizationTtlDays: 30 });
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+  it('explains the restriction on terminating sessions immediately after login', () =>
+    Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const result = yield* transport.terminateSession!('123').pipe(Effect.result);
+            expect(result._tag).toBe('Failure');
+            if (result._tag === 'Failure') expect(result.failure.message).toContain('24 hours');
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({
+              invoke: (() =>
+                Effect.fail(
+                  createMtprotoError('rpc', 'FRESH_RESET_AUTHORISATION_FORBIDDEN', {
+                    code: 406,
+                    details: { errorMessage: 'FRESH_RESET_AUTHORISATION_FORBIDDEN' },
+                  }),
+                )) as MtprotoClient['invoke'],
+            }),
+          ),
+      ),
+    ));
+
+  it.each([
+    ['MESSAGE_NOT_READ_YET', 'unread'],
+    ['MESSAGE_TOO_OLD', 'expired'],
+    ['MSG_TOO_OLD', 'expired'],
+    ['USER_PRIVACY_RESTRICTED', 'privacy'],
+    ['YOUR_PRIVACY_RESTRICTED', 'own-privacy'],
+    ['CHAT_TOO_BIG', 'too-large'],
+  ] as const)('distinguishes read receipt limitation %s', (errorMessage, state) =>
+    Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            expect(
+              yield* transport.getMessageReadReceipts!(
+                { id: 'u:101', kind: 'user', accessHash: '1' },
+                42,
+              ),
+            ).toEqual({ state, people: [] });
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({
+              invoke: (() =>
+                Effect.fail(
+                  createMtprotoError('rpc', errorMessage, { code: 400, details: { errorMessage } }),
+                )) as MtprotoClient['invoke'],
+            }),
+          ),
+      ),
+    ),
+  );
+
+  it.each(['user', 'group'] as const)(
+    'loads names, avatars and exact read times for a %s',
+    (kind) => {
+      const invoke = (request: unknown) => {
+        if (Api.messages.GetHistory.is(request))
+          return Effect.succeed(
+            Api.messages.Messages({
+              messages: [],
+              topics: [],
+              chats: [],
+              users: [
+                Api.User({
+                  id: 101n,
+                  accessHash: 1n,
+                  firstName: 'Alice',
+                  photo: Api.UserProfilePhoto({ photoId: 7n, dcId: 2 }),
+                }),
+                Api.User({ id: 102n, accessHash: 2n, firstName: 'Bob' }),
+              ],
+            }),
+          );
+        if (kind === 'user') {
+          expect(Api.messages.GetOutboxReadDate.is(request)).toBe(true);
+          return Effect.succeed(Api.OutboxReadDate({ date: 123 }));
+        }
+        expect(Api.messages.GetMessageReadParticipants.is(request)).toBe(true);
+        return Effect.succeed([
+          Api.ReadParticipantDate({ userId: 101n, date: 123 }),
+          Api.ReadParticipantDate({ userId: 102n, date: 124 }),
+        ]);
+      };
+      return Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              const peer = { id: kind === 'user' ? 'u:101' : 'g:303', kind, accessHash: '1' };
+              yield* transport.getHistory(peer, 10);
+              const result = yield* transport.getMessageReadReceipts!(peer, 42);
+              expect(result.state).toBe('available');
+              expect(result.people.find((person) => person.id === 'u:101')).toMatchObject({
+                name: 'Alice',
+                readAt: 123,
+                hasAvatar: true,
+                avatarId: '7',
+              });
+              if (kind === 'group')
+                expect(result.people.map((person) => person.name)).toEqual(['Bob', 'Alice']);
+            }),
+          () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+        ),
+      );
+    },
+  );
+
+  it.each([
+    ['BROADCAST_FORBIDDEN', 'broadcast'],
+    ['POLL_VOTE_REQUIRED', 'vote-required'],
+    ['MSG_ID_INVALID', 'deleted'],
+  ] as const)('explains the poll results restriction %s', (errorMessage, unavailable) =>
+    Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            expect(yield* transport.getPollVotes!({ id: 'g:303', kind: 'group' }, 42)).toEqual({
+              people: [],
+              count: 0,
+              unavailable,
+            });
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({
+              invoke: (() =>
+                Effect.fail(
+                  createMtprotoError('rpc', errorMessage, { code: 403, details: { errorMessage } }),
+                )) as MtprotoClient['invoke'],
+            }),
+          ),
+      ),
+    ),
+  );
+
+  it('loads public poll voters with opaque options and stops repeated pagination cursors', () => {
+    const requests: unknown[] = [];
+    const invoke = (request: unknown) => {
+      requests.push(request);
+      return Effect.succeed(
+        Api.messages.VotesList({
+          count: 3,
+          nextOffset: 'next',
+          chats: [],
+          users: [
+            Api.User({
+              id: 101n,
+              accessHash: 1n,
+              firstName: 'Alice',
+              photo: Api.UserProfilePhoto({ photoId: 7n, dcId: 2 }),
+            }),
+          ],
+          votes: [
+            Api.MessagePeerVote({
+              peer: Api.PeerUser({ userId: 101n }),
+              option: new Uint8Array([0, 128]),
+              date: 123,
+            }),
+            Api.MessagePeerVoteMultiple({
+              peer: Api.PeerUser({ userId: 101n }),
+              options: [new Uint8Array([0, 128]), new Uint8Array([255])],
+              date: 124,
+            }),
+            Api.MessagePeerVoteInputOption({ peer: Api.PeerUser({ userId: 101n }), date: 125 }),
+          ],
+        }),
+      );
+    };
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const first = yield* transport.getPollVotes!(
+              { id: 'g:303', kind: 'group' },
+              42,
+              '0080',
+            );
+            expect(first.nextOffset).toBe('next');
+            expect(first.people.map((person) => person.options)).toEqual([
+              ['0080'],
+              ['0080', 'ff'],
+              ['0080'],
+            ]);
+            expect(first.people[0]).toMatchObject({
+              name: 'Alice',
+              avatarId: '7',
+              date: 123,
+              peer: { id: 'u:101', accessHash: '1' },
+            });
+            const last = yield* transport.getPollVotes!(
+              { id: 'g:303', kind: 'group' },
+              42,
+              '0080',
+              'next',
+            );
+            expect(last.nextOffset).toBeUndefined();
+            expect(requests[1]).toMatchObject({
+              id: 42,
+              option: new Uint8Array([0, 128]),
+              offset: 'next',
+              limit: 50,
+            });
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it('sends a quiz using answer indices and maps its server card', () => {
+    const draft = {
+      question: 'Two plus two?',
+      answers: ['Four', 'Five'],
+      quiz: true,
+      multipleChoice: false,
+      publicVoters: true,
+      correctAnswer: 0,
+      solution: '2 + 2 = 4',
+    };
+    const invoke = vi.fn((request: unknown) => {
+      if (!Api.messages.SendMedia.is(request) || !Api.InputMediaPoll.is(request.media))
+        throw new Error('Unexpected request');
+      expect(request.media).toMatchObject({
+        correctAnswers: [0],
+        solution: draft.solution,
+        poll: { quiz: true, publicVoters: true },
+      });
+      expect(request.media.poll.answers[0]).toMatchObject({ option: new Uint8Array([0]) });
+      return Effect.succeed(
+        Api.Updates({
+          date: 123,
+          seq: 1,
+          users: [],
+          chats: [],
+          updates: [
+            Api.UpdateNewMessage({
+              pts: 1,
+              ptsCount: 1,
+              message: Api.Message({
+                id: 81,
+                date: 123,
+                peerId: Api.PeerUser({ userId: 101n }),
+                out: true,
+                message: '',
+                media: Api.MessageMediaPoll({
+                  poll: { ...request.media.poll, id: 42n },
+                  results: Api.PollResults({ totalVoters: 0 }),
+                }),
+              }),
+            }),
+          ],
+        }),
+      );
+    });
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const sent = yield* transport.sendPoll!(
+              { id: 'u:101', kind: 'user', accessHash: '10' },
+              draft,
+              '123',
+            );
+            expect(sent.message.poll).toMatchObject({
+              id: '42',
+              question: draft.question,
+              quiz: true,
+              publicVoters: true,
+              answers: [
+                { option: '00', text: 'Four' },
+                { option: '01', text: 'Five' },
+              ],
+              results: { totalVoters: 0 },
+            });
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it('sends opaque poll options and maps minimal live results without requiring a peer', () => {
+    const invoke = vi.fn((request: unknown) => {
+      expect(Api.messages.SendVote.is(request)).toBe(true);
+      expect(request).toMatchObject({ msgId: 81, options: [new Uint8Array([0, 255])] });
+      return Effect.succeed(
+        Api.Updates({
+          date: 123,
+          seq: 1,
+          users: [],
+          chats: [],
+          updates: [
+            Api.UpdateMessagePoll({
+              pollId: 42n,
+              results: Api.PollResults({
+                min: true,
+                totalVoters: 4,
+                results: [
+                  Api.PollAnswerVoters({
+                    option: new Uint8Array([0, 255]),
+                    voters: 3,
+                    recentVoters: [],
+                  }),
+                ],
+              }),
+            }),
+          ],
+        }),
+      );
+    });
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const result = yield* transport.updatePoll!(
+              { id: 'u:101', kind: 'user', accessHash: '10' },
+              81,
+              {
+                id: '42',
+                hash: '0',
+                question: 'Q',
+                answers: [{ option: '00ff', text: 'A' }],
+                quiz: false,
+                multipleChoice: false,
+                publicVoters: false,
+                closed: false,
+                revotingDisabled: false,
+                hideResultsUntilClose: false,
+                results: {},
+              },
+              'vote',
+              ['00ff'],
+            );
+            expect(result.updateBatches?.[0]?.updates[0]).toMatchObject({
+              type: 'poll-changed',
+              pollId: '42',
+              results: { min: true, totalVoters: 4, answers: [{ option: '00ff', voters: 3 }] },
+            });
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it('sends contact media and preserves its card in short send acknowledgements', () => {
+    const contact = {
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      phoneNumber: '+123456789',
+      vcard: '',
+    };
+    const invoke = vi.fn((request: unknown) => {
+      expect(Api.messages.SendMedia.is(request)).toBe(true);
+      expect(request).toMatchObject({ message: '', randomId: 123n, media: contact });
+      if (Api.messages.SendMedia.is(request))
+        expect(Api.InputMediaContact.is(request.media)).toBe(true);
+      return Effect.succeed(
+        Api.UpdateShortSentMessage({ id: 81, pts: 1, ptsCount: 1, date: 123, out: true }),
+      );
+    });
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const sent = yield* transport.sendContact!(
+              { id: 'u:101', kind: 'user', accessHash: '10' },
+              contact,
+              '123',
+            );
+            expect(sent.message).toMatchObject({ id: 81, text: '', contact });
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it.each(['mention', 'reaction'] as const)(
+    'loads unread %s events and retains their server unread flags',
+    (kind) =>
+      Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              const page = yield* transport.getUnreadNotifications!(
+                { id: 'u:101', kind: 'user', accessHash: '10' },
+                kind,
+              );
+              expect(page.count).toBe(1);
+              expect(page.messages[0]).toMatchObject({
+                id: 42,
+                unreadMention: true,
+                unreadReaction: true,
+              });
+            }),
+          () =>
+            Effect.succeed(
+              clientDouble({
+                invoke: ((request: unknown) => {
+                  expect(
+                    kind === 'mention'
+                      ? Api.messages.GetUnreadMentions.is(request)
+                      : Api.messages.GetUnreadReactions.is(request),
+                  ).toBe(true);
+                  return Effect.succeed(
+                    Api.messages.Messages({
+                      messages: [
+                        Api.Message({
+                          id: 42,
+                          peerId: Api.PeerUser({ userId: 101n }),
+                          date: 1,
+                          message: 'Reply',
+                          mentioned: true,
+                          mediaUnread: true,
+                          reactions: Api.MessageReactions({
+                            results: [],
+                            recentReactions: [
+                              Api.MessagePeerReaction({
+                                unread: true,
+                                peerId: Api.PeerUser({ userId: 101n }),
+                                date: 2,
+                                reaction: Api.ReactionEmoji({ emoticon: '👍' }),
+                              }),
+                            ],
+                          }),
+                        }),
+                      ],
+                      chats: [],
+                      users: [],
+                      topics: [],
+                    }),
+                  );
+                }) as MtprotoClient['invoke'],
+              }),
+            ),
+        ),
+      ),
+  );
+
+  it.each([
+    [undefined, undefined, undefined],
+    [{ hideAuthor: true }, true, undefined],
+    [{ hideCaption: true }, true, true],
+  ] as const)(
+    'forwards with Telegram-compatible privacy flags: %j',
+    async (options, author, caption) => {
+      const invoke = vi.fn((_request: unknown) =>
+        Effect.fail(createMtprotoError('transport', 'Test stops at RPC')),
+      );
+      await Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              yield* transport
+                .forwardMessage(
+                  { id: 'u:1', kind: 'user', accessHash: '10' },
+                  { id: 'u:2', kind: 'user', accessHash: '20' },
+                  42,
+                  '123',
+                  options,
+                )
+                .pipe(Effect.result);
+            }),
+          () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+        ),
+      );
+      const request = invoke.mock.calls[0]?.[0];
+      expect(request).toMatchObject({ id: [42], randomId: [123n] });
+      expect(Api.messages.ForwardMessages.is(request)).toBe(true);
+      if (Api.messages.ForwardMessages.is(request)) {
+        expect(request.dropAuthor).toBe(author);
+        expect(request.dropMediaCaptions).toBe(caption);
+      }
+    },
+  );
+
   it('recovers a chat theme pattern absent from the account wallpaper catalog', () => {
     const document = Api.Document({
       id: 10n,

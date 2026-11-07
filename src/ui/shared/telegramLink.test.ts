@@ -38,3 +38,58 @@ describe('Telegram chat and post links', () => {
     expect(parseTelegramLink(url)).toBeUndefined(),
   );
 });
+
+describe('Mini App links', () => {
+  it.each([
+    ['https://t.me/example_bot?startapp', { username: 'example_bot', webApp: { startParam: '' } }],
+    [
+      'https://t.me/example_bot/shop?startapp=order_123&mode=compact',
+      {
+        username: 'example_bot',
+        webApp: { shortName: 'shop', startParam: 'order_123', mode: 'compact' },
+      },
+    ],
+    ['https://t.me/example_bot/shop', { username: 'example_bot', webApp: { shortName: 'shop' } }],
+    [
+      'tg://resolve?domain=example_bot&startapp=abc&mode=fullscreen',
+      { username: 'example_bot', webApp: { startParam: 'abc', mode: 'fullscreen' } },
+    ],
+    [
+      'tg://resolve?domain=example_bot&appname=shop',
+      { username: 'example_bot', webApp: { shortName: 'shop' } },
+    ],
+  ])('parses %s', (url, target) => expect(parseTelegramLink(url as string)).toEqual(target));
+  it.each([
+    'https://t.me/example_bot?startapp=x&startapp=y',
+    'https://t.me/example_bot/shop?mode=invalid',
+    'https://t.me/example_bot/shop?startapp=hello%20world',
+    'https://t.me/example_bot/shop/extra',
+    'https://t.me.evil.test/example_bot/shop',
+    'tg://resolve?domain=example_bot&appname=shop&post=123',
+  ])('rejects malformed Mini App links %s', (url) =>
+    expect(parseTelegramLink(url)).toBeUndefined(),
+  );
+});
+
+describe('sticker pack links', () => {
+  it.each([
+    'https://t.me/addstickers/Cats_Pack',
+    'https://telegram.me/addstickers/Cats_Pack/',
+    'http://www.telegram.dog/addstickers/Cats_Pack',
+    'tg://addstickers?set=Cats_Pack',
+  ])('opens %s as a sticker pack', (url) => {
+    expect(parseTelegramLink(url)).toEqual({ stickerPack: 'Cats_Pack' });
+  });
+  it.each([
+    'https://t.me.evil.test/addstickers/Cats',
+    'https://user@t.me/addstickers/Cats',
+    'https://t.me:8443/addstickers/Cats',
+    'https://t.me/addstickers/Cats/extra',
+    'https://t.me/addstickers/Cats?url=https://evil.test',
+    'tg://addstickers?set=Cats&set=Dogs',
+    'tg://addstickers?set=../Cats',
+    'tg://addemoji?set=Cats',
+  ])('leaves unsupported or ambiguous pack links alone: %s', (url) => {
+    expect(parseTelegramLink(url)).toBeUndefined();
+  });
+});

@@ -7,10 +7,12 @@ import { queryCache } from '@effectweb/query';
 it('shares catalog data across session recreation and invalidates the defined expression queries', () => {
   const listeners: Array<(event: TelegramResourceInvalidation) => void> = [];
   const recent = vi.fn(() => Effect.succeed([]));
+  const favorites = vi.fn(() => Effect.succeed([]));
   const packs = vi.fn(() => Effect.succeed([]));
   const gifs = vi.fn(() => Effect.succeed([]));
   const source = {
     getRecentStickers: recent,
+    getFavoriteStickers: favorites,
     getStickerPacks: packs,
     getSavedGifs: gifs,
     searchGifs: vi.fn(() => Effect.succeed([])),
@@ -36,16 +38,27 @@ it('shares catalog data across session recreation and invalidates the defined ex
   first.toggleStickers();
   expect(recent).toHaveBeenCalledTimes(1);
   expect(packs).toHaveBeenCalledTimes(1);
+  expect(favorites).toHaveBeenCalledTimes(1);
   expect(gifs).not.toHaveBeenCalled();
   first.dispose();
   const second = createExpressionSession({ ...options, source: { ...source } }, context);
   second.toggleStickers();
   expect(recent).toHaveBeenCalledTimes(1);
   expect(packs).toHaveBeenCalledTimes(1);
+  expect(favorites).toHaveBeenCalledTimes(1);
   listeners.at(-1)!({ kind: 'expressions' });
   expect(recent).toHaveBeenCalledTimes(2);
   expect(packs).toHaveBeenCalledTimes(2);
+  expect(favorites).toHaveBeenCalledTimes(2);
+  expect(second.snapshot().stickerPacks[0]?.id).toBe('favorites');
   expect(gifs).not.toHaveBeenCalled();
+  second.openPackLink('CatsPack');
+  expect(second.snapshot().packLink).toBe('CatsPack');
+  second.closePackLink();
+  expect(second.snapshot().packLink).toBeUndefined();
+  second.openPackLink('DogsPack');
+  second.close();
+  expect(second.snapshot().packLink).toBeUndefined();
   second.toggleGifs();
   expect(gifs).toHaveBeenCalledTimes(1);
   expect(second.snapshot().gifLoading).toBe(false);

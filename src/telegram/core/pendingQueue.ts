@@ -28,6 +28,18 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
       peer: Object.freeze({ ...pending.peer }),
       reply: pending.reply ? Object.freeze({ ...pending.reply }) : undefined,
       formats,
+      pollDraft: pending.pollDraft
+        ? Object.freeze({
+            ...pending.pollDraft,
+            answers: Object.freeze([...pending.pollDraft.answers]),
+          })
+        : undefined,
+      contact: pending.contact
+        ? Object.freeze({
+            ...pending.contact,
+            peer: pending.contact.peer ? Object.freeze({ ...pending.contact.peer }) : undefined,
+          })
+        : undefined,
       sticker: pending.sticker
         ? Object.freeze({
             ...pending.sticker,
@@ -38,6 +50,9 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
         ? Object.freeze({
             fromPeer: Object.freeze({ ...pending.forward.fromPeer }),
             messageId: pending.forward.messageId,
+            ...(pending.forward.options
+              ? { options: Object.freeze({ ...pending.forward.options }) }
+              : {}),
             ...(pending.forward.mediaKind === undefined
               ? {}
               : { mediaKind: pending.forward.mediaKind }),

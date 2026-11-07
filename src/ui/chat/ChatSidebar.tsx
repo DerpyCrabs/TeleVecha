@@ -525,6 +525,24 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
                   ) : null}
                   <span class="min-w-0 flex-1 truncate text-[13px]">{chat.preview}</span>
                   <span class="ml-auto flex shrink-0 items-center gap-1.5">
+                    {(chat.unreadMentions ?? 0) > 0 ? (
+                      <span
+                        class="text-xs font-bold text-accent"
+                        title={`${chat.unreadMentions} unread replies and mentions`}
+                        aria-label={`${chat.unreadMentions} unread replies and mentions`}
+                      >
+                        @{chat.unreadMentions}
+                      </span>
+                    ) : null}
+                    {(chat.unreadReactions ?? 0) > 0 ? (
+                      <span
+                        class="text-xs font-bold text-accent"
+                        title={`${chat.unreadReactions} unread reactions`}
+                        aria-label={`${chat.unreadReactions} unread reactions`}
+                      >
+                        ♡{chat.unreadReactions}
+                      </span>
+                    ) : null}
                     {chat.muted ? <MutedIcon /> : null}
                     <UnreadBadge count={chat.unread} muted={chat.muted} />
                   </span>

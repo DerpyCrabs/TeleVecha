@@ -20,6 +20,7 @@ const accountKeys = [
   'pending',
   'activities',
   'authStep',
+  'qrLogin',
   'codeViaApp',
   'operationError',
   'error',
@@ -36,6 +37,7 @@ export function accountSnapshot(snapshot: AccountSnapshot): AccountSnapshot {
     draftDetails: snapshot.draftDetails,
     pending: snapshot.pending,
     activities: snapshot.activities,
+    ...(snapshot.qrLogin === undefined ? {} : { qrLogin: snapshot.qrLogin }),
     ...(snapshot.authStep === undefined ? {} : { authStep: snapshot.authStep }),
     ...(snapshot.codeViaApp === undefined ? {} : { codeViaApp: snapshot.codeViaApp }),
     ...(snapshot.operationError === undefined ? {} : { operationError: snapshot.operationError }),
@@ -49,6 +51,7 @@ export function mergeAccountSnapshot(previous: EngineSnapshot, next: AccountSnap
 
   const {
     authStep: _authStep,
+    qrLogin: _qrLogin,
     codeViaApp: _codeViaApp,
     operationError: _operationError,
     error: _error,

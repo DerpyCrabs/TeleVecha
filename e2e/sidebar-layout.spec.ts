@@ -56,7 +56,7 @@ test('keeps the conversation and modal inside an intermediate viewport', async (
   await expect(separator).toHaveAttribute('aria-valuenow', '284');
 
   await page.getByRole('button', { name: 'Search messages' }).click();
-  const panel = page.getByRole('dialog', { name: 'Message search' });
+  const panel = page.locator('.search-panel[aria-label="Message search"]');
   await expect(panel).toBeVisible();
   const box = await panel.boundingBox();
   expect(box).not.toBeNull();

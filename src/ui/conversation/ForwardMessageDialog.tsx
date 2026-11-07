@@ -1,7 +1,9 @@
+import { Avatar } from '../shared/Avatar';
+import type { MediaAssets } from '../media/mediaAssets';
 import { list, component, Portal, view } from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatSummary } from '../../domain/models';
-import type { TelegramPeerSearchResult } from '../../telegram/types';
+import type { TelegramForwardOptions, TelegramPeerSearchResult } from '../../telegram/types';
 import { idRows, remotePeerRows } from '../collections';
 import Search from '@effectweb/lucide/icons/search';
 import X from '@effectweb/lucide/icons/x';
@@ -11,8 +13,16 @@ const commandSearch = 'search';
 
 interface ForwardMessageDialogProps {
   chats: ChatSummary[];
+  media: MediaAssets;
+  online: boolean;
   close: () => void;
-  forward: (peerId: string, result?: TelegramPeerSearchResult) => void;
+  forward: (
+    peerId: string,
+    result?: TelegramPeerSearchResult,
+    options?: TelegramForwardOptions,
+  ) => void;
+  overlayLayer?: number;
+  searchLabel?: string;
   search?: ((query: string) => Effect.Effect<TelegramPeerSearchResult[], unknown>) | undefined;
   title?: string | undefined;
   label?: string | undefined;
@@ -87,6 +97,7 @@ export const ForwardMessageDialog = component<
         <div
           use={modalMount(props.close)}
           class="forward-overlay"
+          style={props.overlayLayer ? { zIndex: props.overlayLayer } : undefined}
           role="presentation"
           tabIndex={-1}
           onPointerDown={(event) => event.target === event.currentTarget && props.close()}
@@ -99,7 +110,11 @@ export const ForwardMessageDialog = component<
           >
             <header>
               <strong>{props.title ?? 'Forward to'}</strong>
-              <button onClick={props.close} aria-label={props.cancelLabel ?? 'Cancel forward'}>
+              <button
+                onClick={props.close}
+                title={props.cancelLabel ?? 'Cancel forward'}
+                aria-label={props.cancelLabel ?? 'Cancel forward'}
+              >
                 <X size={17} />
               </button>
             </header>
@@ -107,22 +122,63 @@ export const ForwardMessageDialog = component<
               <label class="mx-3 my-2 flex items-center gap-2 rounded-lg border border-line bg-black/10 px-3 py-2 text-muted">
                 <Search size={16} />
                 <input
+                  autofocus
                   class="min-w-0 flex-1 border-0 bg-transparent text-ink outline-none"
                   value={model.query}
                   onInput={(event) => send({ type: 'Query', value: event.currentTarget.value })}
-                  placeholder="Search chats"
-                  aria-label="Search chats to forward"
+                  placeholder={props.searchLabel ?? 'Search chats'}
+                  aria-label={props.searchLabel ?? 'Search chats to forward'}
                 />
               </label>
             ) : null}
             <div>
               {list(idRows(localChats), (chat) => (
-                <button onClick={() => props.forward(chat.id)}>{chat.title}</button>
+                <button
+                  class="flex w-full items-center gap-3"
+                  title={chat.username ? `${chat.title} · @${chat.username}` : chat.title}
+                  aria-label={chat.title}
+                  onClick={() => props.forward(chat.id)}
+                >
+                  <Avatar
+                    identity={`forward:${chat.id}`}
+                    initials={chat.initials}
+                    color={chat.color}
+                    size="sm"
+                    loadCached={() => props.media.loadAvatar(chat.id, true)}
+                    load={props.online ? () => props.media.loadAvatar(chat.id) : undefined}
+                  />
+                  <span class="min-w-0 flex-1 truncate">{chat.title}</span>
+                </button>
               ))}
               {list(remotePeerRows(newRemoteResults), (result) => (
-                <button onClick={() => props.forward(result.peer.id, result)}>
-                  {result.title}
-                  {result.username ? <small>@{result.username}</small> : null}
+                <button
+                  class="flex w-full items-center gap-3"
+                  title={result.username ? `${result.title} · @${result.username}` : result.title}
+                  aria-label={result.title}
+                  onClick={() => props.forward(result.peer.id, result)}
+                >
+                  <Avatar
+                    identity={`forward:${result.peer.id}:${result.avatarId ?? 'none'}`}
+                    initials={result.initials}
+                    color={result.color}
+                    size="sm"
+                    loadCached={
+                      result.hasAvatar
+                        ? () => props.media.loadPeerAvatar(result.peer, true, result.avatarId, true)
+                        : undefined
+                    }
+                    load={
+                      props.online && result.hasAvatar
+                        ? () => props.media.loadPeerAvatar(result.peer, true, result.avatarId)
+                        : undefined
+                    }
+                  />
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate">{result.title}</span>
+                    {result.username ? (
+                      <small class="block truncate text-muted">@{result.username}</small>
+                    ) : null}
+                  </span>
                 </button>
               ))}
               {Boolean(model.query.trim()) && model.searching ? (

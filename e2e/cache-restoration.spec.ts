@@ -419,19 +419,19 @@ test('reuses cached message-search results before Telegram reconnects', async ({
   await page.goto(`/?scenario=${scenario}&chat=u%3A101`);
   await releaseConnectionAndWaitUntilReady(page, scenario);
   await page.getByRole('button', { name: 'Search messages' }).click();
-  let search = page.getByRole('dialog', { name: 'Message search' });
-  let query = search.getByRole('textbox', { name: 'Message search query' });
+  let search = page.locator('.search-panel[aria-label="Message search"]');
+  let query = search.getByRole('searchbox', { name: 'Message search query' });
   await query.fill('Fixture message 79');
   await query.press('Enter');
-  const resultName = /Alice Fixture.*Fixture message 79/;
+  const resultName = /Fixture message 79$/;
   await expect(search.getByRole('button', { name: resultName })).toBeVisible();
   await page.keyboard.press('Escape');
 
   await page.reload();
   await waitForCachedWorkspace(page, scenario);
   await page.getByRole('button', { name: 'Search messages' }).click();
-  search = page.getByRole('dialog', { name: 'Message search' });
-  query = search.getByRole('textbox', { name: 'Message search query' });
+  search = page.locator('.search-panel[aria-label="Message search"]');
+  query = search.getByRole('searchbox', { name: 'Message search query' });
   await query.fill('Fixture message 79');
   await query.press('Enter');
 

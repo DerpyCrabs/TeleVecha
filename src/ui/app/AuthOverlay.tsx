@@ -1,3 +1,5 @@
+import { QrLogin } from './QrLogin';
+import QrCode from '@effectweb/lucide/icons/qr-code';
 import { Effect } from 'effect';
 import type { EngineSnapshot } from '../../telegram/types';
 import KeyRound from '@effectweb/lucide/icons/key-round';
@@ -13,6 +15,8 @@ interface AuthOverlayProps {
   snapshot: EngineSnapshot;
   configurationError?: string | undefined;
   onRetry: () => Effect.Effect<void, unknown>;
+  onQr: () => Effect.Effect<void, unknown>;
+  onCancelQr: () => Effect.Effect<void, unknown>;
   onPhone: (phone: string) => Effect.Effect<void, unknown>;
   onCode: (code: string) => Effect.Effect<void, unknown>;
   onPassword: (password: string) => Effect.Effect<void, unknown>;
@@ -125,16 +129,20 @@ export const AuthOverlay = component(
   (owner) =>
     view((model) => {
       const props = model.props;
-      const authenticate = (step: AuthStep | 'retry') =>
+      const authenticate = (step: AuthStep | 'retry' | 'qr' | 'cancel-qr') =>
         owner.task(
           'submitted',
-          step === 'retry'
-            ? props.onRetry()
-            : step === 'phone'
-              ? props.onPhone(model.phone)
-              : step === 'code'
-                ? props.onCode(model.code)
-                : props.onPassword(model.password),
+          step === 'qr'
+            ? props.onQr()
+            : step === 'cancel-qr'
+              ? props.onCancelQr()
+              : step === 'retry'
+                ? props.onRetry()
+                : step === 'phone'
+                  ? props.onPhone(model.phone)
+                  : step === 'code'
+                    ? props.onCode(model.code)
+                    : props.onPassword(model.password),
           'drop',
         );
       const form = (step: AuthStep) => (
@@ -175,8 +183,27 @@ export const AuthOverlay = component(
           );
         // Each stage has its own branch lifetime so the new field receives autofocus.
         switch (props.snapshot.authStep) {
+          case 'qr':
+            return (
+              <QrLogin
+                token={props.snapshot.qrLogin}
+                cancel={() => void authenticate('cancel-qr')}
+              />
+            );
           case 'phone':
-            return form('phone');
+            return (
+              <>
+                {form('phone')}
+                <button
+                  class="auth-alternate"
+                  disabled={model.submitted.waiting}
+                  onClick={() => authenticate('qr')}
+                >
+                  <QrCode size={18} />
+                  Log in by QR Code
+                </button>
+              </>
+            );
           case 'code':
             return form('code');
           case 'password':

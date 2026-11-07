@@ -170,7 +170,7 @@ test('lays out, grows and edits the composer draft', async ({ page }) => {
     const trigger = page.getByRole('button', { name: 'Choose emoji, GIF, or sticker' });
     await trigger.focus();
     await trigger.press('Enter');
-    await expect(page.getByRole('textbox', { name: 'Search expressions' })).toBeFocused();
+    await expect(page.getByRole('searchbox', { name: 'Search expressions' })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(trigger).toBeFocused();
   });
@@ -338,6 +338,9 @@ test('searches the full emoji set and sticker packs without redownloading cached
     .toBeGreaterThan(0);
   const downloads = (await fixtureStats(page))?.downloadSticker;
   await page.keyboard.press('Escape');
+  await expect(picker.getByPlaceholder('Search stickers')).toHaveValue('');
+  await page.keyboard.press('Escape');
+  await expect(picker).toHaveCount(0);
   await trigger.click();
   await picker.getByRole('button', { name: 'Stickers' }).click();
   await page.waitForTimeout(100);

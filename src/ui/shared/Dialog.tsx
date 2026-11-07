@@ -13,6 +13,7 @@ export const Dialog = view<
     class?: string;
     children?: JSX.Element;
     footer?: JSX.Element;
+    headerLeading?: JSX.Element;
   },
   never
 >((props, _send) => (
@@ -31,7 +32,14 @@ export const Dialog = view<
         aria-label={props.label ?? props.title}
       >
         <header class={panelHeaderClass}>
-          <strong>{props.title}</strong>
+          {props.headerLeading ? (
+            <span class="flex min-w-0 items-center gap-2">
+              {props.headerLeading}
+              <strong class="truncate">{props.title}</strong>
+            </span>
+          ) : (
+            <strong>{props.title}</strong>
+          )}
           <button
             class={panelCloseButtonClass}
             onClick={props.onClose}

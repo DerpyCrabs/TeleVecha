@@ -107,11 +107,11 @@ test('closes old-chat message actions when browser navigation selects another ch
 test('closes search, reaction, sidebar, and formatting state on peer changes', async ({ page }) => {
   await openAlice(page);
   await page.getByRole('button', { name: 'Search messages' }).click();
-  await expect(page.getByRole('dialog', { name: 'Message search' })).toBeVisible();
+  await expect(page.locator('.search-panel[aria-label="Message search"]')).toBeVisible();
 
   await navigateToChat(page, 'c:202');
 
-  await expect(page.getByRole('dialog', { name: 'Message search' })).toHaveCount(0);
+  await expect(page.locator('.search-panel[aria-label="Message search"]')).toHaveCount(0);
   await navigateToChat(page, 'u:101');
   await expect(page.getByTestId('message-scroller')).toContainText('Newest message from fixture');
 
@@ -139,7 +139,9 @@ test('closes search, reaction, sidebar, and formatting state on peer changes', a
 
 test('does not reopen an old chat image editor when returning to its draft', async ({ page }) => {
   await openAlice(page);
-  await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/outgoing-media.png');
+  await page
+    .locator('.chat-composer input[type="file"]')
+    .setInputFiles('e2e/fixtures/outgoing-media.png');
   await page.getByRole('button', { name: 'Edit image outgoing-media.png' }).click();
   await expect(page.getByRole('dialog', { name: 'Edit image' })).toBeVisible();
 
@@ -147,7 +149,11 @@ test('does not reopen an old chat image editor when returning to its draft', asy
 
   await expect(page.getByRole('dialog', { name: 'Edit image' })).toHaveCount(0);
   await navigateToChat(page, 'u:101');
-  await expect(page.getByTestId('composer-attachment')).toContainText('outgoing-media.png');
+  await expect(
+    page
+      .getByTestId('composer-attachment')
+      .getByRole('button', { name: 'Edit image outgoing-media.png' }),
+  ).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Edit image' })).toHaveCount(0);
 });
 

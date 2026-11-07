@@ -1,3 +1,9 @@
+import { ForwardDraft, type ForwardDraftProps } from './ForwardDraft';
+import { modalVisible } from '../shared/focusScope';
+import Image from '@effectweb/lucide/icons/image';
+import ChartNoAxesColumn from '@effectweb/lucide/icons/chart-no-axes-column';
+import { PollCreateDialog } from './PollCreateDialog';
+import type { TelegramPollDraft } from '../../telegram/types';
 import { findMention, filterMentionMembers, shiftFormats } from './mentions';
 import { patchModel } from '../shared/composition';
 import type { TelegramGroupMember } from '../../telegram/types';
@@ -12,7 +18,6 @@ import FileText from '@effectweb/lucide/icons/file-text';
 import Italic from '@effectweb/lucide/icons/italic';
 import Link2 from '@effectweb/lucide/icons/link-2';
 import Paperclip from '@effectweb/lucide/icons/paperclip';
-import Pencil from '@effectweb/lucide/icons/pencil';
 import Quote from '@effectweb/lucide/icons/quote';
 import SendHorizontal from '@effectweb/lucide/icons/send-horizontal';
 import Smile from '@effectweb/lucide/icons/smile';
@@ -25,19 +30,19 @@ import type { ComposerSession } from './composerSession';
 import type { ExpressionTab } from './ExpressionPicker';
 import { ExpressionPicker } from './ExpressionPicker';
 import type { ExpressionSession } from './expressionSession';
-import { ImageAttachmentEditor } from './ImageAttachmentEditor';
-import { canTransformImage } from './outgoingAttachments';
-import { fileImageMount } from '../shared/fileImageMount';
-import { formatMediaSize } from '../media/mediaPresentation';
+import { AttachmentSendDialog } from './AttachmentSendDialog';
 const commandExpressionVisibility = 'expression-visibility';
 const commandFocus = 'focus';
 const commandFormat = 'format';
 const commandInsert = 'insert';
 
 interface ChatComposerProps {
+  forwardDraft?: (ForwardDraftProps & { send: () => void }) | undefined;
   conversationId: string;
   enabled: boolean;
   canSendMedia: boolean;
+  canSendPolls?: boolean;
+  sendPoll?: (draft: TelegramPollDraft) => Effect.Effect<unknown, unknown>;
   canSendStickers: boolean;
   canSendGifs: boolean;
   placeholder?: string | undefined;
@@ -50,47 +55,11 @@ interface ChatComposerProps {
     stickerUrl(sticker: TelegramSticker): string | undefined;
   };
 }
-function acquireVideoThumbnail(element: HTMLVideoElement, input: () => File) {
-  let file = input();
-  let url = URL.createObjectURL(file);
-  element.src = url;
-  return {
-    update() {
-      const next = input();
-      if (next === file) return;
-      const previous = url;
-      url = URL.createObjectURL(next);
-      file = next;
-      element.src = url;
-      URL.revokeObjectURL(previous);
-    },
-    dispose() {
-      element.removeAttribute('src');
-      element.load();
-      URL.revokeObjectURL(url);
-    },
-  };
-}
-
-const AttachmentThumbnail = view<{ file: File }, never>((props, _send) =>
-  props.file.type.startsWith('image/') ? (
-    <img draggable={false} use={fileImageMount(props.file)} alt="" />
-  ) : props.file.type.startsWith('video/') ? (
-    <video
-      use={domBinding(props.file, acquireVideoThumbnail)}
-      preload="auto"
-      controls
-      playsInline
-      aria-label={`Video preview: ${props.file.name}`}
-    />
-  ) : (
-    <FileText size={22} aria-hidden="true" />
-  ),
-);
 type ChatComposerState = {
   element: HTMLElement | undefined;
-  editingAttachmentId: string;
   expressionOpen: boolean;
+  attachmentMenuOpen: boolean;
+  pollOpen: boolean;
   expressionTab: ExpressionTab;
   formatMenu: { x: number; y: number } | undefined;
   expressionPointerType: string;
@@ -112,7 +81,8 @@ type ChatComposerMessage =
       fields: Partial<
         Pick<
           ChatComposerModel,
-          | 'editingAttachmentId'
+          | 'attachmentMenuOpen'
+          | 'pollOpen'
           | 'expressionTab'
           | 'formatMenu'
           | 'expressionPointerType'
@@ -140,11 +110,17 @@ const FormattingIcon = view<{ kind: TelegramTextFormat['kind'] }, never>((props,
     <Link2 size={15} />
   ),
 );
-function pickFiles(event: MouseEvent & { currentTarget: HTMLButtonElement }) {
-  event.currentTarget
+function pickFiles(
+  event: MouseEvent & { currentTarget: HTMLButtonElement },
+  mode?: 'media' | 'file',
+) {
+  const input = event.currentTarget
     .closest('footer')
-    ?.querySelector<HTMLInputElement>('input[type="file"]')
-    ?.click();
+    ?.querySelector<HTMLInputElement>('input[type="file"]');
+  if (!input) return;
+  input.accept = mode === 'media' ? 'image/*,video/*' : '';
+  input.dataset.sendAs = mode ?? '';
+  input.click();
 }
 function clearFileControl(element: HTMLInputElement) {
   element.value = '';
@@ -199,8 +175,11 @@ function acquireComposer(element: HTMLElement, input: () => Send<ChatComposerMes
   const trigger = () =>
     element.querySelector<HTMLElement>('[aria-label="Choose emoji, GIF, or sticker"]');
   const dismiss = (event: PointerEvent) => {
+    if (modalVisible()) return;
     const target = event.target as Element,
       root = popup();
+    if (!target.closest?.('.composer-attach-area'))
+      send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
     if (root && !root.contains(target) && !trigger()?.contains(target))
       send({
         type: 'Dismiss',
@@ -211,6 +190,7 @@ function acquireComposer(element: HTMLElement, input: () => Send<ChatComposerMes
   };
   const escape = (event: KeyboardEvent) => {
     if (event.key !== 'Escape') return;
+    send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
     if (popup()) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -236,7 +216,8 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
   {
     init: () => ({
       element: undefined,
-      editingAttachmentId: '',
+      attachmentMenuOpen: false,
+      pollOpen: false,
       expressionOpen: false,
       expressionTab: 'emoji',
       formatMenu: undefined,
@@ -257,7 +238,12 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
       const next = {
         ...model,
         ...(reset
-          ? { editingAttachmentId: '', formatMenu: undefined, expressionTab: 'emoji' as const }
+          ? {
+              attachmentMenuOpen: false,
+              pollOpen: false,
+              formatMenu: undefined,
+              expressionTab: 'emoji' as const,
+            }
           : {}),
         ...(close ? { expressionOpen: false } : {}),
         ...(dismissMention ? { mention: undefined, mentionIndex: 0 } : {}),
@@ -421,24 +407,6 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
       if (mention && !blocked) props.composer.loadMentionMembers();
     };
     const setExpressionOpen = (open: boolean) => send({ type: 'ExpressionOpenState', value: open });
-    const editingAttachment = () =>
-      props.composer.attachments.find(({ id }) => id === model.editingAttachmentId);
-    const hasImageBatch = () => {
-      const attachments = props.composer.attachments;
-      return (
-        attachments.length > 1 && attachments.every(({ file }) => file.type.startsWith('image/'))
-      );
-    };
-    const setAllAttachmentModes = (sendAs: 'media' | 'file') => {
-      for (const attachment of props.composer.attachments) {
-        props.composer.updateAttachment(attachment.id, { sendAs });
-      }
-    };
-    const removeAllAttachments = () => {
-      for (const attachment of props.composer.attachments) {
-        props.composer.removeAttachment(attachment.id);
-      }
-    };
     const closeExpression = () => send({ type: 'ExpressionOpenState', value: false });
     const attachTransferredFiles = (files: FileList | null, fallbackName: string) => {
       if (!props.canSendMedia) return;
@@ -476,8 +444,13 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
           <div class="expression-popup-host">
             <ExpressionPicker
               tab={model.expressionTab}
+              packActions={props.expressions}
+              stickerSearch={props.expressions.stickerSearch}
               setTab={selectExpressionTab}
               stickersLoading={props.expressions.stickerLoading}
+              stickerError={props.expressions.stickerError}
+              retryStickers={props.expressions.retryStickers}
+              setStickerFavorite={props.expressions.setStickerFavorite}
               gifsLoading={props.expressions.gifLoading}
               gifError={props.expressions.gifError}
               gifs={props.expressions.gifs}
@@ -507,6 +480,7 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
             />
           </div>
         ) : null}
+        {props.forwardDraft ? <ForwardDraft {...props.forwardDraft} /> : null}
         {props.composer.reply
           ? ((reply) => (
               <div class="composer-reply" data-testid="composer-reply">
@@ -534,112 +508,12 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
             ))(props.composer.editing!)
           : null}
         {props.composer.attachments.length > 0 ? (
-          <div
-            class="composer-attachments"
-            classList={{ 'composer-image-batch': hasImageBatch() }}
-            aria-label="Staged attachments"
-          >
-            {hasImageBatch() ? (
-              <div class="composer-attachment-batch-bar">
-                <strong>{props.composer.attachments.length} images</strong>
-                <div class="composer-attachment-batch-mode" role="group" aria-label="Send all as">
-                  <button
-                    type="button"
-                    aria-pressed={props.composer.attachments.every(
-                      ({ sendAs }) => sendAs === 'media',
-                    )}
-                    onClick={() => setAllAttachmentModes('media')}
-                  >
-                    Media
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={props.composer.attachments.every(
-                      ({ sendAs }) => sendAs === 'file',
-                    )}
-                    onClick={() => setAllAttachmentModes('file')}
-                  >
-                    Files
-                  </button>
-                </div>
-                <button type="button" onClick={pickFiles}>
-                  Add
-                </button>
-                <button type="button" onClick={removeAllAttachments}>
-                  Clear
-                </button>
-              </div>
-            ) : null}
-            {list(idRows(props.composer.attachments), (attachment) => (
-              <div
-                class="composer-attachment"
-                data-testid="composer-attachment"
-                data-attachment-id={attachment.id}
-              >
-                <div class="composer-attachment-preview">
-                  <AttachmentThumbnail file={attachment.file} />
-                </div>
-                <span>
-                  <strong title={attachment.file.name}>{attachment.file.name}</strong>
-                  <small>{formatMediaSize(attachment.file.size) || '0 B'}</small>
-                </span>
-                <div
-                  class="composer-attachment-mode"
-                  role="group"
-                  aria-label={`Send ${attachment.file.name} as`}
-                >
-                  <button
-                    type="button"
-                    aria-pressed={attachment.sendAs === 'media'}
-                    onClick={() =>
-                      props.composer.updateAttachment(attachment.id, { sendAs: 'media' })
-                    }
-                  >
-                    Media
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={attachment.sendAs === 'file'}
-                    onClick={() =>
-                      props.composer.updateAttachment(attachment.id, { sendAs: 'file' })
-                    }
-                  >
-                    File
-                  </button>
-                </div>
-                {canTransformImage(attachment.file) ? (
-                  <button
-                    type="button"
-                    class="composer-attachment-edit"
-                    onClick={() =>
-                      send({ type: 'Fields', fields: { editingAttachmentId: attachment.id } })
-                    }
-                    aria-label={`Edit image ${attachment.file.name}`}
-                  >
-                    <Pencil size={15} />
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  class="composer-attachment-remove"
-                  onClick={() => props.composer.removeAttachment(attachment.id)}
-                  aria-label={`Remove attachment ${attachment.file.name}`}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            ))}
-          </div>
+          <AttachmentSendDialog
+            composer={props.composer}
+            enabled={props.enabled}
+            canSendMedia={props.canSendMedia}
+          />
         ) : null}
-        {editingAttachment()
-          ? ((attachment) => (
-              <ImageAttachmentEditor
-                attachment={attachment}
-                close={() => send({ type: 'Fields', fields: { editingAttachmentId: '' } })}
-                apply={(file) => props.composer.updateAttachment(attachment.id, { file })}
-              />
-            ))(editingAttachment()!)
-          : null}
         <div class="mx-auto flex w-full min-w-0 max-w-3xl items-center gap-2">
           <input
             class="sr-only"
@@ -648,7 +522,11 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
             disabled={!props.canSendMedia}
             onChange={(event) => {
               const files = event.currentTarget.files;
-              if (props.canSendMedia && files?.length) props.composer.attach([...files]);
+              if (props.canSendMedia && files?.length)
+                props.composer.attach(
+                  [...files],
+                  event.currentTarget.dataset.sendAs === 'file' ? 'file' : undefined,
+                );
               clearFileControl(event.currentTarget);
             }}
           />
@@ -851,7 +729,8 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
                   event.keyCode !== 229
                 ) {
                   event.preventDefault();
-                  props.composer.send();
+                  if (props.forwardDraft) props.forwardDraft.send();
+                  else props.composer.send();
                 }
               }}
               onPaste={(event) => {
@@ -875,20 +754,70 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
               aria-label="Message"
               readOnly={!props.enabled}
             />
-            <button
-              class="composer-icon-button"
-              onClick={pickFiles}
-              disabled={!props.canSendMedia}
-              aria-label={props.composer.editing ? 'Replace media' : 'Attach files'}
-            >
-              <Paperclip size={20} />
-            </button>
+            <div class="composer-attach-area">
+              {model.attachmentMenuOpen ? (
+                <div class="composer-attach-menu" role="group" aria-label="Attach">
+                  <button
+                    type="button"
+                    disabled={!props.canSendMedia}
+                    onClick={(event) => {
+                      pickFiles(event, 'media');
+                      send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
+                    }}
+                  >
+                    <Image size={20} /> Photo or video
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!props.canSendMedia}
+                    onClick={(event) => {
+                      pickFiles(event, 'file');
+                      send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
+                    }}
+                  >
+                    <FileText size={20} />
+                    File
+                  </button>
+                  {props.sendPoll && !props.composer.editing ? (
+                    <button
+                      type="button"
+                      disabled={!props.canSendPolls}
+                      onClick={() =>
+                        send({
+                          type: 'Fields',
+                          fields: { attachmentMenuOpen: false, pollOpen: true },
+                        })
+                      }
+                    >
+                      <ChartNoAxesColumn size={20} /> Poll
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              <button
+                class="composer-icon-button"
+                title="Attach files or create a poll"
+                aria-expanded={model.attachmentMenuOpen}
+                onClick={() =>
+                  send({
+                    type: 'Fields',
+                    fields: { attachmentMenuOpen: !model.attachmentMenuOpen },
+                  })
+                }
+                disabled={!props.canSendMedia && !props.canSendPolls}
+                aria-label={props.composer.editing ? 'Replace media' : 'Attach files'}
+              >
+                <Paperclip size={20} />
+              </button>
+            </div>
           </div>
           <button
             class="send-button"
-            onClick={() => props.composer.send()}
+            onClick={() => (props.forwardDraft ? props.forwardDraft.send() : props.composer.send())}
             disabled={
-              (!props.composer.draft.trim() &&
+              props.forwardDraft?.busy ||
+              (!props.forwardDraft &&
+                !props.composer.draft.trim() &&
                 props.composer.attachments.length === 0 &&
                 !props.composer.editing?.media) ||
               !props.enabled
@@ -898,6 +827,12 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
             <SendHorizontal size={18} />
           </button>
         </div>
+        {model.pollOpen && props.sendPoll ? (
+          <PollCreateDialog
+            close={() => send({ type: 'Fields', fields: { pollOpen: false } })}
+            submit={props.sendPoll}
+          />
+        ) : null}
       </footer>
     );
   }),

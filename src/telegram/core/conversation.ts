@@ -1,3 +1,5 @@
+import type { TelegramSearchFilters } from '../types';
+import type { TelegramForwardOptions } from '../types';
 import type {
   EditMediaOptions,
   ConversationViewSnapshot,
@@ -90,13 +92,19 @@ export interface ConversationHost {
     query: string,
     global: boolean,
     offset?: TelegramSearchOffset,
+    filters?: TelegramSearchFilters,
   ): Operation<TelegramSearchPage>;
   getConversationSharedMedia(
     peer: TelegramPeer,
     kind: SharedMediaKind,
     offset?: TelegramSearchOffset,
   ): Operation<TelegramSearchPage>;
-  forwardMessage(fromPeer: TelegramPeer, toPeer: TelegramPeer, messageId: number): Operation<void>;
+  forwardMessage(
+    fromPeer: TelegramPeer,
+    toPeer: TelegramPeer,
+    messageId: number,
+    options?: TelegramForwardOptions,
+  ): Operation<void>;
   getUserDetails(peer: TelegramPeer): Operation<TelegramUserDetails>;
   setBlocked(peer: TelegramPeer, blocked: boolean): Operation<unknown>;
   setPinnedMessage(peer: TelegramPeer, messageId: number, pinned: boolean): Operation<unknown>;
@@ -186,14 +194,19 @@ export function makeConversation(host: ConversationHost, peer: TelegramPeer) {
         Effect.asVoid,
       );
     },
-    search(query: string, global: boolean, offset?: TelegramSearchOffset) {
-      return host.searchConversationMessages(peer, query, global, offset);
+    search(
+      query: string,
+      global: boolean,
+      offset?: TelegramSearchOffset,
+      filters?: TelegramSearchFilters,
+    ) {
+      return host.searchConversationMessages(peer, query, global, offset, filters);
     },
     sharedMedia(kind: SharedMediaKind, offset?: TelegramSearchOffset) {
       return host.getConversationSharedMedia(peer, kind, offset);
     },
-    forwardTo: (target: TelegramPeer, messageId: number) =>
-      host.forwardMessage(peer, target, messageId),
+    forwardTo: (target: TelegramPeer, messageId: number, options?: TelegramForwardOptions) =>
+      host.forwardMessage(peer, target, messageId, options),
     userDetails: () => host.getUserDetails(peer),
     setBlocked: (blocked: boolean) => host.setBlocked(peer, blocked),
     setPinnedMessage: (messageId: number, pinned: boolean) =>

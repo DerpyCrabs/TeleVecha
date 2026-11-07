@@ -261,13 +261,13 @@ test('handles keyboard activation, menu focus, search and delete warnings', asyn
   await expect(page.getByRole('menu', { name: 'Message actions' })).toHaveCount(0);
   await test.step('does not show an empty search result before the user submits the query', async () => {
     await page.getByRole('button', { name: 'Search messages' }).click();
-    const search = page.getByRole('dialog', { name: 'Message search' });
-    await search.getByRole('textbox', { name: 'Message search query' }).fill('fixture');
+    const search = page.locator('.search-panel[aria-label="Message search"]');
+    await search.getByRole('searchbox', { name: 'Message search query' }).fill('fixture');
 
     await expect(search.getByText('No messages found', { exact: true })).toHaveCount(0);
   });
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Message search' })).toHaveCount(0);
+  await expect(page.locator('.search-panel[aria-label="Message search"]')).toHaveCount(0);
   await test.step('warns that deleting a chat also removes its draft', async () => {
     await page.getByRole('textbox', { name: 'Message' }).fill('Unsaved private draft');
     const alice = chatButton(page, /Alice Fixture/);

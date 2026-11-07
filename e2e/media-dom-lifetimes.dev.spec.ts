@@ -150,7 +150,7 @@ test('image editing retains its object URL until the file changes or the editor 
       revoke(url);
     };
     const fixture = mountImageLifetimeFixture(document.body);
-    const first = document.querySelector<HTMLImageElement>('.image-editor-preview img')!;
+    const first = document.querySelector<HTMLCanvasElement>('.image-editor-preview canvas')!;
     for (let index = 0; index < 5; index++) {
       document.querySelector<HTMLButtonElement>('[aria-label="Rotate right"]')!.click();
       await new Promise(requestAnimationFrame);
@@ -158,22 +158,22 @@ test('image editing retains its object URL until the file changes or the editor 
     const edited = {
       created: created.length,
       revoked: revoked.length,
-      sameSource: first.src === created[0],
+      sameElement: first === document.querySelector('.image-editor-preview canvas'),
     };
     fixture.replace();
     await new Promise(requestAnimationFrame);
     const replaced = {
       created: created.length,
       revoked: revoked.length,
-      sameElement: first === document.querySelector('.image-editor-preview img'),
-      source: first.src === created[1],
+      sameElement: first === document.querySelector('.image-editor-preview canvas'),
+      retiredFirst: revoked[0] === created[0],
     };
     await fixture.close();
     return { edited, replaced, allReleased: JSON.stringify(created) === JSON.stringify(revoked) };
   });
   expect(result).toEqual({
-    edited: { created: 1, revoked: 0, sameSource: true },
-    replaced: { created: 2, revoked: 1, sameElement: true, source: true },
+    edited: { created: 1, revoked: 0, sameElement: true },
+    replaced: { created: 2, revoked: 1, sameElement: true, retiredFirst: true },
     allReleased: true,
   });
 });

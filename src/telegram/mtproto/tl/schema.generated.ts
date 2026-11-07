@@ -612,6 +612,18 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     fields: [],
   },
   {
+    id: 3810574680,
+    name: 'account.getAuthorizations',
+    typeName: 'account.GetAuthorizations',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'account.Authorizations',
+      bare: false,
+    },
+    fields: [],
+  },
+  {
     id: 3594051209,
     name: 'account.getChatThemes',
     typeName: 'account.GetChatThemes',
@@ -631,6 +643,18 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         },
       },
     ],
+  },
+  {
+    id: 3945483510,
+    name: 'account.getGlobalPrivacySettings',
+    typeName: 'account.GetGlobalPrivacySettings',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'GlobalPrivacySettings',
+      bare: false,
+    },
+    fields: [],
   },
   {
     id: 313765169,
@@ -665,6 +689,28 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
       bare: false,
     },
     fields: [],
+  },
+  {
+    id: 3671837008,
+    name: 'account.getPrivacy',
+    typeName: 'account.GetPrivacy',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'account.PrivacyRules',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'key',
+        wireName: 'key',
+        type: {
+          kind: 'object',
+          name: 'InputPrivacyKey',
+          bare: false,
+        },
+      },
+    ],
   },
   {
     id: 1913054296,
@@ -1138,6 +1184,26 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 3749180348,
+    name: 'account.resetAuthorization',
+    typeName: 'account.ResetAuthorization',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
     id: 3816265825,
     name: 'account.resetPasswordFailedWait',
     typeName: 'account.ResetPasswordFailedWait',
@@ -1415,6 +1481,83 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         type: {
           kind: 'primitive',
           name: 'int',
+        },
+      },
+    ],
+  },
+  {
+    id: 3213466272,
+    name: 'account.setAuthorizationTTL',
+    typeName: 'account.SetAuthorizationTTL',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'authorizationTtlDays',
+        wireName: 'authorization_ttl_days',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
+    id: 517647042,
+    name: 'account.setGlobalPrivacySettings',
+    typeName: 'account.SetGlobalPrivacySettings',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'GlobalPrivacySettings',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'settings',
+        wireName: 'settings',
+        type: {
+          kind: 'object',
+          name: 'GlobalPrivacySettings',
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 3388480744,
+    name: 'account.setPrivacy',
+    typeName: 'account.SetPrivacy',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'account.PrivacyRules',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'key',
+        wireName: 'key',
+        type: {
+          kind: 'object',
+          name: 'InputPrivacyKey',
+          bare: false,
+        },
+      },
+      {
+        name: 'rules',
+        wireName: 'rules',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'object',
+            name: 'InputPrivacyRule',
+            bare: false,
+          },
+          bare: false,
         },
       },
     ],
@@ -2660,6 +2803,47 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 3084944894,
+    name: 'auth.exportLoginToken',
+    typeName: 'auth.ExportLoginToken',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'auth.LoginToken',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'apiId',
+        wireName: 'api_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'apiHash',
+        wireName: 'api_hash',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'exceptIds',
+        wireName: 'except_ids',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'primitive',
+            name: 'long',
+          },
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
     id: 2776268205,
     name: 'auth.importAuthorization',
     typeName: 'auth.ImportAuthorization',
@@ -2681,6 +2865,27 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
       {
         name: 'bytes',
         wireName: 'bytes',
+        type: {
+          kind: 'primitive',
+          name: 'bytes',
+        },
+      },
+    ],
+  },
+  {
+    id: 2511101156,
+    name: 'auth.importLoginToken',
+    typeName: 'auth.ImportLoginToken',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'auth.LoginToken',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'token',
+        wireName: 'token',
         type: {
           kind: 'primitive',
           name: 'bytes',
@@ -2856,6 +3061,17 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         },
       },
     ],
+  },
+  {
+    id: 2678787354,
+    name: 'auth.resetAuthorizations',
+    typeName: 'auth.ResetAuthorizations',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [],
   },
   {
     id: 2792825935,
@@ -6262,6 +6478,45 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         type: {
           kind: 'primitive',
           name: 'string',
+        },
+      },
+    ],
+  },
+  {
+    id: 142591463,
+    name: 'bots.invokeWebViewCustomMethod',
+    typeName: 'bots.InvokeWebViewCustomMethod',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'DataJSON',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'bot',
+        wireName: 'bot',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'customMethod',
+        wireName: 'custom_method',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'params',
+        wireName: 'params',
+        type: {
+          kind: 'object',
+          name: 'DataJSON',
+          bare: false,
         },
       },
     ],
@@ -44335,6 +44590,35 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     fields: [],
   },
   {
+    id: 3120547163,
+    name: 'messages.faveSticker',
+    typeName: 'messages.FaveSticker',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'id',
+        wireName: 'id',
+        type: {
+          kind: 'object',
+          name: 'InputDocument',
+          bare: false,
+        },
+      },
+      {
+        name: 'unfave',
+        wireName: 'unfave',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
+        },
+      },
+    ],
+  },
+  {
     id: 3191351558,
     name: 'messages.featuredStickers',
     typeName: 'messages.FeaturedStickers',
@@ -44961,6 +45245,36 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 889046467,
+    name: 'messages.getBotApp',
+    typeName: 'messages.GetBotApp',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.BotApp',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'app',
+        wireName: 'app',
+        type: {
+          kind: 'object',
+          name: 'InputBotApp',
+          bare: false,
+        },
+      },
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
     id: 2470627847,
     name: 'messages.getBotCallbackAnswer',
     typeName: 'messages.GetBotCallbackAnswer',
@@ -45208,6 +45522,27 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 82946729,
+    name: 'messages.getFavedStickers',
+    typeName: 'messages.GetFavedStickers',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.FavedStickers',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
     id: 2930772788,
     name: 'messages.getFullChat',
     typeName: 'messages.GetFullChat',
@@ -45448,6 +45783,40 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 834782287,
+    name: 'messages.getMessageReadParticipants',
+    typeName: 'messages.GetMessageReadParticipants',
+    kind: 'method',
+    result: {
+      kind: 'vector',
+      item: {
+        kind: 'object',
+        name: 'ReadParticipantDate',
+        bare: false,
+      },
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'msgId',
+        wireName: 'msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
     id: 1673946374,
     name: 'messages.getMessages',
     typeName: 'messages.GetMessages',
@@ -45469,6 +45838,36 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
             bare: false,
           },
           bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 2353790557,
+    name: 'messages.getOutboxReadDate',
+    typeName: 'messages.GetOutboxReadDate',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'OutboxReadDate',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'msgId',
+        wireName: 'msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
         },
       },
     ],
@@ -45513,6 +45912,115 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
       {
         name: 'folderId',
         wireName: 'folder_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
+    id: 3986940731,
+    name: 'messages.getPollResults',
+    typeName: 'messages.GetPollResults',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'msgId',
+        wireName: 'msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'pollHash',
+        wireName: 'poll_hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
+    id: 3094231054,
+    name: 'messages.getPollVotes',
+    typeName: 'messages.GetPollVotes',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.VotesList',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'id',
+        wireName: 'id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'option',
+        wireName: 'option',
+        type: {
+          kind: 'primitive',
+          name: 'bytes',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'offset',
+        wireName: 'offset',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
         type: {
           kind: 'primitive',
           name: 'int',
@@ -45773,6 +46281,185 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 4043827088,
+    name: 'messages.getUnreadMentions',
+    typeName: 'messages.GetUnreadMentions',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.Messages',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'topMsgId',
+        wireName: 'top_msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'offsetId',
+        wireName: 'offset_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'addOffset',
+        wireName: 'add_offset',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'maxId',
+        wireName: 'max_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'minId',
+        wireName: 'min_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
+    id: 3179253932,
+    name: 'messages.getUnreadReactions',
+    typeName: 'messages.GetUnreadReactions',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.Messages',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'topMsgId',
+        wireName: 'top_msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'savedPeerId',
+        wireName: 'saved_peer_id',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'offsetId',
+        wireName: 'offset_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'addOffset',
+        wireName: 'add_offset',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'maxId',
+        wireName: 'max_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'minId',
+        wireName: 'min_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
     id: 2587622809,
     name: 'messages.highScores',
     typeName: 'messages.HighScores',
@@ -45937,6 +46624,36 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
             bare: false,
           },
           bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 3348096096,
+    name: 'messages.installStickerSet',
+    typeName: 'messages.InstallStickerSet',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.StickerSetInstallResult',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'stickerset',
+        wireName: 'stickerset',
+        type: {
+          kind: 'object',
+          name: 'InputStickerSet',
+          bare: false,
+        },
+      },
+      {
+        name: 'archived',
+        wireName: 'archived',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
         },
       },
     ],
@@ -46581,6 +47298,91 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 2966952579,
+    name: 'messages.prolongWebView',
+    typeName: 'messages.ProlongWebView',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'silent',
+        wireName: 'silent',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 5,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'bot',
+        wireName: 'bot',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'queryId',
+        wireName: 'query_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+      {
+        name: 'replyTo',
+        wireName: 'reply_to',
+        type: {
+          kind: 'object',
+          name: 'InputReplyTo',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'sendAs',
+        wireName: 'send_as',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 13,
+        },
+      },
+    ],
+  },
+  {
     id: 3331155605,
     name: 'messages.quickReplies',
     typeName: 'messages.QuickReplies',
@@ -46830,6 +47632,336 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     fields: [],
   },
   {
+    id: 1398901710,
+    name: 'messages.requestAppWebView',
+    typeName: 'messages.RequestAppWebView',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'WebViewResult',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'writeAllowed',
+        wireName: 'write_allowed',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'compact',
+        wireName: 'compact',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 7,
+        },
+      },
+      {
+        name: 'fullscreen',
+        wireName: 'fullscreen',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 8,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'app',
+        wireName: 'app',
+        type: {
+          kind: 'object',
+          name: 'InputBotApp',
+          bare: false,
+        },
+      },
+      {
+        name: 'startParam',
+        wireName: 'start_param',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'themeParams',
+        wireName: 'theme_params',
+        type: {
+          kind: 'object',
+          name: 'DataJSON',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'platform',
+        wireName: 'platform',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
+    id: 3386908283,
+    name: 'messages.requestMainWebView',
+    typeName: 'messages.RequestMainWebView',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'WebViewResult',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'compact',
+        wireName: 'compact',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 7,
+        },
+      },
+      {
+        name: 'fullscreen',
+        wireName: 'fullscreen',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 8,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'bot',
+        wireName: 'bot',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'startParam',
+        wireName: 'start_param',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'themeParams',
+        wireName: 'theme_params',
+        type: {
+          kind: 'object',
+          name: 'DataJSON',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'platform',
+        wireName: 'platform',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
+    id: 1094336115,
+    name: 'messages.requestSimpleWebView',
+    typeName: 'messages.RequestSimpleWebView',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'WebViewResult',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'fromSwitchWebview',
+        wireName: 'from_switch_webview',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'fromSideMenu',
+        wireName: 'from_side_menu',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'compact',
+        wireName: 'compact',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 7,
+        },
+      },
+      {
+        name: 'fullscreen',
+        wireName: 'fullscreen',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 8,
+        },
+      },
+      {
+        name: 'bot',
+        wireName: 'bot',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'url',
+        wireName: 'url',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 3,
+        },
+      },
+      {
+        name: 'startParam',
+        wireName: 'start_param',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 4,
+        },
+      },
+      {
+        name: 'themeParams',
+        wireName: 'theme_params',
+        type: {
+          kind: 'object',
+          name: 'DataJSON',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'platform',
+        wireName: 'platform',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
     id: 2303510940,
     name: 'messages.requestUrlAuth',
     typeName: 'messages.RequestUrlAuth',
@@ -46908,6 +48040,165 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         flag: {
           field: 'flags',
           bit: 3,
+        },
+      },
+    ],
+  },
+  {
+    id: 647873217,
+    name: 'messages.requestWebView',
+    typeName: 'messages.RequestWebView',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'WebViewResult',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'fromBotMenu',
+        wireName: 'from_bot_menu',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 4,
+        },
+      },
+      {
+        name: 'silent',
+        wireName: 'silent',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 5,
+        },
+      },
+      {
+        name: 'compact',
+        wireName: 'compact',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 7,
+        },
+      },
+      {
+        name: 'fullscreen',
+        wireName: 'fullscreen',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 8,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'bot',
+        wireName: 'bot',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'url',
+        wireName: 'url',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'startParam',
+        wireName: 'start_param',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 3,
+        },
+      },
+      {
+        name: 'themeParams',
+        wireName: 'theme_params',
+        type: {
+          kind: 'object',
+          name: 'DataJSON',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'platform',
+        wireName: 'platform',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'replyTo',
+        wireName: 'reply_to',
+        type: {
+          kind: 'object',
+          name: 'InputReplyTo',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'sendAs',
+        wireName: 'send_as',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 13,
         },
       },
     ],
@@ -47682,6 +48973,142 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
             bare: false,
           },
           bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 699516522,
+    name: 'messages.searchStickers',
+    typeName: 'messages.SearchStickers',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.FoundStickers',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'emojis',
+        wireName: 'emojis',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'q',
+        wireName: 'q',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'emoticon',
+        wireName: 'emoticon',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'langCode',
+        wireName: 'lang_code',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'primitive',
+            name: 'string',
+          },
+          bare: false,
+        },
+      },
+      {
+        name: 'offset',
+        wireName: 'offset',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
+    id: 896555914,
+    name: 'messages.searchStickerSets',
+    typeName: 'messages.SearchStickerSets',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.FoundStickerSets',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'excludeFeatured',
+        wireName: 'exclude_featured',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'q',
+        wireName: 'q',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
         },
       },
     ],
@@ -48692,6 +50119,94 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 283795844,
+    name: 'messages.sendVote',
+    typeName: 'messages.SendVote',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'msgId',
+        wireName: 'msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'options',
+        wireName: 'options',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'primitive',
+            name: 'bytes',
+          },
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 3691135688,
+    name: 'messages.sendWebViewData',
+    typeName: 'messages.SendWebViewData',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'bot',
+        wireName: 'bot',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'randomId',
+        wireName: 'random_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+      {
+        name: 'buttonText',
+        wireName: 'button_text',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'data',
+        wireName: 'data',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
     id: 2492727090,
     name: 'messages.sentEncryptedFile',
     typeName: 'messages.SentEncryptedFile',
@@ -49269,6 +50784,27 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
             name: 'TextWithEntities',
             bare: false,
           },
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 4184757726,
+    name: 'messages.uninstallStickerSet',
+    typeName: 'messages.UninstallStickerSet',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'stickerset',
+        wireName: 'stickerset',
+        type: {
+          kind: 'object',
+          name: 'InputStickerSet',
           bare: false,
         },
       },

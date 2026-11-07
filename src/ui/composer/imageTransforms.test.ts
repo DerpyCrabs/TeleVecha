@@ -1,7 +1,12 @@
 import { Effect, Fiber } from 'effect';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { planImageTransform, readImageDimensions, transformImageFile } from './imageTransforms';
+import {
+  defaultImageAdjustments,
+  planImageTransform,
+  readImageDimensions,
+  transformImageFile,
+} from './imageTransforms';
 
 describe('planImageTransform', () => {
   it('center-crops a landscape image to a square', () => {
@@ -13,6 +18,35 @@ describe('planImageTransform', () => {
       outputWidth: 800,
       outputHeight: 800,
     });
+  });
+
+  it('allows selecting an off-center detail without stretching it', () => {
+    expect(
+      planImageTransform(1200, 800, 0, 'square', {
+        ...defaultImageAdjustments,
+        zoom: 2,
+        positionX: 1,
+        positionY: 0,
+      }),
+    ).toEqual({
+      sourceX: 800,
+      sourceY: 0,
+      sourceWidth: 400,
+      sourceHeight: 400,
+      outputWidth: 400,
+      outputHeight: 400,
+    });
+  });
+
+  it('keeps portrait crops inside a rotated image', () => {
+    const plan = planImageTransform(1200, 800, 90, '9:16', {
+      ...defaultImageAdjustments,
+      positionX: 0,
+      positionY: 1,
+    });
+    expect(plan.outputWidth / plan.outputHeight).toBeCloseTo(9 / 16, 2);
+    expect(plan.sourceY + plan.sourceHeight).toBe(800);
+    expect(plan.sourceX).toBe(0);
   });
 
   it('uses the final orientation when cropping a rotated image', () => {
@@ -60,7 +94,7 @@ describe('image transform ownership', () => {
     const canvas = {
       width: 0,
       height: 0,
-      getContext: () => ({ drawImage: vi.fn() }),
+      getContext: () => ({ drawImage: vi.fn(), scale: vi.fn(), translate: vi.fn() }),
       toBlob: vi.fn(),
     };
     vi.stubGlobal('document', { createElement: () => canvas });

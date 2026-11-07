@@ -5,6 +5,7 @@ import { Context, Effect } from 'effect';
 import { permissionsForDialog } from '../../telegram/core/chatPermissions';
 import type { MessagingError } from '../../telegram/core/messagingError';
 import type {
+  TelegramContact,
   TelegramDialog,
   TelegramGroupMemberPage,
   TelegramPeer,
@@ -46,6 +47,7 @@ export const groupMembers = infiniteQuery({
 export function createContactDetailsSession(
   options: {
     source: ContactDetailsSource;
+    shareContact?: ((contact: TelegramContact) => void) | undefined;
     runEffect: UiEffectRunner;
     runTask: UiTaskRunner;
     dialog: () => TelegramDialog | undefined;
@@ -98,6 +100,18 @@ export function createContactDetailsSession(
     const dialog = options.dialog();
     if (!dialog) return;
     const details = userDetails();
+    if (details?.phone && options.shareContact) {
+      options.shareContact({
+        phoneNumber: details.phone,
+        firstName: details.firstName || dialog.title,
+        lastName: details.lastName || '',
+        vcard: '',
+        peer: dialog.peer,
+        hasAvatar: dialog.hasAvatar,
+        avatarId: dialog.avatarId,
+      });
+      return;
+    }
     const url = details?.username ? `https://t.me/${details.username}` : undefined;
     const text = [dialog.title, details?.phone, url].filter(Boolean).join('\n');
     if (navigator.share) {

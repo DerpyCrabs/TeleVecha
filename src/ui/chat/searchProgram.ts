@@ -1,3 +1,6 @@
+import type { TelegramPeerSearchResult, TelegramSearchFilters } from '../../telegram/types';
+import type { MediaAssets } from '../media/mediaAssets';
+import { searchDateRange } from './searchFilters';
 import {
   available,
   collection,
@@ -22,6 +25,15 @@ export type SearchResults = AsyncResult.AsyncResult<
 >;
 export interface SearchPanelProps {
   dialogs: readonly TelegramDialog[];
+  compact?: boolean;
+  media?: MediaAssets;
+  online?: boolean;
+  searchPeople?: (query: string) => Effect.Effect<TelegramPeerSearchResult[], unknown>;
+  searchMembers?: (
+    peerId: string,
+    query: string,
+    offset: number,
+  ) => Effect.Effect<import('../../telegram/types').TelegramGroupMemberPage, unknown>;
   activePeerId: string;
   /** Cached results for one submitted search. */
   results: (args: MessageSearchArgs) => Source<SearchResults>;
@@ -37,6 +49,11 @@ interface SearchInput {
   readonly query: string;
   readonly global: boolean;
   readonly submitted: string;
+  readonly ready: boolean;
+  readonly filters: TelegramSearchFilters;
+  readonly fromDate: string;
+  readonly untilDate: string;
+  readonly dateError: string;
 }
 export interface SearchModel {
   readonly props: SearchInput;
@@ -45,14 +62,19 @@ export interface SearchModel {
 }
 
 /** The submitted search; global searches share results across chats. */
-export const searchArgs = (input: SearchInput): MessageSearchArgs | undefined =>
-  input.submitted
+export const searchArgs = (input: SearchInput): MessageSearchArgs | undefined => {
+  if (!input.ready || input.dateError) return undefined;
+  const filters = { ...input.filters, ...searchDateRange(input.fromDate, input.untilDate) };
+  const hasFilters = Object.values(filters).some((value) => value !== undefined);
+  return input.submitted || hasFilters
     ? {
         peerId: input.global ? '' : input.host.activePeerId,
         text: input.submitted,
         global: input.global,
+        ...(hasFilters ? { filters } : {}),
       }
     : undefined;
+};
 /** Loaded rows in page order; a message repeated by a later page is shown once. */
 export const searchRows = (result: SearchResults) => pageMessages(available(result)?.pages ?? []);
 export const searchError = resourceError;
@@ -70,6 +92,7 @@ const change = (
   return refresh && args && JSON.stringify(args) === JSON.stringify(searchArgs(model.props))
     ? {
         model: next,
+        cancel: [commandMore, 'typing'],
         commands: [
           {
             key: commandHost,
@@ -78,7 +101,7 @@ const change = (
           },
         ],
       }
-    : { model: next };
+    : { model: next, cancel: [commandMore, 'typing'] };
 };
 const more = (model: SearchModel): Transition<SearchModel, MoreMessage> => {
   const args = searchArgs(model.props);
@@ -111,18 +134,68 @@ const failureMessage = (cause: Cause.Cause<unknown>) => {
 };
 
 export const searchActions = defineActions<SearchModel>()({
-  Query: (model, query: string) => change(model, { query, submitted: '' }),
-  Scope: (model, global: boolean) =>
-    change(model, { global, submitted: model.props.query.trim() }, true),
-  Submit: (model) => change(model, { submitted: model.props.query.trim() }, true),
-  Context: (model, host: SearchPanelProps) =>
+  Query: (model, query: string): Transition<SearchModel, { type: 'AutoSearch' }> => ({
+    model: {
+      ...model,
+      props: { ...model.props, query, ready: false, submitted: '' },
+      loadingMore: false,
+      moreError: '',
+    },
+    cancel: [commandMore],
+    commands: [
+      {
+        key: 'typing',
+        policy: 'replace',
+        effect: Effect.sleep(250).pipe(Effect.as({ type: 'AutoSearch' as const })),
+      },
+    ],
+  }),
+  Filters: (model, filters: TelegramSearchFilters) =>
+    change(model, { filters, ready: true, submitted: model.props.query.trim() }),
+  Dates: (model, fromDate: string, untilDate: string) => {
+    let dateError = '';
+    try {
+      searchDateRange(fromDate, untilDate);
+    } catch (error) {
+      dateError = (error as Error).message;
+    }
+    return change(model, {
+      fromDate,
+      untilDate,
+      dateError,
+      ready: true,
+      submitted: model.props.query.trim(),
+    });
+  },
+  ClearFilters: (model) =>
     change(model, {
-      host,
-      submitted:
-        model.props.host.activePeerId === host.activePeerId
-          ? model.props.submitted
-          : model.props.query.trim(),
+      filters: {},
+      fromDate: '',
+      untilDate: '',
+      dateError: '',
+      ready: true,
+      submitted: model.props.query.trim(),
     }),
+  Scope: (model, global: boolean) =>
+    change(
+      model,
+      {
+        global,
+        filters: { ...model.props.filters, fromPeer: undefined, chatType: undefined },
+        ready: true,
+        submitted: model.props.query.trim(),
+      },
+      true,
+    ),
+  Submit: (model) => change(model, { ready: true, submitted: model.props.query.trim() }, true),
+  Context: (model, host: SearchPanelProps) =>
+    model.props.host.activePeerId === host.activePeerId
+      ? { model: { ...model, props: { ...model.props, host } } }
+      : change(model, {
+          host,
+          filters: { ...model.props.filters, fromPeer: undefined },
+          submitted: model.props.query.trim(),
+        }),
   More: more,
   /** Retry the failed page, or the search itself. */
   Retry: (model) => {
@@ -158,21 +231,36 @@ export const searchActions = defineActions<SearchModel>()({
     ],
   }),
 });
-export type SearchMessage = ActionMessage<typeof searchActions> | MoreMessage;
+export type SearchMessage =
+  | ActionMessage<typeof searchActions>
+  | MoreMessage
+  | { type: 'AutoSearch' };
 
 export function createSearchProgram(props: SearchPanelProps) {
   return program<SearchModel, SearchMessage>({
     initial: {
-      props: { host: props, query: '', global: false, submitted: '' },
+      props: {
+        host: props,
+        query: '',
+        global: false,
+        submitted: '',
+        ready: false,
+        filters: {},
+        fromDate: '',
+        untilDate: '',
+        dateError: '',
+      },
       loadingMore: false,
       moreError: '',
     },
     update: (model, message) =>
       'args' in message
         ? searchActions.update(model, message)
-        : message.type === 'MoreLoaded'
-          ? { model: { ...model, loadingMore: false } }
-          : { model: { ...model, loadingMore: false, moreError: message.error } },
+        : message.type === 'AutoSearch'
+          ? change(model, { ready: true, submitted: model.props.query.trim() })
+          : message.type === 'MoreLoaded'
+            ? { model: { ...model, loadingMore: false } }
+            : { model: { ...model, loadingMore: false, moreError: message.error } },
     onDefect: (cause) => console.error('Search command failed', cause),
   });
 }

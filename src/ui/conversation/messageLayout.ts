@@ -175,7 +175,7 @@ export function layoutMessages(
     let nextIndex = index + 1;
     while (nextIndex < messages.length && continuations[nextIndex]) nextIndex += 1;
     const showSenderAvatar = Boolean(
-      chat.kind === 'channel' &&
+      (chat.kind === 'channel' || chat.kind === 'group') &&
       !message.outgoing &&
       !message.service &&
       message.senderId &&

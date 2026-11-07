@@ -11,6 +11,9 @@ import { view } from 'effectweb';
 import { BotKeyboard } from './BotKeyboard';
 interface BotControlsProps {
   isBot: boolean;
+  appTitle?: string | undefined;
+  appBusy: boolean;
+  onOpenApp: () => void;
   showCommands: boolean;
   started: boolean;
   enabled: boolean;
@@ -39,6 +42,15 @@ export const BotControls = view<BotControlsProps, never>((props, _send) => {
           onClick={props.onStart}
         >
           {props.starting ? 'Starting…' : 'Start bot'}
+        </button>
+      ) : null}
+      {props.appTitle ? (
+        <button
+          class="bot-open-app"
+          disabled={!props.enabled || props.appBusy}
+          onClick={props.onOpenApp}
+        >
+          {props.appBusy ? 'Opening…' : props.appTitle}
         </button>
       ) : null}
       {props.showCommands && (!props.isBot || props.started) ? (

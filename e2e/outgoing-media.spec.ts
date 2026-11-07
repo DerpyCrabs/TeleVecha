@@ -19,65 +19,48 @@ test.beforeEach(async ({ page }) => {
 test('sends adjacent media as a Telegram album and a file-mode item separately', async ({
   page,
 }) => {
-  await page.locator('input[type="file"]').setInputFiles([imagePath, imagePath, imagePath]);
+  await page
+    .locator('.chat-composer input[type="file"]')
+    .setInputFiles([imagePath, imagePath, 'e2e/fixtures/report.txt']);
   const attachments = page.getByTestId('composer-attachment');
   await expect(attachments).toHaveCount(3);
-  await attachments.nth(2).getByRole('button', { name: 'File', exact: true }).click();
-  await expect(
-    attachments.nth(2).getByRole('button', { name: 'File', exact: true }),
-  ).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('textbox', { name: 'Message' }).fill('Grouped upload caption');
+  await expect(attachments.nth(2)).toContainText('report.txt');
+  await page.getByRole('textbox', { name: 'Attachment caption' }).fill('Grouped upload caption');
 
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await page
+    .locator('.attachment-send-dialog')
+    .getByRole('button', { name: /^(Send|Save)$/ })
+    .click();
 
   await expect.poll(async () => (await fixtureStats(page))?.sendAlbum).toBe(1);
   await expect.poll(async () => (await fixtureStats(page))?.sendFile).toBe(1);
   const album = page.locator('.media-album').last();
   await expect(album).toHaveAttribute('data-album-size', '2');
   await expect(album).toBeVisible();
-  await expect(page.locator('article[data-media-kind="file"]').last()).toContainText(
-    'outgoing-media.png',
-  );
+  await expect(page.locator('article[data-media-kind="file"]').last()).toContainText('report.txt');
 });
 
-test('shows image batches as large tiles with batch actions', async ({ page }) => {
+test('shows media in a send dialog and switches the batch to files', async ({ page }) => {
   await page
-    .locator('input[type="file"]')
+    .locator('.chat-composer input[type="file"]')
     .setInputFiles([imagePath, imagePath, imagePath, imagePath, imagePath]);
-
-  const batch = page.getByLabel('Staged attachments');
-  const attachments = page.getByTestId('composer-attachment');
-  await expect(batch).toHaveClass(/composer-image-batch/u);
-  await expect(batch.getByText('5 images')).toBeVisible();
+  const dialog = page.locator('.attachment-send-dialog');
+  const attachments = dialog.getByTestId('composer-attachment');
+  await expect(dialog).toHaveAccessibleName('Send 5 attachments');
   await expect(attachments).toHaveCount(5);
-
-  const bounds = await attachments.evaluateAll((elements) =>
-    elements.map((element) => {
-      const { width, height, top } = element.getBoundingClientRect();
-      return { width, height, top };
-    }),
-  );
-  expect(bounds.every(({ width, height }) => width >= 220 && height >= 230)).toBe(true);
-  expect(new Set(bounds.map(({ top }) => Math.round(top))).size).toBeGreaterThan(1);
-
-  await batch
-    .getByRole('group', { name: 'Send all as' })
-    .getByRole('button', { name: 'Files' })
-    .click();
-  for (const attachment of await attachments.all()) {
-    await expect(attachment.getByRole('button', { name: 'File', exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-  }
-
-  await batch.getByRole('button', { name: 'Clear' }).click();
+  await expect(dialog.getByRole('textbox', { name: 'Attachment caption' })).toBeFocused();
+  await dialog.getByRole('checkbox', { name: 'Send as files' }).check();
+  await expect(dialog.locator('.attachment-send-item.is-file')).toHaveCount(5);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(attachments).toHaveCount(0);
 });
 
 test('renders a generic file with one attachment card', async ({ page }) => {
-  await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await page.locator('.chat-composer input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
+  await page
+    .locator('.attachment-send-dialog')
+    .getByRole('button', { name: /^(Send|Save)$/ })
+    .click();
   const message = page.locator('article[data-media-kind="file"]').last();
   await expect(message).toContainText('report.txt');
 
@@ -100,8 +83,11 @@ test('renders a generic file with one attachment card', async ({ page }) => {
 
 test('renders a staged album as one group while its upload is pending', async ({ page }) => {
   await page.evaluate(() => window.__televechaFixture?.holdNextUpload());
-  await page.locator('input[type="file"]').setInputFiles([imagePath, imagePath]);
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await page.locator('.chat-composer input[type="file"]').setInputFiles([imagePath, imagePath]);
+  await page
+    .locator('.attachment-send-dialog')
+    .getByRole('button', { name: /^(Send|Save)$/ })
+    .click();
 
   const album = page.locator('.media-album').last();
   await expect(album).toBeVisible();
@@ -120,8 +106,11 @@ test('renders a staged album as one group while its upload is pending', async ({
 
 test('shows a local image preview while a single upload is pending', async ({ page }) => {
   await page.evaluate(() => window.__televechaFixture?.holdNextUpload());
-  await page.locator('input[type="file"]').setInputFiles(imagePath);
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await page.locator('.chat-composer input[type="file"]').setInputFiles(imagePath);
+  await page
+    .locator('.attachment-send-dialog')
+    .getByRole('button', { name: /^(Send|Save)$/ })
+    .click();
 
   const pending = page.locator('article[data-media-kind="photo"]').last();
   await expect(pending.getByRole('img', { name: 'outgoing-media.png' })).toBeVisible();
@@ -175,7 +164,7 @@ for (const shape of ['landscape', 'portrait', 'album'] as const) {
     );
     await page.evaluate(() => window.__televechaFixture?.holdNextUpload());
     await page
-      .locator('input[type="file"]')
+      .locator('.chat-composer input[type="file"]')
       .setInputFiles(
         files.map(({ name, data }) => ({
           name,
@@ -183,8 +172,11 @@ for (const shape of ['landscape', 'portrait', 'album'] as const) {
           buffer: Buffer.from(data, 'base64'),
         })),
       );
-    await page.getByRole('textbox', { name: 'Message' }).fill('Image handoff');
-    await page.getByRole('button', { name: 'Send message' }).click();
+    await page.getByRole('textbox', { name: 'Attachment caption' }).fill('Image handoff');
+    await page
+      .locator('.attachment-send-dialog')
+      .getByRole('button', { name: /^(Send|Save)$/ })
+      .click();
     const message = page.locator('article').filter({ hasText: 'Image handoff' });
     await expect(message.locator('.media-upload-status')).toHaveCount(files.length);
     const images = message.locator('.media-visual > img');
@@ -288,13 +280,13 @@ for (const shape of ['landscape', 'portrait', 'album'] as const) {
 }
 
 test('crops and rotates a staged image before sending', async ({ page }) => {
-  await page.locator('input[type="file"]').setInputFiles(imagePath);
+  await page.locator('.chat-composer input[type="file"]').setInputFiles(imagePath);
   const attachment = page.getByTestId('composer-attachment');
   await attachment.getByRole('button', { name: 'Edit image outgoing-media.png' }).click();
   const editor = page.getByRole('dialog', { name: 'Edit image' });
-  await editor.getByRole('button', { name: '16:9' }).click();
+  await editor.getByRole('combobox', { name: 'Crop aspect ratio' }).selectOption('16:9');
   await editor.getByRole('button', { name: 'Rotate right' }).click();
-  await editor.getByRole('button', { name: 'Apply' }).click();
+  await editor.getByRole('button', { name: 'Done' }).click();
 
   await expect(editor).toHaveCount(0);
   await expect
@@ -306,13 +298,16 @@ test('crops and rotates a staged image before sending', async ({ page }) => {
         ),
     )
     .toBe(178);
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await page
+    .locator('.attachment-send-dialog')
+    .getByRole('button', { name: /^(Send|Save)$/ })
+    .click();
   await expect.poll(async () => (await fixtureStats(page))?.sendFile).toBe(1);
 });
 
 test('keeps a quarter-turned image fully inside the editor preview', async ({ page }) => {
   await page
-    .locator('input[type="file"]')
+    .locator('.chat-composer input[type="file"]')
     .setInputFiles({ name: 'wide.png', mimeType: 'image/png', buffer: wideImage as never });
   await page.getByRole('button', { name: 'Edit image wide.png' }).click();
   const editor = page.getByRole('dialog', { name: 'Edit image' });
@@ -320,7 +315,7 @@ test('keeps a quarter-turned image fully inside the editor preview', async ({ pa
 
   const bounds = await editor.evaluate((element) => {
     const preview = element.querySelector<HTMLElement>('.image-editor-preview')!;
-    const image = preview.querySelector('img')!;
+    const image = preview.querySelector('canvas')!;
     const bounds = (item: Element) => {
       const { left, top, right, bottom } = item.getBoundingClientRect();
       return { left, top, right, bottom };
@@ -334,21 +329,19 @@ test('keeps a quarter-turned image fully inside the editor preview', async ({ pa
 });
 
 test('keeps staged attachments with the chat they belong to', async ({ page }) => {
-  await page.locator('input[type="file"]').setInputFiles([imagePath, imagePath]);
+  await page.locator('.chat-composer input[type="file"]').setInputFiles([imagePath, imagePath]);
   await expect(page.getByTestId('composer-attachment')).toHaveCount(2);
 
-  await page
-    .getByTestId('chat-list')
-    .getByRole('button', { name: /Release Channel/ })
-    .click();
-  await expect(page.getByTestId('composer-attachment')).toHaveCount(0);
-  await page
-    .getByTestId('chat-list')
-    .getByRole('button', { name: /Alice Fixture/ })
-    .click();
-
-  await expect(page.getByTestId('composer-attachment')).toHaveCount(2);
-  await expect(page.getByTestId('composer-attachment').first()).toContainText('outgoing-media.png');
+  for (const peerId of ['c:202', 'u:101']) {
+    await page.evaluate((id) => {
+      const url = new URL(location.href);
+      url.searchParams.set('chat', id);
+      history.pushState({}, '', url);
+      dispatchEvent(new PopStateEvent('popstate'));
+    }, peerId);
+    await expect(page.getByTestId('composer-attachment')).toHaveCount(peerId === 'u:101' ? 2 : 0);
+  }
+  await expect(page.getByRole('button', { name: 'Edit image outgoing-media.png' })).toHaveCount(2);
 });
 
 test('replaces media while editing an outgoing message', async ({ page }) => {
@@ -362,10 +355,13 @@ test('replaces media while editing an outgoing message', async ({ page }) => {
     .getByRole('menuitem', { name: 'Edit' })
     .click();
   await expect(page.getByTestId('composer-edit')).toContainText('Fixture message 78');
-  await page.locator('input[type="file"]').setInputFiles(imagePath);
-  await page.getByRole('textbox', { name: 'Message' }).fill('Replaced photo caption');
+  await page.locator('.chat-composer input[type="file"]').setInputFiles(imagePath);
+  await page.getByRole('textbox', { name: 'Attachment caption' }).fill('Replaced photo caption');
 
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await page
+    .locator('.attachment-send-dialog')
+    .getByRole('button', { name: /^(Send|Save)$/ })
+    .click();
 
   await expect.poll(async () => (await fixtureStats(page))?.editMessage).toBe(1);
   await expect(message).toContainText('Replaced photo caption');

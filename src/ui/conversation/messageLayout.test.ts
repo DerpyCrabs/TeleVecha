@@ -72,16 +72,29 @@ describe('layoutMessages', () => {
     expect(layouts[1]?.hide).toBe(true);
   });
 
-  it('groups consecutive channel posts by sender and shows one trailing avatar', () => {
-    const layouts = layoutMessages([message('1'), message('2')], chat, []);
+  it.each(['channel', 'group'] as const)(
+    'groups consecutive %s messages and shows one trailing avatar',
+    (kind) => {
+      const layouts = layoutMessages([message('1'), message('2')], { ...chat, kind }, []);
 
-    expect(layouts[0]?.author).toBe('user:2');
-    expect(layouts[1]?.author).toBe('');
-    expect(layouts[0]?.showSenderAvatar).toBe(false);
-    expect(layouts[1]?.showSenderAvatar).toBe(true);
-    expect(layouts[1]?.className).toContain('message-same-sender');
-    expect(layouts[0]?.compactAfter).toBe(true);
-    expect(layouts[1]?.compactAfter).toBe(false);
+      expect(layouts[0]?.author).toBe('user:2');
+      expect(layouts[1]?.author).toBe('');
+      expect(layouts[0]?.showSenderAvatar).toBe(false);
+      expect(layouts[1]?.showSenderAvatar).toBe(true);
+      expect(layouts[1]?.className).toContain('message-same-sender');
+      expect(layouts[0]?.compactAfter).toBe(true);
+      expect(layouts[1]?.compactAfter).toBe(false);
+    },
+  );
+
+  it('keeps personal conversations and outgoing messages free of sender avatars', () => {
+    expect(layoutMessages([message('1')], { ...chat, kind: 'user' }, [])[0]?.showSenderAvatar).toBe(
+      false,
+    );
+    expect(
+      layoutMessages([message('1', { outgoing: true })], { ...chat, kind: 'group' }, [])[0]
+        ?.showSenderAvatar,
+    ).toBe(false);
   });
 
   it('computes spacing across hidden album rows and sender/date boundaries', () => {

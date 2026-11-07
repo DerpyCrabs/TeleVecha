@@ -377,7 +377,16 @@ export function createBrowserDebugReportRecorder(store: IndexedDbCacheStore) {
 export type BrowserDebugReportRecorder = ReturnType<typeof createBrowserDebugReportRecorder>;
 
 function compactRuntime(snapshot: EngineSnapshot) {
-  const { dialogs, messages, drafts, pending, pinnedMessages, authStep, ...runtime } = snapshot;
+  const {
+    dialogs,
+    messages,
+    drafts,
+    pending,
+    pinnedMessages,
+    authStep,
+    qrLogin: _qrLogin,
+    ...runtime
+  } = snapshot;
   return {
     ...runtime,
     ...(authStep ? { loginStep: authStep } : {}),

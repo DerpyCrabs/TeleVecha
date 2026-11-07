@@ -1,3 +1,7 @@
+import type { MiniAppLink } from '../shared/telegramLink';
+import type { TelegramUserDetails, TelegramWebAppRequest } from '../../telegram/types';
+import type { OpenWebApp, WebAppApi } from './WebAppDialog';
+import { miniAppTheme } from './webAppBridge';
 import { modelOwner, available, program } from 'effectweb';
 import type { SessionContext } from '../app/sessionContext';
 import { Context, Effect } from 'effect';
@@ -35,12 +39,23 @@ interface PendingBotUrlAuth {
   generation: number;
   owner: string;
 }
+export interface PendingWebAppLaunch {
+  request: TelegramWebAppRequest;
+  title: string;
+  description: string;
+  requestWriteAccess: boolean;
+  buttonText: string;
+  generation: number;
+  sourceId: string;
+}
 interface PendingInlineSwitch {
   query: string;
   botUsername?: string | undefined;
   owner: string;
 }
 interface BotSessionOptions {
+  webApps: WebAppApi;
+  loadBotDetails: (peer: TelegramPeer) => Effect.Effect<TelegramUserDetails, unknown>;
   conversation: () => EffectConversation | undefined;
   runEffect: UiEffectRunner;
   runTask: UiTaskRunner;
@@ -64,6 +79,9 @@ export function createBotSession(
 ) {
   const scope = modelOwner({});
   type BotSessionModel = {
+    webApp: OpenWebApp | undefined;
+    webAppLaunch: PendingWebAppLaunch | undefined;
+    webAppLaunchBusy: boolean;
     commandsRequested: string;
     menuOpen: boolean;
     starting: boolean;
@@ -74,6 +92,9 @@ export function createBotSession(
     inlineSwitch: PendingInlineSwitch | undefined;
   };
   type BotSessionMessage =
+    | { type: 'WebAppLaunch'; value: PendingWebAppLaunch | undefined }
+    | { type: 'WebAppLaunchBusy'; value: boolean }
+    | { type: 'WebApp'; value: OpenWebApp | undefined }
     | { type: 'CommandsRequested'; value: string }
     | { type: 'MenuOpen'; value: boolean }
     | { type: 'Starting'; value: boolean }
@@ -84,6 +105,9 @@ export function createBotSession(
     | { type: 'InlineSwitch'; value: PendingInlineSwitch | undefined };
   const state = program<BotSessionModel, BotSessionMessage>({
     initial: {
+      webApp: undefined,
+      webAppLaunch: undefined,
+      webAppLaunchBusy: false,
       commandsRequested: '',
       menuOpen: false,
       starting: false,
@@ -95,6 +119,12 @@ export function createBotSession(
     },
     update: (model, message) => {
       switch (message.type) {
+        case 'WebAppLaunch':
+          return { model: { ...model, webAppLaunch: message.value } };
+        case 'WebAppLaunchBusy':
+          return { model: { ...model, webAppLaunchBusy: message.value } };
+        case 'WebApp':
+          return { model: { ...model, webApp: message.value } };
         case 'CommandsRequested':
           return {
             model: Object.is(model.commandsRequested, message.value)
@@ -191,10 +221,21 @@ export function createBotSession(
       state.send({ type: 'Starting', value: false });
       state.send({ type: 'ButtonBusy', value: undefined });
       state.send({ type: 'Notice', value: '' });
+      state.send({ type: 'WebAppLaunch', value: undefined });
+      state.send({ type: 'WebAppLaunchBusy', value: false });
+      state.send({ type: 'WebApp', value: undefined });
       state.send({ type: 'UrlAuth', value: undefined });
       state.send({ type: 'UrlAuthBusy', value: false });
       state.send({ type: 'InlineSwitch', value: undefined });
       if (noticeTimer) clearTimeout(noticeTimer);
+      scope.cancel('bot-profile');
+      const currentDialog = options.activeDialog();
+      if (currentDialog?.bot && !currentDialog.userDetails && conversationPeerId === peerId)
+        scope.run(
+          'bot-profile',
+          options.loadBotDetails(currentDialog.peer).pipe(Effect.ignore),
+          'replace',
+        );
       if (conversationPeerId === peerId && options.activeDialog()?.peer.kind === 'group')
         loadCommands().catch(() => undefined);
     }
@@ -213,6 +254,21 @@ export function createBotSession(
     subscribeAtUi(
       options.runTask,
       options.resources.subscribeResources((event) => {
+        if (event.kind === 'peer-metadata' && event.peerId === options.activePeerId()) {
+          const dialog = options.activeDialog();
+          if (dialog?.bot)
+            scope.run(
+              'bot-profile',
+              options.loadBotDetails(dialog.peer).pipe(Effect.ignore),
+              'replace',
+            );
+          return;
+        }
+        if (event.kind === 'web-app-result') {
+          if (event.queryId && state.model().webApp?.app.queryId === event.queryId)
+            state.send({ type: 'WebApp', value: undefined });
+          return;
+        }
         if (
           event.kind !== 'bot-commands' ||
           (event.peerId !== undefined && event.peerId !== options.activePeerId())
@@ -258,6 +314,7 @@ export function createBotSession(
     owner: string,
     key: string,
     messageId?: number,
+    webAppMode?: 'menu' | 'main',
   ) => {
     const dialog = options.activeDialog();
     if (!dialog || state.model().buttonBusy) return;
@@ -270,6 +327,35 @@ export function createBotSession(
         const conversation = currentConversation(peerId);
         if (conversation) await options.runEffect(conversation.sendDraft(button.text));
         if (isCurrent(peerId, generation)) options.dismissSingleUseKeyboard(owner);
+        return;
+      }
+      if (button.kind === 'web-app' || button.kind === 'simple-web-app') {
+        const bot = button.bot ?? (dialog.bot ? peer : undefined);
+        if (!bot || (!button.url && webAppMode !== 'main')) {
+          showNotice('This Mini App is missing its bot information.');
+          return;
+        }
+        const request = {
+          peer,
+          bot,
+          mode:
+            webAppMode ??
+            (button.kind === 'simple-web-app' ? ('simple' as const) : ('inline' as const)),
+          url: button.url,
+          theme: miniAppTheme(),
+        };
+        state.send({
+          type: 'WebAppLaunch',
+          value: {
+            request,
+            title: button.botUsername ? `@${button.botUsername}` : dialog.title,
+            description: '',
+            requestWriteAccess: false,
+            buttonText: button.text,
+            generation,
+            sourceId: peerId,
+          },
+        });
         return;
       }
       if (button.kind === 'url') {
@@ -425,8 +511,97 @@ export function createBotSession(
   scope.own(() => {
     if (noticeTimer) clearTimeout(noticeTimer);
   });
+  const prepareWebAppLink = async (bot: TelegramPeer, username: string, link: MiniAppLink) => {
+    if (bot.kind !== 'user') return false;
+    const sourceId = options.activePeerId();
+    const generation = ++actionGeneration;
+    state.send({ type: 'ButtonBusy', value: undefined });
+    const sourcePeer = options.activeDialog()?.peer ?? bot;
+    state.send({ type: 'WebAppLaunch', value: undefined });
+    state.send({ type: 'WebAppLaunchBusy', value: false });
+    const info = link.shortName
+      ? await options.runEffect(options.webApps.getBotApp(bot, link.shortName))
+      : undefined;
+    if (!link.shortName) {
+      const details = await options.runEffect(options.loadBotDetails(bot));
+      if (!details.botHasMainApp) return false;
+    }
+    if (!isCurrent(sourceId, generation)) return true;
+    const request: TelegramWebAppRequest = {
+      peer: sourcePeer,
+      bot,
+      mode: info ? 'app' : 'main',
+      ...(info ? { app: { id: info.id, accessHash: info.accessHash } } : {}),
+      startParam: link.startParam,
+      displayMode: link.mode,
+      theme: miniAppTheme(),
+    };
+    state.send({
+      type: 'WebAppLaunch',
+      value: {
+        request,
+        title: info?.title ?? `@${username}`,
+        description: info?.description ?? '',
+        buttonText: info?.title ?? `@${username}`,
+        requestWriteAccess: info?.requestWriteAccess ?? false,
+        generation,
+        sourceId,
+      },
+    });
+    return true;
+  };
+  const confirmWebAppLaunch = async (writeAllowed: boolean) => {
+    const pending = state.model().webAppLaunch;
+    if (!pending || state.model().webAppLaunchBusy) return;
+    state.send({ type: 'WebAppLaunchBusy', value: true });
+    try {
+      const request = {
+        ...pending.request,
+        writeAllowed: pending.requestWriteAccess && writeAllowed,
+      };
+      const app = await options.runEffect(options.webApps.requestWebApp(request));
+      if (!isCurrent(pending.sourceId, pending.generation)) return;
+      state.send({ type: 'WebAppLaunch', value: undefined });
+      state.send({
+        type: 'WebApp',
+        value: {
+          app,
+          request,
+          title: pending.title,
+          buttonText: pending.buttonText,
+          sameOrigin: new URL(app.url).origin === window.location.origin,
+        },
+      });
+    } catch {
+      if (isCurrent(pending.sourceId, pending.generation))
+        showNotice('Could not open this Mini App.');
+    } finally {
+      if (isCurrent(pending.sourceId, pending.generation))
+        state.send({ type: 'WebAppLaunchBusy', value: false });
+    }
+  };
+  const openMenuApp = async () => {
+    const dialog = options.activeDialog();
+    if (!dialog?.bot) return;
+    const menu = dialog.userDetails?.botMenu;
+    if (!menu && !dialog.userDetails?.botHasMainApp) return;
+    await press(
+      { kind: 'web-app', text: menu?.text ?? 'Open App', url: menu?.url, bot: dialog.peer },
+      'menu',
+      'web-app',
+      undefined,
+      menu ? 'menu' : 'main',
+    );
+  };
   const actions = {
     refresh,
+    openMenuApp,
+    prepareWebAppLink,
+    confirmWebAppLaunch,
+    cancelWebAppLaunch: () => {
+      if (!state.model().webAppLaunchBusy) state.send({ type: 'WebAppLaunch', value: undefined });
+    },
+    closeWebApp: () => state.send({ type: 'WebApp', value: undefined }),
     toggleMenu,
     closeMenu: () => state.send({ type: 'MenuOpen', value: false }),
     start,
@@ -449,6 +624,9 @@ export function createBotSession(
     },
     snapshot: () => ({
       ...actions,
+      webApp: state.model().webApp,
+      webAppLaunch: state.model().webAppLaunch,
+      webAppLaunchBusy: state.model().webAppLaunchBusy,
       commands: commands(),
       commandsLoading: commandsLoading(),
       menuOpen: state.model().menuOpen,

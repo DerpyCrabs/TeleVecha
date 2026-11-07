@@ -272,7 +272,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     const capturedAttachments = cloneAttachments(owner.read().attachments);
     const capturedEditing = owner.read().editing;
     const capturedRestore = editRestore;
-    if (!body.trim() && capturedAttachments.length === 0 && !capturedEditing?.media) return;
+    if (!body.trim() && capturedAttachments.length === 0 && !capturedEditing?.media) return true;
     const dialog = options.activeDialog();
     const conversation = options.conversation();
     if (
@@ -282,7 +282,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
       !options.canSend() ||
       (capturedAttachments.length > 0 && !options.canSendMedia())
     ) {
-      return;
+      return false;
     }
     const peerId = dialog.peer.id;
     const capturedReply = owner.read().reply ? { ...owner.read().reply! } : undefined;
@@ -311,7 +311,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     owner.cancel(MENTION_MEMBERS_TASK);
     owner.patch(empty());
     if (!capturedEditing) rememberAttachments(peerId, []);
-    yield* Effect.gen(function* () {
+    return yield* Effect.gen(function* () {
       yield* pendingDraft;
       if (capturedEditing) {
         const replacement = capturedAttachments[0]
@@ -355,6 +355,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
         yield* conversation.sendDraft(body, telegramReply, capturedFormats);
       }
     }).pipe(
+      Effect.as(true),
       Effect.catchCause(() =>
         Effect.gen(function* () {
           if (!hasNewerState()) {
@@ -372,6 +373,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
           } else if (!owner.disposed && !capturedEditing && options.activePeerId() !== peerId) {
             rememberAttachments(peerId, capturedAttachments);
           }
+          return false;
         }),
       ),
     );
@@ -380,10 +382,13 @@ export function createComposerSession(options: ComposerSessionOptions) {
     if (!owner.read().editing) rememberAttachments(options.activePeerId(), attachments);
     owner.patch({ attachments });
   };
-  const attach = (files: File[]) => {
+  const attach = (files: File[], sendAs?: StagedAttachment['sendAs']) => {
     if (files.length === 0) return;
     editVersion += 1;
-    const staged = files.map(stageAttachment);
+    const staged = files.map((file) => {
+      const attachment = stageAttachment(file);
+      return sendAs ? { ...attachment, sendAs } : attachment;
+    });
     changeAttachments(
       owner.read().editing ? staged.slice(0, 1) : [...owner.read().attachments, ...staged],
     );
@@ -505,6 +510,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     changeDraft,
     replaceDraft,
     switchPeer,
+    sendPending: () => send,
     send: () => {
       if (!owner.disposed) options.runTask(send);
     },

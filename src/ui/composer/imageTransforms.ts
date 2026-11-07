@@ -1,7 +1,27 @@
 import { Effect } from 'effect';
+import { renderImageStrokes, type ImageStroke } from './imageDrawing';
 
-export type CropAspect = 'original' | 'square' | '4:3' | '16:9';
+export type CropAspect = 'original' | 'square' | '4:3' | '16:9' | '3:4' | '9:16';
 export type ImageRotation = 0 | 90 | 180 | 270;
+
+export interface ImageAdjustments {
+  zoom: number;
+  positionX: number;
+  positionY: number;
+  flip: boolean;
+  brightness: number;
+  contrast: number;
+  saturation: number;
+}
+export const defaultImageAdjustments: ImageAdjustments = {
+  zoom: 1,
+  positionX: 0.5,
+  positionY: 0.5,
+  flip: false,
+  brightness: 100,
+  contrast: 100,
+  saturation: 100,
+};
 
 export interface ImageTransformPlan {
   sourceX: number;
@@ -16,6 +36,8 @@ const cropRatios: Record<Exclude<CropAspect, 'original'>, number> = {
   square: 1,
   '4:3': 4 / 3,
   '16:9': 16 / 9,
+  '3:4': 3 / 4,
+  '9:16': 9 / 16,
 };
 
 export function planImageTransform(
@@ -23,8 +45,10 @@ export function planImageTransform(
   height: number,
   rotation: ImageRotation,
   crop: CropAspect,
+  adjustments: ImageAdjustments = defaultImageAdjustments,
 ): ImageTransformPlan {
-  if (width <= 0 || height <= 0) throw new Error('The image has invalid dimensions.');
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0)
+    throw new Error('The image has invalid dimensions.');
   let sourceWidth = width;
   let sourceHeight = height;
   if (crop !== 'original') {
@@ -33,10 +57,13 @@ export function planImageTransform(
     if (width / height > sourceRatio) sourceWidth = height * sourceRatio;
     else sourceHeight = width / sourceRatio;
   }
+  const zoom = Math.min(4, Math.max(1, adjustments.zoom));
+  sourceWidth /= zoom;
+  sourceHeight /= zoom;
   const quarterTurn = rotation === 90 || rotation === 270;
   return {
-    sourceX: (width - sourceWidth) / 2,
-    sourceY: (height - sourceHeight) / 2,
+    sourceX: (width - sourceWidth) * Math.max(0, Math.min(1, adjustments.positionX)),
+    sourceY: (height - sourceHeight) * Math.max(0, Math.min(1, adjustments.positionY)),
     sourceWidth,
     sourceHeight,
     outputWidth: Math.max(1, Math.round(quarterTurn ? sourceHeight : sourceWidth)),
@@ -94,38 +121,83 @@ function outputName(file: File, mimeType: string) {
   return file.name.replace(/(?:\.[^.]+)?$/, `.${extension}`);
 }
 
-export function transformImageFile(file: File, rotation: ImageRotation, crop: CropAspect) {
+export function renderImageTransform(
+  canvas: HTMLCanvasElement,
+  source: CanvasImageSource,
+  width: number,
+  height: number,
+  rotation: ImageRotation,
+  crop: CropAspect,
+  adjustments: ImageAdjustments = defaultImageAdjustments,
+  maxSize = Infinity,
+  strokes: readonly ImageStroke[] = [],
+) {
+  const plan = planImageTransform(width, height, rotation, crop, adjustments);
+  const scale = Math.min(1, maxSize / Math.max(plan.outputWidth, plan.outputHeight));
+  canvas.width = Math.max(1, Math.round(plan.outputWidth * scale));
+  canvas.height = Math.max(1, Math.round(plan.outputHeight * scale));
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Image editing is unavailable in this browser.');
+  context.filter = `brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%)`;
+  context.scale(canvas.width / plan.outputWidth, canvas.height / plan.outputHeight);
+  if (adjustments.flip) {
+    context.translate(plan.outputWidth, 0);
+    context.scale(-1, 1);
+  }
+  if (rotation === 90) {
+    context.translate(plan.outputWidth, 0);
+    context.rotate(Math.PI / 2);
+  } else if (rotation === 180) {
+    context.translate(plan.outputWidth, plan.outputHeight);
+    context.rotate(Math.PI);
+  } else if (rotation === 270) {
+    context.translate(0, plan.outputHeight);
+    context.rotate(-Math.PI / 2);
+  }
+  const quarterTurn = rotation === 90 || rotation === 270;
+  context.drawImage(
+    source,
+    plan.sourceX,
+    plan.sourceY,
+    plan.sourceWidth,
+    plan.sourceHeight,
+    0,
+    0,
+    quarterTurn ? plan.outputHeight : plan.outputWidth,
+    quarterTurn ? plan.outputWidth : plan.outputHeight,
+  );
+  context.filter = 'none';
+  context.scale(
+    (quarterTurn ? plan.outputHeight : plan.outputWidth) / plan.sourceWidth,
+    (quarterTurn ? plan.outputWidth : plan.outputHeight) / plan.sourceHeight,
+  );
+  context.translate(-plan.sourceX, -plan.sourceY);
+  renderImageStrokes(context, strokes, width, height);
+}
+
+export function transformImageFile(
+  file: File,
+  rotation: ImageRotation,
+  crop: CropAspect,
+  adjustments: ImageAdjustments = defaultImageAdjustments,
+  strokes: readonly ImageStroke[] = [],
+) {
   return Effect.scoped(
     Effect.gen(function* () {
       const decoded = yield* decodeImage(file);
       const canvas = yield* Effect.try({
         try: () => {
-          const plan = planImageTransform(decoded.width, decoded.height, rotation, crop);
           const canvas = document.createElement('canvas');
-          canvas.width = plan.outputWidth;
-          canvas.height = plan.outputHeight;
-          const context = canvas.getContext('2d');
-          if (!context) throw new Error('Image editing is unavailable in this browser.');
-          if (rotation === 90) {
-            context.translate(canvas.width, 0);
-            context.rotate(Math.PI / 2);
-          } else if (rotation === 180) {
-            context.translate(canvas.width, canvas.height);
-            context.rotate(Math.PI);
-          } else if (rotation === 270) {
-            context.translate(0, canvas.height);
-            context.rotate(-Math.PI / 2);
-          }
-          context.drawImage(
+          renderImageTransform(
+            canvas,
             decoded.source,
-            plan.sourceX,
-            plan.sourceY,
-            plan.sourceWidth,
-            plan.sourceHeight,
-            0,
-            0,
-            plan.sourceWidth,
-            plan.sourceHeight,
+            decoded.width,
+            decoded.height,
+            rotation,
+            crop,
+            adjustments,
+            Infinity,
+            strokes,
           );
           return canvas;
         },

@@ -1,0 +1,71 @@
+<!doctype html><meta charset="utf-8" /><meta
+  name="viewport"
+  content="width=device-width, initial-scale=1"
+/><title>Fixture Mini App</title>
+<style>
+  body {
+    margin: 0;
+    padding: 24px;
+    font: 16px system-ui;
+    background: #17212b;
+    color: white;
+  }
+  button {
+    padding: 12px;
+    margin: 6px 0;
+    border: 0;
+    border-radius: 8px;
+    background: #5288c1;
+    color: white;
+    width: 100%;
+    cursor: pointer;
+  }
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+  }
+  h1 {
+    font-size: 22px;
+  }
+</style>
+<h1>Fixture Mini App</h1>
+<p>A local test application.</p>
+<button id="main">Show main button</button><button id="back">Show back button</button
+><button id="popup">Show popup</button><button id="confirm">Protect unsaved changes</button
+><button id="send">Send data twice</button>
+<pre id="events"></pre>
+<script>
+  const post = (eventType, eventData = {}) =>
+    parent.postMessage(JSON.stringify({ eventType, eventData }), '*');
+  document.getElementById('main').onclick = () =>
+    post('web_app_setup_main_button', { is_visible: true, is_active: true, text: 'Continue' });
+  document.getElementById('back').onclick = () =>
+    post('web_app_setup_back_button', { is_visible: true });
+  document.getElementById('popup').onclick = () =>
+    post('web_app_open_popup', {
+      title: 'Fixture question',
+      message: 'Choose an answer',
+      buttons: [
+        { id: 'yes', text: 'Yes' },
+        { id: 'no', text: 'No' },
+      ],
+    });
+  document.getElementById('confirm').onclick = () =>
+    post('web_app_setup_closing_behavior', { need_confirmation: true });
+  document.getElementById('send').onclick = () => {
+    post('web_app_data_send', { data: 'fixture-data' });
+    post('web_app_data_send', { data: 'fixture-data' });
+  };
+  window.addEventListener('message', (event) => {
+    if (event.source !== parent) return;
+    if (event.data?.fixtureClick) {
+      document.getElementById(event.data.fixtureClick)?.click();
+      return;
+    }
+    document.getElementById('events').textContent += event.data + '\n';
+    parent.postMessage({ fixtureReceived: event.data }, '*');
+  });
+  post('web_app_ready');
+  post('web_app_request_theme');
+</script>

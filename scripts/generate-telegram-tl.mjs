@@ -196,6 +196,8 @@ function uniqueSorted(values) {
 async function sourceFilesForPublicScan() {
   const explicit = [
     path.join(root, 'src/telegram/transports/webTelegramTransport.ts'),
+    path.join(root, 'src/telegram/transports/qrLogin.ts'),
+    path.join(root, 'src/telegram/transports/qrLogin.test.ts'),
     path.join(root, 'src/telegram/transports/webTelegramTransport.test.ts'),
   ];
   const mtprotoDirectory = path.join(root, 'src/telegram/mtproto');

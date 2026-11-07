@@ -36,6 +36,66 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('voice and video message content receipts', () => {
+  it.each(['mention', 'reaction'] as const)(
+    'acknowledges only viewed %s notifications and retries failures',
+    (kind) =>
+      run(
+        Effect.gen(function* () {
+          const original = yield* createFixtureTelegramTransport();
+          const store = makeMemoryCacheStore();
+          const peer: TelegramPeer = { id: 'u:101', kind: 'user' };
+          const source = voice(peer.id, {
+            media: undefined,
+            mediaUnread: kind === 'mention',
+            outgoing: kind === 'reaction',
+            unreadMention: kind === 'mention',
+            unreadReaction: kind === 'reaction',
+          });
+          let fail = true;
+          const readMessageContents = vi.fn(() =>
+            fail
+              ? Effect.fail(createMtprotoError('transport', 'Receipt failed'))
+              : Effect.succeed({}),
+          );
+          const engine = yield* makeMessagingEngine(
+            {
+              ...original,
+              readMessageContents,
+              getHistory: () =>
+                Effect.succeed({ messages: [source, { ...source, id: 82 }], hasOlder: false }),
+            },
+            store,
+            { manageTabLease: false },
+          );
+          yield* engine.start(credentials);
+          yield* engine.loadConversationView(peer.id);
+          expect(readMessageContents).not.toHaveBeenCalled();
+          expect(
+            (yield* engine.markMessageNotificationsRead(peer, [81]).pipe(Effect.result))._tag,
+          ).toBe('Failure');
+          expect(
+            (yield* store.loadMessage(peer.id, 81))?.[
+              kind === 'mention' ? 'unreadMention' : 'unreadReaction'
+            ],
+          ).toBe(true);
+          fail = false;
+          yield* engine.markMessageNotificationsRead(peer, [81, 81, -1, 999]);
+          yield* engine.markMessageNotificationsRead(peer, [81]);
+          expect(readMessageContents.mock.calls).toHaveLength(2);
+          expect(readMessageContents).toHaveBeenLastCalledWith(peer, [81]);
+          expect(yield* store.loadMessage(peer.id, 81)).toMatchObject({
+            unreadMention: false,
+            unreadReaction: false,
+          });
+          expect(
+            (yield* store.loadMessage(peer.id, 82))?.[
+              kind === 'mention' ? 'unreadMention' : 'unreadReaction'
+            ],
+          ).toBe(true);
+        }),
+      ),
+  );
+
   it.each<TelegramPeer>([
     { id: 'u:101', kind: 'user' },
     { id: 'g:303', kind: 'group' },
@@ -256,6 +316,61 @@ describe('voice and video message content receipts', () => {
           text: 'Edited caption',
           mediaUnread: false,
         });
+      }),
+    ));
+
+  it('does not erase a newer reaction while an earlier read receipt is in flight', () =>
+    run(
+      Effect.gen(function* () {
+        const original = yield* createFixtureTelegramTransport();
+        const store = makeMemoryCacheStore();
+        const entered = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const peer: TelegramPeer = { id: 'u:101', kind: 'user' };
+        const source = voice(peer.id, {
+          outgoing: true,
+          media: undefined,
+          mediaUnread: false,
+          unreadReaction: true,
+        });
+        const engine = yield* makeMessagingEngine(
+          {
+            ...original,
+            getHistory: () => Effect.succeed({ messages: [source], hasOlder: false }),
+            readMessageContents: () =>
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.as({}),
+              ),
+          },
+          store,
+          { manageTabLease: false },
+        );
+        yield* engine.start(credentials);
+        yield* engine.loadConversationView(peer.id);
+        const receipt = yield* engine
+          .markMessageNotificationsRead(peer, [81])
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(entered);
+        const updated = yield* Deferred.make<void>();
+        const unsubscribe = yield* engine.subscribeConversationEvents((event) => {
+          if (event.type === 'message-upsert' && event.message.reactions?.[0]?.count === 2)
+            Deferred.doneUnsafe(updated, Effect.void);
+        });
+        window.__televechaFixture!.emit({
+          type: 'reaction-changed',
+          peerId: peer.id,
+          messageId: 81,
+          unreadReaction: true,
+          reactions: [{ emoji: '👍', count: 2, chosen: false }],
+        });
+        yield* Deferred.await(updated);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(receipt);
+        yield* unsubscribe;
+        expect((yield* store.loadMessage(peer.id, 81))?.unreadReaction).toBe(true);
+        yield* engine.markMessageNotificationsRead(peer, [81]);
+        expect((yield* store.loadMessage(peer.id, 81))?.unreadReaction).toBe(false);
       }),
     ));
 

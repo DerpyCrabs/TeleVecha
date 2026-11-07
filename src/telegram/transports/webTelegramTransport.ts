@@ -1,3 +1,23 @@
+import type { TelegramPollVotes } from '../types';
+import type { TelegramStickerSearchPage } from '../types';
+import type { TelegramSearchFilters } from '../types';
+import type { TelegramWebAppRequest, TelegramWebApp, TelegramBotAppInfo } from '../types';
+import { validWebAppUrl, validWebAppData } from '../../domain/webApp';
+import { isLoginTokenUpdate, watchQrLogin as watchClientQrLogin } from './qrLogin';
+import { changePrivacyRules } from '../../domain/privacy';
+import type {
+  TelegramPrivacyKey,
+  TelegramPrivacyRule,
+  TelegramPrivacySetting,
+  TelegramPrivacyChange,
+} from '../types';
+import type { TelegramActiveSessions } from '../types';
+import type { TelegramReadReceipts } from '../types';
+import type { TelegramPollDraft } from '../types';
+import { pollOptionKey, pollOptionBytes } from '../../domain/poll';
+import type { TelegramPoll, TelegramPollResults, TelegramPollAction } from '../types';
+import type { TelegramContact } from '../types';
+import type { TelegramForwardOptions } from '../types';
 import { SecureRandom, Digest, Kdf } from 'effect/crypto';
 import { Effect, Result, FiberMap, PubSub, ScopedRef, Semaphore, Stream } from 'effect';
 import * as Socket from 'effect/socket/Socket';
@@ -113,6 +133,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   const connectionLock = yield* Semaphore.make(1);
   const clientTasks = yield* FiberMap.make<string, void, never>();
   const updateHub = yield* PubSub.bounded<TransportUpdateBatch>(256);
+  const loginHub = yield* PubSub.sliding<void>(1);
+  yield* Effect.addFinalizer(() => PubSub.shutdown(loginHub));
   const state = {
     credentials: undefined as TelegramCredentials | undefined,
     phoneNumber: '',
@@ -140,6 +162,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     });
   const handleClientEvent = (event: import('../mtproto/events').MtprotoClientEvent) => {
     const raw: unknown = updateEvent.is(event) ? event.update : event;
+    if (isLoginTokenUpdate(raw)) return PubSub.publish(loginHub, undefined).pipe(Effect.asVoid);
     if (connectionStateEvent.is(raw)) {
       if (raw.state === 'connected') {
         return Effect.gen(function* () {
@@ -781,6 +804,31 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       ...(Api.messages.ChannelMessages.is(result) ? { channelPts: result.pts } : {}),
     };
   });
+  const getUnreadNotifications = Effect.fn('WebTelegramTransport.getUnreadNotifications')(
+    function* (peer: TelegramPeer, kind: 'mention' | 'reaction') {
+      const args = {
+        peer: toInputPeer(peer),
+        offsetId: 0,
+        addOffset: 0,
+        limit: 100,
+        maxId: 0,
+        minId: 0,
+      };
+      const result = yield* (yield* getClient).invoke(
+        kind === 'mention'
+          ? Api.messages.GetUnreadMentions(args)
+          : Api.messages.GetUnreadReactions(args),
+      );
+      if (Api.messages.MessagesNotModified.is(result)) return { messages: [], count: 0 };
+      rememberEntities(result.users, result.chats);
+      return {
+        messages: result.messages
+          .map(mapMessage)
+          .filter((message): message is TelegramMessage => Boolean(message)),
+        count: 'count' in result ? result.count : result.messages.length,
+      };
+    },
+  );
   const readHistory = Effect.fn('WebTelegramTransport.readHistory')(function* (
     peer: TelegramPeer,
     maxMessageId: number,
@@ -913,15 +961,19 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     peer?: TelegramPeer,
     limit: number = 50,
     offset?: TelegramSearchOffset,
+    filters?: TelegramSearchFilters,
   ) {
     const result = peer
       ? yield* (yield* getClient).invoke(
           Api.messages.Search({
             peer: toInputPeer(peer),
+            ...(filters?.fromPeer ? { fromId: toInputPeer(filters.fromPeer) } : {}),
             q: query,
-            filter: Api.InputMessagesFilterEmpty(),
-            minDate: 0,
-            maxDate: 0,
+            filter: filters?.kind
+              ? sharedMediaFilters()[filters.kind]
+              : Api.InputMessagesFilterEmpty(),
+            minDate: filters?.minDate ?? 0,
+            maxDate: filters?.maxDate ?? 0,
             offsetId: offset?.messageId ?? 0,
             addOffset: 0,
             limit: limit + 1,
@@ -932,10 +984,15 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         )
       : yield* (yield* getClient).invoke(
           Api.messages.SearchGlobal({
+            ...(filters?.chatType === 'users' ? { usersOnly: true } : {}),
+            ...(filters?.chatType === 'groups' ? { groupsOnly: true } : {}),
+            ...(filters?.chatType === 'channels' ? { broadcastsOnly: true } : {}),
             q: query,
-            filter: Api.InputMessagesFilterEmpty(),
-            minDate: 0,
-            maxDate: 0,
+            filter: filters?.kind
+              ? sharedMediaFilters()[filters.kind]
+              : Api.InputMessagesFilterEmpty(),
+            minDate: filters?.minDate ?? 0,
+            maxDate: filters?.maxDate ?? 0,
             offsetRate: offset?.rate ?? 0,
             offsetPeer: offset?.peer ? toInputPeer(offset.peer) : Api.InputPeerEmpty(),
             offsetId: offset?.messageId ?? 0,
@@ -996,7 +1053,10 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       (candidate): candidate is Tl.User =>
         Api.User.is(candidate) && candidate.id.toString() === peer.id.slice(2),
     );
+    const menu = Api.UserFull.is(result.fullUser) ? result.fullUser.botInfo?.menuButton : undefined;
     return {
+      ...(Api.BotMenuButton.is(menu) ? { botMenu: { text: menu.text, url: menu.url } } : {}),
+      ...(user?.bot ? { botHasMainApp: Boolean(user.botHasMainApp) } : {}),
       firstName: user?.firstName,
       lastName: user?.lastName,
       phone: user?.phone,
@@ -1037,13 +1097,17 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     peer: TelegramPeer,
     limit: number = 50,
     offset: number = 0,
+    query?: string,
   ) {
     if (peer.kind === 'user') return { members: [], totalCount: 0, hasMore: false };
     if (peer.kind === 'channel') {
       const result = yield* (yield* getClient).invoke(
         Api.channels.GetParticipants({
           channel: inputChannel(peer),
-          filter: Api.ChannelParticipantsRecent(),
+          filter:
+            query === undefined
+              ? Api.ChannelParticipantsRecent()
+              : Api.ChannelParticipantsSearch({ q: query.trim() }),
           offset,
           limit,
           hash: 0n,
@@ -1064,12 +1128,12 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
             : {};
         return [mapGroupMember(user, role)];
       });
-      const nextOffset = offset + members.length;
+      const nextOffset = offset + result.participants.length;
       return {
         members,
         totalCount: result.count,
-        hasMore: nextOffset < result.count,
-        ...(nextOffset < result.count ? { nextOffset } : {}),
+        hasMore: result.participants.length > 0 && nextOffset < result.count,
+        ...(result.participants.length > 0 && nextOffset < result.count ? { nextOffset } : {}),
       } satisfies TelegramGroupMemberPage;
     }
     const result = yield* (yield* getClient).invoke(
@@ -1091,8 +1155,14 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
           : {};
       return [mapGroupMember(user, role)];
     });
-    const members = allMembers.slice(offset, offset + limit);
-    const totalCount = allMembers.length;
+    const term = query?.trim().toLocaleLowerCase().replace(/^@/, '') ?? '';
+    const matching = term
+      ? allMembers.filter((member) =>
+          `${member.title} ${member.username ?? ''}`.toLocaleLowerCase().includes(term),
+        )
+      : allMembers;
+    const members = matching.slice(offset, offset + limit);
+    const totalCount = matching.length;
     const nextOffset = offset + members.length;
     return {
       members,
@@ -1290,6 +1360,124 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     }
     return yield* Effect.fail(
       createMtprotoError('protocol', 'Telegram accepted the send but returned no message.'),
+    );
+  });
+  const updatePoll = Effect.fn('WebTelegramTransport.updatePoll')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+    poll: TelegramPoll,
+    action: TelegramPollAction,
+    options: readonly string[],
+  ) {
+    const client = yield* getClient;
+    const result =
+      action === 'vote'
+        ? yield* client.invoke(
+            Api.messages.SendVote({
+              peer: toInputPeer(peer),
+              msgId: messageId,
+              options: options.map(pollOptionBytes),
+            }),
+          )
+        : action === 'refresh'
+          ? yield* client.invoke(
+              Api.messages.GetPollResults({
+                peer: toInputPeer(peer),
+                msgId: messageId,
+                pollHash: telegramLong(poll.hash),
+              }),
+            )
+          : yield* client.invoke(
+              Api.messages.EditMessage({
+                peer: toInputPeer(peer),
+                id: messageId,
+                media: Api.InputMediaPoll({
+                  poll: Api.Poll({
+                    id: telegramLong(poll.id),
+                    hash: telegramLong(poll.hash),
+                    closed: true,
+                    question: Api.TextWithEntities({ text: poll.question, entities: [] }),
+                    answers: poll.answers.map((answer) =>
+                      Api.PollAnswer({
+                        text: Api.TextWithEntities({ text: answer.text, entities: [] }),
+                        option: pollOptionBytes(answer.option),
+                      }),
+                    ),
+                  }),
+                }),
+              }),
+            );
+    return { updateBatches: toUpdateBatches(result) };
+  });
+  const sendPoll = Effect.fn('WebTelegramTransport.sendPoll')(function* (
+    peer: TelegramPeer,
+    draft: TelegramPollDraft,
+    randomId: string,
+  ) {
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.SendMedia({
+        peer: toInputPeer(peer),
+        randomId: telegramLong(randomId),
+        message: '',
+        media: Api.InputMediaPoll({
+          poll: Api.Poll({
+            id: 0n,
+            hash: 0n,
+            question: Api.TextWithEntities({ text: draft.question, entities: [] }),
+            answers: draft.answers.map((text, index) =>
+              Api.PollAnswer({
+                text: Api.TextWithEntities({ text, entities: [] }),
+                option: new Uint8Array([index]),
+              }),
+            ),
+            ...(draft.publicVoters ? { publicVoters: true as const } : {}),
+            ...(draft.multipleChoice ? { multipleChoice: true as const } : {}),
+            ...(draft.quiz ? { quiz: true as const } : {}),
+          }),
+          ...(draft.quiz && draft.correctAnswer !== undefined
+            ? { correctAnswers: [draft.correctAnswer] }
+            : {}),
+          ...(draft.quiz && draft.solution
+            ? { solution: draft.solution, solutionEntities: [] }
+            : {}),
+        }),
+      }),
+    );
+    return yield* mapOutgoingSendResult(
+      result,
+      peer,
+      randomId,
+      'Telegram accepted the poll but returned no message.',
+    );
+  });
+  const sendContact = Effect.fn('WebTelegramTransport.sendContact')(function* (
+    peer: TelegramPeer,
+    contact: TelegramContact,
+    randomId: string,
+  ) {
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.SendMedia({
+        peer: toInputPeer(peer),
+        message: '',
+        randomId: telegramLong(randomId),
+        media: Api.InputMediaContact({
+          phoneNumber: contact.phoneNumber,
+          firstName: contact.firstName,
+          lastName: contact.lastName,
+          vcard: contact.vcard,
+        }),
+      }),
+    );
+    if (Api.UpdateShortSentMessage.is(result)) {
+      const sent = yield* mapShortSentMessage(peer, '', randomId, result);
+      const message = { ...sent.message, contact };
+      return { message, updateBatches: toUpdateBatches(result, [message]) };
+    }
+    return yield* mapOutgoingSendResult(
+      result,
+      peer,
+      randomId,
+      'Telegram accepted the contact but returned no message.',
     );
   });
   const sendFile = Effect.fn('WebTelegramTransport.sendFile')(function* (
@@ -1642,11 +1830,144 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   function telegramColor(color: number) {
     return `#${(color >>> 0).toString(16).padStart(8, '0').slice(-6)}`;
   }
+  const searchStickers = Effect.fn('WebTelegramTransport.searchStickers')(function* (
+    query: string,
+    offset: number = 0,
+  ) {
+    const emojiOnly =
+      /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(query) &&
+      !/[\p{L}\p{N}]/u.test(query);
+    const emoticon = emojiOnly
+      ? Array.from(
+          new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(query),
+          (value) => value.segment.trim(),
+        )
+          .filter(Boolean)
+          .join(' ')
+      : '';
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.SearchStickers({
+        q: emojiOnly ? '' : query,
+        emoticon,
+        langCode: [],
+        offset,
+        limit: 50,
+        hash: 0n,
+      }),
+    );
+    if (!Api.messages.FoundStickers.is(result))
+      return { stickers: [] } satisfies TelegramStickerSearchPage;
+    return {
+      stickers: result.stickers.flatMap((document) => mapStickerDocument(document)),
+      ...(result.nextOffset !== undefined && result.nextOffset > offset
+        ? { nextOffset: result.nextOffset }
+        : {}),
+    };
+  });
   const getRecentStickers = Effect.fn('WebTelegramTransport.getRecentStickers')(function* () {
     const result = yield* (yield* getClient).invoke(Api.messages.GetRecentStickers({ hash: 0n }));
     if (!Api.messages.RecentStickers.is(result)) return [];
     return result.stickers.flatMap((document) => mapStickerDocument(document));
   });
+  const getFavoriteStickers = Effect.fn('WebTelegramTransport.getFavoriteStickers')(function* () {
+    const result = yield* (yield* getClient).invoke(Api.messages.GetFavedStickers({ hash: 0n }));
+    return Api.messages.FavedStickers.is(result)
+      ? result.stickers.flatMap((document) => mapStickerDocument(document))
+      : [];
+  });
+  const setStickerFavorite = Effect.fn('WebTelegramTransport.setStickerFavorite')(function* (
+    sticker: TelegramSticker,
+    favorite: boolean,
+  ) {
+    return yield* (yield* getClient).invoke(
+      Api.messages.FaveSticker({
+        id: Api.InputDocument({
+          id: BigInt(sticker.id),
+          accessHash: BigInt(sticker.accessHash),
+          fileReference: sticker.fileReference,
+        }),
+        unfave: !favorite,
+      }),
+    );
+  });
+  function mapStickerSet(
+    set: Tl.StickerSet,
+    documents: readonly Tl.TypeDocument[],
+  ): TelegramStickerPack {
+    return {
+      id: set.id.toString(),
+      accessHash: set.accessHash.toString(),
+      shortName: set.shortName,
+      title: set.title,
+      installed: set.installedDate !== undefined && !set.archived,
+      count: set.count,
+      stickers: documents.flatMap((document) => mapStickerDocument(document)),
+    };
+  }
+  const getStickerPack = Effect.fn('WebTelegramTransport.getStickerPack')(function* (
+    shortName: string,
+  ) {
+    if (!/^[a-zA-Z0-9_]{1,64}$/.test(shortName))
+      return yield* Effect.fail(createMtprotoError('protocol', 'Invalid sticker pack name.'));
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.GetStickerSet({
+        stickerset: Api.InputStickerSetShortName({ shortName }),
+        hash: 0,
+      }),
+    );
+    if (
+      !Api.messages.StickerSet.is(result) ||
+      !Api.StickerSet.is(result.set) ||
+      result.set.masks ||
+      result.set.emojis
+    )
+      return yield* Effect.fail(createMtprotoError('protocol', 'This is not a sticker pack.'));
+    return mapStickerSet(result.set, result.documents);
+  });
+  const searchStickerPacks = Effect.fn('WebTelegramTransport.searchStickerPacks')(function* (
+    query: string,
+  ) {
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.SearchStickerSets({ q: query, hash: 0n }),
+    );
+    if (!Api.messages.FoundStickerSets.is(result)) return [];
+    return result.sets.flatMap((covered) => {
+      if (
+        !('set' in covered) ||
+        !Api.StickerSet.is(covered.set) ||
+        covered.set.masks ||
+        covered.set.emojis
+      )
+        return [];
+      const documents =
+        'documents' in covered
+          ? covered.documents
+          : 'covers' in covered
+            ? covered.covers
+            : 'cover' in covered
+              ? [covered.cover]
+              : [];
+      return [mapStickerSet(covered.set, documents)];
+    });
+  });
+  const setStickerPackInstalled = Effect.fn('WebTelegramTransport.setStickerPackInstalled')(
+    function* (pack: TelegramStickerPack, installed: boolean) {
+      if (!pack.accessHash)
+        return yield* Effect.fail(
+          createMtprotoError('protocol', 'The sticker pack needs to be loaded again.'),
+        );
+      const stickerset = Api.InputStickerSetID({
+        id: BigInt(pack.id),
+        accessHash: BigInt(pack.accessHash),
+      });
+      if (!installed)
+        return yield* (yield* getClient).invoke(Api.messages.UninstallStickerSet({ stickerset }));
+      yield* (yield* getClient).invoke(
+        Api.messages.InstallStickerSet({ stickerset, archived: false }),
+      );
+      return true;
+    },
+  );
   const getStickerPacks = Effect.fn('WebTelegramTransport.getStickerPacks')(function* () {
     const result = yield* (yield* getClient).invoke(Api.messages.GetAllStickers({ hash: 0n }));
     if (!Api.messages.AllStickers.is(result)) return [];
@@ -1665,11 +1986,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
               }),
             );
             return {
-              id: set.id.toString(),
-              title: set.title,
-              stickers: Api.messages.StickerSet.is(contents)
-                ? contents.documents.flatMap((document) => mapStickerDocument(document))
-                : [],
+              ...mapStickerSet(set, Api.messages.StickerSet.is(contents) ? contents.documents : []),
+              installed: true,
             };
           }).pipe(Effect.result),
         ),
@@ -1780,6 +2098,144 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         createMtprotoError('protocol', 'Telegram returned no custom emoji bytes.'),
       );
     return new Blob([bytes as BlobPart], { type: document.mimeType });
+  });
+  const getBotApp = Effect.fn('WebTelegramTransport.getBotApp')(function* (
+    bot: TelegramPeer,
+    shortName: string,
+  ): Effect.fn.Return<TelegramBotAppInfo, MtprotoError> {
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.GetBotApp({
+        app: Api.InputBotAppShortName({ botId: inputUser(bot), shortName }),
+        hash: 0n,
+      }),
+    );
+    if (!Api.BotApp.is(result.app))
+      return yield* Effect.fail(
+        createMtprotoError('protocol', 'Telegram returned no Mini App information.'),
+      );
+    return {
+      id: result.app.id.toString(),
+      accessHash: result.app.accessHash.toString(),
+      title: result.app.title,
+      description: result.app.description,
+      requestWriteAccess: Boolean(result.requestWriteAccess),
+    };
+  });
+  const requestWebApp = Effect.fn('WebTelegramTransport.requestWebApp')(function* (
+    request: TelegramWebAppRequest,
+  ): Effect.fn.Return<TelegramWebApp, MtprotoError> {
+    if (
+      request.bot.kind !== 'user' ||
+      (!['main', 'app'].includes(request.mode) && !validWebAppUrl(request.url))
+    )
+      return yield* Effect.fail(createMtprotoError('protocol', 'This Mini App link is invalid.'));
+    const client = yield* getClient;
+    const common = {
+      bot: inputUser(request.bot),
+      platform: 'web',
+      ...(request.displayMode === 'compact'
+        ? { compact: true as const }
+        : request.displayMode === 'fullscreen'
+          ? { fullscreen: true as const }
+          : {}),
+      themeParams: Api.DataJSON({ data: JSON.stringify(request.theme) }),
+      ...(request.startParam ? { startParam: request.startParam } : {}),
+    };
+    if (request.mode === 'app' && !request.app)
+      return yield* Effect.fail(createMtprotoError('protocol', 'Mini App information is missing.'));
+    const result =
+      request.mode === 'app'
+        ? yield* client.invoke(
+            Api.messages.RequestAppWebView({
+              peer: toInputPeer(request.peer),
+              app: Api.InputBotAppID({
+                id: telegramLong(request.app!.id),
+                accessHash: telegramLong(request.app!.accessHash),
+              }),
+              platform: common.platform,
+              themeParams: common.themeParams,
+              ...(request.startParam ? { startParam: request.startParam } : {}),
+              ...(request.writeAllowed ? { writeAllowed: true as const } : {}),
+              ...(request.displayMode === 'compact'
+                ? { compact: true as const }
+                : request.displayMode === 'fullscreen'
+                  ? { fullscreen: true as const }
+                  : {}),
+            }),
+          )
+        : request.mode === 'main'
+          ? yield* client.invoke(
+              Api.messages.RequestMainWebView({ ...common, peer: toInputPeer(request.peer) }),
+            )
+          : request.mode === 'simple'
+            ? yield* client.invoke(
+                Api.messages.RequestSimpleWebView({ ...common, url: request.url! }),
+              )
+            : yield* client.invoke(
+                Api.messages.RequestWebView({
+                  ...common,
+                  peer: toInputPeer(request.peer),
+                  url: request.url!,
+                  ...(request.mode === 'menu' ? { fromBotMenu: true as const } : {}),
+                }),
+              );
+    if (!validWebAppUrl(result.url))
+      return yield* Effect.fail(
+        createMtprotoError('protocol', 'Telegram returned an invalid Mini App URL.'),
+      );
+    return {
+      url: result.url,
+      ...(result.queryId === undefined ? {} : { queryId: result.queryId.toString() }),
+      fullsize: Boolean(result.fullsize),
+      fullscreen: Boolean(result.fullscreen),
+    };
+  });
+  const prolongWebApp = Effect.fn('WebTelegramTransport.prolongWebApp')(function* (
+    peer: TelegramPeer,
+    bot: TelegramPeer,
+    queryId: string,
+  ) {
+    yield* (yield* getClient).invoke(
+      Api.messages.ProlongWebView({
+        peer: toInputPeer(peer),
+        bot: inputUser(bot),
+        queryId: telegramLong(queryId),
+      }),
+    );
+  });
+  const sendWebAppData = Effect.fn('WebTelegramTransport.sendWebAppData')(function* (
+    bot: TelegramPeer,
+    buttonText: string,
+    data: string,
+    randomId: string,
+  ) {
+    if (!validWebAppData(data))
+      return yield* Effect.fail(
+        createMtprotoError('protocol', 'Mini App data must contain between 1 and 4096 bytes.'),
+      );
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.SendWebViewData({
+        bot: inputUser(bot),
+        randomId: telegramLong(randomId),
+        buttonText,
+        data,
+      }),
+    );
+    yield* PubSub.publish(updateHub, mapUpdateEnvelope(result));
+  });
+  const invokeWebAppMethod = Effect.fn('WebTelegramTransport.invokeWebAppMethod')(function* (
+    bot: TelegramPeer,
+    method: string,
+    params: string,
+  ) {
+    const result = yield* (yield* getClient).invoke(
+      Api.bots.InvokeWebViewCustomMethod({
+        bot: inputUser(bot),
+        customMethod: method,
+        params: Api.DataJSON({ data: params }),
+      }),
+    );
+    return result.data;
   });
   const getBotCommands = Effect.fn('WebTelegramTransport.getBotCommands')(function* (
     peer: TelegramPeer,
@@ -1917,6 +2373,346 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     const sentMessage = { ...message, randomId };
     return { message: sentMessage, updateBatches: toUpdateBatches(result, [sentMessage]) };
   });
+  function privacyInputKey(key: TelegramPrivacyKey): Tl.TypeInputPrivacyKey {
+    switch (key) {
+      case 'phone-number':
+        return Api.InputPrivacyKeyPhoneNumber();
+      case 'added-by-phone':
+        return Api.InputPrivacyKeyAddedByPhone();
+      case 'last-seen':
+        return Api.InputPrivacyKeyStatusTimestamp();
+      case 'profile-photo':
+        return Api.InputPrivacyKeyProfilePhoto();
+      case 'about':
+        return Api.InputPrivacyKeyAbout();
+      case 'birthday':
+        return Api.InputPrivacyKeyBirthday();
+      case 'forwards':
+        return Api.InputPrivacyKeyForwards();
+      case 'calls':
+        return Api.InputPrivacyKeyPhoneCall();
+      case 'p2p':
+        return Api.InputPrivacyKeyPhoneP2P();
+      case 'invites':
+        return Api.InputPrivacyKeyChatInvite();
+      case 'voice-messages':
+        return Api.InputPrivacyKeyVoiceMessages();
+      case 'saved-music':
+        return Api.InputPrivacyKeySavedMusic();
+    }
+  }
+  function mapPrivacy(
+    key: TelegramPrivacyKey,
+    result: Tl.account.PrivacyRules,
+  ): TelegramPrivacySetting {
+    rememberEntities(result.users, result.chats);
+    const rules: TelegramPrivacyRule[] = result.rules.map((rule) => {
+      if (Api.PrivacyValueAllowAll.is(rule)) return { kind: 'allow-all' };
+      if (Api.PrivacyValueDisallowAll.is(rule)) return { kind: 'deny-all' };
+      if (Api.PrivacyValueAllowContacts.is(rule)) return { kind: 'allow-contacts' };
+      if (Api.PrivacyValueDisallowContacts.is(rule)) return { kind: 'deny-contacts' };
+      if (Api.PrivacyValueAllowPremium.is(rule)) return { kind: 'allow-premium' };
+      if (Api.PrivacyValueAllowBots.is(rule)) return { kind: 'allow-bots' };
+      if (Api.PrivacyValueDisallowBots.is(rule)) return { kind: 'deny-bots' };
+      if (Api.PrivacyValueAllowCloseFriends.is(rule)) return { kind: 'allow-close-friends' };
+      if (Api.PrivacyValueAllowUsers.is(rule) || Api.PrivacyValueDisallowUsers.is(rule))
+        return {
+          kind: Api.PrivacyValueAllowUsers.is(rule) ? 'allow-users' : 'deny-users',
+          users: rule.users.map((id) => peerFromId(`u:${id}`, state.entities)),
+        };
+      if (
+        Api.PrivacyValueAllowChatParticipants.is(rule) ||
+        Api.PrivacyValueDisallowChatParticipants.is(rule)
+      )
+        return {
+          kind: Api.PrivacyValueAllowChatParticipants.is(rule) ? 'allow-chats' : 'deny-chats',
+          chats: rule.chats.map((id) => id.toString()),
+        };
+      return { kind: 'unsupported' };
+    });
+    const peers = [
+      ...result.users.map((user) =>
+        peerSearchResult(peerFromId(`u:${user.id}`, state.entities), user),
+      ),
+      ...result.chats.map((chat) => {
+        const id = `${Api.Channel.is(chat) || Api.ChannelForbidden.is(chat) ? 'c' : 'g'}:${chat.id}`;
+        return peerSearchResult(peerFromId(id, state.entities), chat);
+      }),
+    ];
+    return { key, rules, peers };
+  }
+  function privacyInputRule(rule: TelegramPrivacyRule): Tl.TypeInputPrivacyRule {
+    switch (rule.kind) {
+      case 'allow-all':
+        return Api.InputPrivacyValueAllowAll();
+      case 'deny-all':
+        return Api.InputPrivacyValueDisallowAll();
+      case 'allow-contacts':
+        return Api.InputPrivacyValueAllowContacts();
+      case 'deny-contacts':
+        return Api.InputPrivacyValueDisallowContacts();
+      case 'allow-premium':
+        return Api.InputPrivacyValueAllowPremium();
+      case 'allow-bots':
+        return Api.InputPrivacyValueAllowBots();
+      case 'deny-bots':
+        return Api.InputPrivacyValueDisallowBots();
+      case 'allow-close-friends':
+        return Api.InputPrivacyValueAllowCloseFriends();
+      case 'allow-users':
+      case 'deny-users': {
+        if (rule.users.some((peer) => !peer.accessHash))
+          throw new Error(
+            'Telegram did not provide details for one of the existing exceptions. No settings were changed.',
+          );
+        const users = rule.users.map(inputUser);
+        return rule.kind === 'allow-users'
+          ? Api.InputPrivacyValueAllowUsers({ users })
+          : Api.InputPrivacyValueDisallowUsers({ users });
+      }
+      case 'allow-chats':
+        return Api.InputPrivacyValueAllowChatParticipants({ chats: rule.chats.map(telegramLong) });
+      case 'deny-chats':
+        return Api.InputPrivacyValueDisallowChatParticipants({
+          chats: rule.chats.map(telegramLong),
+        });
+      case 'unsupported':
+        throw new Error('These privacy rules are not supported yet. No settings were changed.');
+    }
+  }
+  const getPrivacy = Effect.fn('WebTelegramTransport.getPrivacy')(function* (
+    key: TelegramPrivacyKey,
+  ) {
+    return mapPrivacy(
+      key,
+      yield* (yield* getClient).invoke(Api.account.GetPrivacy({ key: privacyInputKey(key) })),
+    );
+  });
+  const setPrivacy = Effect.fn('WebTelegramTransport.setPrivacy')(function* (
+    key: TelegramPrivacyKey,
+    change: TelegramPrivacyChange,
+  ) {
+    const current = yield* getPrivacy(key);
+    const rules = yield* Effect.try({
+      try: () => changePrivacyRules(current.rules, change).map(privacyInputRule),
+      catch: (error) =>
+        createMtprotoError(
+          'protocol',
+          error instanceof Error ? error.message : 'Invalid privacy rule.',
+        ),
+    });
+    const result = yield* (yield* getClient).invoke(
+      Api.account.SetPrivacy({ key: privacyInputKey(key), rules }),
+    );
+    return mapPrivacy(key, result);
+  });
+  const getReadTimePrivacy = Effect.fn('WebTelegramTransport.getReadTimePrivacy')(function* () {
+    const settings = yield* (yield* getClient).invoke(Api.account.GetGlobalPrivacySettings());
+    return Boolean(settings.hideReadMarks);
+  });
+  const setReadTimePrivacy = Effect.fn('WebTelegramTransport.setReadTimePrivacy')(function* (
+    hidden: boolean,
+  ) {
+    const client = yield* getClient;
+    const current = yield* client.invoke(Api.account.GetGlobalPrivacySettings());
+    const { hideReadMarks: _previous, ...rest } = current;
+    const result = yield* client.invoke(
+      Api.account.SetGlobalPrivacySettings({
+        settings: { ...rest, ...(hidden ? { hideReadMarks: true as const } : {}) },
+      }),
+    );
+    return Boolean(result.hideReadMarks);
+  });
+  const getActiveSessions = Effect.fn('WebTelegramTransport.getActiveSessions')(
+    function* (): Effect.fn.Return<TelegramActiveSessions, MtprotoError> {
+      const result = yield* (yield* getClient).invoke(Api.account.GetAuthorizations());
+      return {
+        ttlDays: result.authorizationTtlDays,
+        sessions: result.authorizations
+          .map((session) => ({
+            id: session.hash.toString(),
+            current: Boolean(session.current),
+            device: session.deviceModel,
+            platform: session.platform,
+            systemVersion: session.systemVersion,
+            appName: session.appName,
+            appVersion: session.appVersion,
+            createdAt: session.dateCreated,
+            activeAt: session.dateActive,
+            ip: session.ip,
+            country: session.country,
+            region: session.region,
+            passwordPending: Boolean(session.passwordPending),
+            unconfirmed: Boolean(session.unconfirmed),
+          }))
+          .sort(
+            (left, right) =>
+              Number(right.current) - Number(left.current) || right.activeAt - left.activeAt,
+          ),
+      };
+    },
+  );
+  function sessionMutationError(error: MtprotoError) {
+    return telegramRpcErrorMessage(error) === 'FRESH_RESET_AUTHORISATION_FORBIDDEN'
+      ? createMtprotoError(
+          'rpc',
+          'Telegram requires this device to be signed in for 24 hours before it can change other sessions. Use an older session or try later.',
+          { code: error.code, details: error.details },
+        )
+      : error;
+  }
+  const terminateSession = Effect.fn('WebTelegramTransport.terminateSession')(function* (
+    hash?: string,
+  ) {
+    const client = yield* getClient;
+    const result = yield* (
+      hash === undefined
+        ? client.invoke(Api.auth.ResetAuthorizations())
+        : client.invoke(Api.account.ResetAuthorization({ hash: telegramLong(hash) }))
+    ).pipe(Effect.mapError(sessionMutationError));
+    if (!result)
+      return yield* Effect.fail(
+        createMtprotoError('protocol', 'Telegram could not terminate this session.'),
+      );
+  });
+  const setSessionTtl = Effect.fn('WebTelegramTransport.setSessionTtl')(function* (days: number) {
+    const result = yield* (yield* getClient)
+      .invoke(Api.account.SetAuthorizationTTL({ authorizationTtlDays: days }))
+      .pipe(Effect.mapError(sessionMutationError));
+    if (!result)
+      return yield* Effect.fail(
+        createMtprotoError('protocol', 'Telegram could not change the session expiry.'),
+      );
+  });
+  const getPollVotes = Effect.fn('WebTelegramTransport.getPollVotes')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+    option?: string,
+    offset?: string,
+  ): Effect.fn.Return<TelegramPollVotes, MtprotoError> {
+    const loaded = yield* (yield* getClient)
+      .invoke(
+        Api.messages.GetPollVotes({
+          peer: toInputPeer(peer),
+          id: messageId,
+          ...(option ? { option: pollOptionBytes(option) } : {}),
+          ...(offset ? { offset } : {}),
+          limit: 50,
+        }),
+      )
+      .pipe(Effect.result);
+    if (loaded._tag === 'Failure') {
+      const states: Record<string, NonNullable<TelegramPollVotes['unavailable']>> = {
+        BROADCAST_FORBIDDEN: 'broadcast',
+        POLL_VOTE_REQUIRED: 'vote-required',
+        MSG_ID_INVALID: 'deleted',
+        MESSAGE_ID_INVALID: 'deleted',
+      };
+      const unavailable = states[telegramRpcErrorMessage(loaded.failure) ?? ''];
+      if (unavailable) return { unavailable, people: [], count: 0 };
+      return yield* Effect.fail(loaded.failure);
+    }
+    const result = loaded.success;
+    rememberEntities(result.users, result.chats);
+    return {
+      count: result.count,
+      nextOffset:
+        result.votes.length && result.nextOffset && result.nextOffset !== offset
+          ? result.nextOffset
+          : undefined,
+      people: result.votes.flatMap((vote) => {
+        const voter = mapPeer(vote.peer, state.entities);
+        if (!voter) return [];
+        const entity = state.entities.get(voter.id);
+        const title = entityTitle(entity) || 'Deleted account';
+        return [
+          {
+            id: voter.id,
+            peer: voter,
+            name: Api.User.is(entity) && entity.self ? 'You' : title,
+            initials: initials(title),
+            ...peerAvatar(voter.id, entity),
+            date: vote.date,
+            options:
+              'options' in vote
+                ? vote.options.map(pollOptionKey)
+                : 'option' in vote
+                  ? [pollOptionKey(vote.option)]
+                  : option
+                    ? [option]
+                    : [],
+          },
+        ];
+      }),
+    };
+  });
+  const getMessageReadReceipts = Effect.fn('WebTelegramTransport.getMessageReadReceipts')(
+    function* (
+      peer: TelegramPeer,
+      messageId: number,
+    ): Effect.fn.Return<TelegramReadReceipts, MtprotoError> {
+      const client = yield* getClient;
+      const loaded = yield* Effect.gen(function* () {
+        if (peer.kind === 'user') {
+          const result = yield* client.invoke(
+            Api.messages.GetOutboxReadDate({ peer: toInputPeer(peer), msgId: messageId }),
+          );
+          return [{ userId: BigInt(peer.id.slice(2)), date: result.date }];
+        }
+        return yield* client.invoke(
+          Api.messages.GetMessageReadParticipants({ peer: toInputPeer(peer), msgId: messageId }),
+        );
+      }).pipe(Effect.result);
+      if (loaded._tag === 'Failure') {
+        const status: Record<string, TelegramReadReceipts['state']> = {
+          MESSAGE_NOT_READ_YET: 'unread',
+          MESSAGE_TOO_OLD: 'expired',
+          MSG_TOO_OLD: 'expired',
+          USER_PRIVACY_RESTRICTED: 'privacy',
+          YOUR_PRIVACY_RESTRICTED: 'own-privacy',
+          CHAT_TOO_BIG: 'too-large',
+          BROADCAST_FORBIDDEN: 'unavailable',
+          MESSAGE_ID_INVALID: 'unavailable',
+          MSG_ID_INVALID: 'unavailable',
+        };
+        const state = status[telegramRpcErrorMessage(loaded.failure) ?? ''];
+        if (state) return { state, people: [] };
+        return yield* Effect.fail(loaded.failure);
+      }
+      const dates = loaded.success.filter((item) => item.date > 0);
+      if (!dates.length) return { state: 'unread', people: [] };
+      if (dates.some((item) => !state.entities.has(`u:${item.userId}`))) {
+        yield* (
+          peer.kind === 'user'
+            ? fetchEntity(peer).pipe(Effect.asVoid)
+            : getGroupMembers(peer, 200).pipe(Effect.asVoid)
+        ).pipe(Effect.catch(() => Effect.void));
+      }
+      return {
+        state: 'available',
+        people: dates
+          .map((item) => {
+            const id = `u:${item.userId}`,
+              entity = state.entities.get(id),
+              title = entityTitle(entity) || 'Unknown user';
+            return {
+              id,
+              peer: Api.User.is(entity)
+                ? (mapPeer(Api.PeerUser({ userId: item.userId }), state.entities) ?? {
+                    id,
+                    kind: 'user' as const,
+                  })
+                : { id, kind: 'user' as const },
+              name: title,
+              initials: initials(title),
+              ...peerAvatar(id, entity),
+              readAt: item.date,
+            };
+          })
+          .sort((left, right) => right.readAt - left.readAt),
+      };
+    },
+  );
   const getReactionPeople = Effect.fn('WebTelegramTransport.getReactionPeople')(function* (
     peer: TelegramPeer,
     messageId: number,
@@ -2068,9 +2864,12 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     toPeer: TelegramPeer,
     messageId: number,
     randomId: string,
+    options?: TelegramForwardOptions,
   ) {
     const result = yield* (yield* getClient).invoke(
       Api.messages.ForwardMessages({
+        ...(options?.hideAuthor || options?.hideCaption ? { dropAuthor: true as const } : {}),
+        ...(options?.hideCaption ? { dropMediaCaptions: true as const } : {}),
         fromPeer: toInputPeer(fromPeer),
         id: [messageId],
         randomId: [telegramLong(randomId)],
@@ -2109,6 +2908,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
               date: raw.date,
               outgoing: Boolean(raw.out),
               mediaUnread: Boolean(raw.mediaUnread),
+              unreadMention: Boolean(raw.mentioned && raw.mediaUnread),
               replyToId: Api.MessageReplyHeader.is(raw.replyTo)
                 ? raw.replyTo.replyToMsgId
                 : undefined,
@@ -2140,6 +2940,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
               date: raw.date,
               outgoing: Boolean(raw.out),
               mediaUnread: Boolean(raw.mediaUnread),
+              unreadMention: Boolean(raw.mentioned && raw.mediaUnread),
               replyToId: Api.MessageReplyHeader.is(raw.replyTo)
                 ? raw.replyTo.replyToMsgId
                 : undefined,
@@ -2352,6 +3153,17 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         },
       ];
     }
+    if (Api.UpdateMessagePoll.is(update))
+      return [
+        {
+          type: 'poll-changed',
+          pollId: update.pollId.toString(),
+          peerId: update.peer ? toPeerId(update.peer) : undefined,
+          messageId: update.msgId,
+          poll: update.poll ? mapPoll(update.poll, update.results) : undefined,
+          results: mapPollResults(update.results),
+        },
+      ];
     if (Api.UpdateMessageReactions.is(update)) {
       const peerId = toPeerId(update.peer);
       return peerId
@@ -2361,6 +3173,11 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
               peerId,
               messageId: update.msgId,
               reactions: mapReactions(update.reactions),
+              unreadReaction: Boolean(
+                update.reactions.recentReactions?.some(
+                  (reaction) => reaction.unread && !reaction.my,
+                ),
+              ),
             },
           ]
         : [];
@@ -2494,6 +3311,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     if (Api.UpdateChannelTooLong.is(update)) {
       return [{ type: 'channel-too-long', peerId: `c:${update.channelId}` }];
     }
+    if (Api.UpdateWebViewResultSent.is(update))
+      return [{ type: 'web-app-result', queryId: update.queryId.toString() }];
     if (Api.UpdateBotCommands.is(update)) {
       const peerId = toPeerId(update.peer);
       return peerId ? [{ type: 'bot-commands-changed', peerId, botId: `u:${update.botId}` }] : [];
@@ -2556,6 +3375,10 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         date: message.date,
         outgoing: Boolean(message.out),
         mediaUnread: Boolean(message.mediaUnread),
+        unreadMention: Boolean(message.mentioned && message.mediaUnread),
+        unreadReaction: Boolean(
+          message.reactions?.recentReactions?.some((reaction) => reaction.unread && !reaction.my),
+        ),
         replyToId: Api.MessageReplyHeader.is(message.replyTo)
           ? message.replyTo.replyToMsgId
           : undefined,
@@ -2612,6 +3435,10 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       date: message.date,
       outgoing: Boolean(message.out),
       mediaUnread: Boolean(message.mediaUnread),
+      unreadMention: Boolean(message.mentioned && message.mediaUnread),
+      unreadReaction: Boolean(
+        message.reactions?.recentReactions?.some((reaction) => reaction.unread && !reaction.my),
+      ),
       protected: Boolean(
         message.noforwards ||
         ((Api.Chat.is(peerEntity) || Api.Channel.is(peerEntity)) && peerEntity.noforwards),
@@ -2629,8 +3456,18 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         message.replies?.comments && message.replies.channelId !== undefined
           ? { count: message.replies.replies, channelId: `c:${message.replies.channelId}` }
           : undefined,
-      botKeyboard: mapBotKeyboard(message.replyMarkup, botUsername),
+      botKeyboard: mapBotKeyboard(
+        message.replyMarkup,
+        botUsername,
+        Api.User.is(keyboardBot) && keyboardBot.bot
+          ? peerFromId(`u:${keyboardBot.id}`, state.entities)
+          : undefined,
+      ),
       media: mapMedia(message.media),
+      contact: mapContact(message.media),
+      poll: Api.MessageMediaPoll.is(message.media)
+        ? mapPoll(message.media.poll, message.media.results)
+        : undefined,
       reactions: mapReactions(message.reactions),
       mentions: mapMentions(message.entities),
       links,
@@ -2916,6 +3753,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   function mapBotKeyboard(
     markup: Tl.TypeReplyMarkup | undefined,
     botUsername?: string,
+    bot?: TelegramPeer,
   ): TelegramBotKeyboard | undefined {
     if (Api.ReplyKeyboardHide.is(markup)) {
       return { kind: 'reply', rows: [], hidden: true };
@@ -2933,7 +3771,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return {
         kind: 'reply',
         rows: markup.rows.map((row) =>
-          row.buttons.map((button) => mapBotButton(button, botUsername)),
+          row.buttons.map((button) => mapBotButton(button, botUsername, bot)),
         ),
         singleUse: Boolean(markup.singleUse),
         persistent: Boolean(markup.persistent),
@@ -2944,13 +3782,26 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return {
         kind: 'inline',
         rows: markup.rows.map((row) =>
-          row.buttons.map((button) => mapBotButton(button, botUsername)),
+          row.buttons.map((button) => mapBotButton(button, botUsername, bot)),
         ),
       };
     }
     return undefined;
   }
-  function mapBotButton(button: Tl.TypeKeyboardButton, botUsername?: string): TelegramBotButton {
+  function mapBotButton(
+    button: Tl.TypeKeyboardButton,
+    botUsername?: string,
+    bot?: TelegramPeer,
+  ): TelegramBotButton {
+    if (Api.KeyboardButtonWebView.is(button) || Api.KeyboardButtonSimpleWebView.is(button)) {
+      return {
+        kind: Api.KeyboardButtonSimpleWebView.is(button) ? 'simple-web-app' : 'web-app',
+        text: button.text,
+        url: button.url,
+        ...(bot ? { bot } : {}),
+        ...(botUsername ? { botUsername } : {}),
+      };
+    }
     if (Api.KeyboardButton.is(button)) return { kind: 'text', text: button.text };
     if (Api.KeyboardButtonUrl.is(button)) {
       return { kind: 'url', text: button.text, url: button.url };
@@ -3736,6 +4587,59 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       ...(reply.quoteText ? { quoteText: reply.quoteText } : {}),
     });
   }
+  function mapPollResults(results: Tl.TypePollResults): TelegramPollResults {
+    return {
+      min: Boolean(results.min),
+      totalVoters: results.totalVoters,
+      solution: results.solution,
+      answers: results.results?.map((answer) => ({
+        option: pollOptionKey(answer.option),
+        voters: answer.voters ?? 0,
+        chosen: Boolean(answer.chosen),
+        correct: Boolean(answer.correct),
+      })),
+    };
+  }
+  function mapPoll(poll: Tl.TypePoll, results: Tl.TypePollResults): TelegramPoll {
+    return {
+      id: poll.id.toString(),
+      hash: poll.hash.toString(),
+      question: poll.question.text,
+      answers: poll.answers.flatMap((answer) =>
+        Api.PollAnswer.is(answer)
+          ? [{ option: pollOptionKey(answer.option), text: answer.text.text }]
+          : [],
+      ),
+      closed: Boolean(poll.closed),
+      publicVoters: Boolean(poll.publicVoters),
+      multipleChoice: Boolean(poll.multipleChoice),
+      quiz: Boolean(poll.quiz),
+      revotingDisabled: Boolean(poll.revotingDisabled),
+      hideResultsUntilClose: Boolean(poll.hideResultsUntilClose),
+      closeDate: poll.closeDate,
+      results: mapPollResults(results),
+    };
+  }
+  function mapContact(media: Tl.TypeMessageMedia | undefined): TelegramContact | undefined {
+    if (!Api.MessageMediaContact.is(media)) return undefined;
+    const user = state.entities.get(`u:${media.userId}`);
+    const peer =
+      media.userId > 0n && Api.User.is(user) && user.accessHash !== undefined
+        ? { id: `u:${media.userId}`, kind: 'user' as const, accessHash: user.accessHash.toString() }
+        : undefined;
+    return {
+      phoneNumber: media.phoneNumber,
+      firstName: media.firstName,
+      lastName: media.lastName,
+      vcard: media.vcard,
+      peer,
+      hasAvatar: Api.User.is(user) && Api.UserProfilePhoto.is(user.photo),
+      avatarId:
+        Api.User.is(user) && Api.UserProfilePhoto.is(user.photo)
+          ? user.photo.photoId.toString()
+          : undefined,
+    };
+  }
   function mapMedia(media: Tl.TypeMessageMedia | undefined) {
     if (Api.MessageMediaPhoto.is(media) && Api.Photo.is(media.photo)) {
       const dimensions = [...media.photo.sizes]
@@ -3852,6 +4756,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       topMessageId: item.topMessage,
       topMessage: messages.get(`${peer.id}:${item.topMessage}`),
       unreadCount: item.unreadCount,
+      unreadMentionsCount: item.unreadMentionsCount,
+      unreadReactionsCount: item.unreadReactionsCount,
       readInboxMaxId: item.readInboxMaxId,
       readOutboxMaxId: item.readOutboxMaxId,
       muted: isMuted(item.notifySettings, peer, entity),
@@ -3880,6 +4786,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         canSendMessages: true,
         canSendMedia: true,
         canSendStickers: true,
+        canSendPolls: true,
         canSendGifs: true,
         canPinMessages: true,
         canEditMessages: false,
@@ -3897,6 +4804,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         canSendMessages: false,
         canSendMedia: false,
         canSendStickers: false,
+        canSendPolls: false,
         canSendGifs: false,
         canPinMessages: false,
         canEditMessages: false,
@@ -3919,6 +4827,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       canSendMessages: !manageableEntity?.left && !banned?.sendMessages,
       canSendMedia: !banned?.sendMedia,
       canSendStickers: !banned?.sendStickers,
+      canSendPolls: creator || Boolean(rights) || !banned?.sendPolls,
       canSendGifs: !banned?.sendGifs,
       canPinMessages,
       canEditMessages,
@@ -3961,6 +4870,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       canSendMessages: false,
       canSendMedia: false,
       canSendStickers: false,
+      canSendPolls: false,
       canSendGifs: false,
       canPinMessages: false,
       canEditMessages: false,
@@ -4512,6 +5422,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     isAuthorized,
     getAuthorizedAccountId,
     requestCode,
+    watchQrLogin: () =>
+      Stream.unwrap(getClient.pipe(Effect.map((client) => watchClientQrLogin(client, loginHub)))),
     submitCode,
     submitPassword,
     getCurrentState,
@@ -4526,6 +5438,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     getHistory,
     getHistoryAround,
     readHistory,
+    getUnreadNotifications,
     readMessageContents,
     getReadOutboxMaxId,
     getSharedMediaCounts,
@@ -4544,6 +5457,9 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     setPinnedMessage,
     setTyping,
     sendText,
+    sendContact,
+    sendPoll,
+    updatePoll,
     sendFile,
     sendAlbum,
     downloadMedia,
@@ -4553,11 +5469,22 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     getWallpapers,
     downloadWallpaper,
     getRecentStickers,
+    searchStickers,
+    getFavoriteStickers,
+    setStickerFavorite,
     getStickerPacks,
+    getStickerPack,
+    searchStickerPacks,
+    setStickerPackInstalled,
     getSavedGifs,
     searchGifs,
     downloadSticker,
     downloadCustomEmoji,
+    getBotApp,
+    requestWebApp,
+    prolongWebApp,
+    sendWebAppData,
+    invokeWebAppMethod,
     getBotCommands,
     startBot,
     answerBotCallback,
@@ -4565,6 +5492,15 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     acceptUrlAuth,
     sendSticker,
     getReactionPeople,
+    getMessageReadReceipts,
+    getPollVotes,
+    getActiveSessions,
+    getPrivacy,
+    setPrivacy,
+    getReadTimePrivacy,
+    setReadTimePrivacy,
+    terminateSession,
+    setSessionTtl,
     setReaction,
     deleteMessages,
     editMessage,

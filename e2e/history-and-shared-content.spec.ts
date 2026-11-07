@@ -254,13 +254,11 @@ test('shows and incrementally fills a real gap after jumping far back in history
   await page.goto('/?scenario=long-history');
   await page.getByRole('button', { name: /Long History/ }).click();
   await page.getByRole('button', { name: 'Search messages' }).click();
-  const search = page.getByRole('dialog', { name: 'Message search' });
-  const query = search.getByRole('textbox', { name: 'Message search query' });
+  const search = page.locator('.search-panel[aria-label="Message search"]');
+  const query = search.getByRole('searchbox', { name: 'Message search query' });
   await query.fill('Long history message 100');
   await query.press('Enter');
-  await search
-    .getByRole('button', { name: 'Long History Long history message 100', exact: true })
-    .click();
+  await search.getByRole('button', { name: /Long history message 100$/ }).click();
 
   const target = page.locator('article[data-message-id="100"]');
   await expect(target).toBeInViewport();

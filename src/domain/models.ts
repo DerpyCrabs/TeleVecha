@@ -1,3 +1,5 @@
+import type { TelegramPoll } from '../telegram/types';
+import type { TelegramContact } from '../telegram/types';
 import type { RichMessage } from './richMessage';
 
 export type Presence = 'online' | 'recently' | 'offline';
@@ -11,6 +13,8 @@ export interface ChatSummary {
   time: string;
   lastMessageStatus?: 'sent' | 'read' | undefined;
   unread: number;
+  unreadMentions?: number | undefined;
+  unreadReactions?: number | undefined;
   muted?: boolean;
   pinned?: boolean;
   archived?: boolean;
@@ -24,6 +28,8 @@ export interface ChatSummary {
 export type MessageStatus = 'sending' | 'sent' | 'read' | 'failed';
 
 export interface ChatMessage {
+  contact?: TelegramContact | undefined;
+  poll?: TelegramPoll | undefined;
   id: string;
   peerId?: string | undefined;
   author: string;
@@ -66,6 +72,8 @@ export interface ChatMessage {
               | 'callback'
               | 'copy'
               | 'switch-inline'
+              | 'web-app'
+              | 'simple-web-app'
               | 'unsupported';
             text: string;
             url?: string | undefined;
@@ -75,6 +83,7 @@ export interface ChatMessage {
             query?: string | undefined;
             samePeer?: boolean | undefined;
             botUsername?: string | undefined;
+            bot?: import('../telegram/types').TelegramPeer | undefined;
           }>
         >;
         hidden?: boolean | undefined;

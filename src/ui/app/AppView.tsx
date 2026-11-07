@@ -1,3 +1,12 @@
+import { StickerPackManager } from '../composer/StickerPackManager';
+import { WebAppLaunchDialog } from '../bots/WebAppLaunchDialog';
+import { WebAppDialog } from '../bots/WebAppDialog';
+import { ReadReceiptMenuItem, ReadReceiptsDialog } from '../conversation/ReadReceipts';
+import { Dialog } from '../shared/Dialog';
+import { pollHasVote, pollIsClosed } from '../../domain/poll';
+import { PollCard } from '../conversation/PollCard';
+import { ContactCard } from '../conversation/ContactCard';
+import { UnreadNotifications } from '../conversation/UnreadNotifications';
 import { GlobalVoicePlayer } from '../media/GlobalVoicePlayer';
 import { CommentsPanel } from '../conversation/CommentsPanel';
 import { list, collection, view } from 'effectweb';
@@ -208,6 +217,8 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
       service: message.service ? { kind: 'custom', text: message.service.text } : undefined,
       forwardedFrom: message.forwardedFrom,
       media: message.media,
+      poll: message.poll,
+      contact: message.contact,
       text: message.body,
     });
   };
@@ -270,20 +281,51 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
         }}
         style={{ '--left-sidebar-width': `${effectiveLeftSidebarWidth}px` }}
       >
-        <ChatSidebar
-          chats={visibleChats}
-          activeChatId={activeChatId}
-          online={online}
-          layout={sidebarLayout}
-          media={mediaAssets}
-          directory={chatDirectory}
-          requestDelete={(peerId) => {
-            const dialog = snapshot.dialogs.find(({ peer }) => peer.id === peerId);
-            if (dialog) setDeleteChatTarget(dialog);
-          }}
-          openSettings={openSettings}
-          dialogs={snapshot.dialogs}
-        />
+        {searchOpen ? (
+          <SearchPanel
+            compact={viewportWidth <= 650}
+            media={mediaAssets}
+            online={snapshot.online}
+            searchPeople={(query) =>
+              engine
+                .searchPeers(query)
+                .pipe(
+                  Effect.map((results) => results.filter((result) => result.peer.kind === 'user')),
+                )
+            }
+            searchMembers={(peerId, query, offset) => {
+              const peer = snapshot.dialogs.find((dialog) => dialog.peer.id === peerId)?.peer;
+              return peer
+                ? engine.getGroupMembers(peer, 50, offset, query)
+                : Effect.succeed({ members: [], totalCount: 0, hasMore: false });
+            }}
+            dialogs={snapshot.dialogs}
+            activePeerId={activeChatId}
+            results={model.queries.messageSearch}
+            more={model.queries.moreMessages}
+            refresh={model.queries.refreshMessages}
+            openResult={(message) => {
+              if (viewportWidth <= 650) setSearchOpen(false);
+              runInBackground(openMessage(message, viewportWidth > 650));
+            }}
+            close={() => setSearchOpen(false)}
+          />
+        ) : (
+          <ChatSidebar
+            chats={visibleChats}
+            activeChatId={activeChatId}
+            online={online}
+            layout={sidebarLayout}
+            media={mediaAssets}
+            directory={chatDirectory}
+            requestDelete={(peerId) => {
+              const dialog = snapshot.dialogs.find(({ peer }) => peer.id === peerId);
+              if (dialog) setDeleteChatTarget(dialog);
+            }}
+            openSettings={openSettings}
+            dialogs={snapshot.dialogs}
+          />
+        )}
 
         {mobileSidebarOpen || detailsOpen ? (
           <button
@@ -510,7 +552,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             <div class="chat-wallpaper" aria-hidden="true" />
             <div
               use={model.dom.messageScroller}
-              class={`message-scroller scroll-area relative h-full min-h-0 overflow-y-auto overscroll-contain px-5${activeChat.kind === 'channel' ? ' channel-messages' : ''}`}
+              class={`message-scroller scroll-area relative h-full min-h-0 overflow-y-auto overscroll-contain px-5${activeChat.kind === 'channel' || activeChat.kind === 'group' ? ' sender-avatars' : ''}`}
               data-testid="message-scroller"
               data-selection-active={model.selectedMessages.length > 0 ? 'true' : undefined}
             >
@@ -634,7 +676,11 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                             </button>
                           ) : null}
                           {layout.showSenderAvatar ? (
-                            <span class="message-sender-avatar" aria-hidden="true">
+                            <span
+                              class="message-sender-avatar"
+                              aria-hidden="true"
+                              title={layout.author || message.author}
+                            >
                               <Avatar
                                 identity={`${message.senderId}:${message.senderAvatarId ?? 'none'}`}
                                 initials={senderInitials(layout.author || message.author)}
@@ -802,6 +848,60 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 <span>{message.replyTo}</span>
                               </span>
                             </button>
+                          ) : null}
+                          {message.poll ? (
+                            <PollCard
+                              poll={message.poll}
+                              media={mediaAssets}
+                              loadVotes={(option, offset) =>
+                                activeDialog
+                                  ? engine.getPollVotes(
+                                      activeDialog.peer,
+                                      Number(message.id),
+                                      option,
+                                      offset,
+                                    )
+                                  : Effect.fail(new Error('Conversation is unavailable.'))
+                              }
+                              openVoter={(person) =>
+                                runInBackground(
+                                  runEffect(
+                                    engine.addPeer({
+                                      peer: person.peer,
+                                      title: person.name,
+                                      initials: person.initials,
+                                      color: person.color,
+                                      hasAvatar: person.hasAvatar,
+                                      avatarId: person.avatarId,
+                                      category: person.peer.kind === 'user' ? 'user' : 'group',
+                                      bot: false,
+                                      isContact: false,
+                                    }),
+                                  ).then(() => model.selectChat(person.peer.id)),
+                                )
+                              }
+                              online={online && Number.isInteger(Number(message.id))}
+                              vote={(options) =>
+                                activeDialog
+                                  ? engine.updatePoll(
+                                      activeDialog.peer,
+                                      Number(message.id),
+                                      'vote',
+                                      options,
+                                    )
+                                  : Effect.fail(new Error('Conversation is unavailable.'))
+                              }
+                            />
+                          ) : null}
+                          {message.contact ? (
+                            <ContactCard
+                              contact={message.contact}
+                              media={mediaAssets}
+                              online={online}
+                              protected={Boolean(message.protected)}
+                              open={model.openContact}
+                              add={model.addContactCard}
+                            />
                           ) : null}
                           {layout.album.length > 1 ? (
                             <MessageAlbum
@@ -1107,6 +1207,31 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 </button>
                               ) : (
                                 <>
+                                  {target.outgoing &&
+                                  !target.service &&
+                                  activeDialog &&
+                                  !activeDialog.bot &&
+                                  (activeDialog.peer.kind !== 'channel' ||
+                                    activeDialog.permissions?.canViewMembers) ? (
+                                    <ReadReceiptMenuItem
+                                      identity={`${activeDialog.peer.id}:${target.id}`}
+                                      privateChat={activeDialog.peer.kind === 'user'}
+                                      online={online}
+                                      media={mediaAssets}
+                                      load={() =>
+                                        activeDialog
+                                          ? engine.getMessageReadReceipts(
+                                              activeDialog.peer,
+                                              Number(target.id),
+                                            )
+                                          : Effect.fail(new Error('Conversation unavailable'))
+                                      }
+                                      open={(result) => {
+                                        setMessageContextMenu(undefined);
+                                        model.setReadReceipts(result);
+                                      }}
+                                    />
+                                  ) : null}
                                   <button
                                     role="menuitem"
                                     onClick={() => {
@@ -1123,6 +1248,48 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   >
                                     <CheckCheck size={15} /> Select
                                   </button>
+                                  {target.poll && !pollIsClosed(target.poll) ? (
+                                    <>
+                                      {pollHasVote(target.poll) &&
+                                      !target.poll.quiz &&
+                                      !target.poll.revotingDisabled ? (
+                                        <button
+                                          role="menuitem"
+                                          disabled={!online}
+                                          onClick={() => {
+                                            setMessageContextMenu(undefined);
+                                            if (activeDialog)
+                                              runInBackground(
+                                                runEffect(
+                                                  engine.updatePoll(
+                                                    activeDialog.peer,
+                                                    Number(target.id),
+                                                    'vote',
+                                                    [],
+                                                  ),
+                                                ),
+                                              );
+                                          }}
+                                        >
+                                          <Reply size={15} />
+                                          Retract vote
+                                        </button>
+                                      ) : null}
+                                      {target.outgoing && !target.forwardedFrom ? (
+                                        <button
+                                          role="menuitem"
+                                          disabled={!online}
+                                          onClick={() => {
+                                            setMessageContextMenu(undefined);
+                                            model.setStopPollTarget(target);
+                                          }}
+                                        >
+                                          <X size={15} />
+                                          Stop poll
+                                        </button>
+                                      ) : null}
+                                    </>
+                                  ) : null}
                                   {target.media && !target.protected ? (
                                     <button
                                       role="menuitem"
@@ -1222,6 +1389,25 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
               </div>
             </div>
 
+            <UnreadNotifications
+              peerId={activeChatId}
+              mentions={
+                snapshot.dialogs.find((dialog) => dialog.peer.id === activeChatId)
+                  ?.unreadMentionsCount ?? 0
+              }
+              reactions={
+                snapshot.dialogs.find((dialog) => dialog.peer.id === activeChatId)
+                  ?.unreadReactionsCount ?? 0
+              }
+              online={online}
+              load={(kind) => {
+                const peer = snapshot.dialogs.find(
+                  (dialog) => dialog.peer.id === activeChatId,
+                )?.peer;
+                return peer ? engine.getUnreadNotifications(peer, kind) : Effect.succeed([]);
+              }}
+              open={openMessage}
+            />
             {viewport.jumpVisible ? (
               <button
                 class="jump-to-present"
@@ -1249,6 +1435,12 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             Boolean(visibleReplyKeyboard?.keyboard.rows.some((row) => row.length > 0))) ? (
             <BotControls
               isBot={Boolean(activeChat.bot)}
+              appTitle={
+                activeDialog?.userDetails?.botMenu?.text ??
+                (activeDialog?.userDetails?.botHasMainApp ? 'Open App' : undefined)
+              }
+              appBusy={bot.buttonBusy?.owner === 'menu'}
+              onOpenApp={() => runInBackground(bot.openMenuApp())}
               showCommands={Boolean(activeChat.bot || bot.commands.length > 0)}
               started={botStarted}
               enabled={canUseLiveCommands}
@@ -1267,10 +1459,29 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             />
           ) : null}
           <ChatComposer
+            forwardDraft={
+              model.forwardDraft
+                ? {
+                    ...model.forwardDraft,
+                    media: mediaAssets,
+                    cancel: model.cancelForwardDraft,
+                    remove: model.removeForwardMessage,
+                    changeRecipient: () => model.setForwardRecipientOpen(true),
+                    configure: model.setForwardOptions,
+                    send: () => runInBackground(model.sendForwardDraft()),
+                  }
+                : undefined
+            }
             conversationId={activeChatId}
             placeholder={visibleReplyKeyboard?.keyboard.placeholder}
             enabled={canQueueMessage}
             canSendMedia={canSendMedia}
+            canSendPolls={canQueueMessage && activeDialog?.permissions?.canSendPolls !== false}
+            sendPoll={(draft) =>
+              activeDialog
+                ? engine.sendPoll(activeDialog.peer, draft)
+                : Effect.fail(new Error('Conversation is unavailable.'))
+            }
             canSendStickers={canSendStickers}
             canSendGifs={canSendGifs}
             composer={composer}
@@ -1354,25 +1565,54 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
 
         {model.comments ? (
           <CommentsPanel
+            online={online}
             voice={model.voice}
             previewPhoto={model.queries.previewPhoto}
             state={model.comments}
             close={model.closeComments}
             loadOlder={model.loadOlderComments}
             retry={model.retryComments}
-            refresh={model.refreshComments}
             mediaAssets={mediaAssets}
+          />
+        ) : null}
+        {model.forwardRecipientOpen ? (
+          <ForwardMessageDialog
+            media={mediaAssets}
+            online={online}
+            chats={visibleChats}
+            title="Change recipient"
+            label="Change forwarding recipient"
+            close={() => model.setForwardRecipientOpen(false)}
+            search={(query) => engine.searchPeers(query)}
+            forward={(peerId, result) =>
+              runInBackground(model.changeForwardRecipient(peerId, result))
+            }
+          />
+        ) : null}
+        {model.sharingContact ? (
+          <ForwardMessageDialog
+            chats={visibleChats}
+            media={mediaAssets}
+            online={online}
+            title="Share contact with"
+            label="Share contact"
+            cancelLabel="Cancel contact sharing"
+            close={model.closeContactShare}
+            search={(query) => engine.searchPeers(query)}
+            forward={(peerId, result) => runInBackground(model.shareContactTo(peerId, result))}
           />
         ) : null}
         {model.selectionAction === 'forward' ? (
           <ForwardMessageDialog
+            media={mediaAssets}
+            online={online}
             chats={visibleChats}
             title={`Forward ${model.selectedMessages.length} messages to`}
             label="Forward selected messages"
             close={() => model.setSelectionAction(undefined)}
             search={(query) => engine.searchPeers(query)}
-            forward={(peerId, result) =>
-              runInBackground(model.actOnSelection('forward', false, peerId, result))
+            forward={(peerId, result, options) =>
+              runInBackground(model.actOnSelection('forward', false, peerId, result, options))
             }
           />
         ) : null}
@@ -1396,15 +1636,21 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
         ) : null}
         {forwardingMessage ? (
           <ForwardMessageDialog
+            media={mediaAssets}
+            online={online}
             chats={visibleChats}
             close={() => setForwardingMessage(undefined)}
             search={(query) => engine.searchPeers(query)}
-            forward={(peerId, result) => runInBackground(forwardMessage(peerId, result))}
+            forward={(peerId, result, options) =>
+              runInBackground(forwardMessage(peerId, result, options))
+            }
           />
         ) : null}
 
         {bot.inlineSwitch ? (
           <ForwardMessageDialog
+            media={mediaAssets}
+            online={online}
             chats={visibleChats.filter(({ id }) => id !== activeChatId)}
             title="Choose a chat"
             label="Choose a chat for inline query"
@@ -1414,18 +1660,14 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
           />
         ) : null}
 
-        {searchOpen ? (
-          <SearchPanel
-            dialogs={snapshot.dialogs}
-            activePeerId={activeChatId}
-            results={model.queries.messageSearch}
-            more={model.queries.moreMessages}
-            refresh={model.queries.refreshMessages}
-            openResult={(message) => {
-              setSearchOpen(false);
-              runInBackground(openMessage(message));
-            }}
-            close={() => setSearchOpen(false)}
+        {expressions.packLink ? (
+          <StickerPackManager
+            {...expressions}
+            initialShortName={expressions.packLink}
+            packs={expressions.stickerPacks}
+            load={(sticker) => mediaAssets.loadSticker(sticker)}
+            cachedUrl={(sticker) => mediaAssets.sticker(sticker).cached()}
+            close={expressions.closePackLink}
           />
         ) : null}
 
@@ -1468,6 +1710,57 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             ))(sharedMediaKind!)
           : null}
 
+        {model.readReceipts ? (
+          <ReadReceiptsDialog
+            result={model.readReceipts}
+            media={mediaAssets}
+            online={online}
+            close={() => model.setReadReceipts(undefined)}
+            open={(person) => {
+              model.setReadReceipts(undefined);
+              runInBackground(
+                runEffect(
+                  engine.addPeer({
+                    peer: person.peer,
+                    title: person.name,
+                    initials: person.initials,
+                    color: person.color,
+                    hasAvatar: person.hasAvatar,
+                    avatarId: person.avatarId,
+                    category: 'user',
+                    bot: false,
+                    isContact: false,
+                  }),
+                ).then(() => model.selectChat(person.peer.id)),
+              );
+            }}
+          />
+        ) : null}
+        {model.stopPollTarget ? (
+          <Dialog
+            title="Stop poll"
+            closeLabel="Cancel stopping poll"
+            onClose={() => model.setStopPollTarget(undefined)}
+            class="poll-stop-dialog"
+          >
+            <p>Stop this poll? No more votes will be accepted.</p>
+            <div class="poll-dialog-actions">
+              <button onClick={() => model.setStopPollTarget(undefined)}>Cancel</button>
+              <button
+                onClick={() => {
+                  const target = model.stopPollTarget;
+                  model.setStopPollTarget(undefined);
+                  if (target && activeDialog)
+                    runInBackground(
+                      runEffect(engine.updatePoll(activeDialog.peer, Number(target.id), 'close')),
+                    );
+                }}
+              >
+                Stop poll
+              </button>
+            </div>
+          </Dialog>
+        ) : null}
         {deleteTarget
           ? ((message) => (
               <DeleteMessageDialog
@@ -1505,6 +1798,17 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             ))(deleteChatTarget!)
           : null}
 
+        {bot.webAppLaunch ? (
+          <WebAppLaunchDialog
+            pending={bot.webAppLaunch}
+            busy={bot.webAppLaunchBusy}
+            close={bot.cancelWebAppLaunch}
+            confirm={(allowed) => runInBackground(bot.confirmWebAppLaunch(allowed))}
+          />
+        ) : null}
+        {bot.webApp ? (
+          <WebAppDialog pending={bot.webApp} api={engine} close={bot.closeWebApp} />
+        ) : null}
         {bot.urlAuth
           ? ((pending) => (
               <BotUrlAuthDialog
@@ -1518,6 +1822,12 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
 
         {settingsOpen ? (
           <SettingsDialog
+            sessions={engine}
+            privacy={engine}
+            media={mediaAssets}
+            dialogs={snapshot.dialogs}
+            chats={visibleChats}
+            online={online}
             loggingOut={loggingOut}
             clearingCache={clearingCache}
             debugReportBusy={debugReportBusy}
@@ -1571,6 +1881,8 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
           snapshot={snapshot}
           configurationError={configurationError}
           onRetry={retrySync}
+          onQr={() => engine.beginQrLogin()}
+          onCancelQr={() => engine.cancelQrLogin()}
           onPhone={(phone) => engine.requestCode(phone).pipe(Effect.asVoid)}
           onCode={(code) => engine.submitCode(code).pipe(Effect.asVoid)}
           onPassword={(password) => engine.submitPassword(password).pipe(Effect.asVoid)}

@@ -1,3 +1,4 @@
+import type { TelegramSearchFilters } from '../../telegram/types';
 import { Context, Effect } from 'effect';
 import {
   fetchNextPage,
@@ -33,6 +34,7 @@ export interface QueryLoaders {
     text: string,
     global: boolean,
     offset: TelegramSearchOffset | undefined,
+    filters?: TelegramSearchFilters,
   ): Effect.Effect<TelegramSearchPage, unknown>;
   sharedMedia(
     peerId: string,
@@ -76,13 +78,14 @@ export interface MessageSearchArgs {
   readonly peerId: string;
   readonly text: string;
   readonly global: boolean;
+  readonly filters?: TelegramSearchFilters;
 }
 export const messageSearchQuery = infiniteQuery({
   name: 'message-search',
   initial: {} as SearchCursor,
   load: (args: MessageSearchArgs, cursor: SearchCursor) =>
     Effect.flatMap(QueryLoaders, (loaders) =>
-      loaders.searchMessages(args.peerId, args.text, args.global, cursor.offset),
+      loaders.searchMessages(args.peerId, args.text, args.global, cursor.offset, args.filters),
     ),
   next: nextCursor,
 });

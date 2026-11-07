@@ -1,3 +1,5 @@
+import type { StickerSearchProps } from './StickerSearchResults';
+import type { StickerPackActions } from './StickerPackManager';
 import { list, component, sequence, view } from 'effectweb';
 import type { Effect } from 'effect';
 import type { TelegramSticker, TelegramStickerPack } from '../../telegram/types';
@@ -8,9 +10,14 @@ import { StickerPicker } from './StickerPicker';
 import { emojiEntries } from './emojiData';
 export type ExpressionTab = 'emoji' | 'gifs' | 'stickers';
 interface ExpressionPickerProps {
+  packActions: StickerPackActions;
+  stickerSearch: (query: string) => StickerSearchProps;
   tab: ExpressionTab;
   setTab: (tab: ExpressionTab) => void;
   stickersLoading: boolean;
+  stickerError: string;
+  retryStickers: () => Effect.Effect<void, unknown>;
+  setStickerFavorite: (sticker: TelegramSticker, favorite: boolean) => Effect.Effect<void, unknown>;
   gifsLoading: boolean;
   gifError: string;
   gifs: TelegramSticker[];
@@ -56,6 +63,14 @@ export const ExpressionPicker = component<ExpressionPickerProps, { query: string
         <label class="expression-search">
           <Search size={15} />
           <input
+            type="search"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' && model.query) {
+                event.preventDefault();
+                event.stopPropagation();
+                send({ query: '' });
+              }
+            }}
             value={model.query}
             onInput={(event) => send({ query: event.currentTarget.value })}
             placeholder={`Search ${props.tab}`}
@@ -101,10 +116,16 @@ export const ExpressionPicker = component<ExpressionPickerProps, { query: string
           {props.tab === 'stickers' ? (
             <StickerPicker
               packs={props.packs}
+              search={model.query.trim() ? props.stickerSearch(model.query.trim()) : undefined}
+              packActions={props.packActions}
+              error={props.stickerError}
+              retry={props.retryStickers}
+              setFavorite={props.setStickerFavorite}
               loading={props.stickersLoading}
               load={props.load}
               send={props.sendSticker}
               query={model.query}
+              clearQuery={() => send({ query: '' })}
               cachedUrl={props.stickerUrl}
               enabled={props.canSend && props.canSendStickers}
             />

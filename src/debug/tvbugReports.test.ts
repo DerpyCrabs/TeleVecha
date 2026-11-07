@@ -91,6 +91,22 @@ describe('browser debug report recorder', () => {
     recorder.dispose();
   });
 
+  it('omits active QR login tokens from exported diagnostics', async () => {
+    const recorder = createBrowserDebugReportRecorder(store());
+    recorder.attachEngine({
+      snapshot: () => ({
+        ...initialEngineSnapshot(),
+        authStep: 'qr',
+        qrLogin: { url: 'tg://login?token=private-login-token', expires: 123 },
+      }),
+    });
+    const report = await Effect.runPromise(recorder.prepare());
+    const bundle = parseTvBugBundle(new Uint8Array(await report.file.arrayBuffer()));
+    expect(bundle.snapshot.runtime).not.toHaveProperty('qrLogin');
+    expect(JSON.stringify(bundle)).not.toContain('private-login-token');
+    recorder.dispose();
+  });
+
   it('captures the attached tab conversation instead of an account-owner projection', async () => {
     const recorder = createBrowserDebugReportRecorder(store());
     recorder.attachEngine({

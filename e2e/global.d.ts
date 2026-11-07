@@ -57,6 +57,8 @@ interface Window {
       searchGifs: number;
       downloadSticker: number;
       getBotCommands: number;
+      sendWebAppData: number;
+      prolongWebApp: number;
       startBot: number;
       answerBotCallback: number;
       sendSticker: number;
@@ -70,6 +72,7 @@ interface Window {
       getPinnedMessages: number;
       setMuted: number;
       getUserDetails: number;
+      getMessageReadReceipts: number;
       setBlocked: number;
       updateContact: number;
       deleteContact: number;

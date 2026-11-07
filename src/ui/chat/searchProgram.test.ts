@@ -2,6 +2,7 @@ import { Context, Effect } from 'effect';
 import { queryCache } from '@effectweb/query';
 import { describe, expect, it } from 'vitest';
 import type {
+  TelegramSearchFilters,
   TelegramMessage,
   TelegramSearchOffset,
   TelegramSearchPage,
@@ -34,6 +35,7 @@ type Search = (
   text: string,
   global: boolean,
   offset: TelegramSearchOffset | undefined,
+  filters?: TelegramSearchFilters,
 ) => Effect.Effect<TelegramSearchPage, unknown>;
 const unused = () => Effect.die('unused');
 
@@ -66,6 +68,54 @@ const shown = (host: SearchPanelProps, source: ReturnType<typeof createSearchPro
 };
 
 describe('compiled search workflow', () => {
+  it('searches by filters without text and keeps each combination in its own cache', async () => {
+    const received: unknown[] = [];
+    const host = hostFor((_peer, _text, _global, _offset, filters) => {
+      received.push(filters);
+      return Effect.succeed(page([filters?.kind === 'photos' ? 1 : 2]));
+    });
+    const source = createSearchProgram(host);
+    source.send(searchActions.message.Filters({ kind: 'photos' }));
+    shown(host, source);
+    await settle();
+    expect(shown(host, source)).toEqual([1]);
+    source.send(searchActions.message.Filters({ kind: 'videos' }));
+    shown(host, source);
+    await settle();
+    expect(shown(host, source)).toEqual([2]);
+    expect(received).toEqual([{ kind: 'photos' }, { kind: 'videos' }]);
+    source.send(searchActions.message.ClearFilters());
+    expect(searchArgs(source.model().props)).toBeUndefined();
+    source.dispose();
+  });
+
+  it('clears incompatible sender restrictions when switching to all chats', () => {
+    const source = createSearchProgram(hostFor(() => Effect.succeed(page([]))));
+    source.send(
+      searchActions.message.Filters({ kind: 'files', fromPeer: { id: 'u:5', kind: 'user' } }),
+    );
+    source.send(searchActions.message.Scope(true));
+    expect(searchArgs(source.model().props)).toEqual({
+      peerId: '',
+      text: '',
+      global: true,
+      filters: { kind: 'files', fromPeer: undefined, chatType: undefined },
+    });
+    source.send(searchActions.message.Dates('2026-11-07', '2026-11-01'));
+    expect(source.model().props.dateError).toBeTruthy();
+    expect(searchArgs(source.model().props)).toBeUndefined();
+    source.dispose();
+  });
+
+  it('automatically submits after typing settles', async () => {
+    const source = createSearchProgram(hostFor(() => Effect.succeed(page([]))));
+    source.send(searchActions.message.Query('photo'));
+    expect(searchArgs(source.model().props)).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(searchArgs(source.model().props)?.text).toBe('photo');
+    source.dispose();
+  });
+
   it.each(['sync', 'async', 'promise-adapter'])(
     'accepts a %s producer without changing model or view',
     async (kind) => {

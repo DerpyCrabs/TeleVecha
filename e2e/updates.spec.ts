@@ -69,6 +69,11 @@ test('applies presence and incoming messages, and forwards to another chat', asy
     const dialog = page.getByRole('dialog', { name: 'Forward message' });
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'Release Channel' }).click();
+    await expect(
+      page.getByRole('button', { name: 'Forwarding options', exact: true }),
+    ).toBeVisible();
+    expect((await fixtureStats(page))?.forwardMessage ?? 0).toBe(0);
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect.poll(async () => (await fixtureStats(page))?.forwardMessage).toBe(1);
 
     await chatButton(page, /Release Channel/).click();

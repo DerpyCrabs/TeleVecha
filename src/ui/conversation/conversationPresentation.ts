@@ -1,3 +1,4 @@
+import { pendingPoll } from '../../domain/poll';
 import type { ChatMessage } from '../../domain/models';
 import type { EngineSnapshot, PendingAttachment, PendingSend } from '../../telegram/types';
 import { presentMessage, presentPendingAttachment, presentReply } from './presentation';
@@ -31,6 +32,8 @@ function pendingMessage(
     author: 'You',
     senderId: 'self',
     body: first ? send.text : '',
+    contact: send.contact,
+    poll: send.pollDraft ? pendingPoll(send.pollDraft, send.id) : undefined,
     time: new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(
       new Date(send.createdAt),
     ),

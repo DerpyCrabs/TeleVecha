@@ -1,3 +1,16 @@
+import type { TelegramPollVotes } from '../types';
+import type { TelegramStickerPack } from '../types';
+import type { TelegramSearchFilters } from '../types';
+import { changePrivacyRules } from '../../domain/privacy';
+import type { TelegramPrivacyKey, TelegramPrivacyChange, TelegramPrivacySetting } from '../types';
+import type { TelegramActiveSessions } from '../types';
+import type { TelegramReadReceipts } from '../types';
+import { pendingPoll } from '../../domain/poll';
+import type { TelegramPollDraft } from '../types';
+import { pollHasVote } from '../../domain/poll';
+import type { TelegramPoll, TelegramPollAction } from '../types';
+import type { TelegramContact } from '../types';
+import type { TelegramForwardOptions } from '../types';
 import { Deferred, Effect, PubSub, Queue, Stream } from 'effect';
 import type { TelegramTransport } from '../types';
 import type {
@@ -315,6 +328,8 @@ interface FixtureStats {
   searchGifs: number;
   downloadSticker: number;
   getBotCommands: number;
+  sendWebAppData: number;
+  prolongWebApp: number;
   startBot: number;
   answerBotCallback: number;
   sendSticker: number;
@@ -328,6 +343,7 @@ interface FixtureStats {
   getPinnedMessages: number;
   setMuted: number;
   getUserDetails: number;
+  getMessageReadReceipts: number;
   setBlocked: number;
   updateContact: number;
   deleteContact: number;
@@ -445,7 +461,47 @@ function fixtureTgsBlob() {
             nm: 'Fixture TGS',
             ddd: 0,
             assets: [],
-            layers: [],
+            layers: [
+              {
+                ddd: 0,
+                ind: 1,
+                ty: 4,
+                nm: 'Rotating star',
+                sr: 1,
+                ks: {
+                  o: { a: 0, k: 100 },
+                  r: {
+                    a: 1,
+                    k: [
+                      { t: 0, s: [0], e: [360], o: { x: 0.33, y: 0.33 }, i: { x: 0.67, y: 0.67 } },
+                      { t: 30, s: [360] },
+                    ],
+                  },
+                  p: { a: 0, k: [64, 64, 0] },
+                  a: { a: 0, k: [0, 0, 0] },
+                  s: { a: 0, k: [100, 100, 100] },
+                },
+                shapes: [
+                  {
+                    ty: 'sr',
+                    sy: 1,
+                    d: 1,
+                    pt: { a: 0, k: 5 },
+                    p: { a: 0, k: [0, 0] },
+                    r: { a: 0, k: 0 },
+                    or: { a: 0, k: 46 },
+                    os: { a: 0, k: 0 },
+                    ir: { a: 0, k: 21 },
+                    is: { a: 0, k: 0 },
+                  },
+                  { ty: 'fl', c: { a: 0, k: [1, 0.75, 0.15, 1] }, o: { a: 0, k: 100 }, r: 1 },
+                ],
+                ip: 0,
+                op: 30,
+                st: 0,
+                bm: 0,
+              },
+            ],
           }),
         ),
       ),
@@ -485,7 +541,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
     const scenario = new URLSearchParams(window.location.search).get('scenario') ?? '';
     const scenarios = new Set(scenario.split('+').filter(Boolean));
     const hasScenario = (value: string) => scenarios.has(value);
-    let authorized = scenario !== 'auth';
+    let authorized = !scenario.startsWith('auth');
     let connected = false;
     let pendingConnect: Deferred.Deferred<void> | undefined;
     let pendingSend: Deferred.Deferred<void> | undefined;
@@ -599,6 +655,8 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       searchGifs: 0,
       downloadSticker: 0,
       getBotCommands: 0,
+      sendWebAppData: 0,
+      prolongWebApp: 0,
       startBot: 0,
       answerBotCallback: 0,
       sendSticker: 0,
@@ -612,6 +670,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       getPinnedMessages: 0,
       setMuted: 0,
       getUserDetails: 0,
+      getMessageReadReceipts: 0,
       setBlocked: 0,
       updateContact: 0,
       deleteContact: 0,
@@ -796,20 +855,28 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         commentFailure = false;
         return yield* Effect.fail(createMtprotoError('transport', 'Could not load comments.'));
       }
-      const all: TelegramMessage[] =
-        rootId === 42
-          ? Array.from({ length: 75 }, (_, index) => ({
-              id: 100 + index,
-              peerId: peer.id,
-              peer,
-              senderId: 'u:101',
-              senderName: 'Alice Fixture',
-              text: `Fixture comment ${index + 1}`,
-              date: 1_700_001_000 + index,
-              outgoing: false,
-              replyToId: rootId,
-            }))
-          : [];
+      if (!messages.has(peer.id)) {
+        messages.set(
+          peer.id,
+          Array.from({ length: 75 }, (_, index) => ({
+            id: 100 + index,
+            peerId: peer.id,
+            peer,
+            senderId: 'u:101',
+            senderName: 'Alice Fixture',
+            text: `Fixture comment ${index + 1}`,
+            date: 1_700_001_000 + index,
+            outgoing: false,
+            replyToId: 42,
+          })),
+        );
+      }
+      const threadIds = new Set([rootId]);
+      const all = (messages.get(peer.id) ?? []).filter((message) => {
+        if (message.replyToId === undefined || !threadIds.has(message.replyToId)) return false;
+        threadIds.add(message.id);
+        return true;
+      });
       const eligible = all.filter((message) => !before || message.id < before);
       const page = eligible.slice(-limit);
       return {
@@ -996,21 +1063,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
             : scenario === 'shared-video' && kind === 'videos'
               ? [sharedVideo, ...(messages.get(peer.id) ?? [])]
               : (messages.get(peer.id) ?? []);
-        const found = source.filter((message) =>
-          kind === 'links'
-            ? Boolean(message.links?.length || /https?:\/\//u.test(message.text))
-            : kind === 'files'
-              ? message.media?.kind === 'file'
-              : kind === 'photos'
-                ? message.media?.kind === 'photo'
-                : kind === 'videos'
-                  ? message.media?.kind === 'video'
-                  : kind === 'audio'
-                    ? message.media?.kind === 'file' && message.media.mimeType.startsWith('audio/')
-                    : kind === 'voice'
-                      ? message.media?.kind === 'voice' || message.media?.kind === 'round-video'
-                      : message.media?.kind === 'animation',
-        );
+        const found = source.filter((message) => matchesMediaKind(message, kind));
         if (scenario === 'shared-media-pagination' || scenario === 'shared-media-short-pages') {
           const template = found[0];
           const shortPages = scenario === 'shared-media-short-pages';
@@ -1025,11 +1078,27 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         return messagePage(found, limit, offset, false);
       });
     }
+    function matchesMediaKind(message: TelegramMessage, kind: SharedMediaKind) {
+      return kind === 'links'
+        ? Boolean(message.links?.length || /https?:\/\//u.test(message.text))
+        : kind === 'files'
+          ? message.media?.kind === 'file'
+          : kind === 'photos'
+            ? message.media?.kind === 'photo'
+            : kind === 'videos'
+              ? message.media?.kind === 'video'
+              : kind === 'audio'
+                ? message.media?.kind === 'file' && message.media.mimeType.startsWith('audio/')
+                : kind === 'voice'
+                  ? message.media?.kind === 'voice' || message.media?.kind === 'round-video'
+                  : message.media?.kind === 'animation';
+    }
     function searchMessages(
       query: string,
       peer?: TelegramPeer,
       limit: number = 50,
       offset?: TelegramSearchOffset,
+      filters?: TelegramSearchFilters,
     ) {
       return Effect.sync(() => {
         stats.searchMessages += 1;
@@ -1037,7 +1106,18 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         const sources = peer ? [messages.get(peer.id) ?? []] : [...messages.values()];
         const found = sources
           .flat()
-          .filter((message) => message.text.toLocaleLowerCase().includes(term));
+          .filter((message) => message.text.toLocaleLowerCase().includes(term))
+          .filter((message) => !filters?.minDate || message.date >= filters.minDate)
+          .filter((message) => !filters?.maxDate || message.date <= filters.maxDate)
+          .filter((message) => !filters?.fromPeer || message.senderId === filters.fromPeer.id)
+          .filter((message) => !filters?.kind || matchesMediaKind(message, filters.kind))
+          .filter(
+            (message) =>
+              !filters?.chatType ||
+              message.peerId.startsWith(
+                filters.chatType === 'users' ? 'u:' : filters.chatType === 'groups' ? 'g:' : 'c:',
+              ),
+          );
         return messagePage(found, limit, offset, !peer);
       });
     }
@@ -1228,6 +1308,12 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       return Effect.sync(() => {
         stats.getUserDetails += 1;
         return {
+          ...(peer.id === 'u:606'
+            ? {
+                botMenu: { text: 'Open Bot App', url: 'https://example.com/mini' },
+                botHasMainApp: true,
+              }
+            : {}),
           firstName: 'Alice',
           lastName: 'Fixture',
           phone: '+1 555 010 2048',
@@ -1254,7 +1340,12 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         stats.deleteContact += 1;
       });
     }
-    function getGroupMembers(peer: TelegramPeer, limit: number = 50, offset: number = 0) {
+    function getGroupMembers(
+      peer: TelegramPeer,
+      limit: number = 50,
+      offset: number = 0,
+      query?: string,
+    ) {
       return Effect.sync(() => {
         if (peer.kind === 'user') return { members: [], totalCount: 0, hasMore: false };
         const allMembers = [
@@ -1281,13 +1372,17 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
             presence: 'offline' as const,
           },
         ];
-        const members = allMembers.slice(offset, offset + limit);
+        const term = query?.trim().toLocaleLowerCase().replace(/^@/, '') ?? '';
+        const matching = allMembers.filter((member) =>
+          `${member.title} ${member.username ?? ''}`.toLocaleLowerCase().includes(term),
+        );
+        const members = matching.slice(offset, offset + limit);
         const nextOffset = offset + members.length;
         return {
           members,
-          totalCount: allMembers.length,
-          hasMore: nextOffset < allMembers.length,
-          ...(nextOffset < allMembers.length ? { nextOffset } : {}),
+          totalCount: matching.length,
+          hasMore: nextOffset < matching.length,
+          ...(nextOffset < matching.length ? { nextOffset } : {}),
         };
       });
     }
@@ -1340,6 +1435,103 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         stats.setTyping += 1;
       });
     }
+    function updatePoll(
+      peer: TelegramPeer,
+      messageId: number,
+      current: TelegramPoll,
+      action: TelegramPollAction,
+      options: readonly string[],
+    ) {
+      return Effect.sync(() => {
+        const source = (messages.get(peer.id) ?? []).find((message) => message.id === messageId);
+        const poll = source?.poll ?? current;
+        const voted = pollHasVote(poll);
+        const results =
+          action === 'vote'
+            ? {
+                ...poll.results,
+                min: false,
+                totalVoters: Math.max(
+                  0,
+                  (poll.results.totalVoters ?? 0) - Number(voted) + Number(options.length > 0),
+                ),
+                answers: poll.answers.map((answer) => {
+                  const old = poll.results.answers?.find((item) => item.option === answer.option);
+                  const chosen = options.includes(answer.option);
+                  return {
+                    option: answer.option,
+                    chosen,
+                    correct: old?.correct,
+                    voters: Math.max(
+                      0,
+                      (old?.voters ?? 0) - Number(Boolean(old?.chosen)) + Number(chosen),
+                    ),
+                  };
+                }),
+              }
+            : poll.results;
+        const next = { ...poll, closed: action === 'close' || poll.closed, results };
+        if (source)
+          messages.set(
+            peer.id,
+            (messages.get(peer.id) ?? []).map((message) =>
+              message.id === messageId ? { ...message, poll: next } : message,
+            ),
+          );
+        return {
+          updateBatches: [
+            {
+              updates: [
+                {
+                  type: 'poll-changed' as const,
+                  pollId: poll.id,
+                  peerId: peer.id,
+                  messageId,
+                  poll: next,
+                  results,
+                },
+              ],
+            },
+          ],
+        };
+      });
+    }
+    const sendPoll = Effect.fn('FixtureTransport.sendPoll')(function* (
+      peer: TelegramPeer,
+      draft: TelegramPollDraft,
+      randomId: string,
+    ) {
+      const result = yield* sendText(peer, '', randomId);
+      const poll = pendingPoll(draft, randomId);
+      poll.results = {
+        totalVoters: 0,
+        solution: draft.solution,
+        answers: poll.answers.map((answer, index) => ({
+          option: answer.option,
+          voters: 0,
+          correct: draft.quiz && index === draft.correctAnswer,
+        })),
+      };
+      const message = { ...result.message, poll };
+      messages.set(
+        peer.id,
+        (messages.get(peer.id) ?? []).map((item) => (item.id === message.id ? message : item)),
+      );
+      return { ...result, message };
+    });
+    const sendContact = Effect.fn('FixtureTransport.sendContact')(function* (
+      peer: TelegramPeer,
+      contact: TelegramContact,
+      randomId: string,
+    ) {
+      const sent = yield* sendText(peer, '', randomId);
+      const message = { ...sent.message, contact };
+      messages.set(
+        peer.id,
+        (messages.get(peer.id) ?? []).map((item) => (item.id === message.id ? message : item)),
+      );
+      return { message };
+    });
     const sendText = Effect.fn('FixtureTransport.sendText')(function* (
       peer: TelegramPeer,
       text: string,
@@ -1675,12 +1867,71 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#183b56"/><stop offset="1" stop-color="#267871"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><g fill="#ffffff" opacity=".08"><circle cx="180" cy="170" r="90"/><circle cx="900" cy="540" r="180"/></g></svg>`;
       return new Blob([svg], { type: 'image/svg+xml' });
     });
+    let favoriteStickers: TelegramSticker[] = [];
+    const getFavoriteStickers = () => Effect.sync(() => [...favoriteStickers]);
+    const setStickerFavorite = (sticker: TelegramSticker, favorite: boolean) =>
+      Effect.sync(() => {
+        favoriteStickers = favoriteStickers.filter((value) => value.id !== sticker.id);
+        if (favorite) favoriteStickers.unshift(sticker);
+        return true;
+      });
+    const searchStickers = (query: string, offset: number = 0) =>
+      Effect.sync(() => ({
+        stickers: fixtureStickers()
+          .slice(0, 2)
+          .map((sticker, index) => ({
+            ...sticker,
+            id: `search-${query}-${offset + index}`,
+            title: `${query} ${offset + index}`,
+          })),
+        ...(offset === 0 ? { nextOffset: 2 } : {}),
+      }));
     function getRecentStickers() {
       return Effect.sync(() => {
         stats.getRecentStickers += 1;
         return fixtureStickers();
       });
     }
+    const removedStickerPacks = new Set<string>();
+    const addedStickerPacks = new Map<string, TelegramStickerPack>();
+    const getStickerPack = (shortName: string) =>
+      Effect.sync(() => ({
+        id:
+          shortName === 'FixtureAnimals'
+            ? 'pack-a'
+            : shortName === 'FixtureAnimated'
+              ? 'pack-b'
+              : 'pack-c',
+        accessHash: '10',
+        shortName,
+        title:
+          shortName === 'FixtureAnimals'
+            ? 'Fixture Animals'
+            : shortName === 'FixtureAnimated'
+              ? 'Fixture Animated'
+              : 'Fixture Cats',
+        installed:
+          shortName === 'FixtureAnimals'
+            ? !removedStickerPacks.has('pack-a')
+            : shortName === 'FixtureAnimated'
+              ? !removedStickerPacks.has('pack-b')
+              : addedStickerPacks.has('pack-c'),
+        count: 3,
+        stickers: fixtureStickers(),
+      }));
+    const searchStickerPacks = (_query: string) =>
+      getStickerPack('FixtureCats').pipe(Effect.map((pack) => [pack]));
+    const setStickerPackInstalled = (pack: TelegramStickerPack, installed: boolean) =>
+      Effect.sync(() => {
+        if (installed) {
+          removedStickerPacks.delete(pack.id);
+          addedStickerPacks.set(pack.id, { ...pack, installed: true });
+        } else {
+          removedStickerPacks.add(pack.id);
+          addedStickerPacks.delete(pack.id);
+        }
+        return true;
+      });
     function getStickerPacks() {
       return Effect.sync(() => {
         stats.getStickerPacks += 1;
@@ -1700,9 +1951,28 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
           ];
         }
         return [
-          { id: 'pack-a', title: 'Fixture Animals', stickers: recent.slice(0, 2) },
-          { id: 'pack-b', title: 'Fixture Animated', stickers: recent.slice(2) },
-        ];
+          {
+            id: 'pack-a',
+            accessHash: '10',
+            shortName: 'FixtureAnimals',
+            installed: true,
+            title: 'Fixture Animals',
+            stickers: recent.slice(0, 2),
+          },
+          {
+            id: 'pack-b',
+            accessHash: '11',
+            shortName: 'FixtureAnimated',
+            installed: true,
+            title: 'Fixture Animated',
+            stickers: recent.slice(2),
+          },
+          ...addedStickerPacks.values(),
+        ].filter(
+          (pack, index, all) =>
+            !removedStickerPacks.has(pack.id) &&
+            all.findIndex((value) => value.id === pack.id) === index,
+        );
       });
     }
     const getSavedGifs = Effect.fn('FixtureTransport.getSavedGifs')(function* () {
@@ -1858,6 +2128,12 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
             [
               { kind: 'text', text: 'Status' },
               { kind: 'text', text: 'Help' },
+              {
+                kind: 'simple-web-app',
+                text: 'Open Mini App',
+                url: 'https://example.com/mini',
+                bot: { id: 'u:606', kind: 'user', accessHash: '6' },
+              },
             ],
           ],
         },
@@ -1987,6 +2263,157 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         return { people, count: reaction?.count ?? 0 };
       });
     }
+    const getPollVotes = (
+      peer: TelegramPeer,
+      messageId: number,
+      option?: string,
+      offset?: string,
+    ) =>
+      Effect.sync((): TelegramPollVotes => {
+        const poll = messages.get(peer.id)?.find((message) => message.id === messageId)?.poll;
+        const answers = poll?.answers ?? [];
+        const count = option
+          ? (poll?.results.answers?.find((answer) => answer.option === option)?.voters ?? 0)
+          : (poll?.results.totalVoters ?? 0);
+        const start = Number(offset || 0);
+        const people = Array.from(
+          { length: Math.max(0, Math.min(2, count - start)) },
+          (_, index) => ({
+            id: `u:${101 + start + index}`,
+            peer: { id: `u:${101 + start + index}`, kind: 'user' as const, accessHash: '1' },
+            name: start + index === 0 ? 'Alice Fixture' : `Voter ${start + index + 1}`,
+            initials: 'VF',
+            color: '#6650d8',
+            hasAvatar: true,
+            avatarId: `fixture-voter-${start + index}`,
+            options: [
+              option ?? answers[(start + index) % Math.max(1, answers.length)]?.option ?? '00',
+            ],
+            date: 1700000000,
+          }),
+        );
+        return {
+          people,
+          count,
+          nextOffset: start + people.length < count ? String(start + people.length) : undefined,
+        };
+      });
+    const privacySettings = new Map<TelegramPrivacyKey, TelegramPrivacySetting>();
+    let hideReadTime = false;
+    const getPrivacy = (key: TelegramPrivacyKey) =>
+      Effect.sync(
+        () =>
+          privacySettings.get(key) ?? {
+            key,
+            rules: [{ kind: 'allow-contacts' as const }, { kind: 'deny-all' as const }],
+            peers: [],
+          },
+      );
+    const setPrivacy = Effect.fn('FixtureTransport.setPrivacy')(function* (
+      key: TelegramPrivacyKey,
+      change: TelegramPrivacyChange,
+    ) {
+      const current = yield* getPrivacy(key);
+      const next = { ...current, rules: changePrivacyRules(current.rules, change) };
+      privacySettings.set(key, next);
+      return next;
+    });
+    const getReadTimePrivacy = () => Effect.sync(() => hideReadTime);
+    const setReadTimePrivacy = (hidden: boolean) =>
+      Effect.sync(() => {
+        hideReadTime = hidden;
+        return hidden;
+      });
+    let sessionTtl = 180;
+    let activeSessions: TelegramActiveSessions['sessions'] = [
+      {
+        id: '0',
+        current: true,
+        device: 'Fixture browser',
+        platform: 'Linux',
+        systemVersion: '6',
+        appName: 'TeleVecha',
+        appVersion: '0.1',
+        createdAt: 1700000000,
+        activeAt: 1700000500,
+        ip: '127.0.0.1',
+        country: 'Local',
+        region: '',
+        passwordPending: false,
+        unconfirmed: false,
+      },
+      {
+        id: '1234567890123456789',
+        current: false,
+        device: 'Pixel 8',
+        platform: 'Android',
+        systemVersion: '15',
+        appName: 'Telegram Android',
+        appVersion: '12',
+        createdAt: 1700000000,
+        activeAt: 1700000400,
+        ip: '192.0.2.1',
+        country: 'Fixture',
+        region: 'Test City',
+        passwordPending: false,
+        unconfirmed: false,
+      },
+      {
+        id: '-234567890123456789',
+        current: false,
+        device: 'Desktop PC',
+        platform: 'Windows',
+        systemVersion: '11',
+        appName: 'Telegram Desktop',
+        appVersion: '6',
+        createdAt: 1700000000,
+        activeAt: 1700000200,
+        ip: '192.0.2.2',
+        country: 'Fixture',
+        region: 'Test City',
+        passwordPending: false,
+        unconfirmed: false,
+      },
+    ];
+    const getActiveSessions = () =>
+      Effect.sync(() => ({
+        sessions: activeSessions.map((session) => ({ ...session })),
+        ttlDays: sessionTtl,
+      }));
+    const terminateSession = (hash?: string) =>
+      Effect.sync(() => {
+        activeSessions = activeSessions.filter(
+          (session) => session.current || (hash !== undefined && session.id !== hash),
+        );
+      });
+    const setSessionTtl = (days: number) =>
+      Effect.sync(() => {
+        sessionTtl = days;
+      });
+    function getMessageReadReceipts(peer: TelegramPeer, _messageId: number) {
+      stats.getMessageReadReceipts += 1;
+      return Effect.succeed<TelegramReadReceipts>({
+        state: 'available',
+        people: (peer.kind === 'user'
+          ? [{ id: peer.id, name: 'Alice Fixture' }]
+          : [
+              { id: 'u:404', name: 'Fixture Author' },
+              { id: 'u:405', name: 'Another Member' },
+            ]
+        ).map((person, index) => ({
+          ...person,
+          peer: { id: person.id, kind: 'user' as const, accessHash: '1' },
+          initials: person.name
+            .split(' ')
+            .map((part) => part[0])
+            .join(''),
+          color: '#408acf',
+          hasAvatar: true,
+          avatarId: `fixture-${person.id}`,
+          readAt: Math.floor(Date.now() / 1000) - 60 * (index + 1),
+        })),
+      });
+    }
     function setReaction(peer: TelegramPeer, messageId: number, emoji?: string) {
       return Effect.sync(() => {
         stats.setReaction += 1;
@@ -2097,6 +2524,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       toPeer: TelegramPeer,
       messageId: number,
       randomId: string,
+      options?: TelegramForwardOptions,
     ) {
       stats.forwardMessage += 1;
       const source = messages.get(fromPeer.id)?.find(({ id }) => id === messageId);
@@ -2104,6 +2532,16 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         return yield* Effect.fail(createMtprotoError('transport', 'Fixture message was not found'));
       const message = {
         ...source,
+        text: options?.hideCaption && source.media ? '' : source.text,
+        formats: options?.hideCaption && source.media ? [] : source.formats,
+        forwardedFrom:
+          options?.hideAuthor || options?.hideCaption
+            ? undefined
+            : (source.forwardedFrom ?? {
+                name: source.senderName ?? 'Fixture sender',
+                peerId: fromPeer.id,
+                messageId,
+              }),
         id: (messages.get(toPeer.id)?.at(-1)?.id ?? 0) + 1,
         peerId: toPeer.id,
         senderId: 'self',
@@ -2127,6 +2565,27 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
           );
       },
       emit: (update) => {
+        if (
+          (update.type === 'new-message' || update.type === 'edit-message') &&
+          update.message.peerId === discussionPeer.id
+        ) {
+          messages.set(
+            discussionPeer.id,
+            [
+              ...(messages.get(discussionPeer.id) ?? []).filter(
+                (message) => message.id !== update.message.id,
+              ),
+              update.message,
+            ].sort((a, b) => a.id - b.id),
+          );
+        } else if (update.type === 'delete-messages' && update.peerId === discussionPeer.id) {
+          messages.set(
+            discussionPeer.id,
+            (messages.get(discussionPeer.id) ?? []).filter(
+              (message) => !update.messageIds.includes(message.id),
+            ),
+          );
+        }
         Queue.offerUnsafe(controls, { _tag: 'emit', update });
       },
       releaseConnect: () => {
@@ -2199,6 +2658,28 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       isAuthorized,
       getAuthorizedAccountId,
       requestCode,
+      watchQrLogin: () =>
+        Stream.unfold<number, import('../types').TelegramQrLogin, never, never>(0, (index) =>
+          Effect.gen(function* () {
+            if (index > 0) yield* Effect.sleep(5000);
+            if (scenario === 'auth-qr-password' && index === 1)
+              return [{ type: 'password-required' as const }, index + 1] as const;
+            if (scenario === 'auth-qr-success' && index === 1) {
+              authorized = true;
+              return [{ type: 'authorized' as const }, index + 1] as const;
+            }
+            if ((scenario === 'auth-qr-password' || scenario === 'auth-qr-success') && index > 1)
+              return undefined;
+            return [
+              {
+                type: 'token' as const,
+                url: `tg://login?token=fixture-token-${index}`,
+                expires: Math.floor(Date.now() / 1000) + 5,
+              },
+              index + 1,
+            ] as const;
+          }),
+        ),
       submitCode,
       submitPassword,
       getCurrentState,
@@ -2207,9 +2688,24 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       getDialogs,
       getHistory,
       getHistoryAround,
+      getUnreadNotifications: (peer, kind) =>
+        Effect.sync(() => {
+          const unread = (messages.get(peer.id) ?? []).filter((message) =>
+            kind === 'mention' ? message.unreadMention : message.unreadReaction,
+          );
+          return { messages: unread, count: unread.length };
+        }),
       readMessageContents: (peer, messageIds) =>
         Effect.sync(() => {
           stats.readMessageContents.push({ peerId: peer.id, messageIds: [...messageIds] });
+          messages.set(
+            peer.id,
+            (messages.get(peer.id) ?? []).map((message) =>
+              messageIds.includes(message.id)
+                ? { ...message, mediaUnread: false, unreadMention: false, unreadReaction: false }
+                : message,
+            ),
+          );
           return {};
         }),
       readHistory,
@@ -2234,6 +2730,9 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       setPinnedMessage,
       setTyping,
       sendText,
+      sendContact,
+      sendPoll,
+      updatePoll,
       sendFile,
       sendAlbum,
       downloadMedia,
@@ -2243,11 +2742,41 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       getWallpapers,
       downloadWallpaper,
       getRecentStickers,
+      searchStickers,
+      getFavoriteStickers,
+      setStickerFavorite,
       getStickerPacks,
+      getStickerPack,
+      searchStickerPacks,
+      setStickerPackInstalled,
       getSavedGifs,
       searchGifs,
       downloadSticker,
       downloadCustomEmoji,
+      getBotApp: (_bot, shortName) =>
+        Effect.succeed({
+          id: '9223372036854775806',
+          accessHash: '9223372036854775805',
+          title: `Fixture ${shortName}`,
+          description: 'A test Mini App opened from a Telegram link.',
+          requestWriteAccess: true,
+        }),
+      requestWebApp: (request) =>
+        Effect.succeed({
+          url: new URL('/e2e/mini-app.html', window.location.href).href,
+          ...(request.mode === 'simple' ? {} : { queryId: '9223372036854775806' }),
+          fullsize: false,
+          fullscreen: false,
+        }),
+      prolongWebApp: () =>
+        Effect.sync(() => {
+          stats.prolongWebApp++;
+        }),
+      sendWebAppData: (_bot, _text, _data, _id) =>
+        Effect.sync(() => {
+          stats.sendWebAppData++;
+        }),
+      invokeWebAppMethod: (_bot, _method, params) => Effect.succeed(params),
       getBotCommands,
       startBot,
       answerBotCallback,
@@ -2256,6 +2785,15 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       sendSticker,
       getReactionPeople,
       setReaction,
+      getMessageReadReceipts,
+      getPollVotes,
+      getActiveSessions,
+      getPrivacy,
+      setPrivacy,
+      getReadTimePrivacy,
+      setReadTimePrivacy,
+      terminateSession,
+      setSessionTtl,
       deleteMessages,
       editMessage,
       forwardMessage,

@@ -1,3 +1,4 @@
+import { pendingPoll } from '../../domain/poll';
 import { describe, expect, it } from 'vitest';
 
 import type { TelegramChatPermissions, TelegramDialog, TelegramMessage } from '../types';
@@ -44,13 +45,36 @@ function dialog(
 
 function message(
   overrides: Partial<
-    Pick<TelegramMessage, 'outgoing' | 'protected' | 'service' | 'forwardedFrom' | 'media'>
+    Pick<
+      TelegramMessage,
+      'outgoing' | 'protected' | 'service' | 'forwardedFrom' | 'media' | 'contact' | 'poll'
+    >
   > = {},
 ) {
   return { outgoing: true, text: 'Hello', ...overrides };
 }
 
 describe('Telegram chat permissions', () => {
+  it('keeps contact cards and polls out of the text editor', () => {
+    expect(
+      messageCapabilities(
+        dialog('user'),
+        message({ contact: { firstName: 'Ada', lastName: '', phoneNumber: '+123', vcard: '' } }),
+      ).canEdit,
+    ).toBe(false);
+    const poll = pendingPoll(
+      {
+        question: 'Question',
+        answers: ['A', 'B'],
+        quiz: false,
+        multipleChoice: false,
+        publicVoters: false,
+        solution: '',
+      },
+      '1',
+    );
+    expect(messageCapabilities(dialog('user'), message({ poll })).canEdit).toBe(false);
+  });
   it('does not offer local channel deletion or editing for non-editable media', () => {
     const channel = dialog('channel');
     const sticker = message({

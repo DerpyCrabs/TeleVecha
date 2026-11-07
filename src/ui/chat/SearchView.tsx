@@ -1,7 +1,14 @@
+import './search.css';
+import { Avatar } from '../shared/Avatar';
+import { SearchSenderFilter } from './SearchSenderFilter';
+import type { SharedMediaKind, TelegramSearchFilters, TelegramPeer } from '../../telegram/types';
 import { list } from 'effectweb';
 import { available, observe, view, type Send } from 'effectweb';
-import { Dialog } from '../shared/Dialog';
-import { panelClass, panelErrorClass, panelLoadMoreClass } from '../shared/panelStyles';
+import ArrowLeft from '@effectweb/lucide/icons/arrow-left';
+import Calendar from '@effectweb/lucide/icons/calendar-days';
+import X from '@effectweb/lucide/icons/x';
+import { searchPanelMount } from './searchPanelMount';
+import { panelErrorClass, panelLoadMoreClass } from '../shared/panelStyles';
 import {
   searchActions,
   searchArgs,
@@ -14,14 +21,24 @@ import {
 } from './searchProgram';
 import * as AsyncResult from 'effect/reactivity/AsyncResult';
 
+const kinds: readonly [string, string][] = [
+  ['', 'All messages'],
+  ['photos', 'Photos'],
+  ['videos', 'Videos'],
+  ['files', 'Files'],
+  ['audio', 'Music'],
+  ['voice', 'Voice messages'],
+  ['links', 'Links'],
+  ['gifs', 'GIFs'],
+];
 const notSubmitted: SearchResults = AsyncResult.initial();
 
 export const SearchView = view<{ model: SearchModel; send: Send<SearchMessage> }>(
   ({ model, send }) => {
     const dispatch = searchActions.bind(send);
-    const { query, global, submitted, host } = model.props;
+    const { query, global, host, filters, fromDate, untilDate, dateError } = model.props;
     const args = searchArgs(model.props);
-    const title = (peerId: string) => host.dialogs.find(({ peer }) => peer.id === peerId)?.title;
+    const dialog = (peerId: string) => host.dialogs.find(({ peer }) => peer.id === peerId);
     const results = (result: SearchResults) => {
       const page = available(result);
       const rows = searchMessages.from(searchRows(result));
@@ -31,15 +48,94 @@ export const SearchView = view<{ model: SearchModel; send: Send<SearchMessage> }
         <p class="text-[0.78rem] text-muted">Searching Telegram…</p>
       ) : (
         <>
-          {list(rows, (message) => (
-            <button
-              class="grid w-full gap-[0.2rem] rounded-[0.6rem] border-0 bg-transparent p-[0.65rem] text-left text-ink hover:bg-white/5 [&>span]:text-[0.78rem] [&>span]:text-muted"
-              onClick={() => dispatch.Open(message)}
-            >
-              <strong>{title(message.peerId) ?? message.peerTitle ?? message.peerId}</strong>
-              <span>{message.text || message.media?.name || 'Message'}</span>
-            </button>
-          ))}
+          {list(rows, (message) => {
+            const chat = dialog(message.peerId);
+            const title = chat?.title ?? message.peerTitle ?? message.peerId;
+            const sender = dialog(message.senderId);
+            const senderTitle = message.outgoing
+              ? 'You'
+              : (message.senderName ?? sender?.title ?? title);
+            const rowTitle = global ? title : senderTitle;
+            const senderPeer: TelegramPeer = sender?.peer ?? {
+              id: message.senderId,
+              kind: message.senderId.startsWith('c:')
+                ? 'channel'
+                : message.senderId.startsWith('g:')
+                  ? 'group'
+                  : 'user',
+            };
+            const useSender = !global && Boolean(message.senderId);
+            const date = new Date(message.date * 1000);
+            return (
+              <button
+                class="search-result"
+                onClick={() => dispatch.Open(message)}
+                title={`Open message in ${title}`}
+              >
+                <Avatar
+                  identity={`search:${useSender ? message.senderId : message.peerId}:${useSender ? (message.senderAvatarId ?? '') : (chat?.avatarId ?? '')}`}
+                  size="sm"
+                  initials={
+                    useSender
+                      ? senderTitle
+                          .split(/\s+/)
+                          .slice(0, 2)
+                          .map((part) => part[0])
+                          .join('')
+                      : (chat?.initials ?? title.slice(0, 2))
+                  }
+                  color={
+                    useSender
+                      ? (message.senderColor ?? sender?.color ?? 'var(--accent)')
+                      : (chat?.color ?? 'var(--accent)')
+                  }
+                  loadCached={
+                    host.media
+                      ? () =>
+                          useSender
+                            ? host.media!.loadPeerAvatar(
+                                senderPeer,
+                                true,
+                                message.senderAvatarId,
+                                true,
+                              )
+                            : host.media!.loadAvatar(message.peerId, true)
+                      : undefined
+                  }
+                  load={
+                    host.media && host.online
+                      ? () =>
+                          useSender
+                            ? host.media!.loadPeerAvatar(senderPeer, true, message.senderAvatarId)
+                            : host.media!.loadAvatar(message.peerId)
+                      : undefined
+                  }
+                />
+                <span class="search-result-content">
+                  <span class="search-result-heading">
+                    <strong>{rowTitle}</strong>
+                    <time dateTime={date.toISOString()} title={date.toLocaleString()}>
+                      {date.toLocaleDateString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </time>
+                  </span>
+                  {global && message.senderName ? (
+                    <span class="search-result-sender">{message.senderName}</span>
+                  ) : null}
+                  <span class="search-result-text">
+                    {message.text ||
+                      message.poll?.question ||
+                      message.contact?.firstName ||
+                      message.media?.name ||
+                      'Message'}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
           {error ? (
             <div class={`panel-error ${panelErrorClass}`} role="alert">
               <p>{error}</p>
@@ -49,11 +145,11 @@ export const SearchView = view<{ model: SearchModel; send: Send<SearchMessage> }
             </div>
           ) : rows.length === 0 ? (
             <p class="text-[0.78rem] text-muted">
-              {query.trim()
-                ? submitted
-                  ? 'No messages found'
-                  : 'Press Enter to search'
-                : 'Enter a search term'}
+              {args
+                ? 'No messages found'
+                : query.trim()
+                  ? 'Searching…'
+                  : 'Enter a search term or choose a filter'}
             </p>
           ) : null}
           {page?.next !== undefined && !error ? (
@@ -69,67 +165,162 @@ export const SearchView = view<{ model: SearchModel; send: Send<SearchMessage> }
       );
     };
     return (
-      <Dialog
-        title="Search messages"
-        label="Message search"
-        onClose={dispatch.Close}
-        closeLabel="Close search"
-        class={`search-panel ${panelClass}`}
+      <aside
+        class="search-panel"
+        role={host.compact ? 'dialog' : 'complementary'}
+        aria-modal={host.compact || undefined}
+        aria-label="Message search"
+        use={searchPanelMount({ compact: host.compact ?? false, close: dispatch.Close })}
       >
-        <div
-          class="search-scope flex gap-[0.3rem] px-[0.8rem] pt-[0.6rem]"
-          role="group"
-          aria-label="Search scope"
-        >
+        <header class="search-panel-header">
           <button
-            class="flex items-center gap-[0.35rem] rounded-[0.55rem] border-0 bg-transparent px-[0.7rem] py-[0.45rem] text-muted"
-            aria-pressed={!global}
-            classList={{ 'active !bg-[var(--accent-soft)] !text-ink': !global }}
-            onClick={() => dispatch.Scope(false)}
+            type="button"
+            class="search-back"
+            title="Back to chats"
+            aria-label="Close search"
+            onClick={dispatch.Close}
           >
-            This chat
+            <ArrowLeft size={22} />
           </button>
+          <form
+            class="search-query"
+            onSubmit={(event) => {
+              event.preventDefault();
+              dispatch.Submit();
+            }}
+          >
+            <svg
+              width="17"
+              height="17"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+            <input
+              type="search"
+              class="w-full border-0 bg-transparent py-[0.7rem] text-ink outline-0"
+              value={query}
+              onInput={(event) => dispatch.Query(event.currentTarget.value)}
+              placeholder={global ? 'Search all Telegram messages' : 'Search this chat'}
+              aria-label="Message search query"
+              autofocus
+            />
+          </form>
+        </header>
+        <div class="search-context">
           <button
-            class="flex items-center gap-[0.35rem] rounded-[0.55rem] border-0 bg-transparent px-[0.7rem] py-[0.45rem] text-muted"
-            aria-pressed={global}
-            classList={{ 'active !bg-[var(--accent-soft)] !text-ink': global }}
-            onClick={() => dispatch.Scope(true)}
+            type="button"
+            class="search-scope-chip"
+            title={global ? 'Search this chat' : 'Search all chats'}
+            onClick={() => dispatch.Scope(!global)}
           >
-            All chats
+            {global ? 'All chats' : `In: ${dialog(host.activePeerId)?.title ?? 'this chat'}`}
+            {!global ? <X size={14} /> : null}
           </button>
+          {!global ? (
+            <SearchSenderFilter
+              host={host}
+              selected={filters.fromPeer}
+              change={(fromPeer) => dispatch.Filters({ ...filters, fromPeer })}
+            />
+          ) : (
+            <select
+              class="search-chat-type"
+              aria-label="Chat type"
+              value={filters.chatType ?? ''}
+              onChange={(event) =>
+                dispatch.Filters({
+                  ...filters,
+                  chatType: (event.currentTarget.value ||
+                    undefined) as TelegramSearchFilters['chatType'],
+                })
+              }
+            >
+              <option value="">All types</option>
+              <option value="users">People</option>
+              <option value="groups">Groups</option>
+              <option value="channels">Channels</option>
+            </select>
+          )}
+          <details class="search-date-picker">
+            <summary title="Filter by date" aria-label="Filter by date">
+              <Calendar size={17} />
+              {fromDate || untilDate ? 'Dates set' : 'Date'}
+            </summary>
+            <div class="search-date-fields">
+              <label>
+                From
+                <input
+                  type="date"
+                  aria-label="From date"
+                  value={fromDate}
+                  max={untilDate || undefined}
+                  onChange={(event) => dispatch.Dates(event.currentTarget.value, untilDate)}
+                />
+              </label>
+              <label>
+                To
+                <input
+                  type="date"
+                  aria-label="To date"
+                  value={untilDate}
+                  min={fromDate || undefined}
+                  onChange={(event) => dispatch.Dates(fromDate, event.currentTarget.value)}
+                />
+              </label>
+              {fromDate || untilDate ? (
+                <button type="button" onClick={() => dispatch.Dates('', '')}>
+                  Clear dates
+                </button>
+              ) : null}
+            </div>
+          </details>
+          {Object.values(filters).some((value) => value !== undefined) || fromDate || untilDate ? (
+            <button
+              type="button"
+              class="search-clear-filters"
+              title="Clear filters"
+              aria-label="Clear filters"
+              onClick={dispatch.ClearFilters}
+            >
+              <X size={16} />
+            </button>
+          ) : null}
         </div>
-        <form
-          class="mx-[0.8rem] my-[0.7rem] flex items-center gap-[0.55rem] rounded-[0.65rem] border border-[#30343d] bg-[#101216] px-[0.7rem] focus-within:border-[color-mix(in_srgb,var(--accent)_70%,transparent)] focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent)_20%,transparent)]"
-          onSubmit={(event) => {
-            event.preventDefault();
-            dispatch.Submit();
-          }}
-        >
-          <svg
-            width="17"
-            height="17"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            aria-hidden="true"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          <input
-            class="w-full border-0 bg-transparent py-[0.7rem] text-ink outline-0"
-            value={query}
-            onInput={(event) => dispatch.Query(event.currentTarget.value)}
-            placeholder={global ? 'Search all Telegram messages' : 'Search this chat'}
-            aria-label="Message search query"
-            autofocus
-          />
-        </form>
+        <div class="search-kind-tabs" role="group" aria-label="Message type">
+          {list(
+            kinds,
+            ([value]) => value,
+            ([value, label]) => (
+              <button
+                type="button"
+                aria-pressed={(filters.kind ?? '') === value}
+                onClick={() =>
+                  dispatch.Filters({
+                    ...filters,
+                    kind: (value || undefined) as SharedMediaKind | undefined,
+                  })
+                }
+              >
+                {value ? label : 'Messages'}
+              </button>
+            ),
+          )}
+        </div>
+        {dateError ? (
+          <p class="search-date-error" role="alert">
+            {dateError}
+          </p>
+        ) : null}
         <div class="search-results min-h-40 overflow-y-auto px-[0.8rem] pt-[0.4rem] pb-[0.8rem]">
           {args ? observe(host.results(args), results) : results(notSubmitted)}
         </div>
-      </Dialog>
+      </aside>
     );
   },
 );

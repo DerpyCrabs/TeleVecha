@@ -835,10 +835,15 @@ test('shows upload progress and classifies WebP uploads as stickers', async ({ p
     await page.goto('/?scenario=held-upload');
     await selectAlice(page);
     await page.getByRole('textbox', { name: 'Message' }).fill('Fixture caption');
-    await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
+    await page
+      .locator('.chat-composer input[type="file"]')
+      .setInputFiles('e2e/fixtures/report.txt');
     await expect(page.getByTestId('composer-attachment')).toContainText('report.txt');
     expect((await fixtureStats(page))?.sendFile).toBe(0);
-    await page.getByRole('button', { name: 'Send message' }).click();
+    await page
+      .locator('.attachment-send-dialog')
+      .getByRole('button', { name: /^(Send|Save)$/ })
+      .click();
 
     const upload = page.locator('article.message', { hasText: 'Fixture caption' });
     await expect(upload).toContainText('report.txt');
@@ -849,9 +854,16 @@ test('shows upload progress and classifies WebP uploads as stickers', async ({ p
     await expect(upload.locator('footer')).toHaveAttribute('aria-label', /Message status: sent$/u);
   });
   await test.step('classifies WebP uploads as stickers', async () => {
-    await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/sticker.webp');
-    await expect(page.getByTestId('composer-attachment')).toContainText('sticker.webp');
-    await page.getByRole('button', { name: 'Send message' }).click();
+    await page
+      .locator('.chat-composer input[type="file"]')
+      .setInputFiles('e2e/fixtures/sticker.webp');
+    await expect(
+      page.getByRole('button', { name: 'Remove attachment sticker.webp' }),
+    ).toBeVisible();
+    await page
+      .locator('.attachment-send-dialog')
+      .getByRole('button', { name: /^(Send|Save)$/ })
+      .click();
 
     const upload = page.locator('article[data-media-kind="sticker"]');
     await expect(upload).toContainText('sticker.webp');

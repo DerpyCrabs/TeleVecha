@@ -1,3 +1,14 @@
+import type { TelegramSearchFilters } from '../types';
+import type { TelegramWebAppRequest } from '../types';
+import type { TelegramPrivacyKey, TelegramPrivacyChange } from '../types';
+import type { TelegramReadReceipts } from '../types';
+import { pollDraftError } from '../../domain/poll';
+import type { TelegramPollDraft } from '../types';
+import { mergePollResults, pollHasVote, pollIsClosed } from '../../domain/poll';
+import type { TelegramPollAction } from '../types';
+import { createMtprotoError } from '../mtproto/errors';
+import type { TelegramContact } from '../types';
+import type { TelegramForwardOptions } from '../types';
 import { SecureRandom } from 'effect/crypto';
 import { Deferred, Effect, Exit, Layer, Schedule, Scope, Stream } from 'effect';
 
@@ -94,6 +105,7 @@ const MAX_MESSAGE_TEXT_LENGTH = 4_096;
 const MAX_CAPTION_TEXT_LENGTH = 1_024;
 const EXPRESSION_INDEX_CACHE_KEYS = [
   'sticker-index:recent:v2',
+  'sticker-index:favorites:v1',
   'sticker-index:packs:v2',
   'sticker-index:gifs:v2',
 ];
@@ -156,6 +168,7 @@ function makeMessagingEngineModule(
   let accountReadySignal: Deferred.Deferred<void, Error> = accountReady;
   let tabLease: TabLease | undefined;
   let sessionScope: Scope.Closeable | undefined;
+  let qrScope: Scope.Closeable | undefined;
   let quiescing = false;
   let currentCacheEpoch = 0;
   let resourceCache = resources;
@@ -640,6 +653,7 @@ function makeMessagingEngineModule(
     quiescing = true;
     const session = sessionScope;
     sessionScope = undefined;
+    qrScope = undefined;
     metadataGeneration += 1;
     yield* engineTasks.interruptOperation('connection');
     if (session) yield* Scope.close(session, Exit.void);
@@ -1033,16 +1047,71 @@ function makeMessagingEngineModule(
       return page;
     },
   );
+  const getUnreadNotifications = Effect.fn('MessagingEngine.getUnreadNotifications')(function* (
+    peer: TelegramPeer,
+    kind: 'mention' | 'reaction',
+  ) {
+    const session = sessionScope;
+    const accountId = activeAccountId;
+    if (!telegramTransport.getUnreadNotifications || !currentSnapshot().online)
+      return (histories.loaded(peer.id)?.messages ?? []).filter((message) =>
+        kind === 'mention' ? message.unreadMention : message.unreadReaction,
+      );
+    const dialogVersion = versions.current('dialog', peer.id);
+    const result = yield* runTelegramOperation(
+      () => telegramTransport.getUnreadNotifications!(peer, kind),
+      'Loading unread mentions and reactions',
+    );
+    if (!isOperationCurrent(session, accountId)) return [];
+    const field = kind === 'mention' ? 'unreadMentionsCount' : 'unreadReactionsCount';
+    yield* queueDialogStateOperation(() =>
+      Effect.gen(function* () {
+        if (!isOperationCurrent(session, accountId)) return;
+        const dialog = dialogForPeer(peer.id);
+        if (!dialog) return;
+        if (versions.current('dialog', peer.id) !== dialogVersion) return;
+        const changed = { ...dialog, [field]: result.count };
+        versions.next('dialog', peer.id);
+        yield* patch({
+          dialogs: currentSnapshot().dialogs.map((item) =>
+            item.peer.id === peer.id ? changed : item,
+          ),
+        });
+        if (!changed.transient)
+          yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
+      }),
+    );
+    return result.messages;
+  });
   const searchConversationMessages = Effect.fn('MessagingEngine.searchConversationMessages')(
-    function* (peer: TelegramPeer, query: string, global: boolean, offset?: TelegramSearchOffset) {
+    function* (
+      peer: TelegramPeer,
+      query: string,
+      global: boolean,
+      offset?: TelegramSearchOffset,
+      filters?: TelegramSearchFilters,
+    ) {
       const term = query.trim();
-      if (!term) return { messages: [], hasMore: false } satisfies TelegramSearchPage;
+      if (
+        !term &&
+        !filters?.kind &&
+        !filters?.fromPeer &&
+        !filters?.minDate &&
+        !filters?.maxDate &&
+        !filters?.chatType
+      )
+        return { messages: [], hasMore: false } satisfies TelegramSearchPage;
       const cacheKey = queryMetadataKey('message-search', [
         global ? 'global' : peer.id,
         term.toLocaleLowerCase(),
         offset?.messageId,
         offset?.peer?.id,
         offset?.rate,
+        filters?.kind,
+        filters?.fromPeer?.id,
+        filters?.minDate,
+        filters?.maxDate,
+        filters?.chatType,
       ]);
       const cached = yield* readMetadata<TelegramSearchPage>(cacheKey);
       if (cached && !currentSnapshot().online) {
@@ -1052,7 +1121,8 @@ function makeMessagingEngineModule(
         return cached?.value ?? { messages: [], hasMore: false };
       }
       const page = yield* runTelegramOperation(
-        () => telegramTransport.searchMessages(query, global ? undefined : peer, 50, offset),
+        () =>
+          telegramTransport.searchMessages(term, global ? undefined : peer, 50, offset, filters),
         'Searching messages',
       );
       yield* Effect.all(
@@ -1512,9 +1582,31 @@ function makeMessagingEngineModule(
     peer: TelegramPeer,
     limit: number = 50,
     offset: number = 0,
+    query?: string,
   ) {
     if (peer.kind === 'user' || !telegramTransport.getGroupMembers) {
       return { members: [], totalCount: 0, hasMore: false } satisfies TelegramGroupMemberPage;
+    }
+    // Search pages must not replace the cached, unfiltered membership list.
+    if (query !== undefined) {
+      if (!currentSnapshot().online) {
+        const cached = yield* cachedGroupMembers(peer.id);
+        const term = query.trim().toLocaleLowerCase().replace(/^@/, '');
+        const matching = (cached?.value ?? []).filter((member) =>
+          `${member.title} ${member.username ?? ''}`.toLocaleLowerCase().includes(term),
+        );
+        const nextOffset = offset + limit;
+        return {
+          members: matching.slice(offset, nextOffset),
+          totalCount: matching.length,
+          hasMore: nextOffset < matching.length,
+          ...(nextOffset < matching.length ? { nextOffset } : {}),
+        };
+      }
+      return yield* runTelegramOperation(
+        () => telegramTransport.getGroupMembers!(peer, limit, offset, query.trim()),
+        'Searching group members',
+      );
     }
     if (offset > 0) {
       if (!currentSnapshot().online) {
@@ -2243,7 +2335,51 @@ function makeMessagingEngineModule(
       ),
     );
   });
+  const cancelQrLogin = Effect.fn('MessagingEngine.cancelQrLogin')(function* () {
+    const scope = qrScope;
+    qrScope = undefined;
+    if (scope) yield* Scope.close(scope, Exit.void);
+    if (currentSnapshot().authStep === 'qr')
+      yield* patch({ authStep: 'phone', qrLogin: undefined, error: undefined });
+  });
+  const beginQrLogin = Effect.fn('MessagingEngine.beginQrLogin')(function* () {
+    if (currentSnapshot().phase !== 'unauthorized' || !sessionScope) return;
+    yield* cancelQrLogin();
+    mayClaimLegacyAccount = false;
+    const session = sessionScope;
+    const scope = yield* Scope.fork(session, 'parallel');
+    qrScope = scope;
+    yield* patch({ authStep: 'qr', qrLogin: undefined, error: undefined });
+    if (!telegramTransport.watchQrLogin) {
+      yield* patch({ error: 'QR login is unavailable for this connection.' });
+      return;
+    }
+    yield* Stream.runForEach(telegramTransport.watchQrLogin(), (result) =>
+      Effect.gen(function* () {
+        if (qrScope !== scope || !isLifecycleCurrent(session)) return;
+        if (result.type === 'token') {
+          yield* patch({ qrLogin: { url: result.url, expires: result.expires }, error: undefined });
+        } else if (result.type === 'password-required') {
+          yield* patch({ authStep: 'password', qrLogin: undefined, error: undefined });
+        } else {
+          yield* patch({ qrLogin: undefined });
+          yield* activateAuthorizedSession(false, session);
+        }
+      }),
+    ).pipe(
+      Effect.catch((error) =>
+        qrScope === scope && isLifecycleCurrent(session)
+          ? patch({
+              qrLogin: undefined,
+              error: error instanceof Error ? error.message : 'Could not start QR login.',
+            })
+          : Effect.void,
+      ),
+      Effect.forkIn(scope, { startImmediately: true }),
+    );
+  });
   const requestCode = Effect.fn('MessagingEngine.requestCode')(function* (phoneNumber: string) {
+    yield* cancelQrLogin();
     mayClaimLegacyAccount = false;
     yield* Effect.gen(function* () {
       const result = yield* runTelegramOperation(
@@ -2827,6 +2963,19 @@ function makeMessagingEngineModule(
       });
     });
   });
+  const searchStickers = Effect.fn('MessagingEngine.searchStickers')(function* (
+    query: string,
+    offset: number = 0,
+  ) {
+    const term = query.trim();
+    if (!term) return { stickers: [] };
+    if (!telegramTransport.searchStickers)
+      return yield* Effect.fail(new Error('Sticker search is unavailable.'));
+    return yield* runTelegramOperation(
+      () => telegramTransport.searchStickers!(term, offset),
+      'Searching stickers',
+    );
+  });
   const getRecentStickers = Effect.fn('MessagingEngine.getRecentStickers')(function* () {
     const session = sessionScope;
     const accountId = activeAccountId;
@@ -2839,15 +2988,94 @@ function makeMessagingEngineModule(
       capturedMetadataGeneration,
     );
   });
+  let favoriteStickerVersion = 0;
+  const getFavoriteStickers = Effect.fn('MessagingEngine.getFavoriteStickers')(function* () {
+    const cacheKey = 'sticker-index:favorites:v1';
+    const cached = yield* readMetadata<TelegramSticker[]>(cacheKey);
+    if (!currentSnapshot().online || !activeAccountId) return cached?.value ?? [];
+    const session = sessionScope;
+    const accountId = activeAccountId;
+    const version = favoriteStickerVersion;
+    const values = yield* runTelegramOperation(
+      () => telegramTransport.getFavoriteStickers?.() ?? Effect.succeed([]),
+      'Loading favorite stickers',
+    );
+    if (version !== favoriteStickerVersion || !isOperationCurrent(session, accountId)) return [];
+    yield* writeMetadata(cacheKey, values);
+    return values;
+  });
+  const setStickerFavorite = Effect.fn('MessagingEngine.setStickerFavorite')(function* (
+    sticker: TelegramSticker,
+    favorite: boolean,
+  ) {
+    if (!telegramTransport.setStickerFavorite)
+      return yield* Effect.fail(new Error('Favorite stickers are unavailable.'));
+    const session = sessionScope;
+    const accountId = activeAccountId;
+    const changed = yield* runTelegramOperation(
+      () => telegramTransport.setStickerFavorite!(sticker, favorite),
+      favorite ? 'Adding favorite sticker' : 'Removing favorite sticker',
+    );
+    if (!changed)
+      return yield* Effect.fail(new Error('Telegram did not update favorite stickers.'));
+    if (!isOperationCurrent(session, accountId)) return;
+    favoriteStickerVersion += 1;
+    yield* cacheStore.deleteMetadata('sticker-index:favorites:v1');
+    yield* invalidateResource({ kind: 'expressions' });
+  });
+  let stickerPacksVersion = 0;
+  const getStickerPack = Effect.fn('MessagingEngine.getStickerPack')(function* (shortName: string) {
+    if (!telegramTransport.getStickerPack)
+      return yield* Effect.fail(new Error('Sticker packs are unavailable.'));
+    return yield* runTelegramOperation(
+      () => telegramTransport.getStickerPack!(shortName),
+      'Loading sticker pack',
+    );
+  });
+  const searchStickerPacks = Effect.fn('MessagingEngine.searchStickerPacks')(function* (
+    query: string,
+  ) {
+    if (!query.trim() || !telegramTransport.searchStickerPacks) return [];
+    return yield* runTelegramOperation(
+      () => telegramTransport.searchStickerPacks!(query.trim()),
+      'Searching sticker packs',
+    );
+  });
+  const setStickerPackInstalled = Effect.fn('MessagingEngine.setStickerPackInstalled')(function* (
+    pack: TelegramStickerPack,
+    installed: boolean,
+  ) {
+    if (!telegramTransport.setStickerPackInstalled)
+      return yield* Effect.fail(new Error('Sticker packs are unavailable.'));
+    const session = sessionScope;
+    const accountId = activeAccountId;
+    const changed = yield* runTelegramOperation(
+      () => telegramTransport.setStickerPackInstalled!(pack, installed),
+      installed ? 'Adding sticker pack' : 'Removing sticker pack',
+    );
+    if (!changed) return yield* Effect.fail(new Error('Telegram did not update the sticker pack.'));
+    if (!isOperationCurrent(session, accountId)) return;
+    stickerPacksVersion += 1;
+    yield* Effect.all([
+      cacheStore.deleteMetadata('sticker-index:packs:v2'),
+      cacheStore.deleteBlob('sticker-index:packs:v2'),
+    ]);
+    yield* invalidateResource({ kind: 'expressions' });
+  });
   const getStickerPacks = Effect.fn('MessagingEngine.getStickerPacks')(function* () {
     const session = sessionScope;
     const accountId = activeAccountId;
     const capturedMetadataGeneration = metadataGeneration;
+    const version = stickerPacksVersion;
     const cacheKey = 'sticker-index:packs:v2';
     const cachedMetadata = yield* readMetadata<TelegramStickerPack[]>(cacheKey);
-    if (cachedMetadata) return cachedMetadata.value;
+    if (
+      cachedMetadata &&
+      (!currentSnapshot().online || cachedMetadata.value.every((pack) => pack.accessHash))
+    )
+      return cachedMetadata.value;
     const legacyBlob = yield* cacheStore.loadBlob(cacheKey);
-    if (legacyBlob) {
+    if (legacyBlob && !currentSnapshot().online) {
       const legacy = yield* Effect.tryPromise({
         try: () => legacyBlob.text(),
         catch: (error) => error,
@@ -2867,7 +3095,8 @@ function makeMessagingEngineModule(
     );
     if (
       !isOperationCurrent(session, accountId) ||
-      capturedMetadataGeneration !== metadataGeneration
+      capturedMetadataGeneration !== metadataGeneration ||
+      version !== stickerPacksVersion
     )
       return [];
     yield* writeMetadata(cacheKey, packs);
@@ -2985,6 +3214,55 @@ function makeMessagingEngineModule(
         return blob;
       });
     });
+  });
+  const getBotApp = Effect.fn('MessagingEngine.getBotApp')(function* (
+    bot: TelegramPeer,
+    shortName: string,
+  ) {
+    if (!telegramTransport.getBotApp)
+      return yield* Effect.fail(new Error('Mini Apps are unavailable.'));
+    return yield* telegramTransport.getBotApp(bot, shortName);
+  });
+  const requestWebApp = Effect.fn('MessagingEngine.requestWebApp')(function* (
+    request: TelegramWebAppRequest,
+  ) {
+    if (!telegramTransport.requestWebApp)
+      return yield* Effect.fail(new Error('Mini Apps are unavailable.'));
+    return yield* runTelegramOperation(
+      () => telegramTransport.requestWebApp!(request),
+      'Opening Mini App',
+    );
+  });
+  const prolongWebApp = Effect.fn('MessagingEngine.prolongWebApp')(function* (
+    peer: TelegramPeer,
+    bot: TelegramPeer,
+    queryId: string,
+  ) {
+    if (!telegramTransport.prolongWebApp)
+      return yield* Effect.fail(new Error('Mini Apps are unavailable.'));
+    yield* telegramTransport.prolongWebApp(peer, bot, queryId);
+  });
+  const sendWebAppData = Effect.fn('MessagingEngine.sendWebAppData')(function* (
+    bot: TelegramPeer,
+    text: string,
+    data: string,
+  ) {
+    if (!telegramTransport.sendWebAppData)
+      return yield* Effect.fail(new Error('Mini Apps are unavailable.'));
+    const id = yield* randomId();
+    yield* runTelegramOperation(
+      () => telegramTransport.sendWebAppData!(bot, text, data, id),
+      'Sending Mini App data',
+    );
+  });
+  const invokeWebAppMethod = Effect.fn('MessagingEngine.invokeWebAppMethod')(function* (
+    bot: TelegramPeer,
+    method: string,
+    params: string,
+  ) {
+    if (!telegramTransport.invokeWebAppMethod)
+      return yield* Effect.fail(new Error('Mini Apps are unavailable.'));
+    return yield* telegramTransport.invokeWebAppMethod(bot, method, params);
   });
   const getBotCommands = Effect.fn('MessagingEngine.getBotCommands')(function* (
     peer: TelegramPeer,
@@ -3137,6 +3415,87 @@ function makeMessagingEngineModule(
       });
     });
   });
+  const updatePoll = Effect.fn('MessagingEngine.updatePoll')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+    action: TelegramPollAction,
+    options: readonly string[] = [],
+  ) {
+    const session = sessionScope;
+    const accountId = activeAccountId;
+    const message =
+      histories.loaded(peer.id)?.messages.find((item) => item.id === messageId) ??
+      (yield* cacheStore.loadMessage(peer.id, messageId));
+    if (!isOperationCurrent(session, accountId)) return;
+    if (!message?.poll || !telegramTransport.updatePoll)
+      return yield* Effect.fail(new Error('This poll is unavailable.'));
+    const poll = message.poll;
+    if (action === 'vote') {
+      if (pollIsClosed(poll)) return yield* Effect.fail(new Error('This poll is closed.'));
+      if ((poll.quiz || poll.revotingDisabled) && pollHasVote(poll))
+        return yield* Effect.fail(new Error('Your vote cannot be changed.'));
+      if ((poll.quiz || !poll.multipleChoice) && options.length > 1)
+        return yield* Effect.fail(new Error('Choose one answer.'));
+      if (
+        new Set(options).size !== options.length ||
+        options.some((option) => !poll.answers.some((answer) => answer.option === option))
+      )
+        return yield* Effect.fail(new Error('Invalid poll answer.'));
+      if (poll.quiz && options.length === 0)
+        return yield* Effect.fail(new Error('Choose an answer.'));
+    }
+    const result = yield* runTelegramOperation(
+      () => telegramTransport.updatePoll!(peer, messageId, poll, action, options),
+      'Updating poll',
+    );
+    if (!isOperationCurrent(session, accountId)) return;
+    yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+  });
+  const sendPoll = Effect.fn('MessagingEngine.sendPoll')(function* (
+    peer: TelegramPeer,
+    draft: TelegramPollDraft,
+  ) {
+    yield* requirePeerPermission(peer, 'canSendMessages', 'Sending polls');
+    const dialog = dialogForPeer(peer.id);
+    if (dialog && permissionsForDialog(dialog).canSendPolls === false)
+      return yield* Effect.fail(new Error('Polls are not allowed in this chat.'));
+    const error = pollDraftError(draft);
+    if (error) return yield* Effect.fail(new Error(error));
+    if (!telegramTransport.sendPoll)
+      return yield* Effect.fail(new Error('Sending polls is unavailable.'));
+    const pending = sendQueue.create({
+      id: yield* randomUuid(),
+      accountId: activeAccountId ?? cachedAccountId,
+      peer,
+      text: '',
+      randomId: yield* randomId(),
+      createdAt: Date.now(),
+      attempts: 0,
+      pollDraft: draft,
+    });
+    yield* enqueuePending(pending);
+  });
+  const sendContact = Effect.fn('MessagingEngine.sendContact')(function* (
+    peer: TelegramPeer,
+    contact: TelegramContact,
+  ) {
+    yield* requirePeerPermission(peer, 'canSendMessages', 'Sending contacts');
+    if (!contact.firstName.trim() || !contact.phoneNumber.trim())
+      return yield* Effect.fail(new Error('A contact needs a name and phone number.'));
+    if (!telegramTransport.sendContact)
+      return yield* Effect.fail(new Error('Contact sharing is unavailable.'));
+    const pending = sendQueue.create({
+      id: yield* randomUuid(),
+      accountId: activeAccountId ?? cachedAccountId,
+      peer,
+      text: '',
+      randomId: yield* randomId(),
+      createdAt: Date.now(),
+      attempts: 0,
+      contact,
+    });
+    yield* enqueuePending(pending);
+  });
   const sendSticker = Effect.fn('MessagingEngine.sendSticker')(function* (
     peer: TelegramPeer,
     sticker: TelegramSticker,
@@ -3163,6 +3522,89 @@ function makeMessagingEngineModule(
       reply,
     });
     yield* enqueuePending(pending);
+  });
+  const getPrivacy = Effect.fn('MessagingEngine.getPrivacy')(function* (key: TelegramPrivacyKey) {
+    if (!telegramTransport.getPrivacy)
+      return yield* Effect.fail(new Error('Privacy settings are unavailable.'));
+    return yield* telegramTransport.getPrivacy(key);
+  });
+  const setPrivacy = Effect.fn('MessagingEngine.setPrivacy')(function* (
+    key: TelegramPrivacyKey,
+    change: TelegramPrivacyChange,
+  ) {
+    if (!telegramTransport.setPrivacy)
+      return yield* Effect.fail(new Error('Privacy settings are unavailable.'));
+    if (key === 'added-by-phone' && change.audience === 'nobody')
+      return yield* Effect.fail(new Error('Choose Everybody or My Contacts for phone discovery.'));
+    return yield* telegramTransport.setPrivacy(key, change);
+  });
+  const getReadTimePrivacy = Effect.fn('MessagingEngine.getReadTimePrivacy')(function* () {
+    if (!telegramTransport.getReadTimePrivacy)
+      return yield* Effect.fail(new Error('Read time privacy is unavailable.'));
+    return yield* telegramTransport.getReadTimePrivacy();
+  });
+  const setReadTimePrivacy = Effect.fn('MessagingEngine.setReadTimePrivacy')(function* (
+    hidden: boolean,
+  ) {
+    if (!telegramTransport.setReadTimePrivacy)
+      return yield* Effect.fail(new Error('Read time privacy is unavailable.'));
+    return yield* telegramTransport.setReadTimePrivacy(hidden);
+  });
+  const getActiveSessions = Effect.fn('MessagingEngine.getActiveSessions')(function* () {
+    if (!telegramTransport.getActiveSessions)
+      return yield* Effect.fail(new Error('Active sessions are unavailable.'));
+    return yield* telegramTransport.getActiveSessions();
+  });
+  const terminateSession = Effect.fn('MessagingEngine.terminateSession')(function* (hash?: string) {
+    const session = sessionScope,
+      accountId = activeAccountId;
+    if (!telegramTransport.terminateSession)
+      return yield* Effect.fail(new Error('Session management is unavailable.'));
+    if (hash !== undefined) {
+      const page = yield* getActiveSessions();
+      if (!isOperationCurrent(session, accountId)) return;
+      const target = page.sessions.find((item) => item.id === hash);
+      if (!target) return;
+      if (target.current)
+        return yield* Effect.fail(new Error('Use Log out to end the current session.'));
+    }
+    yield* telegramTransport.terminateSession(hash);
+  });
+  const setSessionTtl = Effect.fn('MessagingEngine.setSessionTtl')(function* (days: number) {
+    if (!Number.isInteger(days) || days < 1 || days > 366)
+      return yield* Effect.fail(new Error('Invalid session expiry.'));
+    if (!telegramTransport.setSessionTtl)
+      return yield* Effect.fail(new Error('Session expiry is unavailable.'));
+    yield* telegramTransport.setSessionTtl(days);
+  });
+  const getPollVotes = Effect.fn('MessagingEngine.getPollVotes')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+    option?: string,
+    offset?: string,
+  ) {
+    const message =
+      histories.loaded(peer.id)?.messages.find((item) => item.id === messageId) ??
+      (yield* cacheStore.loadMessage(peer.id, messageId));
+    if (!message?.poll?.publicVoters || !telegramTransport.getPollVotes)
+      return yield* Effect.fail(new Error('Voters are unavailable for this poll.'));
+    if (option && !message.poll.answers.some((answer) => answer.option === option))
+      return yield* Effect.fail(new Error('This poll option is no longer available.'));
+    return yield* runTelegramOperation(
+      () => telegramTransport.getPollVotes!(peer, messageId, option, offset),
+      'Loading poll voters',
+    );
+  });
+  const getMessageReadReceipts = Effect.fn('MessagingEngine.getMessageReadReceipts')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+  ): Effect.fn.Return<TelegramReadReceipts, unknown> {
+    const message =
+      histories.loaded(peer.id)?.messages.find((item) => item.id === messageId) ??
+      (yield* cacheStore.loadMessage(peer.id, messageId));
+    if (!message?.outgoing || message.service || !telegramTransport.getMessageReadReceipts)
+      return { state: 'unavailable', people: [] };
+    return yield* telegramTransport.getMessageReadReceipts(peer, messageId);
   });
   const getReactionPeople = Effect.fn('MessagingEngine.getReactionPeople')(function* (
     peer: TelegramPeer,
@@ -3393,6 +3835,7 @@ function makeMessagingEngineModule(
     fromPeer: TelegramPeer,
     toPeer: TelegramPeer,
     messageId: number,
+    options?: TelegramForwardOptions,
   ) {
     const source =
       histories.loaded(fromPeer.id)?.messages.find(({ id }) => id === messageId) ??
@@ -3421,11 +3864,16 @@ function makeMessagingEngineModule(
       id: yield* randomUuid(),
       accountId: activeAccountId ?? cachedAccountId,
       peer: toPeer,
-      text: source?.text ?? '',
+      text: options?.hideCaption && source.media ? '' : source.text,
       randomId: yield* randomId(),
       createdAt: Date.now(),
       attempts: 0,
-      forward: { fromPeer, messageId, ...(source.media ? { mediaKind: source.media.kind } : {}) },
+      forward: {
+        fromPeer,
+        messageId,
+        options,
+        ...(source.media ? { mediaKind: source.media.kind } : {}),
+      },
     });
     yield* enqueuePending(pending);
   });
@@ -3538,7 +3986,13 @@ function makeMessagingEngineModule(
           }).pipe(Effect.ignore),
         ).pipe(Effect.forkIn(session, { startImmediately: true }));
       }
-      yield* patch({ authStep: undefined, codeViaApp: undefined, error: undefined, online: true });
+      yield* patch({
+        authStep: undefined,
+        qrLogin: undefined,
+        codeViaApp: undefined,
+        error: undefined,
+        online: true,
+      });
       yield* renewAccountReady();
       yield* Deferred.succeed(accountReadySignal, undefined);
       const startupSync = runSerialized('update', '', () =>
@@ -4179,7 +4633,7 @@ function makeMessagingEngineModule(
   const applyUpdate = Effect.fn('MessagingEngine.applyUpdate')(function* (
     update: TransportUpdate,
     publish: boolean,
-  ) {
+  ): Effect.fn.Return<void, unknown> {
     if (update.type === 'too-long' || update.type === 'channel-too-long') return;
     if (update.type === 'read-message-contents') {
       const session = sessionScope;
@@ -4202,9 +4656,26 @@ function makeMessagingEngineModule(
               if (!isOperationCurrent(session, accountId)) return;
               const previous =
                 histories.loaded(peerId)?.messages.find(({ id }) => id === messageId) ?? stored;
-              if (!previous || previous.mediaUnread === false) continue;
+              if (
+                !previous ||
+                (previous.mediaUnread === false &&
+                  !previous.unreadMention &&
+                  !previous.unreadReaction)
+              )
+                continue;
               messageRevisions.record(peerId, messageId);
-              const message = { ...previous, mediaUnread: false, cacheEpoch: currentCacheEpoch };
+              const message = {
+                ...previous,
+                mediaUnread: false,
+                unreadMention: false,
+                unreadReaction:
+                  update.expectedReactionVersion === undefined ||
+                  versions.current('reaction', `${peerId}:${messageId}`) ===
+                    update.expectedReactionVersion
+                    ? false
+                    : previous.unreadReaction,
+                cacheEpoch: currentCacheEpoch,
+              };
               yield* cacheStore.putMessage(message);
               if (!isOperationCurrent(session, accountId)) return;
               histories.updateLoaded(peerId, (history) => ({
@@ -4213,11 +4684,21 @@ function makeMessagingEngineModule(
                   candidate.id === messageId ? message : candidate,
                 ),
               }));
-              const dialog = currentSnapshot().dialogs.find(
-                ({ peer, topMessageId }) => peer.id === peerId && topMessageId === messageId,
-              );
+              const dialog = currentSnapshot().dialogs.find(({ peer }) => peer.id === peerId);
               if (dialog) {
-                const changed = { ...dialog, topMessage: message };
+                const changed = {
+                  ...dialog,
+                  ...(dialog.topMessageId === messageId ? { topMessage: message } : {}),
+                  unreadMentionsCount: Math.max(
+                    0,
+                    (dialog.unreadMentionsCount ?? 0) - Number(Boolean(previous.unreadMention)),
+                  ),
+                  unreadReactionsCount: Math.max(
+                    0,
+                    (dialog.unreadReactionsCount ?? 0) -
+                      Number(Boolean(previous.unreadReaction && !message.unreadReaction)),
+                  ),
+                };
                 versions.next('dialog', peerId);
                 yield* patch({
                   dialogs: currentSnapshot().dialogs.map((candidate) =>
@@ -4488,8 +4969,42 @@ function makeMessagingEngineModule(
       }
       return;
     }
+    if (update.type === 'poll-changed') {
+      const candidates = new Map<string, TelegramMessage>();
+      for (const peerId of histories.peerIds())
+        for (const message of histories.loaded(peerId)?.messages ?? [])
+          if (message.poll?.id === update.pollId)
+            candidates.set(`${peerId}:${message.id}`, message);
+      for (const dialog of currentSnapshot().dialogs)
+        if (dialog.topMessage?.poll?.id === update.pollId)
+          candidates.set(`${dialog.peer.id}:${dialog.topMessage.id}`, dialog.topMessage);
+      if (update.peerId && update.messageId !== undefined) {
+        const stored = yield* cacheStore.loadMessage(update.peerId, update.messageId);
+        if (stored?.poll?.id === update.pollId && !candidates.has(`${stored.peerId}:${stored.id}`))
+          candidates.set(`${stored.peerId}:${stored.id}`, stored);
+      }
+      for (const message of candidates.values()) {
+        const previous = message.poll!;
+        const poll = {
+          ...(update.poll ?? previous),
+          results: mergePollResults(previous.results, update.results),
+        };
+        yield* applyUpdate(
+          { type: 'edit-message', pts: 0, ptsCount: 0, message: { ...message, poll } },
+          true,
+        );
+      }
+      return;
+    }
     if (update.type === 'reaction-changed') {
-      yield* applyReactionChange(update.peerId, update.messageId, update.reactions);
+      yield* applyReactionChange(
+        update.peerId,
+        update.messageId,
+        update.reactions,
+        undefined,
+        undefined,
+        update.unreadReaction,
+      );
       return;
     }
     if (update.type === 'activity') {
@@ -4567,16 +5082,29 @@ function makeMessagingEngineModule(
       return;
     }
     if (update.type === 'expression-index-changed') {
+      if (update.kind !== 'gifs') {
+        favoriteStickerVersion += 1;
+        stickerPacksVersion += 1;
+      }
       const keys =
         update.kind === 'gifs'
           ? ['sticker-index:gifs:v2']
           : update.kind === 'stickers'
-            ? ['sticker-index:recent:v2', 'sticker-index:packs:v2']
-            : ['sticker-index:recent:v2', 'sticker-index:packs:v2', 'sticker-index:gifs:v2'];
+            ? ['sticker-index:recent:v2', 'sticker-index:packs:v2', 'sticker-index:favorites:v1']
+            : [
+                'sticker-index:recent:v2',
+                'sticker-index:packs:v2',
+                'sticker-index:gifs:v2',
+                'sticker-index:favorites:v1',
+              ];
       yield* Effect.all(
         keys.flatMap((key) => [cacheStore.deleteBlob(key), cacheStore.deleteMetadata(key)]),
       );
       yield* invalidateResource({ kind: 'expressions' });
+      return;
+    }
+    if (update.type === 'web-app-result') {
+      yield* invalidateResource({ kind: 'web-app-result', queryId: update.queryId });
       return;
     }
     if (update.type === 'bot-commands-changed') {
@@ -4697,6 +5225,11 @@ function makeMessagingEngineModule(
         ...(message.id >= dialog.topMessageId
           ? { topMessageId: message.id, topMessage: message }
           : {}),
+        unreadMentionsCount:
+          (dialog.unreadMentionsCount ?? 0) +
+          Number(
+            Boolean(incrementUnread && message.id !== dialog.topMessageId && message.unreadMention),
+          ),
         unreadCount:
           incrementUnread && message.id !== dialog.topMessageId && !message.outgoing
             ? dialog.unreadCount + 1
@@ -4715,7 +5248,9 @@ function makeMessagingEngineModule(
     reactions: readonly TelegramReaction[],
     expectedVersion?: number,
     operation?: { session: Scope.Closeable | undefined; accountId: string | undefined },
+    unreadReaction?: boolean,
   ) {
+    const unread = unreadReaction === undefined ? {} : { unreadReaction };
     const key = `${peerId}:${messageId}`;
     const version = expectedVersion ?? nextReactionVersion(key);
     messageRevisions.record(peerId, messageId);
@@ -4724,7 +5259,37 @@ function makeMessagingEngineModule(
       return;
     }
     if (versions.current('reaction', key) !== version) return;
-    if (stored) yield* cacheStore.putMessage({ ...stored, reactions });
+    const previous =
+      histories.loaded(peerId)?.messages.find((message) => message.id === messageId) ?? stored;
+    if (unreadReaction !== undefined && !previous) yield* refreshDialogHead(peerId);
+    if (
+      unreadReaction !== undefined &&
+      previous &&
+      Boolean(previous.unreadReaction) !== unreadReaction
+    ) {
+      yield* queueDialogStateOperation(() =>
+        Effect.gen(function* () {
+          const dialog = dialogForPeer(peerId);
+          if (!dialog) return;
+          const changed = {
+            ...dialog,
+            unreadReactionsCount: Math.max(
+              0,
+              (dialog.unreadReactionsCount ?? 0) + (unreadReaction ? 1 : -1),
+            ),
+          };
+          versions.next('dialog', peerId);
+          yield* patch({
+            dialogs: currentSnapshot().dialogs.map((item) =>
+              item.peer.id === peerId ? changed : item,
+            ),
+          });
+          if (!changed.transient)
+            yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
+        }),
+      );
+    }
+    if (stored) yield* cacheStore.putMessage({ ...stored, reactions, ...unread });
     if (operation && !isOperationCurrent(operation.session, operation.accountId)) {
       return;
     }
@@ -4734,13 +5299,13 @@ function makeMessagingEngineModule(
       histories.updateLoaded(peerId, (history) => ({
         ...history,
         messages: history.messages.map((message) =>
-          message.id === messageId ? { ...message, reactions } : message,
+          message.id === messageId ? { ...message, reactions, ...unread } : message,
         ),
       }));
     }
     const updated =
       histories.loaded(peerId)?.messages.find(({ id }) => id === messageId) ??
-      (stored ? { ...stored, reactions } : undefined);
+      (stored ? { ...stored, reactions, ...unread } : undefined);
     if (updated) yield* publishConversationEvent({ type: 'message-upsert', message: updated });
   });
   function nextReactionVersion(key: string) {
@@ -5083,6 +5648,31 @@ function makeMessagingEngineModule(
                 attempting.peer,
                 attempting.forward.messageId,
                 attempting.randomId,
+                attempting.forward.options,
+              );
+              return { sentMessages: [result.message], updateBatches: result.updateBatches };
+            }
+            if (attempting.pollDraft) {
+              if (!transport.sendPoll)
+                return yield* Effect.fail(
+                  createMtprotoError('protocol', 'Sending polls is unavailable.'),
+                );
+              const result = yield* transport.sendPoll(
+                attempting.peer,
+                attempting.pollDraft,
+                attempting.randomId,
+              );
+              return { sentMessages: [result.message], updateBatches: result.updateBatches };
+            }
+            if (attempting.contact) {
+              if (!transport.sendContact)
+                return yield* Effect.fail(
+                  createMtprotoError('protocol', 'Contact sharing is unavailable.'),
+                );
+              const result = yield* transport.sendContact(
+                attempting.peer,
+                attempting.contact,
+                attempting.randomId,
               );
               return { sentMessages: [result.message], updateBatches: result.updateBatches };
             }
@@ -5302,9 +5892,10 @@ function makeMessagingEngineModule(
       .flush(peerId, (pending) => flushInboxRead(peerId, pending))
       .pipe(Effect.ignore, Effect.ensuring(Effect.sync(() => inboxReadInFlight.delete(peerId))));
   });
-  const markMediaRead = Effect.fn('MessagingEngine.markMediaRead')(function* (
+  const markMessageContentsRead = Effect.fn('MessagingEngine.markMessageContentsRead')(function* (
     peer: TelegramPeer,
     messageId: number,
+    notificationsOnly: boolean,
   ) {
     const session = sessionScope;
     const accountId = activeAccountId;
@@ -5318,23 +5909,40 @@ function makeMessagingEngineModule(
         if (!isOperationCurrent(session, accountId)) return;
         if (
           !source ||
-          source.outgoing ||
-          source.mediaUnread === false ||
-          (source.media?.kind !== 'voice' && source.media?.kind !== 'round-video')
+          (notificationsOnly
+            ? !source.unreadMention && !source.unreadReaction
+            : source.outgoing ||
+              source.mediaUnread === false ||
+              (source.media?.kind !== 'voice' && source.media?.kind !== 'round-video'))
         )
           return;
+        const expectedReactionVersion = versions.current('reaction', `${peer.id}:${messageId}`);
         const result = yield* runTelegramOperation(
           () => telegramTransport.readMessageContents(peer, [messageId]),
-          'Marking voice or video message as listened',
+          notificationsOnly
+            ? 'Marking viewed mentions and reactions as read'
+            : 'Marking voice or video message as listened',
         );
         if (!isOperationCurrent(session, accountId)) return;
-        yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+        yield* queueMutationUpdateBatches(
+          result.updateBatches?.map((batch) => ({
+            ...batch,
+            updates: batch.updates.map((update) =>
+              update.type === 'read-message-contents'
+                ? { ...update, expectedReactionVersion }
+                : update,
+            ),
+          })),
+          session,
+          accountId,
+        );
         // Also apply the acknowledged receipt when its PTS was already consumed
         // by a live update, or the channel RPC returned only Bool.
         yield* enqueueSyntheticUpdates(
           [
             {
               type: 'read-message-contents',
+              expectedReactionVersion,
               peerId: peer.id,
               messageIds: [messageId],
               pts: 0,
@@ -5348,6 +5956,12 @@ function makeMessagingEngineModule(
       }),
     );
   });
+  const markMediaRead = (peer: TelegramPeer, messageId: number) =>
+    markMessageContentsRead(peer, messageId, false);
+  const markMessageNotificationsRead = (peer: TelegramPeer, messageIds: number[]) =>
+    Effect.forEach([...new Set(messageIds)], (id) => markMessageContentsRead(peer, id, true), {
+      discard: true,
+    });
   const flushInboxRead = Effect.fn('MessagingEngine.flushInboxRead')(function* (
     peerId: string,
     maxMessageId: number,
@@ -5839,6 +6453,7 @@ function makeMessagingEngineModule(
     refreshReadReceipt: refreshReadReceipt,
     retryMarkRead: retryMarkRead,
     markMediaRead,
+    markMessageNotificationsRead,
     refreshUpdates: refreshUpdates,
     subscribe: subscribe,
     subscribeResources: subscribeResources,
@@ -5853,6 +6468,7 @@ function makeMessagingEngineModule(
     loadConversationPinnedMessages: loadConversationPinnedMessages,
     getConversationSharedMedia: getConversationSharedMedia,
     searchConversationMessages: searchConversationMessages,
+    getUnreadNotifications,
     getLinkedMessage,
     resolveUsername,
     getDiscussion,
@@ -5875,6 +6491,8 @@ function makeMessagingEngineModule(
     loadOlderConversationView: loadOlderConversationView,
     retryConversationView: retryConversationView,
     setDraft: setDraft,
+    beginQrLogin,
+    cancelQrLogin,
     requestCode: requestCode,
     submitCode: submitCode,
     submitPassword: submitPassword,
@@ -5890,18 +6508,41 @@ function makeMessagingEngineModule(
     getChatAppearance: getChatAppearance,
     downloadWallpaper: downloadWallpaper,
     getRecentStickers: getRecentStickers,
+    searchStickers,
+    getFavoriteStickers,
+    setStickerFavorite,
     getStickerPacks: getStickerPacks,
+    getStickerPack,
+    searchStickerPacks,
+    setStickerPackInstalled,
     getSavedGifs: getSavedGifs,
     searchGifs: searchGifs,
     downloadSticker: downloadSticker,
     downloadCustomEmoji: downloadCustomEmoji,
+    getBotApp,
+    requestWebApp,
+    prolongWebApp,
+    sendWebAppData,
+    invokeWebAppMethod,
     getBotCommands: getBotCommands,
     startBot: startBot,
     answerBotCallback: answerBotCallback,
     requestUrlAuth: requestUrlAuth,
     acceptUrlAuth: acceptUrlAuth,
     sendSticker: sendSticker,
+    sendContact,
+    sendPoll,
+    updatePoll,
     getReactionPeople,
+    getMessageReadReceipts,
+    getPollVotes,
+    getActiveSessions,
+    getPrivacy,
+    setPrivacy,
+    getReadTimePrivacy,
+    setReadTimePrivacy,
+    terminateSession,
+    setSessionTtl,
     toggleReaction: toggleReaction,
     deleteMessage: deleteMessage,
     editMessage: editMessage,

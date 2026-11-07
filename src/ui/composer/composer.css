@@ -196,3 +196,198 @@
 .composer-mention-name {
   min-width: 0;
 }
+
+.composer-attach-area {
+  position: relative;
+}
+.composer-attach-menu {
+  position: absolute;
+  bottom: calc(100% + 0.7rem);
+  right: 0;
+  width: min(17rem, calc(100vw - 2rem));
+  padding: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: var(--panel);
+  box-shadow: 0 0.5rem 2rem #0003;
+  z-index: 30;
+}
+.composer-attach-menu button {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.8rem;
+  border-radius: 0.6rem;
+}
+.composer-attach-menu button:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.poll-create-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(30rem, calc(100vw - 1.5rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--panel);
+  color: var(--text);
+}
+.poll-create-dialog input:not([type='checkbox']):not([type='radio']),
+.poll-create-dialog textarea {
+  padding: 0.55rem 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  width: 100%;
+  color: inherit;
+  resize: none;
+}
+.poll-setting {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 2rem;
+}
+.poll-create-dialog input[type='radio'],
+.poll-create-dialog input[type='checkbox'] {
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+.composer-forward {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  max-width: 48rem;
+  margin: 0 auto 0.5rem;
+  color: var(--accent);
+}
+.composer-forward-summary {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 0.15rem;
+  border: 0;
+  border-left: 2px solid var(--accent);
+  padding: 0.25rem 0.6rem;
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+}
+.composer-forward-summary strong {
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+.composer-forward-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-forward-error {
+  color: #fca5a5;
+  font-size: 0.8rem;
+}
+.forward-draft-preview {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 1rem;
+  background: var(--bg);
+}
+.forward-draft-message {
+  border-radius: 0.7rem;
+  padding: 0.7rem;
+  margin-bottom: 0.5rem;
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+.forward-draft-message strong,
+.forward-draft-message small {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+.forward-draft-message p {
+  margin: 0.3rem 0 0;
+  white-space: pre-wrap;
+}
+.forward-draft-options {
+  padding: 0.7rem 1rem;
+}
+.forward-draft-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 2.75rem;
+}
+.forward-draft-options > button {
+  display: block;
+  margin-left: auto;
+  border: 0;
+  padding: 0.6rem 1rem;
+  background: transparent;
+  color: var(--accent);
+}
+.forward-draft-dialog {
+  width: min(26rem, calc(100vw - 2rem));
+}
+.forward-draft-message {
+  position: relative;
+  padding-right: 2.6rem;
+}
+.forward-draft-remove {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.3rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+.forward-draft-remove:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.forward-draft-options > .forward-change-recipient {
+  float: left;
+  margin-left: 0;
+}
+.forward-draft-options {
+  flex-shrink: 0;
+}
+.poll-create-dialog > header {
+  flex-shrink: 0;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+.poll-create-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.poll-create-fields {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.25rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+.poll-create-form > .poll-dialog-actions {
+  flex-shrink: 0;
+  padding: 0.4rem 1.25rem;
+  border-top: 1px solid var(--line);
+}
+.poll-create-dialog button[hidden] {
+  display: none;
+}

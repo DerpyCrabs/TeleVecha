@@ -37,7 +37,7 @@ import type {
   TelegramResourceInvalidation,
 } from '../types';
 
-const PROTOCOL_VERSION = 9;
+const PROTOCOL_VERSION = 10;
 const OWNER_HEARTBEAT_MS = 2_000;
 const OWNER_TIMEOUT_MS = 7_000;
 const REQUEST_RETRY_MS = 2_000;
@@ -53,6 +53,7 @@ type RemoteMethod = Exclude<
   | 'snapshot'
   | 'subscribe'
   | 'subscribeResources'
+  | 'subscribeConversationEvents'
   | 'start'
   | 'stop'
   | 'conversation'
@@ -86,12 +87,24 @@ const invokeEngineCommand = (
       return engine.refreshReadReceipt(
         ...(args as Parameters<MessagingEngine['refreshReadReceipt']>),
       );
+    case 'markMessageNotificationsRead':
+      return engine.markMessageNotificationsRead(
+        ...(args as Parameters<MessagingEngine['markMessageNotificationsRead']>),
+      );
+    case 'getUnreadNotifications':
+      return engine.getUnreadNotifications(
+        ...(args as Parameters<MessagingEngine['getUnreadNotifications']>),
+      );
     case 'markMediaRead':
       return engine.markMediaRead(...(args as Parameters<MessagingEngine['markMediaRead']>));
     case 'retryMarkRead':
       return engine.retryMarkRead(...(args as Parameters<MessagingEngine['retryMarkRead']>));
     case 'clearOperationError':
       return engine.clearOperationError();
+    case 'beginQrLogin':
+      return engine.beginQrLogin();
+    case 'cancelQrLogin':
+      return engine.cancelQrLogin();
     case 'requestCode':
       return engine.requestCode(...(args as Parameters<MessagingEngine['requestCode']>));
     case 'submitCode':
@@ -142,6 +155,12 @@ const invokeEngineCommand = (
       return engine.sendDraft(...(args as Parameters<MessagingEngine['sendDraft']>));
     case 'sendAttachments':
       return engine.sendAttachments(...(args as Parameters<MessagingEngine['sendAttachments']>));
+    case 'updatePoll':
+      return engine.updatePoll(...(args as Parameters<MessagingEngine['updatePoll']>));
+    case 'sendPoll':
+      return engine.sendPoll(...(args as Parameters<MessagingEngine['sendPoll']>));
+    case 'sendContact':
+      return engine.sendContact(...(args as Parameters<MessagingEngine['sendContact']>));
     case 'sendSticker':
       return engine.sendSticker(...(args as Parameters<MessagingEngine['sendSticker']>));
     case 'forwardMessage':
@@ -150,6 +169,28 @@ const invokeEngineCommand = (
       return engine.editMessage(...(args as Parameters<MessagingEngine['editMessage']>));
     case 'deleteMessage':
       return engine.deleteMessage(...(args as Parameters<MessagingEngine['deleteMessage']>));
+    case 'getPrivacy':
+      return engine.getPrivacy(...(args as Parameters<MessagingEngine['getPrivacy']>));
+    case 'setPrivacy':
+      return engine.setPrivacy(...(args as Parameters<MessagingEngine['setPrivacy']>));
+    case 'getReadTimePrivacy':
+      return engine.getReadTimePrivacy();
+    case 'setReadTimePrivacy':
+      return engine.setReadTimePrivacy(
+        ...(args as Parameters<MessagingEngine['setReadTimePrivacy']>),
+      );
+    case 'getActiveSessions':
+      return engine.getActiveSessions();
+    case 'terminateSession':
+      return engine.terminateSession(...(args as Parameters<MessagingEngine['terminateSession']>));
+    case 'setSessionTtl':
+      return engine.setSessionTtl(...(args as Parameters<MessagingEngine['setSessionTtl']>));
+    case 'getPollVotes':
+      return engine.getPollVotes(...(args as Parameters<MessagingEngine['getPollVotes']>));
+    case 'getMessageReadReceipts':
+      return engine.getMessageReadReceipts(
+        ...(args as Parameters<MessagingEngine['getMessageReadReceipts']>),
+      );
     case 'getReactionPeople':
       return engine.getReactionPeople(
         ...(args as Parameters<MessagingEngine['getReactionPeople']>),
@@ -206,8 +247,26 @@ const invokeEngineCommand = (
       return engine.downloadWallpaper(
         ...(args as Parameters<MessagingEngine['downloadWallpaper']>),
       );
+    case 'getFavoriteStickers':
+      return engine.getFavoriteStickers();
+    case 'setStickerFavorite':
+      return engine.setStickerFavorite(
+        ...(args as Parameters<MessagingEngine['setStickerFavorite']>),
+      );
+    case 'searchStickers':
+      return engine.searchStickers(...(args as Parameters<MessagingEngine['searchStickers']>));
     case 'getRecentStickers':
       return engine.getRecentStickers();
+    case 'getStickerPack':
+      return engine.getStickerPack(...(args as Parameters<MessagingEngine['getStickerPack']>));
+    case 'searchStickerPacks':
+      return engine.searchStickerPacks(
+        ...(args as Parameters<MessagingEngine['searchStickerPacks']>),
+      );
+    case 'setStickerPackInstalled':
+      return engine.setStickerPackInstalled(
+        ...(args as Parameters<MessagingEngine['setStickerPackInstalled']>),
+      );
     case 'getStickerPacks':
       return engine.getStickerPacks();
     case 'getSavedGifs':
@@ -221,6 +280,18 @@ const invokeEngineCommand = (
     case 'answerBotCallback':
       return engine.answerBotCallback(
         ...(args as Parameters<MessagingEngine['answerBotCallback']>),
+      );
+    case 'getBotApp':
+      return engine.getBotApp(...(args as Parameters<MessagingEngine['getBotApp']>));
+    case 'requestWebApp':
+      return engine.requestWebApp(...(args as Parameters<MessagingEngine['requestWebApp']>));
+    case 'prolongWebApp':
+      return engine.prolongWebApp(...(args as Parameters<MessagingEngine['prolongWebApp']>));
+    case 'sendWebAppData':
+      return engine.sendWebAppData(...(args as Parameters<MessagingEngine['sendWebAppData']>));
+    case 'invokeWebAppMethod':
+      return engine.invokeWebAppMethod(
+        ...(args as Parameters<MessagingEngine['invokeWebAppMethod']>),
       );
     case 'requestUrlAuth':
       return engine.requestUrlAuth(...(args as Parameters<MessagingEngine['requestUrlAuth']>));
@@ -245,6 +316,7 @@ const localCapabilities = new Set<keyof EffectMessagingClient>([
   'snapshot',
   'subscribe',
   'subscribeResources',
+  'subscribeConversationEvents',
   'start',
   'stop',
   'conversation',
@@ -320,6 +392,7 @@ type CoordinatorMessage =
       pendingPayloadIds?: string[] | undefined;
     }
   | { type: 'resource'; version: number; from: string; event: TelegramResourceInvalidation }
+  | { type: 'conversation-event'; version: number; from: string; event: TelegramConversationEvent }
   | {
       type: 'request';
       version: number;
@@ -349,6 +422,7 @@ const ChatPermissionsSchema = Schema.Struct({
   canSendMessages: Schema.Boolean,
   canSendMedia: Schema.Boolean,
   canSendStickers: Schema.Boolean,
+  canSendPolls: Schema.optional(Schema.Boolean),
   canSendGifs: Schema.Boolean,
   canPinMessages: Schema.Boolean,
   canEditMessages: Schema.Boolean,
@@ -361,6 +435,8 @@ const ChatPermissionsSchema = Schema.Struct({
   memberCount: Schema.optional(Schema.Number),
 });
 const UserDetailsSchema = Schema.Struct({
+  botMenu: Schema.optional(Schema.Struct({ text: Schema.String, url: Schema.String })),
+  botHasMainApp: Schema.optional(Schema.Boolean),
   firstName: Schema.optional(Schema.String),
   lastName: Schema.optional(Schema.String),
   phone: Schema.optional(Schema.String),
@@ -416,6 +492,8 @@ const BotButtonSchema = Schema.Struct({
     'callback',
     'copy',
     'switch-inline',
+    'web-app',
+    'simple-web-app',
     'unsupported',
   ]),
   text: Schema.String,
@@ -426,6 +504,7 @@ const BotButtonSchema = Schema.Struct({
   query: Schema.optional(Schema.String),
   samePeer: Schema.optional(Schema.Boolean),
   botUsername: Schema.optional(Schema.String),
+  bot: Schema.optional(PeerSchema),
 });
 const BotKeyboardSchema = Schema.Struct({
   kind: Schema.Literals(['inline', 'reply']),
@@ -539,6 +618,43 @@ const RichMessageValueSchema = Schema.declare(
   { identifier: 'RichMessageStructuredCloneValue' },
 );
 
+const ContactSchema = Schema.Struct({
+  phoneNumber: Schema.String,
+  firstName: Schema.String,
+  lastName: Schema.String,
+  vcard: Schema.String,
+  peer: Schema.optional(PeerSchema),
+  hasAvatar: Schema.optional(Schema.Boolean),
+  avatarId: Schema.optional(Schema.String),
+});
+const PollSchema = Schema.Struct({
+  id: Schema.String,
+  hash: Schema.String,
+  question: Schema.String,
+  answers: Schema.Array(Schema.Struct({ option: Schema.String, text: Schema.String })),
+  closed: Schema.Boolean,
+  publicVoters: Schema.Boolean,
+  multipleChoice: Schema.Boolean,
+  quiz: Schema.Boolean,
+  revotingDisabled: Schema.Boolean,
+  hideResultsUntilClose: Schema.Boolean,
+  closeDate: Schema.optional(Schema.Number),
+  results: Schema.Struct({
+    min: Schema.optional(Schema.Boolean),
+    totalVoters: Schema.optional(Schema.Number),
+    solution: Schema.optional(Schema.String),
+    answers: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          option: Schema.String,
+          voters: Schema.Number,
+          chosen: Schema.optional(Schema.Boolean),
+          correct: Schema.optional(Schema.Boolean),
+        }),
+      ),
+    ),
+  }),
+});
 const MessageSchema = Schema.Struct({
   id: Schema.Number,
   peerId: Schema.String,
@@ -557,6 +673,8 @@ const MessageSchema = Schema.Struct({
   date: Schema.Number,
   outgoing: Schema.Boolean,
   mediaUnread: Schema.optional(Schema.Boolean),
+  unreadMention: Schema.optional(Schema.Boolean),
+  unreadReaction: Schema.optional(Schema.Boolean),
   protected: Schema.optional(Schema.Boolean),
   editedAt: Schema.optional(Schema.Number),
   replyToId: Schema.optional(Schema.Number),
@@ -565,6 +683,8 @@ const MessageSchema = Schema.Struct({
   groupedId: Schema.optional(Schema.String),
   forwardedFrom: Schema.optional(ForwardedFromSchema),
   service: Schema.optional(ServiceMessageSchema),
+  contact: Schema.optional(ContactSchema),
+  poll: Schema.optional(PollSchema),
   botKeyboard: Schema.optional(BotKeyboardSchema),
   media: Schema.optional(MediaSchema),
   reactions: Schema.optional(Schema.Array(ReactionSchema)),
@@ -587,6 +707,8 @@ const DialogSchema = Schema.Struct({
   topMessageId: Schema.Number,
   topMessage: Schema.optional(MessageSchema),
   unreadCount: Schema.Number,
+  unreadMentionsCount: Schema.optional(Schema.Number),
+  unreadReactionsCount: Schema.optional(Schema.Number),
   readInboxMaxId: Schema.Number,
   readOutboxMaxId: Schema.Number,
   muted: Schema.Boolean,
@@ -612,6 +734,15 @@ const StickerSchema = Schema.Struct({
   inlineQueryId: Schema.optional(Schema.String),
   inlineResultId: Schema.optional(Schema.String),
 });
+const PollDraftSchema = Schema.Struct({
+  question: Schema.String,
+  answers: Schema.Array(Schema.String),
+  publicVoters: Schema.Boolean,
+  multipleChoice: Schema.Boolean,
+  quiz: Schema.Boolean,
+  correctAnswer: Schema.optional(Schema.Number),
+  solution: Schema.String,
+});
 const PendingSendSchema = Schema.Struct({
   id: Schema.String,
   accountId: Schema.optional(Schema.String),
@@ -628,10 +759,18 @@ const PendingSendSchema = Schema.Struct({
   ),
   formats: Schema.optional(Schema.Array(TextFormatSchema)),
   sticker: Schema.optional(StickerSchema),
+  contact: Schema.optional(ContactSchema),
+  pollDraft: Schema.optional(PollDraftSchema),
   forward: Schema.optional(
     Schema.Struct({
       fromPeer: PeerSchema,
       messageId: Schema.Number,
+      options: Schema.optional(
+        Schema.Struct({
+          hideAuthor: Schema.optional(Schema.Boolean),
+          hideCaption: Schema.optional(Schema.Boolean),
+        }),
+      ),
       mediaKind: Schema.optional(
         Schema.Literals(['photo', 'video', 'round-video', 'voice', 'animation', 'sticker', 'file']),
       ),
@@ -666,7 +805,8 @@ const AccountSnapshotSchema = Schema.Struct({
   draftDetails: Schema.Record(Schema.String, DraftDetailsSchema),
   pending: Schema.Array(PendingSendSchema),
   activities: Schema.Array(ActivitySchema),
-  authStep: Schema.optional(Schema.Literals(['phone', 'code', 'password'])),
+  authStep: Schema.optional(Schema.Literals(['phone', 'code', 'password', 'qr'])),
+  qrLogin: Schema.optional(Schema.Struct({ url: Schema.String, expires: Schema.Number })),
   codeViaApp: Schema.optional(Schema.Boolean),
   operationError: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
@@ -685,10 +825,43 @@ const ConversationViewSnapshotSchema = Schema.Struct({
   historyRetryAt: Schema.optional(Schema.Number),
 });
 const ResourceInvalidationSchema = Schema.Struct({
-  kind: Schema.Literals(['expressions', 'bot-commands', 'group-members', 'peer-metadata']),
+  kind: Schema.Literals([
+    'expressions',
+    'bot-commands',
+    'group-members',
+    'peer-metadata',
+    'web-app-result',
+  ]),
+  queryId: Schema.optional(Schema.String),
   peerId: Schema.optional(Schema.String),
 });
+const ConversationEventSchema = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literals(['message-upsert']),
+    message: MessageSchema,
+    insertIfMissing: Schema.optional(Schema.Boolean),
+  }),
+  Schema.Struct({
+    type: Schema.Literals(['messages-delete']),
+    peerId: Schema.optional(Schema.String),
+    messageIds: Schema.Array(Schema.Number),
+  }),
+  Schema.Struct({
+    type: Schema.Literals(['pinned-messages']),
+    peerId: Schema.String,
+    messages: Schema.Array(MessageSchema),
+  }),
+  Schema.Struct({
+    type: Schema.Literals(['history-reset']),
+    peerId: Schema.optional(Schema.String),
+  }),
+]);
 const CoordinatorMessageSchema = Schema.Union([
+  Schema.Struct({
+    ...envelope,
+    type: Schema.Literals(['conversation-event']),
+    event: ConversationEventSchema,
+  }),
   Schema.Struct({ ...envelope, type: Schema.Literals(['hello']) }),
   Schema.Struct({ ...envelope, type: Schema.Literals(['client-heartbeat']) }),
   Schema.Struct({ ...envelope, type: Schema.Literals(['owner']), at: Schema.Number }),
@@ -755,9 +928,13 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   retrySync: { readiness: 'startup' },
   refreshUpdates: { readiness: 'account', coalesce: true },
   refreshReadReceipt: { readiness: 'account', coalesce: true },
+  markMessageNotificationsRead: { readiness: 'account', concurrent: true, coalesce: true },
+  getUnreadNotifications: { readiness: 'account', concurrent: true },
   markMediaRead: { readiness: 'account', concurrent: true, coalesce: true },
   retryMarkRead: { readiness: 'workspace' },
   clearOperationError: { readiness: 'workspace' },
+  beginQrLogin: { readiness: 'startup' },
+  cancelQrLogin: { readiness: 'startup' },
   requestCode: { readiness: 'startup' },
   submitCode: { readiness: 'startup' },
   submitPassword: { readiness: 'startup' },
@@ -776,10 +953,22 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   setTyping: { readiness: 'workspace', concurrent: true },
   sendDraft: { readiness: 'workspace', concurrent: true, surfaceError: true },
   sendAttachments: { readiness: 'workspace', concurrent: true, surfaceError: true },
+  updatePoll: { readiness: 'workspace', concurrent: true, surfaceError: true },
+  sendPoll: { readiness: 'workspace', concurrent: true, surfaceError: true },
+  sendContact: { readiness: 'workspace', concurrent: true, surfaceError: true },
   sendSticker: { readiness: 'workspace', concurrent: true, surfaceError: true },
   forwardMessage: { readiness: 'workspace', concurrent: true, surfaceError: true },
   editMessage: { readiness: 'account', concurrent: true, surfaceError: true },
   deleteMessage: { readiness: 'account', concurrent: true, surfaceError: true },
+  getPrivacy: { readiness: 'account', concurrent: true, coalesce: true },
+  setPrivacy: { readiness: 'account' },
+  getReadTimePrivacy: { readiness: 'account', concurrent: true, coalesce: true },
+  setReadTimePrivacy: { readiness: 'account' },
+  getActiveSessions: { readiness: 'account', concurrent: true, coalesce: true },
+  terminateSession: { readiness: 'account' },
+  setSessionTtl: { readiness: 'account' },
+  getPollVotes: { readiness: 'account', concurrent: true, coalesce: true },
+  getMessageReadReceipts: { readiness: 'account', concurrent: true, coalesce: true },
   getReactionPeople: { readiness: 'account', concurrent: true, coalesce: true },
   toggleReaction: { readiness: 'account', concurrent: true, surfaceError: true },
   retryPendingSend: { readiness: 'workspace', concurrent: true, surfaceError: true },
@@ -804,13 +993,24 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   getWallpapers: { readiness: 'workspace' },
   getChatAppearance: { readiness: 'workspace', concurrent: true, coalesce: true },
   downloadWallpaper: { readiness: 'account', concurrent: true },
+  getFavoriteStickers: { readiness: 'workspace', concurrent: true },
+  setStickerFavorite: { readiness: 'workspace' },
+  searchStickers: { readiness: 'workspace', concurrent: true },
   getRecentStickers: { readiness: 'workspace', concurrent: true },
+  getStickerPack: { readiness: 'workspace', concurrent: true },
+  searchStickerPacks: { readiness: 'workspace', concurrent: true },
+  setStickerPackInstalled: { readiness: 'workspace' },
   getStickerPacks: { readiness: 'workspace', concurrent: true },
   getSavedGifs: { readiness: 'workspace', concurrent: true },
   searchGifs: { readiness: 'workspace' },
   getBotCommands: { readiness: 'workspace', concurrent: true, coalesce: true },
   startBot: { readiness: 'workspace', concurrent: true, surfaceError: true },
   answerBotCallback: { readiness: 'account', concurrent: true, surfaceError: true },
+  getBotApp: { readiness: 'account', concurrent: true },
+  requestWebApp: { readiness: 'account' },
+  prolongWebApp: { readiness: 'account' },
+  sendWebAppData: { readiness: 'account' },
+  invokeWebAppMethod: { readiness: 'account' },
   requestUrlAuth: { readiness: 'account' },
   acceptUrlAuth: { readiness: 'account', concurrent: true, surfaceError: true },
   downloadAvatar: { readiness: 'account', concurrent: true },
@@ -952,6 +1152,8 @@ function errorMessage(error: unknown) {
     subscribe: (listener: (snapshot: EngineSnapshot) => void) => subscribe(listener),
     subscribeResources: (listener: (event: TelegramResourceInvalidation) => void) =>
       subscribeResources(listener),
+    subscribeConversationEvents: (listener: (event: TelegramConversationEvent) => void) =>
+      engineState.subscribeConversationEvents(listener),
     start: (credentials: TelegramCredentials) =>
       start(credentials).pipe(Effect.mapError((error) => toMessagingError(error, 'start'))),
     stop: () => stop().pipe(Effect.mapError((error) => toMessagingError(error, 'stop'))),
@@ -1081,6 +1283,10 @@ function errorMessage(error: unknown) {
     refreshReadReceipt: remote('refreshReadReceipt'),
     retryMarkRead: remote('retryMarkRead'),
     markMediaRead: remote('markMediaRead'),
+    getUnreadNotifications: remote('getUnreadNotifications'),
+    markMessageNotificationsRead: remote('markMessageNotificationsRead'),
+    beginQrLogin: remote('beginQrLogin'),
+    cancelQrLogin: remote('cancelQrLogin'),
     requestCode: remote('requestCode'),
     submitCode: remote('submitCode'),
     submitPassword: remote('submitPassword'),
@@ -1098,10 +1304,22 @@ function errorMessage(error: unknown) {
     sendDraft: remote('sendDraft'),
     sendAttachments: remote('sendAttachments'),
     sendSticker: remote('sendSticker'),
+    sendContact: remote('sendContact'),
+    sendPoll: remote('sendPoll'),
+    updatePoll: remote('updatePoll'),
     forwardMessage: remote('forwardMessage'),
     editMessage: remote('editMessage'),
     deleteMessage: remote('deleteMessage'),
     getReactionPeople: remote('getReactionPeople'),
+    getMessageReadReceipts: remote('getMessageReadReceipts'),
+    getPollVotes: remote('getPollVotes'),
+    getActiveSessions: remote('getActiveSessions'),
+    getPrivacy: remote('getPrivacy'),
+    setPrivacy: remote('setPrivacy'),
+    getReadTimePrivacy: remote('getReadTimePrivacy'),
+    setReadTimePrivacy: remote('setReadTimePrivacy'),
+    terminateSession: remote('terminateSession'),
+    setSessionTtl: remote('setSessionTtl'),
     toggleReaction: remote('toggleReaction'),
     retryPendingSend: remote('retryPendingSend'),
     cancelPendingSend: remote('cancelPendingSend'),
@@ -1125,12 +1343,23 @@ function errorMessage(error: unknown) {
     getWallpapers: remote('getWallpapers'),
     getChatAppearance: remote('getChatAppearance'),
     getRecentStickers: remote('getRecentStickers'),
+    searchStickers: remote('searchStickers'),
+    getFavoriteStickers: remote('getFavoriteStickers'),
+    setStickerFavorite: remote('setStickerFavorite'),
     getStickerPacks: remote('getStickerPacks'),
+    getStickerPack: remote('getStickerPack'),
+    searchStickerPacks: remote('searchStickerPacks'),
+    setStickerPackInstalled: remote('setStickerPackInstalled'),
     getSavedGifs: remote('getSavedGifs'),
     searchGifs: remote('searchGifs'),
     getBotCommands: remote('getBotCommands'),
     startBot: remote('startBot'),
     answerBotCallback: remote('answerBotCallback'),
+    getBotApp: remote('getBotApp'),
+    requestWebApp: remote('requestWebApp'),
+    prolongWebApp: remote('prolongWebApp'),
+    sendWebAppData: remote('sendWebAppData'),
+    invokeWebAppMethod: remote('invokeWebAppMethod'),
     requestUrlAuth: remote('requestUrlAuth'),
     acceptUrlAuth: remote('acceptUrlAuth'),
   } satisfies EffectMessagingClient;
@@ -1294,6 +1523,10 @@ function errorMessage(error: unknown) {
               ),
             );
         }
+        break;
+      case 'conversation-event':
+        if (message.from === activeOwnerId)
+          yield* engineState.publishConversationEvent(message.event);
         break;
       case 'resource':
         if (message.from === activeOwnerId) {
@@ -1515,6 +1748,8 @@ function errorMessage(error: unknown) {
   const publishConversationEvent = Effect.fn('TabCoordinator.publishConversationEvent')(function* (
     event: TelegramConversationEvent,
   ) {
+    yield* engineState.publishConversationEvent(event);
+    post({ type: 'conversation-event', version: PROTOCOL_VERSION, from: thisClientId, event });
     if (event.type === 'history-reset') {
       yield* reloadClientConversationViews(event.peerId);
       return;

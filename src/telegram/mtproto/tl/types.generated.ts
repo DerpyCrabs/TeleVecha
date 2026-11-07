@@ -14,18 +14,29 @@ export declare namespace Tl {
     | Tl.ReqDHParams
     | Tl.ReqPqMulti
     | Tl.SetClientDHParams
+    | Tl.account.GetAuthorizations
     | Tl.account.GetChatThemes
+    | Tl.account.GetGlobalPrivacySettings
     | Tl.account.GetNotifySettings
     | Tl.account.GetPassword
+    | Tl.account.GetPrivacy
     | Tl.account.GetThemes
     | Tl.account.GetWallPapers
+    | Tl.account.ResetAuthorization
+    | Tl.account.SetAuthorizationTTL
+    | Tl.account.SetGlobalPrivacySettings
+    | Tl.account.SetPrivacy
     | Tl.account.UpdateNotifySettings
     | Tl.auth.CheckPassword
     | Tl.auth.ExportAuthorization
+    | Tl.auth.ExportLoginToken
     | Tl.auth.ImportAuthorization
+    | Tl.auth.ImportLoginToken
     | Tl.auth.LogOut
+    | Tl.auth.ResetAuthorizations
     | Tl.auth.SendCode
     | Tl.auth.SignIn
+    | Tl.bots.InvokeWebViewCustomMethod
     | Tl.channels.DeleteChannel
     | Tl.channels.DeleteMessages
     | Tl.channels.GetChannels
@@ -50,38 +61,58 @@ export declare namespace Tl {
     | Tl.messages.DeleteHistory
     | Tl.messages.DeleteMessages
     | Tl.messages.EditMessage
+    | Tl.messages.FaveSticker
     | Tl.messages.ForwardMessages
     | Tl.messages.GetAllStickers
+    | Tl.messages.GetBotApp
     | Tl.messages.GetBotCallbackAnswer
     | Tl.messages.GetChats
     | Tl.messages.GetCustomEmojiDocuments
     | Tl.messages.GetDialogs
     | Tl.messages.GetDiscussionMessage
+    | Tl.messages.GetFavedStickers
     | Tl.messages.GetFullChat
     | Tl.messages.GetHistory
     | Tl.messages.GetInlineBotResults
     | Tl.messages.GetMessageReactionsList
+    | Tl.messages.GetMessageReadParticipants
     | Tl.messages.GetMessages
+    | Tl.messages.GetOutboxReadDate
     | Tl.messages.GetPeerDialogs
     | Tl.messages.GetPinnedDialogs
+    | Tl.messages.GetPollResults
+    | Tl.messages.GetPollVotes
     | Tl.messages.GetRecentStickers
     | Tl.messages.GetReplies
     | Tl.messages.GetSavedGifs
     | Tl.messages.GetSearchCounters
     | Tl.messages.GetStickerSet
+    | Tl.messages.GetUnreadMentions
+    | Tl.messages.GetUnreadReactions
+    | Tl.messages.InstallStickerSet
+    | Tl.messages.ProlongWebView
     | Tl.messages.ReadHistory
     | Tl.messages.ReadMessageContents
+    | Tl.messages.RequestAppWebView
+    | Tl.messages.RequestMainWebView
+    | Tl.messages.RequestSimpleWebView
     | Tl.messages.RequestUrlAuth
+    | Tl.messages.RequestWebView
     | Tl.messages.Search
     | Tl.messages.SearchGlobal
+    | Tl.messages.SearchStickerSets
+    | Tl.messages.SearchStickers
     | Tl.messages.SendInlineBotResult
     | Tl.messages.SendMedia
     | Tl.messages.SendMessage
     | Tl.messages.SendMultiMedia
     | Tl.messages.SendReaction
+    | Tl.messages.SendVote
+    | Tl.messages.SendWebViewData
     | Tl.messages.SetTyping
     | Tl.messages.StartBot
     | Tl.messages.ToggleDialogPin
+    | Tl.messages.UninstallStickerSet
     | Tl.messages.UpdatePinnedMessage
     | Tl.messages.UploadMedia
     | Tl.updates.GetChannelDifference
@@ -97,6 +128,27 @@ export declare namespace Tl {
     pos: number;
     amount: bigint;
     date: number;
+  }>;
+  export type Authorization = TlObject<'authorization'> & AuthorizationFields;
+  export type AuthorizationFields = Readonly<{
+    current?: true;
+    officialApp?: true;
+    passwordPending?: true;
+    encryptedRequestsDisabled?: true;
+    callRequestsDisabled?: true;
+    unconfirmed?: true;
+    hash: bigint;
+    deviceModel: string;
+    platform: string;
+    systemVersion: string;
+    apiId: number;
+    appName: string;
+    appVersion: string;
+    dateCreated: number;
+    dateActive: number;
+    ip: string;
+    country: string;
+    region: string;
   }>;
   export type BadMsgNotification = TlObject<'bad_msg_notification'> & BadMsgNotificationFields;
   export type BadMsgNotificationFields = Readonly<{
@@ -1315,6 +1367,18 @@ export declare namespace Tl {
     accessHash: bigint;
     accuracyRadius?: number;
   }>;
+  export type GlobalPrivacySettings = TlObject<'globalPrivacySettings'> &
+    GlobalPrivacySettingsFields;
+  export type GlobalPrivacySettingsFields = Readonly<{
+    archiveAndMuteNewNoncontactPeers?: true;
+    keepArchivedUnmuted?: true;
+    keepArchivedFolders?: true;
+    hideReadMarks?: true;
+    newNoncontactPeersRequirePremium?: true;
+    displayGiftsButton?: true;
+    noncontactPeersPaidStars?: bigint;
+    disallowedGifts?: Tl.TypeDisallowedGiftsSettings;
+  }>;
   export type GroupCall = TlObject<'groupCall'> & GroupCallFields;
   export type GroupCallDiscarded = TlObject<'groupCallDiscarded'> & GroupCallDiscardedFields;
   export type GroupCallDiscardedFields = Readonly<{
@@ -1449,6 +1513,16 @@ export declare namespace Tl {
   export type InlineQueryPeerTypeSameBotPM = TlObject<'inlineQueryPeerTypeSameBotPM'> &
     InlineQueryPeerTypeSameBotPMFields;
   export type InlineQueryPeerTypeSameBotPMFields = Readonly<Record<never, never>>;
+  export type InputBotAppID = TlObject<'inputBotAppID'> & InputBotAppIDFields;
+  export type InputBotAppIDFields = Readonly<{
+    id: bigint;
+    accessHash: bigint;
+  }>;
+  export type InputBotAppShortName = TlObject<'inputBotAppShortName'> & InputBotAppShortNameFields;
+  export type InputBotAppShortNameFields = Readonly<{
+    botId: Tl.TypeInputUser;
+    shortName: string;
+  }>;
   export type InputBotInlineMessageID = TlObject<'inputBotInlineMessageID'> &
     InputBotInlineMessageIDFields;
   export type InputBotInlineMessageID64 = TlObject<'inputBotInlineMessageID64'> &
@@ -1985,6 +2059,93 @@ export declare namespace Tl {
   export type InputPollAnswerFields = Readonly<{
     text: Tl.TypeTextWithEntities;
     media?: Tl.TypeInputMedia;
+  }>;
+  export type InputPrivacyKeyAbout = TlObject<'inputPrivacyKeyAbout'> & InputPrivacyKeyAboutFields;
+  export type InputPrivacyKeyAboutFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyAddedByPhone = TlObject<'inputPrivacyKeyAddedByPhone'> &
+    InputPrivacyKeyAddedByPhoneFields;
+  export type InputPrivacyKeyAddedByPhoneFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyBirthday = TlObject<'inputPrivacyKeyBirthday'> &
+    InputPrivacyKeyBirthdayFields;
+  export type InputPrivacyKeyBirthdayFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyChatInvite = TlObject<'inputPrivacyKeyChatInvite'> &
+    InputPrivacyKeyChatInviteFields;
+  export type InputPrivacyKeyChatInviteFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyForwards = TlObject<'inputPrivacyKeyForwards'> &
+    InputPrivacyKeyForwardsFields;
+  export type InputPrivacyKeyForwardsFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyNoPaidMessages = TlObject<'inputPrivacyKeyNoPaidMessages'> &
+    InputPrivacyKeyNoPaidMessagesFields;
+  export type InputPrivacyKeyNoPaidMessagesFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyPhoneCall = TlObject<'inputPrivacyKeyPhoneCall'> &
+    InputPrivacyKeyPhoneCallFields;
+  export type InputPrivacyKeyPhoneCallFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyPhoneNumber = TlObject<'inputPrivacyKeyPhoneNumber'> &
+    InputPrivacyKeyPhoneNumberFields;
+  export type InputPrivacyKeyPhoneNumberFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyPhoneP2P = TlObject<'inputPrivacyKeyPhoneP2P'> &
+    InputPrivacyKeyPhoneP2PFields;
+  export type InputPrivacyKeyPhoneP2PFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyProfilePhoto = TlObject<'inputPrivacyKeyProfilePhoto'> &
+    InputPrivacyKeyProfilePhotoFields;
+  export type InputPrivacyKeyProfilePhotoFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeySavedMusic = TlObject<'inputPrivacyKeySavedMusic'> &
+    InputPrivacyKeySavedMusicFields;
+  export type InputPrivacyKeySavedMusicFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyStarGiftsAutoSave = TlObject<'inputPrivacyKeyStarGiftsAutoSave'> &
+    InputPrivacyKeyStarGiftsAutoSaveFields;
+  export type InputPrivacyKeyStarGiftsAutoSaveFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyStatusTimestamp = TlObject<'inputPrivacyKeyStatusTimestamp'> &
+    InputPrivacyKeyStatusTimestampFields;
+  export type InputPrivacyKeyStatusTimestampFields = Readonly<Record<never, never>>;
+  export type InputPrivacyKeyVoiceMessages = TlObject<'inputPrivacyKeyVoiceMessages'> &
+    InputPrivacyKeyVoiceMessagesFields;
+  export type InputPrivacyKeyVoiceMessagesFields = Readonly<Record<never, never>>;
+  export type InputPrivacyValueAllowAll = TlObject<'inputPrivacyValueAllowAll'> &
+    InputPrivacyValueAllowAllFields;
+  export type InputPrivacyValueAllowAllFields = Readonly<Record<never, never>>;
+  export type InputPrivacyValueAllowBots = TlObject<'inputPrivacyValueAllowBots'> &
+    InputPrivacyValueAllowBotsFields;
+  export type InputPrivacyValueAllowBotsFields = Readonly<Record<never, never>>;
+  export type InputPrivacyValueAllowChatParticipants =
+    TlObject<'inputPrivacyValueAllowChatParticipants'> &
+      InputPrivacyValueAllowChatParticipantsFields;
+  export type InputPrivacyValueAllowChatParticipantsFields = Readonly<{
+    chats: readonly bigint[];
+  }>;
+  export type InputPrivacyValueAllowCloseFriends = TlObject<'inputPrivacyValueAllowCloseFriends'> &
+    InputPrivacyValueAllowCloseFriendsFields;
+  export type InputPrivacyValueAllowCloseFriendsFields = Readonly<Record<never, never>>;
+  export type InputPrivacyValueAllowContacts = TlObject<'inputPrivacyValueAllowContacts'> &
+    InputPrivacyValueAllowContactsFields;
+  export type InputPrivacyValueAllowContactsFields = Readonly<Record<never, never>>;
+  export type InputPrivacyValueAllowPremium = TlObject<'inputPrivacyValueAllowPremium'> &
+    InputPrivacyValueAllowPremiumFields;
+  export type InputPrivacyValueAllowPremiumFields = Readonly<Record<never, never>>;
+  export type InputPrivacyValueAllowUsers = TlObject<'inputPrivacyValueAllowUsers'> &
+    InputPrivacyValueAllowUsersFields;
+  export type InputPrivacyValueAllowUsersFields = Readonly<{
+    users: readonly Tl.TypeInputUser[];
+  }>;
+  export type InputPrivacyValueDisallowAll = TlObject<'inputPrivacyValueDisallowAll'> &
+    InputPrivacyValueDisallowAllFields;
+  export type InputPrivacyValueDisallowAllFields = Readonly<Record<never, never>>;
+  export type InputPrivacyValueDisallowBots = TlObject<'inputPrivacyValueDisallowBots'> &
+    InputPrivacyValueDisallowBotsFields;
+  export type InputPrivacyValueDisallowBotsFields = Readonly<Record<never, never>>;
+  export type InputPrivacyValueDisallowChatParticipants =
+    TlObject<'inputPrivacyValueDisallowChatParticipants'> &
+      InputPrivacyValueDisallowChatParticipantsFields;
+  export type InputPrivacyValueDisallowChatParticipantsFields = Readonly<{
+    chats: readonly bigint[];
+  }>;
+  export type InputPrivacyValueDisallowContacts = TlObject<'inputPrivacyValueDisallowContacts'> &
+    InputPrivacyValueDisallowContactsFields;
+  export type InputPrivacyValueDisallowContactsFields = Readonly<Record<never, never>>;
+  export type InputPrivacyValueDisallowUsers = TlObject<'inputPrivacyValueDisallowUsers'> &
+    InputPrivacyValueDisallowUsersFields;
+  export type InputPrivacyValueDisallowUsersFields = Readonly<{
+    users: readonly Tl.TypeInputUser[];
   }>;
   export type InputQuickReplyShortcut = TlObject<'inputQuickReplyShortcut'> &
     InputQuickReplyShortcutFields;
@@ -3269,6 +3430,25 @@ export declare namespace Tl {
     date: number;
     reaction: Tl.TypeReaction;
   }>;
+  export type MessagePeerVote = TlObject<'messagePeerVote'> & MessagePeerVoteFields;
+  export type MessagePeerVoteFields = Readonly<{
+    peer: Tl.TypePeer;
+    option: Uint8Array;
+    date: number;
+  }>;
+  export type MessagePeerVoteInputOption = TlObject<'messagePeerVoteInputOption'> &
+    MessagePeerVoteInputOptionFields;
+  export type MessagePeerVoteInputOptionFields = Readonly<{
+    peer: Tl.TypePeer;
+    date: number;
+  }>;
+  export type MessagePeerVoteMultiple = TlObject<'messagePeerVoteMultiple'> &
+    MessagePeerVoteMultipleFields;
+  export type MessagePeerVoteMultipleFields = Readonly<{
+    peer: Tl.TypePeer;
+    options: readonly Uint8Array[];
+    date: number;
+  }>;
   export type MessageRange = TlObject<'messageRange'> & MessageRangeFields;
   export type MessageRangeFields = Readonly<{
     minId: number;
@@ -3420,6 +3600,10 @@ export declare namespace Tl {
   }>;
   export type NotifyUsers = TlObject<'notifyUsers'> & NotifyUsersFields;
   export type NotifyUsersFields = Readonly<Record<never, never>>;
+  export type OutboxReadDate = TlObject<'outboxReadDate'> & OutboxReadDateFields;
+  export type OutboxReadDateFields = Readonly<{
+    date: number;
+  }>;
   export type PQInnerDataDc = TlObject<'p_q_inner_data_dc'> & PQInnerDataDcFields;
   export type PQInnerDataDcFields = Readonly<{
     pq: Uint8Array;
@@ -4160,6 +4344,11 @@ export declare namespace Tl {
   export type ReactionEmptyFields = Readonly<Record<never, never>>;
   export type ReactionPaid = TlObject<'reactionPaid'> & ReactionPaidFields;
   export type ReactionPaidFields = Readonly<Record<never, never>>;
+  export type ReadParticipantDate = TlObject<'readParticipantDate'> & ReadParticipantDateFields;
+  export type ReadParticipantDateFields = Readonly<{
+    userId: bigint;
+    date: number;
+  }>;
   export type RecentStory = TlObject<'recentStory'> & RecentStoryFields;
   export type RecentStoryFields = Readonly<{
     live?: true;
@@ -4715,6 +4904,11 @@ export declare namespace Tl {
     documents: readonly bigint[];
   }>;
   export type StickerSet = TlObject<'stickerSet'> & StickerSetFields;
+  export type StickerSetCovered = TlObject<'stickerSetCovered'> & StickerSetCoveredFields;
+  export type StickerSetCoveredFields = Readonly<{
+    set: Tl.TypeStickerSet;
+    cover: Tl.TypeDocument;
+  }>;
   export type StickerSetFields = Readonly<{
     archived?: true;
     official?: true;
@@ -4734,6 +4928,24 @@ export declare namespace Tl {
     thumbDocumentId?: bigint;
     count: number;
     hash: number;
+  }>;
+  export type StickerSetFullCovered = TlObject<'stickerSetFullCovered'> &
+    StickerSetFullCoveredFields;
+  export type StickerSetFullCoveredFields = Readonly<{
+    set: Tl.TypeStickerSet;
+    packs: readonly Tl.TypeStickerPack[];
+    keywords: readonly Tl.TypeStickerKeyword[];
+    documents: readonly Tl.TypeDocument[];
+  }>;
+  export type StickerSetMultiCovered = TlObject<'stickerSetMultiCovered'> &
+    StickerSetMultiCoveredFields;
+  export type StickerSetMultiCoveredFields = Readonly<{
+    set: Tl.TypeStickerSet;
+    covers: readonly Tl.TypeDocument[];
+  }>;
+  export type StickerSetNoCovered = TlObject<'stickerSetNoCovered'> & StickerSetNoCoveredFields;
+  export type StickerSetNoCoveredFields = Readonly<{
+    set: Tl.TypeStickerSet;
   }>;
   export type StoriesStealthMode = TlObject<'storiesStealthMode'> & StoriesStealthModeFields;
   export type StoriesStealthModeFields = Readonly<{
@@ -4983,6 +5195,7 @@ export declare namespace Tl {
     list: readonly Tl.TypeTodoItem[];
   }>;
   export type TypeAuctionBidLevel = Tl.AuctionBidLevel;
+  export type TypeAuthorization = Tl.Authorization;
   export type TypeBaseTheme =
     | Tl.BaseThemeArctic
     | Tl.BaseThemeClassic
@@ -5108,6 +5321,7 @@ export declare namespace Tl {
   export type TypeGame = Tl.Game;
   export type TypeGeoPoint = Tl.GeoPoint | Tl.GeoPointEmpty;
   export type TypeGeoPointAddress = Tl.GeoPointAddress;
+  export type TypeGlobalPrivacySettings = Tl.GlobalPrivacySettings;
   export type TypeGroupCall = Tl.GroupCall | Tl.GroupCallDiscarded;
   export type TypeGroupCallMessage = Tl.GroupCallMessage;
   export type TypeGroupCallParticipant = Tl.GroupCallParticipant;
@@ -5122,6 +5336,7 @@ export declare namespace Tl {
     | Tl.InlineQueryPeerTypeMegagroup
     | Tl.InlineQueryPeerTypePM
     | Tl.InlineQueryPeerTypeSameBotPM;
+  export type TypeInputBotApp = Tl.InputBotAppID | Tl.InputBotAppShortName;
   export type TypeInputBotInlineMessageID =
     | Tl.InputBotInlineMessageID
     | Tl.InputBotInlineMessageID64;
@@ -5198,6 +5413,34 @@ export declare namespace Tl {
     | Tl.InputPeerUserFromMessage;
   export type TypeInputPeerNotifySettings = Tl.InputPeerNotifySettings;
   export type TypeInputPhoto = Tl.InputPhoto | Tl.InputPhotoEmpty;
+  export type TypeInputPrivacyKey =
+    | Tl.InputPrivacyKeyAbout
+    | Tl.InputPrivacyKeyAddedByPhone
+    | Tl.InputPrivacyKeyBirthday
+    | Tl.InputPrivacyKeyChatInvite
+    | Tl.InputPrivacyKeyForwards
+    | Tl.InputPrivacyKeyNoPaidMessages
+    | Tl.InputPrivacyKeyPhoneCall
+    | Tl.InputPrivacyKeyPhoneNumber
+    | Tl.InputPrivacyKeyPhoneP2P
+    | Tl.InputPrivacyKeyProfilePhoto
+    | Tl.InputPrivacyKeySavedMusic
+    | Tl.InputPrivacyKeyStarGiftsAutoSave
+    | Tl.InputPrivacyKeyStatusTimestamp
+    | Tl.InputPrivacyKeyVoiceMessages;
+  export type TypeInputPrivacyRule =
+    | Tl.InputPrivacyValueAllowAll
+    | Tl.InputPrivacyValueAllowBots
+    | Tl.InputPrivacyValueAllowChatParticipants
+    | Tl.InputPrivacyValueAllowCloseFriends
+    | Tl.InputPrivacyValueAllowContacts
+    | Tl.InputPrivacyValueAllowPremium
+    | Tl.InputPrivacyValueAllowUsers
+    | Tl.InputPrivacyValueDisallowAll
+    | Tl.InputPrivacyValueDisallowBots
+    | Tl.InputPrivacyValueDisallowChatParticipants
+    | Tl.InputPrivacyValueDisallowContacts
+    | Tl.InputPrivacyValueDisallowUsers;
   export type TypeInputQuickReplyShortcut =
     | Tl.InputQuickReplyShortcut
     | Tl.InputQuickReplyShortcutId;
@@ -5403,6 +5646,10 @@ export declare namespace Tl {
     | Tl.MessageMediaVideoStream
     | Tl.MessageMediaWebPage;
   export type TypeMessagePeerReaction = Tl.MessagePeerReaction;
+  export type TypeMessagePeerVote =
+    | Tl.MessagePeerVote
+    | Tl.MessagePeerVoteInputOption
+    | Tl.MessagePeerVoteMultiple;
   export type TypeMessageRange = Tl.MessageRange;
   export type TypeMessageReactions = Tl.MessageReactions;
   export type TypeMessageReactor = Tl.MessageReactor;
@@ -5439,6 +5686,7 @@ export declare namespace Tl {
     | Tl.NotifyForumTopic
     | Tl.NotifyPeer
     | Tl.NotifyUsers;
+  export type TypeOutboxReadDate = Tl.OutboxReadDate;
   export type TypePage = Tl.Page;
   export type TypePageBlock =
     | Tl.InputPageBlockMap
@@ -5574,6 +5822,7 @@ export declare namespace Tl {
     | Tl.ReactionEmpty
     | Tl.ReactionPaid;
   export type TypeReactionCount = Tl.ReactionCount;
+  export type TypeReadParticipantDate = Tl.ReadParticipantDate;
   export type TypeRecentStory = Tl.RecentStory;
   export type TypeReplyMarkup =
     | Tl.ReplyInlineMarkup
@@ -5700,6 +5949,11 @@ export declare namespace Tl {
   export type TypeStickerKeyword = Tl.StickerKeyword;
   export type TypeStickerPack = Tl.StickerPack;
   export type TypeStickerSet = Tl.StickerSet;
+  export type TypeStickerSetCovered =
+    | Tl.StickerSetCovered
+    | Tl.StickerSetFullCovered
+    | Tl.StickerSetMultiCovered
+    | Tl.StickerSetNoCovered;
   export type TypeStoriesStealthMode = Tl.StoriesStealthMode;
   export type TypeStoryFwdHeader = Tl.StoryFwdHeader;
   export type TypeStoryItem = Tl.StoryItem | Tl.StoryItemDeleted | Tl.StoryItemSkipped;
@@ -5917,6 +6171,7 @@ export declare namespace Tl {
     | Tl.WebPageAttributeStory
     | Tl.WebPageAttributeTheme
     | Tl.WebPageAttributeUniqueStarGift;
+  export type TypeWebViewResult = Tl.WebViewResultUrl;
   export type UpdateAiComposeTones = TlObject<'updateAiComposeTones'> & UpdateAiComposeTonesFields;
   export type UpdateAiComposeTonesFields = Readonly<Record<never, never>>;
   export type UpdateAttachMenuBots = TlObject<'updateAttachMenuBots'> & UpdateAttachMenuBotsFields;
@@ -7333,13 +7588,34 @@ export declare namespace Tl {
     url?: string;
     date: number;
   }>;
+  export type WebViewResultUrl = TlObject<'webViewResultUrl'> & WebViewResultUrlFields;
+  export type WebViewResultUrlFields = Readonly<{
+    fullsize?: true;
+    fullscreen?: true;
+    sameOrigin?: true;
+    queryId?: bigint;
+    url: string;
+  }>;
   export namespace account {
+    export type Authorizations = TlObject<'account.authorizations'> & AuthorizationsFields;
+    export type AuthorizationsFields = Readonly<{
+      authorizationTtlDays: number;
+      authorizations: readonly Tl.TypeAuthorization[];
+    }>;
+    export type GetAuthorizations = TlObject<'account.getAuthorizations'> &
+      GetAuthorizationsFields &
+      TlRequest<Tl.account.TypeAuthorizations>;
+    export type GetAuthorizationsFields = Readonly<Record<never, never>>;
     export type GetChatThemes = TlObject<'account.getChatThemes'> &
       GetChatThemesFields &
       TlRequest<Tl.account.TypeThemes>;
     export type GetChatThemesFields = Readonly<{
       hash: bigint;
     }>;
+    export type GetGlobalPrivacySettings = TlObject<'account.getGlobalPrivacySettings'> &
+      GetGlobalPrivacySettingsFields &
+      TlRequest<Tl.TypeGlobalPrivacySettings>;
+    export type GetGlobalPrivacySettingsFields = Readonly<Record<never, never>>;
     export type GetNotifySettings = TlObject<'account.getNotifySettings'> &
       GetNotifySettingsFields &
       TlRequest<Tl.TypePeerNotifySettings>;
@@ -7350,6 +7626,12 @@ export declare namespace Tl {
       GetPasswordFields &
       TlRequest<Tl.account.TypePassword>;
     export type GetPasswordFields = Readonly<Record<never, never>>;
+    export type GetPrivacy = TlObject<'account.getPrivacy'> &
+      GetPrivacyFields &
+      TlRequest<Tl.account.TypePrivacyRules>;
+    export type GetPrivacyFields = Readonly<{
+      key: Tl.TypeInputPrivacyKey;
+    }>;
     export type GetThemes = TlObject<'account.getThemes'> &
       GetThemesFields &
       TlRequest<Tl.account.TypeThemes>;
@@ -7379,6 +7661,37 @@ export declare namespace Tl {
       pendingResetDate?: number;
       loginEmailPattern?: string;
     }>;
+    export type PrivacyRules = TlObject<'account.privacyRules'> & PrivacyRulesFields;
+    export type PrivacyRulesFields = Readonly<{
+      rules: readonly Tl.TypePrivacyRule[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+    }>;
+    export type ResetAuthorization = TlObject<'account.resetAuthorization'> &
+      ResetAuthorizationFields &
+      TlRequest<boolean>;
+    export type ResetAuthorizationFields = Readonly<{
+      hash: bigint;
+    }>;
+    export type SetAuthorizationTTL = TlObject<'account.setAuthorizationTTL'> &
+      SetAuthorizationTTLFields &
+      TlRequest<boolean>;
+    export type SetAuthorizationTTLFields = Readonly<{
+      authorizationTtlDays: number;
+    }>;
+    export type SetGlobalPrivacySettings = TlObject<'account.setGlobalPrivacySettings'> &
+      SetGlobalPrivacySettingsFields &
+      TlRequest<Tl.TypeGlobalPrivacySettings>;
+    export type SetGlobalPrivacySettingsFields = Readonly<{
+      settings: Tl.TypeGlobalPrivacySettings;
+    }>;
+    export type SetPrivacy = TlObject<'account.setPrivacy'> &
+      SetPrivacyFields &
+      TlRequest<Tl.account.TypePrivacyRules>;
+    export type SetPrivacyFields = Readonly<{
+      key: Tl.TypeInputPrivacyKey;
+      rules: readonly Tl.TypeInputPrivacyRule[];
+    }>;
     export type Themes = TlObject<'account.themes'> & ThemesFields;
     export type ThemesFields = Readonly<{
       hash: bigint;
@@ -7386,7 +7699,9 @@ export declare namespace Tl {
     }>;
     export type ThemesNotModified = TlObject<'account.themesNotModified'> & ThemesNotModifiedFields;
     export type ThemesNotModifiedFields = Readonly<Record<never, never>>;
+    export type TypeAuthorizations = Tl.account.Authorizations;
     export type TypePassword = Tl.account.Password;
+    export type TypePrivacyRules = Tl.account.PrivacyRules;
     export type TypeThemes = Tl.account.Themes | Tl.account.ThemesNotModified;
     export type TypeWallPapers = Tl.account.WallPapers | Tl.account.WallPapersNotModified;
     export type UpdateNotifySettings = TlObject<'account.updateNotifySettings'> &
@@ -7442,6 +7757,14 @@ export declare namespace Tl {
     export type ExportAuthorizationFields = Readonly<{
       dcId: number;
     }>;
+    export type ExportLoginToken = TlObject<'auth.exportLoginToken'> &
+      ExportLoginTokenFields &
+      TlRequest<Tl.auth.TypeLoginToken>;
+    export type ExportLoginTokenFields = Readonly<{
+      apiId: number;
+      apiHash: string;
+      exceptIds: readonly bigint[];
+    }>;
     export type ExportedAuthorization = TlObject<'auth.exportedAuthorization'> &
       ExportedAuthorizationFields;
     export type ExportedAuthorizationFields = Readonly<{
@@ -7455,12 +7778,37 @@ export declare namespace Tl {
       id: bigint;
       bytes: Uint8Array;
     }>;
+    export type ImportLoginToken = TlObject<'auth.importLoginToken'> &
+      ImportLoginTokenFields &
+      TlRequest<Tl.auth.TypeLoginToken>;
+    export type ImportLoginTokenFields = Readonly<{
+      token: Uint8Array;
+    }>;
     export type LogOut = TlObject<'auth.logOut'> & LogOutFields & TlRequest<Tl.auth.TypeLoggedOut>;
     export type LogOutFields = Readonly<Record<never, never>>;
     export type LoggedOut = TlObject<'auth.loggedOut'> & LoggedOutFields;
     export type LoggedOutFields = Readonly<{
       futureAuthToken?: Uint8Array;
     }>;
+    export type LoginToken = TlObject<'auth.loginToken'> & LoginTokenFields;
+    export type LoginTokenFields = Readonly<{
+      expires: number;
+      token: Uint8Array;
+    }>;
+    export type LoginTokenMigrateTo = TlObject<'auth.loginTokenMigrateTo'> &
+      LoginTokenMigrateToFields;
+    export type LoginTokenMigrateToFields = Readonly<{
+      dcId: number;
+      token: Uint8Array;
+    }>;
+    export type LoginTokenSuccess = TlObject<'auth.loginTokenSuccess'> & LoginTokenSuccessFields;
+    export type LoginTokenSuccessFields = Readonly<{
+      authorization: Tl.auth.TypeAuthorization;
+    }>;
+    export type ResetAuthorizations = TlObject<'auth.resetAuthorizations'> &
+      ResetAuthorizationsFields &
+      TlRequest<boolean>;
+    export type ResetAuthorizationsFields = Readonly<Record<never, never>>;
     export type SendCode = TlObject<'auth.sendCode'> &
       SendCodeFields &
       TlRequest<Tl.auth.TypeSentCode>;
@@ -7575,6 +7923,10 @@ export declare namespace Tl {
       | Tl.auth.CodeTypeSms;
     export type TypeExportedAuthorization = Tl.auth.ExportedAuthorization;
     export type TypeLoggedOut = Tl.auth.LoggedOut;
+    export type TypeLoginToken =
+      | Tl.auth.LoginToken
+      | Tl.auth.LoginTokenMigrateTo
+      | Tl.auth.LoginTokenSuccess;
     export type TypeSentCode =
       | Tl.auth.SentCode
       | Tl.auth.SentCodePaymentRequired
@@ -7591,6 +7943,16 @@ export declare namespace Tl {
       | Tl.auth.SentCodeTypeSms
       | Tl.auth.SentCodeTypeSmsPhrase
       | Tl.auth.SentCodeTypeSmsWord;
+  }
+  export namespace bots {
+    export type InvokeWebViewCustomMethod = TlObject<'bots.invokeWebViewCustomMethod'> &
+      InvokeWebViewCustomMethodFields &
+      TlRequest<Tl.TypeDataJSON>;
+    export type InvokeWebViewCustomMethodFields = Readonly<{
+      bot: Tl.TypeInputUser;
+      customMethod: string;
+      params: Tl.TypeDataJSON;
+    }>;
   }
   export namespace channels {
     export type ChannelParticipant = TlObject<'channels.channelParticipant'> &
@@ -7798,6 +8160,13 @@ export declare namespace Tl {
     export type AllStickersNotModified = TlObject<'messages.allStickersNotModified'> &
       AllStickersNotModifiedFields;
     export type AllStickersNotModifiedFields = Readonly<Record<never, never>>;
+    export type BotApp = TlObject<'messages.botApp'> & BotAppFields;
+    export type BotAppFields = Readonly<{
+      inactive?: true;
+      requestWriteAccess?: true;
+      hasSettings?: true;
+      app: Tl.TypeBotApp;
+    }>;
     export type BotCallbackAnswer = TlObject<'messages.botCallbackAnswer'> &
       BotCallbackAnswerFields;
     export type BotCallbackAnswerFields = Readonly<{
@@ -7943,6 +8312,22 @@ export declare namespace Tl {
     export type EmojiGameUnavailable = TlObject<'messages.emojiGameUnavailable'> &
       EmojiGameUnavailableFields;
     export type EmojiGameUnavailableFields = Readonly<Record<never, never>>;
+    export type FaveSticker = TlObject<'messages.faveSticker'> &
+      FaveStickerFields &
+      TlRequest<boolean>;
+    export type FaveStickerFields = Readonly<{
+      id: Tl.TypeInputDocument;
+      unfave: boolean;
+    }>;
+    export type FavedStickers = TlObject<'messages.favedStickers'> & FavedStickersFields;
+    export type FavedStickersFields = Readonly<{
+      hash: bigint;
+      packs: readonly Tl.TypeStickerPack[];
+      stickers: readonly Tl.TypeDocument[];
+    }>;
+    export type FavedStickersNotModified = TlObject<'messages.favedStickersNotModified'> &
+      FavedStickersNotModifiedFields;
+    export type FavedStickersNotModifiedFields = Readonly<Record<never, never>>;
     export type ForwardMessages = TlObject<'messages.forwardMessages'> &
       ForwardMessagesFields &
       TlRequest<Tl.TypeUpdates>;
@@ -7969,10 +8354,36 @@ export declare namespace Tl {
       allowPaidStars?: bigint;
       suggestedPost?: Tl.TypeSuggestedPost;
     }>;
+    export type FoundStickerSets = TlObject<'messages.foundStickerSets'> & FoundStickerSetsFields;
+    export type FoundStickerSetsFields = Readonly<{
+      hash: bigint;
+      sets: readonly Tl.TypeStickerSetCovered[];
+    }>;
+    export type FoundStickerSetsNotModified = TlObject<'messages.foundStickerSetsNotModified'> &
+      FoundStickerSetsNotModifiedFields;
+    export type FoundStickerSetsNotModifiedFields = Readonly<Record<never, never>>;
+    export type FoundStickers = TlObject<'messages.foundStickers'> & FoundStickersFields;
+    export type FoundStickersFields = Readonly<{
+      nextOffset?: number;
+      hash: bigint;
+      stickers: readonly Tl.TypeDocument[];
+    }>;
+    export type FoundStickersNotModified = TlObject<'messages.foundStickersNotModified'> &
+      FoundStickersNotModifiedFields;
+    export type FoundStickersNotModifiedFields = Readonly<{
+      nextOffset?: number;
+    }>;
     export type GetAllStickers = TlObject<'messages.getAllStickers'> &
       GetAllStickersFields &
       TlRequest<Tl.messages.TypeAllStickers>;
     export type GetAllStickersFields = Readonly<{
+      hash: bigint;
+    }>;
+    export type GetBotApp = TlObject<'messages.getBotApp'> &
+      GetBotAppFields &
+      TlRequest<Tl.messages.TypeBotApp>;
+    export type GetBotAppFields = Readonly<{
+      app: Tl.TypeInputBotApp;
       hash: bigint;
     }>;
     export type GetBotCallbackAnswer = TlObject<'messages.getBotCallbackAnswer'> &
@@ -8016,6 +8427,12 @@ export declare namespace Tl {
       peer: Tl.TypeInputPeer;
       msgId: number;
     }>;
+    export type GetFavedStickers = TlObject<'messages.getFavedStickers'> &
+      GetFavedStickersFields &
+      TlRequest<Tl.messages.TypeFavedStickers>;
+    export type GetFavedStickersFields = Readonly<{
+      hash: bigint;
+    }>;
     export type GetFullChat = TlObject<'messages.getFullChat'> &
       GetFullChatFields &
       TlRequest<Tl.messages.TypeChatFull>;
@@ -8055,11 +8472,25 @@ export declare namespace Tl {
       offset?: string;
       limit: number;
     }>;
+    export type GetMessageReadParticipants = TlObject<'messages.getMessageReadParticipants'> &
+      GetMessageReadParticipantsFields &
+      TlRequest<readonly Tl.TypeReadParticipantDate[]>;
+    export type GetMessageReadParticipantsFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      msgId: number;
+    }>;
     export type GetMessages = TlObject<'messages.getMessages'> &
       GetMessagesFields &
       TlRequest<Tl.messages.TypeMessages>;
     export type GetMessagesFields = Readonly<{
       id: readonly Tl.TypeInputMessage[];
+    }>;
+    export type GetOutboxReadDate = TlObject<'messages.getOutboxReadDate'> &
+      GetOutboxReadDateFields &
+      TlRequest<Tl.TypeOutboxReadDate>;
+    export type GetOutboxReadDateFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      msgId: number;
     }>;
     export type GetPeerDialogs = TlObject<'messages.getPeerDialogs'> &
       GetPeerDialogsFields &
@@ -8072,6 +8503,24 @@ export declare namespace Tl {
       TlRequest<Tl.messages.TypePeerDialogs>;
     export type GetPinnedDialogsFields = Readonly<{
       folderId: number;
+    }>;
+    export type GetPollResults = TlObject<'messages.getPollResults'> &
+      GetPollResultsFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type GetPollResultsFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      msgId: number;
+      pollHash: bigint;
+    }>;
+    export type GetPollVotes = TlObject<'messages.getPollVotes'> &
+      GetPollVotesFields &
+      TlRequest<Tl.messages.TypeVotesList>;
+    export type GetPollVotesFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      id: number;
+      option?: Uint8Array;
+      offset?: string;
+      limit: number;
     }>;
     export type GetRecentStickers = TlObject<'messages.getRecentStickers'> &
       GetRecentStickersFields &
@@ -8116,6 +8565,38 @@ export declare namespace Tl {
       stickerset: Tl.TypeInputStickerSet;
       hash: number;
     }>;
+    export type GetUnreadMentions = TlObject<'messages.getUnreadMentions'> &
+      GetUnreadMentionsFields &
+      TlRequest<Tl.messages.TypeMessages>;
+    export type GetUnreadMentionsFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      topMsgId?: number;
+      offsetId: number;
+      addOffset: number;
+      limit: number;
+      maxId: number;
+      minId: number;
+    }>;
+    export type GetUnreadReactions = TlObject<'messages.getUnreadReactions'> &
+      GetUnreadReactionsFields &
+      TlRequest<Tl.messages.TypeMessages>;
+    export type GetUnreadReactionsFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      topMsgId?: number;
+      savedPeerId?: Tl.TypeInputPeer;
+      offsetId: number;
+      addOffset: number;
+      limit: number;
+      maxId: number;
+      minId: number;
+    }>;
+    export type InstallStickerSet = TlObject<'messages.installStickerSet'> &
+      InstallStickerSetFields &
+      TlRequest<Tl.messages.TypeStickerSetInstallResult>;
+    export type InstallStickerSetFields = Readonly<{
+      stickerset: Tl.TypeInputStickerSet;
+      archived: boolean;
+    }>;
     export type MessageReactionsList = TlObject<'messages.messageReactionsList'> &
       MessageReactionsListFields;
     export type MessageReactionsListFields = Readonly<{
@@ -8157,6 +8638,17 @@ export declare namespace Tl {
       users: readonly Tl.TypeUser[];
       state: Tl.updates.TypeState;
     }>;
+    export type ProlongWebView = TlObject<'messages.prolongWebView'> &
+      ProlongWebViewFields &
+      TlRequest<boolean>;
+    export type ProlongWebViewFields = Readonly<{
+      silent?: true;
+      peer: Tl.TypeInputPeer;
+      bot: Tl.TypeInputUser;
+      queryId: bigint;
+      replyTo?: Tl.TypeInputReplyTo;
+      sendAs?: Tl.TypeInputPeer;
+    }>;
     export type ReadHistory = TlObject<'messages.readHistory'> &
       ReadHistoryFields &
       TlRequest<Tl.messages.TypeAffectedMessages>;
@@ -8180,6 +8672,45 @@ export declare namespace Tl {
     export type RecentStickersNotModified = TlObject<'messages.recentStickersNotModified'> &
       RecentStickersNotModifiedFields;
     export type RecentStickersNotModifiedFields = Readonly<Record<never, never>>;
+    export type RequestAppWebView = TlObject<'messages.requestAppWebView'> &
+      RequestAppWebViewFields &
+      TlRequest<Tl.TypeWebViewResult>;
+    export type RequestAppWebViewFields = Readonly<{
+      writeAllowed?: true;
+      compact?: true;
+      fullscreen?: true;
+      peer: Tl.TypeInputPeer;
+      app: Tl.TypeInputBotApp;
+      startParam?: string;
+      themeParams?: Tl.TypeDataJSON;
+      platform: string;
+    }>;
+    export type RequestMainWebView = TlObject<'messages.requestMainWebView'> &
+      RequestMainWebViewFields &
+      TlRequest<Tl.TypeWebViewResult>;
+    export type RequestMainWebViewFields = Readonly<{
+      compact?: true;
+      fullscreen?: true;
+      peer: Tl.TypeInputPeer;
+      bot: Tl.TypeInputUser;
+      startParam?: string;
+      themeParams?: Tl.TypeDataJSON;
+      platform: string;
+    }>;
+    export type RequestSimpleWebView = TlObject<'messages.requestSimpleWebView'> &
+      RequestSimpleWebViewFields &
+      TlRequest<Tl.TypeWebViewResult>;
+    export type RequestSimpleWebViewFields = Readonly<{
+      fromSwitchWebview?: true;
+      fromSideMenu?: true;
+      compact?: true;
+      fullscreen?: true;
+      bot: Tl.TypeInputUser;
+      url?: string;
+      startParam?: string;
+      themeParams?: Tl.TypeDataJSON;
+      platform: string;
+    }>;
     export type RequestUrlAuth = TlObject<'messages.requestUrlAuth'> &
       RequestUrlAuthFields &
       TlRequest<Tl.TypeUrlAuthResult>;
@@ -8189,6 +8720,23 @@ export declare namespace Tl {
       buttonId?: number;
       url?: string;
       inAppOrigin?: string;
+    }>;
+    export type RequestWebView = TlObject<'messages.requestWebView'> &
+      RequestWebViewFields &
+      TlRequest<Tl.TypeWebViewResult>;
+    export type RequestWebViewFields = Readonly<{
+      fromBotMenu?: true;
+      silent?: true;
+      compact?: true;
+      fullscreen?: true;
+      peer: Tl.TypeInputPeer;
+      bot: Tl.TypeInputUser;
+      url?: string;
+      startParam?: string;
+      themeParams?: Tl.TypeDataJSON;
+      platform: string;
+      replyTo?: Tl.TypeInputReplyTo;
+      sendAs?: Tl.TypeInputPeer;
     }>;
     export type SavedGifs = TlObject<'messages.savedGifs'> & SavedGifsFields;
     export type SavedGifsFields = Readonly<{
@@ -8241,6 +8789,26 @@ export declare namespace Tl {
       offsetPeer: Tl.TypeInputPeer;
       offsetId: number;
       limit: number;
+    }>;
+    export type SearchStickerSets = TlObject<'messages.searchStickerSets'> &
+      SearchStickerSetsFields &
+      TlRequest<Tl.messages.TypeFoundStickerSets>;
+    export type SearchStickerSetsFields = Readonly<{
+      excludeFeatured?: true;
+      q: string;
+      hash: bigint;
+    }>;
+    export type SearchStickers = TlObject<'messages.searchStickers'> &
+      SearchStickersFields &
+      TlRequest<Tl.messages.TypeFoundStickers>;
+    export type SearchStickersFields = Readonly<{
+      emojis?: true;
+      q: string;
+      emoticon: string;
+      langCode: readonly string[];
+      offset: number;
+      limit: number;
+      hash: bigint;
     }>;
     export type SendInlineBotResult = TlObject<'messages.sendInlineBotResult'> &
       SendInlineBotResultFields &
@@ -8343,6 +8911,23 @@ export declare namespace Tl {
       msgId: number;
       reaction?: readonly Tl.TypeReaction[];
     }>;
+    export type SendVote = TlObject<'messages.sendVote'> &
+      SendVoteFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type SendVoteFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      msgId: number;
+      options: readonly Uint8Array[];
+    }>;
+    export type SendWebViewData = TlObject<'messages.sendWebViewData'> &
+      SendWebViewDataFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type SendWebViewDataFields = Readonly<{
+      bot: Tl.TypeInputUser;
+      randomId: bigint;
+      buttonText: string;
+      data: string;
+    }>;
     export type SetTyping = TlObject<'messages.setTyping'> & SetTypingFields & TlRequest<boolean>;
     export type SetTypingFields = Readonly<{
       peer: Tl.TypeInputPeer;
@@ -8365,6 +8950,14 @@ export declare namespace Tl {
       keywords: readonly Tl.TypeStickerKeyword[];
       documents: readonly Tl.TypeDocument[];
     }>;
+    export type StickerSetInstallResultArchive =
+      TlObject<'messages.stickerSetInstallResultArchive'> & StickerSetInstallResultArchiveFields;
+    export type StickerSetInstallResultArchiveFields = Readonly<{
+      sets: readonly Tl.TypeStickerSetCovered[];
+    }>;
+    export type StickerSetInstallResultSuccess =
+      TlObject<'messages.stickerSetInstallResultSuccess'> & StickerSetInstallResultSuccessFields;
+    export type StickerSetInstallResultSuccessFields = Readonly<Record<never, never>>;
     export type StickerSetNotModified = TlObject<'messages.stickerSetNotModified'> &
       StickerSetNotModifiedFields;
     export type StickerSetNotModifiedFields = Readonly<Record<never, never>>;
@@ -8378,6 +8971,7 @@ export declare namespace Tl {
     export type TypeAffectedHistory = Tl.messages.AffectedHistory;
     export type TypeAffectedMessages = Tl.messages.AffectedMessages;
     export type TypeAllStickers = Tl.messages.AllStickers | Tl.messages.AllStickersNotModified;
+    export type TypeBotApp = Tl.messages.BotApp;
     export type TypeBotCallbackAnswer = Tl.messages.BotCallbackAnswer;
     export type TypeBotResults = Tl.messages.BotResults;
     export type TypeChatFull = Tl.messages.ChatFull;
@@ -8391,6 +8985,15 @@ export declare namespace Tl {
       | Tl.messages.EmojiGameDiceInfo
       | Tl.messages.EmojiGameUnavailable;
     export type TypeEmojiGameOutcome = Tl.messages.EmojiGameOutcome;
+    export type TypeFavedStickers =
+      | Tl.messages.FavedStickers
+      | Tl.messages.FavedStickersNotModified;
+    export type TypeFoundStickerSets =
+      | Tl.messages.FoundStickerSets
+      | Tl.messages.FoundStickerSetsNotModified;
+    export type TypeFoundStickers =
+      | Tl.messages.FoundStickers
+      | Tl.messages.FoundStickersNotModified;
     export type TypeMessageReactionsList = Tl.messages.MessageReactionsList;
     export type TypeMessages =
       | Tl.messages.ChannelMessages
@@ -8404,6 +9007,16 @@ export declare namespace Tl {
     export type TypeSavedGifs = Tl.messages.SavedGifs | Tl.messages.SavedGifsNotModified;
     export type TypeSearchCounter = Tl.messages.SearchCounter;
     export type TypeStickerSet = Tl.messages.StickerSet | Tl.messages.StickerSetNotModified;
+    export type TypeStickerSetInstallResult =
+      | Tl.messages.StickerSetInstallResultArchive
+      | Tl.messages.StickerSetInstallResultSuccess;
+    export type TypeVotesList = Tl.messages.VotesList;
+    export type UninstallStickerSet = TlObject<'messages.uninstallStickerSet'> &
+      UninstallStickerSetFields &
+      TlRequest<boolean>;
+    export type UninstallStickerSetFields = Readonly<{
+      stickerset: Tl.TypeInputStickerSet;
+    }>;
     export type UpdatePinnedMessage = TlObject<'messages.updatePinnedMessage'> &
       UpdatePinnedMessageFields &
       TlRequest<Tl.TypeUpdates>;
@@ -8421,6 +9034,14 @@ export declare namespace Tl {
       businessConnectionId?: string;
       peer: Tl.TypeInputPeer;
       media: Tl.TypeInputMedia;
+    }>;
+    export type VotesList = TlObject<'messages.votesList'> & VotesListFields;
+    export type VotesListFields = Readonly<{
+      count: number;
+      votes: readonly Tl.TypeMessagePeerVote[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+      nextOffset?: string;
     }>;
   }
   export namespace storage {

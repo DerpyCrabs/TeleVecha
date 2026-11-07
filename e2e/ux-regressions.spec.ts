@@ -156,7 +156,7 @@ test('dismisses transient menus and dialogs and keeps the conversation through u
     await expect(chatMenu).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Search messages' }).click();
-    const search = page.getByRole('dialog', { name: 'Message search' });
+    const search = page.locator('.search-panel[aria-label="Message search"]');
     await page.keyboard.press('Escape');
     await expect(search).toHaveCount(0);
 

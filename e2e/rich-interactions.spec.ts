@@ -100,7 +100,9 @@ test('stages, removes and uploads a pasted attachment', async ({ page }) => {
   await openReady(page);
   await selectAlice(page);
   await test.step('removes a staged attachment without sending it', async () => {
-    await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
+    await page
+      .locator('.chat-composer input[type="file"]')
+      .setInputFiles('e2e/fixtures/report.txt');
     await expect(page.getByTestId('composer-attachment')).toContainText('report.txt');
     await page.getByRole('button', { name: 'Remove attachment' }).click();
     await expect(page.getByTestId('composer-attachment')).toHaveCount(0);
@@ -115,10 +117,15 @@ test('stages, removes and uploads a pasted attachment', async ({ page }) => {
       );
     });
 
-    await expect(page.getByTestId('composer-attachment')).toContainText('pasted-image-');
+    await expect(
+      page.getByRole('button', { name: /Remove attachment pasted-image-/ }),
+    ).toBeVisible();
     expect((await fixtureStats(page))?.sendFile).toBe(0);
-    await page.getByRole('textbox', { name: 'Message' }).fill('Pasted caption');
-    await page.getByRole('button', { name: 'Send message' }).click();
+    await page.getByRole('textbox', { name: 'Attachment caption' }).fill('Pasted caption');
+    await page
+      .locator('.attachment-send-dialog')
+      .getByRole('button', { name: /^(Send|Save)$/ })
+      .click();
     await expect.poll(async () => (await fixtureStats(page))?.sendFile).toBe(1);
     await expect(page.locator('article.message').last()).toContainText('Pasted caption');
     await expect(page.locator('article.message').last().locator('img')).toBeVisible();
@@ -129,8 +136,11 @@ test('preserves the pending bubble DOM node when Telegram confirms the send', as
   await page.goto('/?scenario=held-upload');
   await selectAlice(page);
   await page.getByRole('textbox', { name: 'Message' }).fill('Stable upload');
-  await page.locator('input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await page.locator('.chat-composer input[type="file"]').setInputFiles('e2e/fixtures/report.txt');
+  await page
+    .locator('.attachment-send-dialog')
+    .getByRole('button', { name: /^(Send|Save)$/ })
+    .click();
   const pending = page.locator('article.message', { hasText: 'Stable upload' });
   await pending.evaluate((element) => {
     element.dataset.pendingNode = 'preserve';
@@ -376,9 +386,16 @@ test('replies, quotes, uploads a dropped file and keeps composer focus', async (
       );
     });
 
-    await expect(page.getByTestId('composer-attachment')).toContainText('dropped.png');
+    await expect(
+      page
+        .getByTestId('composer-attachment')
+        .getByRole('button', { name: 'Edit image dropped.png' }),
+    ).toBeVisible();
     expect((await fixtureStats(page))?.sendFile).toBe(0);
-    await page.getByRole('button', { name: 'Send message' }).click();
+    await page
+      .locator('.attachment-send-dialog')
+      .getByRole('button', { name: 'Send', exact: true })
+      .click();
     await expect.poll(async () => (await fixtureStats(page))?.sendFile).toBe(1);
     await expect(page.locator('article.message').last()).toContainText('dropped.png');
     await expect(page.locator('article.message').last().getByRole('img')).toBeVisible();

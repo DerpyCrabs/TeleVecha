@@ -41,11 +41,14 @@ for (const { retry, count } of [
     await openReady(page, '/?chat=u%3A101');
     if (!retry) await page.evaluate(() => window.__televechaFixture?.holdNextUpload());
     await page
-      .locator('input[type="file"]')
+      .locator('.chat-composer input[type="file"]')
       .setInputFiles(Array.from({ length: count }, () => 'e2e/fixtures/outgoing-media.png'));
     const caption = retry ? 'FAIL' : 'Pending photo regression';
-    await page.getByRole('textbox', { name: 'Message' }).fill(caption);
-    await page.getByRole('button', { name: 'Send message' }).click();
+    await page.getByRole('textbox', { name: 'Attachment caption' }).fill(caption);
+    await page
+      .locator('.attachment-send-dialog')
+      .getByRole('button', { name: /^(Send|Save)$/ })
+      .click();
     const message = page.locator('article.message', { hasText: caption });
     if (retry) {
       await expect(message.getByLabel('Failed message actions')).toBeVisible();

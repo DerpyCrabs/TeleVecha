@@ -347,6 +347,37 @@ describe('tab coordinator request and hydration regressions', () => {
     );
   });
 
+  it('delivers discussion events only from the elected owner', () => {
+    installChannel();
+    return Effect.runPromise(
+      provideCoordinator(
+        Effect.gen(function* () {
+          const coordinator = yield* makeUnavailableCoordinator();
+          yield* coordinator.start({ apiId: 1, apiHash: 'fixture' });
+          const owner = { from: 'owner', version: RecordingChannel.latest.hello.version };
+          yield* coordinator.receive({ ...owner, type: 'owner', at: Date.now() });
+          const received = yield* Deferred.make<unknown>();
+          const events: unknown[] = [];
+          const unsubscribe = yield* coordinator.client.subscribeConversationEvents((event) => {
+            events.push(event);
+            Deferred.doneUnsafe(received, Effect.succeed(event));
+          });
+          const event = { type: 'messages-delete', peerId: 'c:909', messageIds: [174] };
+          yield* coordinator.receive({
+            ...owner,
+            from: 'unrelated',
+            type: 'conversation-event',
+            event,
+          });
+          yield* coordinator.receive({ ...owner, type: 'conversation-event', event });
+          expect(yield* Deferred.await(received).pipe(Effect.timeout('1 second'))).toEqual(event);
+          expect(events).toEqual([event]);
+          yield* unsubscribe;
+        }),
+      ),
+    );
+  });
+
   it('rejects a pending request when its elected owner disappears', () => {
     installChannel();
     return Effect.runPromise(

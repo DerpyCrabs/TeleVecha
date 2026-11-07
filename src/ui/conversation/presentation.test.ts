@@ -18,6 +18,11 @@ function message(overrides: Partial<TelegramMessage> = {}): TelegramMessage {
 }
 
 describe('presentation', () => {
+  it('renders contact cards without an unsupported-message placeholder', () => {
+    const contact = { firstName: 'Ada', lastName: 'Lovelace', phoneNumber: '+123', vcard: '' };
+    expect(presentMessage(message({ text: '', contact }), 0)).toMatchObject({ body: '', contact });
+  });
+
   it('presents a dialog without exposing Telegram cache details', () => {
     const dialog: TelegramDialog = {
       peer,

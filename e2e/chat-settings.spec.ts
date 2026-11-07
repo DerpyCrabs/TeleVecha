@@ -8,15 +8,15 @@ test('searches messages, paginates and reveals an old result', async ({ page }) 
   await selectAlice(page);
   await test.step('searches the current chat and all chats through Telegram', async () => {
     await page.getByRole('button', { name: 'Search messages' }).click();
-    const search = page.getByRole('dialog', { name: 'Message search' });
-    await search.getByRole('textbox', { name: 'Message search query' }).fill('Fixture message 79');
-    await search.getByRole('textbox', { name: 'Message search query' }).press('Enter');
-    await expect(
-      search.getByRole('button', { name: /Alice Fixture.*Fixture message 79/ }),
-    ).toBeVisible();
-    await search.getByRole('button', { name: 'All chats' }).click();
-    await search.getByRole('textbox', { name: 'Message search query' }).fill('Release notes');
-    await search.getByRole('textbox', { name: 'Message search query' }).press('Enter');
+    const search = page.locator('.search-panel[aria-label="Message search"]');
+    await search
+      .getByRole('searchbox', { name: 'Message search query' })
+      .fill('Fixture message 79');
+    await search.getByRole('searchbox', { name: 'Message search query' }).press('Enter');
+    await expect(search.getByRole('button', { name: /Fixture message 79$/ })).toBeVisible();
+    await search.getByTitle('Search all chats', { exact: true }).click();
+    await search.getByRole('searchbox', { name: 'Message search query' }).fill('Release notes');
+    await search.getByRole('searchbox', { name: 'Message search query' }).press('Enter');
     await expect(
       search.getByRole('button', { name: /Release Channel.*Release notes/ }),
     ).toBeVisible();
@@ -26,41 +26,35 @@ test('searches messages, paginates and reveals an old result', async ({ page }) 
     expect(requests).toBeLessThanOrEqual(3);
   });
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Message search' })).toHaveCount(0);
+  await expect(page.locator('.search-panel[aria-label="Message search"]')).toHaveCount(0);
   await test.step('paginates search results and discards the old cursor when the query changes', async () => {
     await page.getByRole('button', { name: 'Search messages' }).click();
-    const search = page.getByRole('dialog', { name: 'Message search' });
-    const query = search.getByRole('textbox', { name: 'Message search query' });
+    const search = page.locator('.search-panel[aria-label="Message search"]');
+    const query = search.getByRole('searchbox', { name: 'Message search query' });
     await query.fill('Fixture message');
     await query.press('Enter');
     await expect(search.getByRole('button', { name: 'Load more' })).toBeVisible();
-    await expect(
-      search.getByRole('button', { name: 'Alice Fixture Fixture message 1', exact: true }),
-    ).toHaveCount(0);
+    await expect(search.getByRole('button', { name: /Fixture message 1$/ })).toHaveCount(0);
 
     await search.getByRole('button', { name: 'Load more' }).click();
-    await expect(
-      search.getByRole('button', { name: 'Alice Fixture Fixture message 1', exact: true }),
-    ).toBeVisible();
+    await expect(search.getByRole('button', { name: /Fixture message 1$/ })).toBeVisible();
 
     await query.fill('Release notes');
     await expect(search.getByRole('button', { name: 'Load more' })).toHaveCount(0);
     await expect(search.getByRole('button', { name: /Fixture message/ })).toHaveCount(0);
-    await search.getByRole('button', { name: 'All chats' }).click();
+    await search.getByTitle('Search all chats', { exact: true }).click();
     await expect(
       search.getByRole('button', { name: /Release Channel.*Release notes/ }),
     ).toBeVisible();
   });
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Message search' })).toHaveCount(0);
+  await expect(page.locator('.search-panel[aria-label="Message search"]')).toHaveCount(0);
   await test.step('loads and reveals an old search result outside the current history window', async () => {
     await page.getByRole('button', { name: 'Search messages' }).click();
-    const search = page.getByRole('dialog', { name: 'Message search' });
-    await search.getByRole('textbox', { name: 'Message search query' }).fill('Fixture message 5');
-    await search.getByRole('textbox', { name: 'Message search query' }).press('Enter');
-    await search
-      .getByRole('button', { name: 'Alice Fixture Fixture message 5', exact: true })
-      .click();
+    const search = page.locator('.search-panel[aria-label="Message search"]');
+    await search.getByRole('searchbox', { name: 'Message search query' }).fill('Fixture message 5');
+    await search.getByRole('searchbox', { name: 'Message search query' }).press('Enter');
+    await search.getByRole('button', { name: /Fixture message 5$/ }).click();
     await expect(page.locator('article[data-message-id="5"]')).toBeInViewport();
     expect((await fixtureStats(page))?.getHistoryAround).toBe(1);
   });

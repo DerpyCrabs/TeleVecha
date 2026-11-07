@@ -107,7 +107,7 @@ export function messageCapabilities(
   dialog: TelegramDialog,
   message: Pick<
     TelegramMessage,
-    'outgoing' | 'protected' | 'service' | 'forwardedFrom' | 'media' | 'text'
+    'outgoing' | 'protected' | 'service' | 'forwardedFrom' | 'media' | 'text' | 'poll' | 'contact'
   >,
 ): TelegramMessageCapabilities {
   const permissions = permissionsForDialog(dialog);
@@ -125,8 +125,10 @@ export function messageCapabilities(
         ? canDeleteForMe || canDeleteForEveryone
         : message.outgoing || permissions.canDeleteMessages;
   const editableMedia =
-    message.media === undefined ||
-    !['sticker', 'voice', 'round-video'].includes(message.media.kind);
+    !message.poll &&
+    !message.contact &&
+    (message.media === undefined ||
+      !['sticker', 'voice', 'round-video'].includes(message.media.kind));
   const canEditOwnMessage =
     message.outgoing && !message.service && !message.forwardedFrom && editableMedia;
 

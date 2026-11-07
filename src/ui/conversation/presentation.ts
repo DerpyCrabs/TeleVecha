@@ -58,6 +58,9 @@ export function dialogMessagePreview(message: TelegramMessage) {
   const text = message.text.trim();
   if (text) return text;
   if (message.service?.text) return message.service.text;
+  if (message.poll) return `${message.poll.quiz ? 'Quiz' : 'Poll'}: ${message.poll.question}`;
+  if (message.contact)
+    return `Contact: ${[message.contact.firstName, message.contact.lastName].filter(Boolean).join(' ')}`;
   const media = message.media ? mediaPreview(message.media) : '';
   if (media) return media;
   if (message.richMessage) {
@@ -94,6 +97,8 @@ export function presentPendingAttachment(
 function pendingSendPreview(send: PendingSend) {
   const text = send.text.trim();
   if (text) return text;
+  if (send.pollDraft) return `Poll: ${send.pollDraft.question}`;
+  if (send.contact) return `Contact: ${send.contact.firstName}`;
   if (send.sticker) return 'Sticker';
   const attachment = send.attachment ?? send.album?.attachments[0];
   return attachment ? mediaPreview(presentPendingAttachment(attachment)) : 'Message';
@@ -139,6 +144,8 @@ export function presentDialog(dialog: TelegramDialog, pending?: PendingSend): Ch
         }
       : {}),
     unread: dialog.unreadCount,
+    unreadMentions: dialog.unreadMentionsCount,
+    unreadReactions: dialog.unreadReactionsCount,
     muted: dialog.muted,
     pinned: dialog.pinned,
     archived: Boolean(dialog.archived),
@@ -167,7 +174,11 @@ export function presentMessage(
     senderColorVersion: message.senderColorVersion,
     senderRole: message.senderRole,
     senderRoleKind: message.senderRoleKind,
-    body: message.text || (message.media || message.richMessage ? '' : 'Unsupported message'),
+    body:
+      message.text ||
+      (message.media || message.contact || message.poll || message.richMessage
+        ? ''
+        : 'Unsupported message'),
     time: formatMessageTime(message.date),
     date: message.date,
     editedAt: message.editedAt,
@@ -179,6 +190,8 @@ export function presentMessage(
     service: message.service,
     botKeyboard: message.botKeyboard,
     media: message.media,
+    contact: message.contact,
+    poll: message.poll,
     mediaUnread: message.mediaUnread,
     reactions: message.reactions,
     mentions: message.mentions,
