@@ -240,6 +240,7 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
       markMediaRead: () => Effect.void,
       getUnreadNotifications: () => Effect.succeed([]),
       markMessageNotificationsRead: () => Effect.void,
+      markAllNotificationsRead: () => Effect.void,
       retryMarkRead: () => Effect.void,
       clearOperationError: () => Effect.void,
       beginQrLogin: () => Effect.void,

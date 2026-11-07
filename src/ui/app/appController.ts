@@ -1862,6 +1862,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     peerId: string,
     openGeneration: number,
     selection: number,
+    reaction = false,
   ) => {
     if (
       openGeneration !== openMessageGeneration ||
@@ -1887,7 +1888,11 @@ export const createAppController = Effect.fn('createAppController')(function* (p
         `:is(article.message, .media-album-item)[data-message-id="${messageId}"]`,
       );
       if (!target) continue;
-      viewport.reveal(target);
+      viewport.reveal(
+        (reaction
+          ? target.querySelector<HTMLElement>('.message-reactions .reaction')
+          : undefined) ?? target,
+      );
       target.classList.add('message-target');
       window.setTimeout(() => target.classList.remove('message-target'), 1200);
       return true;
@@ -1908,7 +1913,11 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       } as TelegramMessage);
     await openMessage(target);
   };
-  const openMessage = async (message: TelegramMessage, preserveSearch = false) => {
+  const openMessage = async (
+    message: TelegramMessage,
+    preserveSearch = false,
+    reaction = false,
+  ) => {
     const generation = ++openMessageGeneration;
     openingMessage = true;
     viewport.pauseAtHistory();
@@ -1957,7 +1966,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       ) {
         return;
       }
-      revealed = await revealMessage(message.id, message.peerId, generation, selection);
+      revealed = await revealMessage(message.id, message.peerId, generation, selection, reaction);
     } finally {
       if (generation === openMessageGeneration) {
         openingMessage = false;

@@ -963,6 +963,49 @@ describe('web Telegram transport', () => {
   });
 
   it.each(['mention', 'reaction'] as const)(
+    'marks all %s notifications using the bulk RPC until offset is drained',
+    (kind) => {
+      let calls = 0;
+      return Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              const result = yield* transport.readAllNotifications!(
+                { id: 'u:101', kind: 'user', accessHash: '10' },
+                kind,
+              );
+              expect(calls).toBe(2);
+              expect(result.updateBatches).toEqual(
+                [11, 12].map((pts) => ({ updates: [{ type: 'pts-advanced', pts, ptsCount: 1 }] })),
+              );
+            }),
+          () =>
+            Effect.succeed(
+              clientDouble({
+                invoke: ((request: unknown) => {
+                  expect(
+                    kind === 'mention'
+                      ? Api.messages.ReadMentions.is(request)
+                      : Api.messages.ReadReactions.is(request),
+                  ).toBe(true);
+                  calls += 1;
+                  return Effect.succeed(
+                    createTl('messages.affectedHistory', {
+                      pts: 10 + calls,
+                      ptsCount: 1,
+                      offset: calls === 1 ? 100 : 0,
+                    }),
+                  );
+                }) as MtprotoClient['invoke'],
+              }),
+            ),
+        ),
+      );
+    },
+  );
+
+  it.each(['mention', 'reaction'] as const)(
     'loads unread %s events and retains their server unread flags',
     (kind) =>
       Effect.runPromise(

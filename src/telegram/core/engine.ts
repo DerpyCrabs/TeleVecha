@@ -1058,6 +1058,7 @@ function makeMessagingEngineModule(
         kind === 'mention' ? message.unreadMention : message.unreadReaction,
       );
     const dialogVersion = versions.current('dialog', peer.id);
+    const requestRevision = messageRevisions.capture();
     const result = yield* runTelegramOperation(
       () => telegramTransport.getUnreadNotifications!(peer, kind),
       'Loading unread mentions and reactions',
@@ -1081,7 +1082,31 @@ function makeMessagingEngineModule(
           yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
       }),
     );
-    return result.messages;
+    let reconciled: TelegramMessage[] = [];
+    // The target may already be in history with stale unread flags. Reconcile
+    // the server result before navigation so visibility can acknowledge it.
+    yield* queueDialogStateOperation(() =>
+      Effect.gen(function* () {
+        if (!isOperationCurrent(session, accountId)) return;
+        const fetched = messageRevisions.filter(peer.id, result.messages, requestRevision);
+        for (const message of fetched) messageRevisions.record(peer.id, message.id);
+        const reconciledRevision = messageRevisions.capture();
+        yield* cacheStore.putMessages(
+          fetched.map((message) => ({ ...message, cacheEpoch: currentCacheEpoch })),
+        );
+        if (!isOperationCurrent(session, accountId)) return;
+        const accepted = messageRevisions.filter(peer.id, fetched, reconciledRevision);
+        reconciled = accepted;
+        const byId = new Map(accepted.map((message) => [message.id, message]));
+        histories.updateLoaded(peer.id, (history) => ({
+          ...history,
+          messages: history.messages.map((message) => byId.get(message.id) ?? message),
+        }));
+        for (const message of accepted)
+          yield* publishConversationEvent({ type: 'message-upsert', message });
+      }),
+    );
+    return reconciled;
   });
   const searchConversationMessages = Effect.fn('MessagingEngine.searchConversationMessages')(
     function* (
@@ -1288,7 +1313,18 @@ function makeMessagingEngineModule(
           ? currentView
           : yield* loadConversationView(message.peerId);
       if (conversation.messages.some(({ id }) => id === message.id)) {
-        return { conversation, found: true };
+        // The client view can lag behind a just-fetched notification event.
+        // Resolve from the reconciled history instead of returning that stale view.
+        const loaded = new Map(
+          (histories.loaded(message.peerId)?.messages ?? []).map((item) => [item.id, item]),
+        );
+        return {
+          conversation: {
+            ...conversation,
+            messages: conversation.messages.map((item) => loaded.get(item.id) ?? item),
+          },
+          found: true,
+        };
       }
 
       const historyVersion = histories.version(message.peerId);
@@ -5962,6 +5998,70 @@ function makeMessagingEngineModule(
     Effect.forEach([...new Set(messageIds)], (id) => markMessageContentsRead(peer, id, true), {
       discard: true,
     });
+  const markAllNotificationsRead = Effect.fn('MessagingEngine.markAllNotificationsRead')(function* (
+    peer: TelegramPeer,
+    kind: 'mention' | 'reaction',
+  ) {
+    const session = sessionScope;
+    const accountId = activeAccountId;
+    if (!currentSnapshot().online || !telegramTransport.readAllNotifications)
+      return yield* Effect.fail(new Error('Marking notifications as read is unavailable.'));
+    return yield* queueMutation(`notifications-read:${peer.id}:${kind}`, () =>
+      Effect.gen(function* () {
+        if (!isOperationCurrent(session, accountId)) return;
+        const requestRevision = messageRevisions.capture();
+        const cached = yield* cacheStore.loadMessages(peer.id, Number.MAX_SAFE_INTEGER);
+        if (!isOperationCurrent(session, accountId)) return;
+        const candidates = [
+          ...new Map(
+            [...cached, ...(histories.loaded(peer.id)?.messages ?? [])].map((message) => [
+              message.id,
+              message,
+            ]),
+          ).values(),
+        ];
+        const dialogVersion = versions.current('dialog', peer.id);
+        const result = yield* runTelegramOperation(
+          () => telegramTransport.readAllNotifications!(peer, kind),
+          'Marking all notifications as read',
+        );
+        if (!isOperationCurrent(session, accountId)) return;
+        yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+        yield* queueDialogStateOperation(() =>
+          Effect.gen(function* () {
+            if (!isOperationCurrent(session, accountId)) return;
+            const field = kind === 'mention' ? 'unreadMention' : 'unreadReaction';
+            for (const previous of messageRevisions.filter(peer.id, candidates, requestRevision)) {
+              if (!previous[field]) continue;
+              const message = { ...previous, [field]: false, cacheEpoch: currentCacheEpoch };
+              messageRevisions.record(peer.id, message.id);
+              yield* cacheStore.putMessage(message);
+              if (!isOperationCurrent(session, accountId)) return;
+              histories.updateLoaded(peer.id, (history) => ({
+                ...history,
+                messages: history.messages.map((item) => (item.id === message.id ? message : item)),
+              }));
+              yield* publishConversationEvent({ type: 'message-upsert', message });
+            }
+            const dialog = dialogForPeer(peer.id);
+            if (!dialog || versions.current('dialog', peer.id) !== dialogVersion) return;
+            const countField = kind === 'mention' ? 'unreadMentionsCount' : 'unreadReactionsCount';
+            const changed = { ...dialog, [countField]: 0 };
+            versions.next('dialog', peer.id);
+            yield* patch({
+              dialogs: currentSnapshot().dialogs.map((item) =>
+                item.peer.id === peer.id ? changed : item,
+              ),
+            });
+            if (!changed.transient)
+              yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
+          }),
+        );
+        // Reconcile a count changed by a concurrent incoming notification.
+        if (isOperationCurrent(session, accountId)) yield* getUnreadNotifications(peer, kind);
+      }),
+    );
+  });
   const flushInboxRead = Effect.fn('MessagingEngine.flushInboxRead')(function* (
     peerId: string,
     maxMessageId: number,
@@ -6454,6 +6554,7 @@ function makeMessagingEngineModule(
     retryMarkRead: retryMarkRead,
     markMediaRead,
     markMessageNotificationsRead,
+    markAllNotificationsRead,
     refreshUpdates: refreshUpdates,
     subscribe: subscribe,
     subscribeResources: subscribeResources,

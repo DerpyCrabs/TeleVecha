@@ -878,6 +878,10 @@ export interface TelegramTransport {
     peer: TelegramPeer,
     kind: 'mention' | 'reaction',
   ): TransportEffect<{ messages: TelegramMessage[]; count: number }>;
+  readAllNotifications?(
+    peer: TelegramPeer,
+    kind: 'mention' | 'reaction',
+  ): TransportEffect<TransportMutationResult>;
   readHistory(peer: TelegramPeer, maxMessageId: number): TransportEffect<TransportMutationResult>;
   readMessageContents(
     peer: TelegramPeer,

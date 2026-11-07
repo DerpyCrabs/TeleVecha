@@ -92,7 +92,9 @@ export declare namespace Tl {
     | Tl.messages.InstallStickerSet
     | Tl.messages.ProlongWebView
     | Tl.messages.ReadHistory
+    | Tl.messages.ReadMentions
     | Tl.messages.ReadMessageContents
+    | Tl.messages.ReadReactions
     | Tl.messages.RequestAppWebView
     | Tl.messages.RequestMainWebView
     | Tl.messages.RequestSimpleWebView
@@ -8656,11 +8658,26 @@ export declare namespace Tl {
       peer: Tl.TypeInputPeer;
       maxId: number;
     }>;
+    export type ReadMentions = TlObject<'messages.readMentions'> &
+      ReadMentionsFields &
+      TlRequest<Tl.messages.TypeAffectedHistory>;
+    export type ReadMentionsFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      topMsgId?: number;
+    }>;
     export type ReadMessageContents = TlObject<'messages.readMessageContents'> &
       ReadMessageContentsFields &
       TlRequest<Tl.messages.TypeAffectedMessages>;
     export type ReadMessageContentsFields = Readonly<{
       id: readonly number[];
+    }>;
+    export type ReadReactions = TlObject<'messages.readReactions'> &
+      ReadReactionsFields &
+      TlRequest<Tl.messages.TypeAffectedHistory>;
+    export type ReadReactionsFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      topMsgId?: number;
+      savedPeerId?: Tl.TypeInputPeer;
     }>;
     export type RecentStickers = TlObject<'messages.recentStickers'> & RecentStickersFields;
     export type RecentStickersFields = Readonly<{

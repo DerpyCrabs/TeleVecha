@@ -86,13 +86,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
   let anchorScrollTop = 0;
   let anchorViewportTop = 0;
   let touchY: number | undefined;
-  let pointerScrollCandidate = false;
-  const isScrollbarPointer = (scroller: HTMLDivElement, event: PointerEvent) => {
-    if (event.target !== scroller || event.pointerType === 'touch') return false;
-    const bounds = scroller.getBoundingClientRect();
-    const scrollbarStart = Math.min(bounds.left + scroller.clientWidth, bounds.right - 12);
-    return event.clientX >= scrollbarStart;
-  };
+  let lastPresentScrollTop = 0;
   const atPresent = (scroller: HTMLDivElement) => {
     const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     if (distance <= 2) return true;
@@ -162,6 +156,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
   };
   const pinPresent = (scroller: HTMLDivElement) => {
     scroller.scrollTop = scroller.scrollHeight;
+    lastPresentScrollTop = scroller.scrollTop;
   };
   const applyEffects = (
     effects: ConversationViewportEffect[],
@@ -188,7 +183,20 @@ export function createConversationViewport(options: ConversationViewportOptions)
     event: ConversationViewportEvent,
     scroller: HTMLDivElement | undefined = options.scroller(),
   ) {
-    if (event.type === 'geometry-changed' || event.type === 'content-changed') geometryDirty = true;
+    if (event.type === 'geometry-changed' || event.type === 'content-changed') {
+      geometryDirty = true;
+      // ResizeObserver may run before the scroll event. Respect a position
+      // already moved away from the tail instead of undoing that movement.
+      if (
+        scroller &&
+        followingPresent() &&
+        scroller.scrollTop < lastPresentScrollTop - 2 &&
+        !atPresent(scroller)
+      ) {
+        source.send({ type: 'Viewport', event: { type: 'user-left-present' }, scroller });
+        captureReadingAnchors(scroller);
+      }
+    }
     source.send({ type: 'Viewport', event, scroller });
   }
   let wasEmpty = false;
@@ -204,8 +212,10 @@ export function createConversationViewport(options: ConversationViewportOptions)
   };
   const attach = (scroller: HTMLDivElement, content: HTMLDivElement) => {
     const handleScroll = () => {
-      if (followingPresent() && pointerScrollCandidate && !atPresent(scroller)) {
-        readHistory(scroller);
+      if (followingPresent() && !atPresent(scroller)) {
+        // Observe the actual position, including keyboard, scrollbar and
+        // accessibility scrolling. Never pull a scroll event back to the tail.
+        dispatch({ type: 'user-left-present' }, scroller);
       }
       if (!followingPresent() && atPresent(scroller)) {
         options.dismissUnreadMarker();
@@ -228,7 +238,6 @@ export function createConversationViewport(options: ConversationViewportOptions)
       }
     };
     const handlePointerDown = (event: PointerEvent) => {
-      pointerScrollCandidate = event.button === 0 && isScrollbarPointer(scroller, event);
       if (event.pointerType === 'touch') {
         touchY = event.clientY;
         return;
@@ -242,7 +251,6 @@ export function createConversationViewport(options: ConversationViewportOptions)
     };
     const handlePointerEnd = () => {
       touchY = undefined;
-      pointerScrollCandidate = false;
     };
     scroller.addEventListener('scroll', handleScroll, { passive: true });
     scroller.addEventListener('wheel', handleWheel, { passive: true });
@@ -374,16 +382,24 @@ export function createConversationViewport(options: ConversationViewportOptions)
       `article[data-message-id="${CSS.escape(message.id)}"]`,
     );
     if (!target) return false;
+    // A fetched target can change height before ResizeObserver has refreshed
+    // the row geometry. Anchor the new position against the current layout.
+    geometryDirty = true;
     dispatch({ type: 'history-target-opened' }, scroller);
     target.scrollIntoView({ block: 'center' });
+    captureReadingAnchors(scroller);
     dispatch({ type: 'viewport-scrolled' }, scroller);
     return true;
   };
   const reveal = (target: HTMLElement) => {
     const scroller = options.scroller();
     if (!scroller?.contains(target)) return false;
+    // A fetched target can change height before ResizeObserver has refreshed
+    // the row geometry. Anchor the new position against the current layout.
+    geometryDirty = true;
     dispatch({ type: 'history-target-opened' }, scroller);
     target.scrollIntoView({ block: 'center' });
+    captureReadingAnchors(scroller);
     dispatch({ type: 'viewport-scrolled' }, scroller);
     return true;
   };

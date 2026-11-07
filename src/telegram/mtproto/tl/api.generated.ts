@@ -1506,10 +1506,18 @@ const $messages_ReadHistory = createTlFactory<
   Tl.messages.ReadHistory,
   Tl.messages.ReadHistoryFields
 >('messages.readHistory');
+const $messages_ReadMentions = createTlFactory<
+  Tl.messages.ReadMentions,
+  Tl.messages.ReadMentionsFields
+>('messages.readMentions');
 const $messages_ReadMessageContents = createTlFactory<
   Tl.messages.ReadMessageContents,
   Tl.messages.ReadMessageContentsFields
 >('messages.readMessageContents');
+const $messages_ReadReactions = createTlFactory<
+  Tl.messages.ReadReactions,
+  Tl.messages.ReadReactionsFields
+>('messages.readReactions');
 const $messages_RecentStickers = createTlFactory<
   Tl.messages.RecentStickers,
   Tl.messages.RecentStickersFields
@@ -2162,7 +2170,9 @@ export const Api = Object.freeze({
     PeerDialogs: $messages_PeerDialogs,
     ProlongWebView: $messages_ProlongWebView,
     ReadHistory: $messages_ReadHistory,
+    ReadMentions: $messages_ReadMentions,
     ReadMessageContents: $messages_ReadMessageContents,
+    ReadReactions: $messages_ReadReactions,
     RecentStickers: $messages_RecentStickers,
     RequestAppWebView: $messages_RequestAppWebView,
     RequestMainWebView: $messages_RequestMainWebView,

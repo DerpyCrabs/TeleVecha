@@ -47536,6 +47536,49 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 921026381,
+    name: 'messages.readMentions',
+    typeName: 'messages.ReadMentions',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.AffectedHistory',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'topMsgId',
+        wireName: 'top_msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+    ],
+  },
+  {
     id: 916930423,
     name: 'messages.readMessageContents',
     typeName: 'messages.ReadMessageContents',
@@ -47556,6 +47599,62 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
             name: 'int',
           },
           bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 2663665555,
+    name: 'messages.readReactions',
+    typeName: 'messages.ReadReactions',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.AffectedHistory',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'topMsgId',
+        wireName: 'top_msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'savedPeerId',
+        wireName: 'saved_peer_id',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
         },
       },
     ],

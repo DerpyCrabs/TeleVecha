@@ -20,6 +20,7 @@ export const messagingCapabilities = [
   'markMediaRead',
   'getUnreadNotifications',
   'markMessageNotificationsRead',
+  'markAllNotificationsRead',
   'clearOperationError',
   'beginQrLogin',
   'cancelQrLogin',

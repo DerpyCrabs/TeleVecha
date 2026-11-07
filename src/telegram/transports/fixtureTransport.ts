@@ -303,6 +303,7 @@ interface FixtureStats {
   lastSendRandomId?: string;
   sendFile: number;
   sendAlbum: number;
+  readAllNotifications: { peerId: string; kind: 'mention' | 'reaction' }[];
   readMessageContents: { peerId: string; messageIds: number[] }[];
   readHistory: number;
   readHistoryPeers: string[];
@@ -636,6 +637,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       sendFile: 0,
       sendAlbum: 0,
       readMessageContents: [],
+      readAllNotifications: [],
       readHistory: 0,
       readHistoryPeers: [],
       getReadOutboxMaxId: 0,
@@ -2694,6 +2696,16 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
             kind === 'mention' ? message.unreadMention : message.unreadReaction,
           );
           return { messages: unread, count: unread.length };
+        }),
+      readAllNotifications: (peer, kind) =>
+        Effect.sync(() => {
+          stats.readAllNotifications.push({ peerId: peer.id, kind });
+          const field = kind === 'mention' ? 'unreadMention' : 'unreadReaction';
+          messages.set(
+            peer.id,
+            (messages.get(peer.id) ?? []).map((message) => ({ ...message, [field]: false })),
+          );
+          return {};
         }),
       readMessageContents: (peer, messageIds) =>
         Effect.sync(() => {

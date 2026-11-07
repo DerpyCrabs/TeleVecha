@@ -1406,7 +1406,21 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                 )?.peer;
                 return peer ? engine.getUnreadNotifications(peer, kind) : Effect.succeed([]);
               }}
-              open={openMessage}
+              markAll={() => {
+                const dialog = snapshot.dialogs.find((dialog) => dialog.peer.id === activeChatId);
+                if (!dialog) return Effect.void;
+                return Effect.forEach(
+                  (['mention', 'reaction'] as const).filter(
+                    (kind) =>
+                      (kind === 'mention'
+                        ? dialog.unreadMentionsCount
+                        : dialog.unreadReactionsCount) ?? 0,
+                  ),
+                  (kind) => engine.markAllNotificationsRead(dialog.peer, kind),
+                  { discard: true },
+                );
+              }}
+              open={(message) => openMessage(message, false, Boolean(message.unreadReaction))}
             />
             {viewport.jumpVisible ? (
               <button

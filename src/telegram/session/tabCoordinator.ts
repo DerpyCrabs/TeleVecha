@@ -37,7 +37,7 @@ import type {
   TelegramResourceInvalidation,
 } from '../types';
 
-const PROTOCOL_VERSION = 10;
+const PROTOCOL_VERSION = 11;
 const OWNER_HEARTBEAT_MS = 2_000;
 const OWNER_TIMEOUT_MS = 7_000;
 const REQUEST_RETRY_MS = 2_000;
@@ -86,6 +86,10 @@ const invokeEngineCommand = (
     case 'refreshReadReceipt':
       return engine.refreshReadReceipt(
         ...(args as Parameters<MessagingEngine['refreshReadReceipt']>),
+      );
+    case 'markAllNotificationsRead':
+      return engine.markAllNotificationsRead(
+        ...(args as Parameters<MessagingEngine['markAllNotificationsRead']>),
       );
     case 'markMessageNotificationsRead':
       return engine.markMessageNotificationsRead(
@@ -928,6 +932,7 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   retrySync: { readiness: 'startup' },
   refreshUpdates: { readiness: 'account', coalesce: true },
   refreshReadReceipt: { readiness: 'account', coalesce: true },
+  markAllNotificationsRead: { readiness: 'account', concurrent: true, coalesce: true },
   markMessageNotificationsRead: { readiness: 'account', concurrent: true, coalesce: true },
   getUnreadNotifications: { readiness: 'account', concurrent: true },
   markMediaRead: { readiness: 'account', concurrent: true, coalesce: true },
@@ -1284,6 +1289,7 @@ function errorMessage(error: unknown) {
     retryMarkRead: remote('retryMarkRead'),
     markMediaRead: remote('markMediaRead'),
     getUnreadNotifications: remote('getUnreadNotifications'),
+    markAllNotificationsRead: remote('markAllNotificationsRead'),
     markMessageNotificationsRead: remote('markMessageNotificationsRead'),
     beginQrLogin: remote('beginQrLogin'),
     cancelQrLogin: remote('cancelQrLogin'),

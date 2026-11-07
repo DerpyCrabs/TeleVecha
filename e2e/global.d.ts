@@ -32,6 +32,7 @@ interface Window {
       lastSendRandomId?: string;
       sendFile: number;
       sendAlbum: number;
+      readAllNotifications: { peerId: string; kind: 'mention' | 'reaction' }[];
       readMessageContents: { peerId: string; messageIds: number[] }[];
       readHistory: number;
       readHistoryPeers: string[];

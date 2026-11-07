@@ -37,12 +37,16 @@ test('row resize preserves reading position even when total history height is un
     const detach = viewport.attach(scroller, content);
     const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     try {
+      viewport.jumpToPresent();
+      await frame();
       await frame();
       scroller.scrollTop = 1000;
-      viewport.pauseAtHistory();
+
       await frame();
       await frame();
       viewport.captureAnchor();
+      const scrolledTop = scroller.scrollTop;
+      const followingPresent = viewport.snapshot().followingPresent;
       const before = rows[25]!.getBoundingClientRect().top;
       const height = scroller.scrollHeight;
       rows[20]!.style.height = '80px';
@@ -50,13 +54,22 @@ test('row resize preserves reading position even when total history height is un
       await frame();
       await frame();
       const after = rows[25]!.getBoundingClientRect().top;
-      return { before, after, height, nextHeight: scroller.scrollHeight };
+      return {
+        before,
+        after,
+        height,
+        scrolledTop,
+        followingPresent,
+        nextHeight: scroller.scrollHeight,
+      };
     } finally {
       detach();
       viewport.dispose();
       scroller.remove();
     }
   });
+  expect(result.scrolledTop).toBe(1000);
+  expect(result.followingPresent).toBe(false);
   expect(result.nextHeight).toBe(result.height);
   expect(Math.abs(result.after - result.before)).toBeLessThan(1);
 });

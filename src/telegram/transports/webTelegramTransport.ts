@@ -824,11 +824,35 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return {
         messages: result.messages
           .map(mapMessage)
-          .filter((message): message is TelegramMessage => Boolean(message)),
+          .filter((message): message is TelegramMessage => Boolean(message))
+          .map((message) => ({
+            ...message,
+            [kind === 'mention' ? 'unreadMention' : 'unreadReaction']: true,
+          })),
         count: 'count' in result ? result.count : result.messages.length,
       };
     },
   );
+  const readAllNotifications = Effect.fn('WebTelegramTransport.readAllNotifications')(function* (
+    peer: TelegramPeer,
+    kind: 'mention' | 'reaction',
+  ) {
+    const updateBatches: TransportUpdateBatch[] = [];
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const result = yield* (yield* getClient).invoke(
+        kind === 'mention'
+          ? Api.messages.ReadMentions({ peer: toInputPeer(peer) })
+          : Api.messages.ReadReactions({ peer: toInputPeer(peer) }),
+      );
+      updateBatches.push({
+        updates: [{ type: 'pts-advanced', pts: result.pts, ptsCount: result.ptsCount }],
+      });
+      if (result.offset <= 0) return { updateBatches };
+    }
+    return yield* Effect.fail(
+      createMtprotoError('protocol', 'Telegram did not finish marking notifications as read.'),
+    );
+  });
   const readHistory = Effect.fn('WebTelegramTransport.readHistory')(function* (
     peer: TelegramPeer,
     maxMessageId: number,
@@ -5439,6 +5463,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     getHistoryAround,
     readHistory,
     getUnreadNotifications,
+    readAllNotifications,
     readMessageContents,
     getReadOutboxMaxId,
     getSharedMediaCounts,

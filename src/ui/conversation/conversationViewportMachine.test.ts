@@ -24,6 +24,14 @@ describe('conversation viewport machine', () => {
     }
   });
 
+  it('never pulls a scroll event back to the bottom', () => {
+    for (const state of states) {
+      expect(
+        transitionConversationViewport(state, { type: 'viewport-scrolled' }).effects,
+      ).not.toContain('pin-present');
+    }
+  });
+
   it.each(['jump-to-present', 'conversation-empty'] as const)(
     '%s always enters present mode and pins it',
     (type) => {

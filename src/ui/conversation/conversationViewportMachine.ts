@@ -64,10 +64,7 @@ export function transitionConversationViewport(
     case 'conversation-empty':
       return { state: { ...state, mode: 'present' }, effects: ['pin-present'] };
     case 'viewport-scrolled':
-      return {
-        state,
-        effects: [state.mode === 'present' ? 'pin-present' : 'capture-reading-anchor'],
-      };
+      return { state, effects: ['capture-reading-anchor'] };
     case 'reading-anchor-requested':
       return { state, effects: state.mode === 'history' ? ['capture-reading-anchor'] : [] };
     case 'geometry-changed':

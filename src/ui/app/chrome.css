@@ -437,3 +437,36 @@
   overflow-y: auto;
   min-height: 0;
 }
+
+.notification-options {
+  min-width: 2.75rem;
+  min-height: 2rem;
+  padding: 0.2rem 0.5rem;
+}
+.notification-menu {
+  position: absolute;
+  right: 3.4rem;
+  top: 0;
+  width: max-content;
+  max-width: calc(100vw - 6rem);
+  padding: 0.35rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.75rem;
+  background: var(--surface-raised);
+  box-shadow: 0 5px 18px var(--shadow);
+}
+.notification-menu button {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 2.75rem;
+  width: 100%;
+  padding: 0.5rem 0.8rem;
+  border-radius: 0.5rem;
+  color: var(--text);
+  text-align: left;
+}
+.notification-menu button:hover,
+.notification-menu button:focus-visible {
+  background: var(--surface-hover);
+}
