@@ -1,3 +1,6 @@
+import type { TelegramPeer } from '../types';
+import { messageInSavedDialog } from '../savedMessages';
+import { messageInTopic } from '../forums';
 import { Deferred, Effect, Exit, Queue, Schema, Scope, Stream } from 'effect';
 
 import { makeConversation } from '../core/conversation';
@@ -37,7 +40,7 @@ import type {
   TelegramResourceInvalidation,
 } from '../types';
 
-const PROTOCOL_VERSION = 11;
+const PROTOCOL_VERSION = 30;
 const OWNER_HEARTBEAT_MS = 2_000;
 const OWNER_TIMEOUT_MS = 7_000;
 const REQUEST_RETRY_MS = 2_000;
@@ -173,6 +176,126 @@ const invokeEngineCommand = (
       return engine.editMessage(...(args as Parameters<MessagingEngine['editMessage']>));
     case 'deleteMessage':
       return engine.deleteMessage(...(args as Parameters<MessagingEngine['deleteMessage']>));
+    case 'deleteForumTopic':
+      return engine.deleteForumTopic(...(args as Parameters<MessagingEngine['deleteForumTopic']>));
+    case 'getForumTopic':
+      return engine.getForumTopic(...(args as Parameters<MessagingEngine['getForumTopic']>));
+    case 'getForumTopics':
+      return engine.getForumTopics(...(args as Parameters<MessagingEngine['getForumTopics']>));
+    case 'createForumTopic':
+      return engine.createForumTopic(...(args as Parameters<MessagingEngine['createForumTopic']>));
+    case 'editForumTopic':
+      return engine.editForumTopic(...(args as Parameters<MessagingEngine['editForumTopic']>));
+    case 'pinForumTopic':
+      return engine.pinForumTopic(...(args as Parameters<MessagingEngine['pinForumTopic']>));
+    case 'readForumTopic':
+      return engine.readForumTopic(...(args as Parameters<MessagingEngine['readForumTopic']>));
+    case 'checkChatInvite':
+      return engine.checkChatInvite(...(args as Parameters<MessagingEngine['checkChatInvite']>));
+    case 'joinChatInvite':
+      return engine.joinChatInvite(...(args as Parameters<MessagingEngine['joinChatInvite']>));
+    case 'getJoinRequests':
+      return engine.getJoinRequests(...(args as Parameters<MessagingEngine['getJoinRequests']>));
+    case 'resolveJoinRequest':
+      return engine.resolveJoinRequest(
+        ...(args as Parameters<MessagingEngine['resolveJoinRequest']>),
+      );
+    case 'resolveAllJoinRequests':
+      return engine.resolveAllJoinRequests(
+        ...(args as Parameters<MessagingEngine['resolveAllJoinRequests']>),
+      );
+    case 'getChatInviteLinks':
+      return engine.getChatInviteLinks(
+        ...(args as Parameters<MessagingEngine['getChatInviteLinks']>),
+      );
+    case 'exportChatInviteLink':
+      return engine.exportChatInviteLink(
+        ...(args as Parameters<MessagingEngine['exportChatInviteLink']>),
+      );
+    case 'editChatInviteLink':
+      return engine.editChatInviteLink(
+        ...(args as Parameters<MessagingEngine['editChatInviteLink']>),
+      );
+    case 'revokeChatInviteLink':
+      return engine.revokeChatInviteLink(
+        ...(args as Parameters<MessagingEngine['revokeChatInviteLink']>),
+      );
+    case 'deleteChatInviteLink':
+      return engine.deleteChatInviteLink(
+        ...(args as Parameters<MessagingEngine['deleteChatInviteLink']>),
+      );
+    case 'getSavedMessagesInfo':
+      return engine.getSavedMessagesInfo(
+        ...(args as Parameters<MessagingEngine['getSavedMessagesInfo']>),
+      );
+    case 'getSavedDialogs':
+      return engine.getSavedDialogs(...(args as Parameters<MessagingEngine['getSavedDialogs']>));
+    case 'getEarlierGroupHistory':
+      return engine.getEarlierGroupHistory(
+        ...(args as Parameters<MessagingEngine['getEarlierGroupHistory']>),
+      );
+    case 'getSavedHistory':
+      return engine.getSavedHistory(...(args as Parameters<MessagingEngine['getSavedHistory']>));
+    case 'getSavedTags':
+      return engine.getSavedTags(...(args as Parameters<MessagingEngine['getSavedTags']>));
+    case 'renameSavedTag':
+      return engine.renameSavedTag(...(args as Parameters<MessagingEngine['renameSavedTag']>));
+    case 'pinSavedDialog':
+      return engine.pinSavedDialog(...(args as Parameters<MessagingEngine['pinSavedDialog']>));
+    case 'setSavedMessageTags':
+      return engine.setSavedMessageTags(
+        ...(args as Parameters<MessagingEngine['setSavedMessageTags']>),
+      );
+    case 'getAdminLog':
+      return engine.getAdminLog(...(args as Parameters<MessagingEngine['getAdminLog']>));
+    case 'upgradeChat':
+      return engine.upgradeChat(...(args as Parameters<MessagingEngine['upgradeChat']>));
+    case 'getChatManagement':
+      return engine.getChatManagement(
+        ...(args as Parameters<MessagingEngine['getChatManagement']>),
+      );
+    case 'setChatSetting':
+      return engine.setChatSetting(...(args as Parameters<MessagingEngine['setChatSetting']>));
+    case 'getManagedParticipants':
+      return engine.getManagedParticipants(
+        ...(args as Parameters<MessagingEngine['getManagedParticipants']>),
+      );
+    case 'addChatMember':
+      return engine.addChatMember(...(args as Parameters<MessagingEngine['addChatMember']>));
+    case 'editChatParticipant':
+      return engine.editChatParticipant(
+        ...(args as Parameters<MessagingEngine['editChatParticipant']>),
+      );
+    case 'createChat':
+      return engine.createChat(...(args as Parameters<MessagingEngine['createChat']>));
+    case 'getChatFolders':
+      return engine.getChatFolders(...(args as Parameters<MessagingEngine['getChatFolders']>));
+    case 'saveChatFolder':
+      return engine.saveChatFolder(...(args as Parameters<MessagingEngine['saveChatFolder']>));
+    case 'deleteChatFolder':
+      return engine.deleteChatFolder(...(args as Parameters<MessagingEngine['deleteChatFolder']>));
+    case 'reorderChatFolders':
+      return engine.reorderChatFolders(
+        ...(args as Parameters<MessagingEngine['reorderChatFolders']>),
+      );
+    case 'getFolderUpdates':
+      return engine.getFolderUpdates(...(args as Parameters<MessagingEngine['getFolderUpdates']>));
+    case 'joinFolderUpdates':
+      return engine.joinFolderUpdates(
+        ...(args as Parameters<MessagingEngine['joinFolderUpdates']>),
+      );
+    case 'getFolderLinks':
+      return engine.getFolderLinks(...(args as Parameters<MessagingEngine['getFolderLinks']>));
+    case 'exportFolderLink':
+      return engine.exportFolderLink(...(args as Parameters<MessagingEngine['exportFolderLink']>));
+    case 'deleteFolderLink':
+      return engine.deleteFolderLink(...(args as Parameters<MessagingEngine['deleteFolderLink']>));
+    case 'checkFolderInvite':
+      return engine.checkFolderInvite(
+        ...(args as Parameters<MessagingEngine['checkFolderInvite']>),
+      );
+    case 'joinFolderInvite':
+      return engine.joinFolderInvite(...(args as Parameters<MessagingEngine['joinFolderInvite']>));
     case 'getPrivacy':
       return engine.getPrivacy(...(args as Parameters<MessagingEngine['getPrivacy']>));
     case 'setPrivacy':
@@ -225,6 +348,8 @@ const invokeEngineCommand = (
       return engine.getUserDetails(...(args as Parameters<MessagingEngine['getUserDetails']>));
     case 'getGroupMembers':
       return engine.getGroupMembers(...(args as Parameters<MessagingEngine['getGroupMembers']>));
+    case 'setUnreadMark':
+      return engine.setUnreadMark(...(args as Parameters<MessagingEngine['setUnreadMark']>));
     case 'setMuted':
       return engine.setMuted(...(args as Parameters<MessagingEngine['setMuted']>));
     case 'setBlocked':
@@ -682,6 +807,9 @@ const MessageSchema = Schema.Struct({
   protected: Schema.optional(Schema.Boolean),
   editedAt: Schema.optional(Schema.Number),
   replyToId: Schema.optional(Schema.Number),
+  topicId: Schema.optional(Schema.Number),
+  savedPeerId: Schema.optional(Schema.String),
+  reactionsAsTags: Schema.optional(Schema.Boolean),
   replyQuote: Schema.optional(Schema.String),
   randomId: Schema.optional(Schema.String),
   groupedId: Schema.optional(Schema.String),
@@ -711,6 +839,10 @@ const DialogSchema = Schema.Struct({
   topMessageId: Schema.Number,
   topMessage: Schema.optional(MessageSchema),
   unreadCount: Schema.Number,
+  unreadMark: Schema.optional(Schema.Boolean),
+  isContact: Schema.optional(Schema.Boolean),
+  broadcast: Schema.optional(Schema.Boolean),
+  forum: Schema.optional(Schema.Boolean),
   unreadMentionsCount: Schema.optional(Schema.Number),
   unreadReactionsCount: Schema.optional(Schema.Number),
   readInboxMaxId: Schema.Number,
@@ -759,7 +891,11 @@ const PendingSendSchema = Schema.Struct({
   lastError: Schema.optional(Schema.String),
   uploadProgress: Schema.optional(Schema.Number),
   reply: Schema.optional(
-    Schema.Struct({ messageId: Schema.Number, quoteText: Schema.optional(Schema.String) }),
+    Schema.Struct({
+      messageId: Schema.Number,
+      topMessageId: Schema.optional(Schema.Number),
+      quoteText: Schema.optional(Schema.String),
+    }),
   ),
   formats: Schema.optional(Schema.Array(TextFormatSchema)),
   sticker: Schema.optional(StickerSchema),
@@ -771,6 +907,7 @@ const PendingSendSchema = Schema.Struct({
       messageId: Schema.Number,
       options: Schema.optional(
         Schema.Struct({
+          topMessageId: Schema.optional(Schema.Number),
           hideAuthor: Schema.optional(Schema.Boolean),
           hideCaption: Schema.optional(Schema.Boolean),
         }),
@@ -818,6 +955,8 @@ const AccountSnapshotSchema = Schema.Struct({
 });
 const ConversationViewSnapshotSchema = Schema.Struct({
   activePeerId: Schema.optional(Schema.String),
+  activeTopicId: Schema.optional(Schema.Number),
+  activeSavedPeer: Schema.optional(PeerSchema),
   messages: Schema.Array(MessageSchema),
   loadingMessages: Schema.Boolean,
   hasOlderMessages: Schema.Boolean,
@@ -834,6 +973,8 @@ const ResourceInvalidationSchema = Schema.Struct({
     'bot-commands',
     'group-members',
     'peer-metadata',
+    'chat-folders',
+    'forum-topics',
     'web-app-result',
   ]),
   queryId: Schema.optional(Schema.String),
@@ -965,6 +1106,50 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   forwardMessage: { readiness: 'workspace', concurrent: true, surfaceError: true },
   editMessage: { readiness: 'account', concurrent: true, surfaceError: true },
   deleteMessage: { readiness: 'account', concurrent: true, surfaceError: true },
+  deleteForumTopic: { readiness: 'account', concurrent: true },
+  getForumTopic: { readiness: 'account', concurrent: true },
+  getForumTopics: { readiness: 'account', concurrent: true },
+  createForumTopic: { readiness: 'account', concurrent: true },
+  editForumTopic: { readiness: 'account', concurrent: true },
+  pinForumTopic: { readiness: 'account', concurrent: true },
+  readForumTopic: { readiness: 'account', concurrent: true },
+  checkChatInvite: { readiness: 'account', concurrent: true },
+  joinChatInvite: { readiness: 'account', concurrent: true },
+  getJoinRequests: { readiness: 'account', concurrent: true },
+  resolveJoinRequest: { readiness: 'account', concurrent: true },
+  resolveAllJoinRequests: { readiness: 'account', concurrent: true },
+  getChatInviteLinks: { readiness: 'account', concurrent: true },
+  exportChatInviteLink: { readiness: 'account', concurrent: true },
+  editChatInviteLink: { readiness: 'account', concurrent: true },
+  revokeChatInviteLink: { readiness: 'account', concurrent: true },
+  deleteChatInviteLink: { readiness: 'account', concurrent: true },
+  getSavedMessagesInfo: { readiness: 'account', concurrent: true },
+  getSavedDialogs: { readiness: 'account', concurrent: true },
+  getSavedHistory: { readiness: 'account', concurrent: true },
+  getEarlierGroupHistory: { readiness: 'account', concurrent: true },
+  getSavedTags: { readiness: 'account', concurrent: true },
+  renameSavedTag: { readiness: 'account', concurrent: true },
+  pinSavedDialog: { readiness: 'account', concurrent: true },
+  setSavedMessageTags: { readiness: 'account', concurrent: true },
+  getAdminLog: { readiness: 'account', concurrent: true },
+  upgradeChat: { readiness: 'account', concurrent: true },
+  getChatManagement: { readiness: 'account', concurrent: true },
+  setChatSetting: { readiness: 'account', concurrent: true },
+  getManagedParticipants: { readiness: 'account', concurrent: true },
+  addChatMember: { readiness: 'account', concurrent: true },
+  editChatParticipant: { readiness: 'account', concurrent: true },
+  createChat: { readiness: 'account', concurrent: true },
+  getChatFolders: { readiness: 'account', concurrent: true },
+  saveChatFolder: { readiness: 'account', concurrent: true },
+  deleteChatFolder: { readiness: 'account', concurrent: true },
+  reorderChatFolders: { readiness: 'account', concurrent: true },
+  getFolderUpdates: { readiness: 'account', concurrent: true },
+  joinFolderUpdates: { readiness: 'account', concurrent: true },
+  getFolderLinks: { readiness: 'account', concurrent: true },
+  exportFolderLink: { readiness: 'account', concurrent: true },
+  deleteFolderLink: { readiness: 'account', concurrent: true },
+  checkFolderInvite: { readiness: 'account', concurrent: true },
+  joinFolderInvite: { readiness: 'account', concurrent: true },
   getPrivacy: { readiness: 'account', concurrent: true, coalesce: true },
   setPrivacy: { readiness: 'account' },
   getReadTimePrivacy: { readiness: 'account', concurrent: true, coalesce: true },
@@ -987,6 +1172,7 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   addPeer: { readiness: 'account' },
   getUserDetails: { readiness: 'account', concurrent: true, coalesce: true },
   getGroupMembers: { readiness: 'workspace', concurrent: true, coalesce: true },
+  setUnreadMark: { readiness: 'account', concurrent: true, surfaceError: true },
   setMuted: { readiness: 'account', concurrent: true, surfaceError: true },
   setBlocked: { readiness: 'account', concurrent: true, surfaceError: true },
   updateContact: { readiness: 'account', concurrent: true, surfaceError: true },
@@ -1047,8 +1233,14 @@ function retainWorkspaceWhileStarting(
 function conversationLoadingSnapshot(
   previous: EngineSnapshot | undefined,
   peerId: string,
+  topicId?: number,
+  savedPeer?: TelegramPeer,
 ): ConversationViewSnapshot {
-  if (previous?.activePeerId === peerId) {
+  if (
+    previous?.activePeerId === peerId &&
+    previous.activeTopicId === topicId &&
+    previous.activeSavedPeer?.id === savedPeer?.id
+  ) {
     return {
       ...conversationViewSnapshot(previous),
       loadingMessages: previous.messages.length === 0,
@@ -1058,6 +1250,8 @@ function conversationLoadingSnapshot(
   return {
     ...conversationViewSnapshot(initialEngineSnapshot()),
     activePeerId: peerId,
+    activeTopicId: topicId,
+    activeSavedPeer: savedPeer,
     loadingMessages: true,
   };
 }
@@ -1066,7 +1260,13 @@ function retainConversationMetadata(
   previous: EngineSnapshot | undefined,
   next: ConversationViewSnapshot,
 ): ConversationViewSnapshot {
-  if (!previous || previous.activePeerId !== next.activePeerId) return next;
+  if (
+    !previous ||
+    previous.activePeerId !== next.activePeerId ||
+    previous.activeTopicId !== next.activeTopicId ||
+    previous.activeSavedPeer?.id !== next.activeSavedPeer?.id
+  )
+    return next;
   return {
     ...next,
     ...(next.pinnedMessages.length === 0 && previous.pinnedMessages.length > 0
@@ -1162,9 +1362,10 @@ function errorMessage(error: unknown) {
     start: (credentials: TelegramCredentials) =>
       start(credentials).pipe(Effect.mapError((error) => toMessagingError(error, 'start'))),
     stop: () => stop().pipe(Effect.mapError((error) => toMessagingError(error, 'stop'))),
-    conversation: (peerId: string) => conversation(peerId),
-    openConversation: (peerId: string) =>
-      openConversation(peerId).pipe(
+    conversation: (peerId: string, topicId?: number, savedPeer?: TelegramPeer) =>
+      conversation(peerId, topicId, savedPeer),
+    openConversation: (peerId: string, topicId?: number, savedPeer?: TelegramPeer) =>
+      openConversation(peerId, topicId, savedPeer).pipe(
         Effect.mapError((error) => toMessagingError(error, 'openConversation')),
       ),
     clearOperationError: () => invoke('clearOperationError', []).pipe(Effect.ignore),
@@ -1175,7 +1376,13 @@ function errorMessage(error: unknown) {
       return clientOperation(
         'setActiveConversationVisibility',
         Effect.gen(function* () {
-          const key = JSON.stringify([peerId, state]);
+          const key = JSON.stringify([
+            peerId,
+            currentSnapshot().activeTopicId,
+            currentSnapshot().activeSavedPeer?.id,
+            currentSnapshot().messages.at(-1)?.id,
+            state,
+          ]);
           if (key === lastVisibilityKey) return;
           lastVisibilityKey = key;
           return yield* invokeCoalesced('setActiveConversationVisibility', [peerId, state]).pipe(
@@ -1320,6 +1527,51 @@ function errorMessage(error: unknown) {
     getMessageReadReceipts: remote('getMessageReadReceipts'),
     getPollVotes: remote('getPollVotes'),
     getActiveSessions: remote('getActiveSessions'),
+    deleteForumTopic: remote('deleteForumTopic'),
+    getForumTopic: remote('getForumTopic'),
+    getForumTopics: remote('getForumTopics'),
+    createForumTopic: remote('createForumTopic'),
+    editForumTopic: remote('editForumTopic'),
+    pinForumTopic: remote('pinForumTopic'),
+    readForumTopic: remote('readForumTopic'),
+    checkChatInvite: remote('checkChatInvite'),
+    joinChatInvite: remote('joinChatInvite'),
+    getJoinRequests: remote('getJoinRequests'),
+    resolveJoinRequest: remote('resolveJoinRequest'),
+    resolveAllJoinRequests: remote('resolveAllJoinRequests'),
+    getChatInviteLinks: remote('getChatInviteLinks'),
+    exportChatInviteLink: remote('exportChatInviteLink'),
+    editChatInviteLink: remote('editChatInviteLink'),
+    revokeChatInviteLink: remote('revokeChatInviteLink'),
+    deleteChatInviteLink: remote('deleteChatInviteLink'),
+    getChatManagement: remote('getChatManagement'),
+    upgradeChat: remote('upgradeChat'),
+    getAdminLog: remote('getAdminLog'),
+    getSavedMessagesInfo: remote('getSavedMessagesInfo'),
+    getSavedDialogs: remote('getSavedDialogs'),
+    getSavedHistory: remote('getSavedHistory'),
+    getEarlierGroupHistory: remote('getEarlierGroupHistory'),
+    getSavedTags: remote('getSavedTags'),
+    renameSavedTag: remote('renameSavedTag'),
+    pinSavedDialog: remote('pinSavedDialog'),
+    setSavedMessageTags: remote('setSavedMessageTags'),
+
+    setChatSetting: remote('setChatSetting'),
+    getManagedParticipants: remote('getManagedParticipants'),
+    addChatMember: remote('addChatMember'),
+    editChatParticipant: remote('editChatParticipant'),
+    createChat: remote('createChat'),
+    getChatFolders: remote('getChatFolders'),
+    saveChatFolder: remote('saveChatFolder'),
+    deleteChatFolder: remote('deleteChatFolder'),
+    reorderChatFolders: remote('reorderChatFolders'),
+    getFolderUpdates: remote('getFolderUpdates'),
+    joinFolderUpdates: remote('joinFolderUpdates'),
+    getFolderLinks: remote('getFolderLinks'),
+    exportFolderLink: remote('exportFolderLink'),
+    deleteFolderLink: remote('deleteFolderLink'),
+    checkFolderInvite: remote('checkFolderInvite'),
+    joinFolderInvite: remote('joinFolderInvite'),
     getPrivacy: remote('getPrivacy'),
     setPrivacy: remote('setPrivacy'),
     getReadTimePrivacy: remote('getReadTimePrivacy'),
@@ -1338,6 +1590,7 @@ function errorMessage(error: unknown) {
     addPeer: remote('addPeer'),
     getUserDetails: remote('getUserDetails'),
     getGroupMembers: remote('getGroupMembers'),
+    setUnreadMark: remote('setUnreadMark'),
     setMuted: remote('setMuted'),
     setBlocked: remote('setBlocked'),
     updateContact: remote('updateContact'),
@@ -1482,7 +1735,13 @@ function errorMessage(error: unknown) {
             post({ type: 'hello', version: PROTOCOL_VERSION, from: thisClientId });
             const activePeerId = currentSnapshot().activePeerId;
             if (activePeerId) {
-              yield* fork(invokeCoalesced('openConversation', [activePeerId]).pipe(Effect.ignore));
+              yield* fork(
+                invokeCoalesced('openConversation', [
+                  activePeerId,
+                  currentSnapshot().activeTopicId,
+                  currentSnapshot().activeSavedPeer,
+                ]).pipe(Effect.ignore),
+              );
             }
           }
           yield* flushPendingRequests();
@@ -1769,6 +2028,63 @@ function errorMessage(error: unknown) {
       else yield* queueState(clientId);
     }
   });
+  const topicReadMax = new Map<string, number>();
+  const loadSavedView = Effect.fn('TabCoordinator.loadSavedView')(function* (
+    engine: NonNullable<typeof activeOwner>['engine'],
+    peerId: string,
+    savedPeer: TelegramPeer,
+    previous?: ConversationViewSnapshot,
+    before?: number,
+  ): Effect.fn.Return<ConversationViewSnapshot, unknown> {
+    const page = yield* engine.getSavedHistory(savedPeer, before);
+    if (page.messages.some((message) => message.peerId !== peerId))
+      return yield* Effect.fail(new Error('Saved Messages belong to another account.'));
+    const messages = [
+      ...new Map(
+        [...(previous?.messages ?? []), ...page.messages]
+          .filter((message) => messageInSavedDialog(message, savedPeer.id))
+          .map((message) => [message.id, message]),
+      ).values(),
+    ].sort((a, b) => a.id - b.id);
+    return {
+      activePeerId: peerId,
+      activeSavedPeer: savedPeer,
+      messages,
+      loadingMessages: false,
+      loadingOlderMessages: false,
+      hasOlderMessages: page.hasOlder,
+      pinnedMessages: messages.filter((message) => message.pinned),
+      historyGaps: [],
+    };
+  });
+  const loadTopicView = Effect.fn('TabCoordinator.loadTopicView')(function* (
+    engine: NonNullable<typeof activeOwner>['engine'],
+    peerId: string,
+    topicId: number,
+    previous?: ConversationViewSnapshot,
+    before?: number,
+  ): Effect.fn.Return<ConversationViewSnapshot, unknown> {
+    const peer = engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peerId)?.peer;
+    if (!peer) return yield* Effect.fail(new Error('This forum is no longer available.'));
+    const page = yield* engine.getReplies(peer, topicId, before);
+    const combined = [...(previous?.messages ?? []), ...page.messages].filter((message) =>
+      messageInTopic(message, topicId),
+    );
+    const messages = [...new Map(combined.map((message) => [message.id, message])).values()].sort(
+      (a, b) => a.id - b.id,
+    );
+    return {
+      activePeerId: peerId,
+      activeTopicId: topicId,
+      sharedMediaCounts: undefined,
+      messages,
+      loadingMessages: false,
+      loadingOlderMessages: false,
+      hasOlderMessages: page.hasOlder,
+      pinnedMessages: messages.filter((message) => message.pinned),
+      historyGaps: [],
+    };
+  });
   const refreshClientConversationMetadata = Effect.fn(
     'TabCoordinator.refreshClientConversationMetadata',
   )(function* (
@@ -1776,6 +2092,11 @@ function errorMessage(error: unknown) {
     peerId: string,
     engine: NonNullable<typeof activeOwner>['engine'],
   ) {
+    if (
+      clientRegistry.snapshot(clientId)?.activeTopicId !== undefined ||
+      clientRegistry.snapshot(clientId)?.activeSavedPeer
+    )
+      return;
     // Pins publish conversation events as cached and remote values arrive. Those
     // events also enter any pending history load's journal.
     yield* fork(engine.loadConversationPinnedMessages(peerId).pipe(Effect.ignore));
@@ -1786,6 +2107,8 @@ function errorMessage(error: unknown) {
           if (
             sharedMediaCounts === undefined ||
             current?.activePeerId !== peerId ||
+            current.activeTopicId !== undefined ||
+            current.activeSavedPeer !== undefined ||
             activeOwner?.engine !== engine
           )
             return Effect.void;
@@ -1814,7 +2137,12 @@ function errorMessage(error: unknown) {
         const request = clientRegistry.beginConversationLoad(clientId, peerId);
         yield* refreshClientConversationMetadata(clientId, peerId, engine);
         yield* fork(
-          engine.loadConversationView(peerId).pipe(
+          (previous.activeSavedPeer
+            ? loadSavedView(engine, peerId, previous.activeSavedPeer)
+            : previous.activeTopicId !== undefined
+              ? loadTopicView(engine, peerId, previous.activeTopicId)
+              : engine.loadConversationView(peerId)
+          ).pipe(
             Effect.matchEffect({
               onSuccess: (conversation) =>
                 Effect.suspend(() => {
@@ -2047,11 +2375,20 @@ function errorMessage(error: unknown) {
     if (method === 'openConversation') {
       const peerId = String(args[0]);
       const previous = clientRegistry.snapshot(clientId);
+      const topicId = typeof args[1] === 'number' ? args[1] : undefined;
+      const savedPeer = args[2] as TelegramPeer | undefined;
+      if (savedPeer && topicId !== undefined)
+        return yield* Effect.fail(new Error('Choose a topic or a saved chat.'));
       const request = yield* updateClientConversation(
         clientId,
         peerId,
-        conversationLoadingSnapshot(previous, peerId),
-        () => engine.loadConversationView(peerId),
+        conversationLoadingSnapshot(previous, peerId, topicId, savedPeer),
+        () =>
+          savedPeer
+            ? loadSavedView(engine, peerId, savedPeer)
+            : topicId === undefined
+              ? engine.loadConversationView(peerId)
+              : loadTopicView(engine, peerId, topicId),
       );
       if (!request.current() || activeOwner?.engine !== engine) return true;
       yield* refreshClientConversationMetadata(clientId, peerId, engine);
@@ -2061,6 +2398,24 @@ function errorMessage(error: unknown) {
     if (method === 'setActiveConversationVisibility') {
       const peerId = String(args[0]);
       const state = args[1] as { visible: boolean; atBottom: boolean };
+      const view = clientRegistry.snapshot(clientId);
+      if (view?.activeSavedPeer) {
+        clientRegistry.setVisibility(clientId, { peerId, visible: false, atBottom: false });
+        yield* applyVisibility(peerId);
+        return;
+      }
+      if (view?.activeTopicId !== undefined) {
+        clientRegistry.setVisibility(clientId, { peerId, visible: false, atBottom: false });
+        yield* applyVisibility(peerId);
+        const peer = engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peerId)?.peer;
+        const maxId = view.messages.at(-1)?.id ?? 0;
+        const key = `${clientId}:${peerId}:${view.activeTopicId}`;
+        if (peer && state.visible && state.atBottom && maxId > (topicReadMax.get(key) ?? 0)) {
+          yield* engine.readForumTopic(peer, view.activeTopicId, maxId);
+          topicReadMax.set(key, maxId);
+        }
+        return;
+      }
       clientRegistry.setVisibility(clientId, { peerId, ...state });
       yield* applyVisibility(peerId);
       return;
@@ -2081,6 +2436,30 @@ function errorMessage(error: unknown) {
         conversationViewSnapshot(previous),
         () =>
           Effect.gen(function* () {
+            if (previous.activeSavedPeer) {
+              if (!messageInSavedDialog(message, previous.activeSavedPeer.id))
+                return yield* Effect.fail(new Error('The message belongs to another saved chat.'));
+              const view = yield* loadSavedView(
+                engine,
+                peerId,
+                previous.activeSavedPeer,
+                undefined,
+                message.id + 1,
+              );
+              found = view.messages.some((item) => item.id === message.id);
+              return view;
+            }
+            if (previous.activeTopicId !== undefined) {
+              const view = yield* loadTopicView(
+                engine,
+                peerId,
+                previous.activeTopicId,
+                undefined,
+                message.id + 1,
+              );
+              found = view.messages.some((item) => item.id === message.id);
+              return view;
+            }
             const result = yield* engine.openMessageInConversationView(
               message,
               conversationViewSnapshot(previous),
@@ -2094,10 +2473,20 @@ function errorMessage(error: unknown) {
     if (method === 'loadConversationSharedMediaCounts') {
       const peerId = String(args[0]);
       const previous = clientRegistry.snapshot(clientId) ?? initialEngineSnapshot();
-      if (previous.activePeerId !== peerId) return undefined;
+      if (
+        previous.activePeerId !== peerId ||
+        previous.activeSavedPeer ||
+        previous.activeTopicId !== undefined
+      )
+        return undefined;
       const counts = yield* engine.loadConversationSharedMediaCounts(peerId);
       const current = clientRegistry.snapshot(clientId);
-      if (counts && current?.activePeerId === peerId) {
+      if (
+        counts &&
+        current?.activePeerId === peerId &&
+        !current.activeSavedPeer &&
+        current.activeTopicId === undefined
+      ) {
         yield* publishClientSnapshot(clientId, { ...current, sharedMediaCounts: counts });
       }
       return counts;
@@ -2124,18 +2513,35 @@ function errorMessage(error: unknown) {
             : { loadingOlderMessages: true }),
         },
         () =>
-          method === 'loadOlderConversationView'
-            ? engine.loadOlderConversationView(peerId, conversationViewSnapshot(previous))
-            : method === 'loadHistoryGapConversationView'
-              ? engine.loadHistoryGapConversationView(
+          previous.activeSavedPeer
+            ? loadSavedView(
+                engine,
+                peerId,
+                previous.activeSavedPeer,
+                method === 'loadOlderConversationView' ? previous : undefined,
+                method === 'loadOlderConversationView' ? previous.messages[0]?.id : undefined,
+              )
+            : previous.activeTopicId !== undefined
+              ? loadTopicView(
+                  engine,
                   peerId,
-                  args[1] as TelegramHistoryGap,
-                  conversationViewSnapshot(previous),
+                  previous.activeTopicId,
+                  method === 'loadOlderConversationView' ? previous : undefined,
+                  method === 'loadOlderConversationView' ? previous.messages[0]?.id : undefined,
                 )
-              : engine.retryConversationView(peerId, conversationViewSnapshot(previous)),
+              : method === 'loadOlderConversationView'
+                ? engine.loadOlderConversationView(peerId, conversationViewSnapshot(previous))
+                : method === 'loadHistoryGapConversationView'
+                  ? engine.loadHistoryGapConversationView(
+                      peerId,
+                      args[1] as TelegramHistoryGap,
+                      conversationViewSnapshot(previous),
+                    )
+                  : engine.retryConversationView(peerId, conversationViewSnapshot(previous)),
       );
       return conversation;
     }
+    if (method === 'logOut') topicReadMax.clear();
     const result = yield* invokeEngineCommand(engine, method, args);
     const next = engine.snapshot();
     const previous = clientRegistry.snapshot(clientId) ?? initialEngineSnapshot();
@@ -2281,17 +2687,21 @@ function errorMessage(error: unknown) {
   function rejectPendingSentTo(ownerId: string, error: Error) {
     return requestJournal.rejectPending((request) => request.sentTo === ownerId, error);
   }
-  const openConversation = Effect.fn('TabCoordinator.openConversation')(function* (peerId: string) {
-    yield* invokeCoalesced('openConversation', [peerId]);
-    const selectedConversation = conversation(peerId);
+  const openConversation = Effect.fn('TabCoordinator.openConversation')(function* (
+    peerId: string,
+    topicId?: number,
+    savedPeer?: TelegramPeer,
+  ) {
+    yield* invokeCoalesced('openConversation', [peerId, topicId, savedPeer]);
+    const selectedConversation = conversation(peerId, topicId, savedPeer);
     if (!selectedConversation) {
       return yield* Effect.fail(new Error('The requested conversation is no longer available.'));
     }
     return selectedConversation;
   });
-  function conversation(peerId: string) {
+  function conversation(peerId: string, topicId?: number, savedPeer?: TelegramPeer) {
     const dialog = currentSnapshot().dialogs.find(({ peer }) => peer.id === peerId);
-    return dialog ? makeConversation(client, dialog.peer) : undefined;
+    return dialog ? makeConversation(client, dialog.peer, topicId, savedPeer) : undefined;
   }
   function mediaAssetKey(message: TelegramMessage) {
     return telegramMediaAssetKey(message);

@@ -1,3 +1,18 @@
+import type { SavedDialogsOffset } from '../savedMessages';
+import type { AdminLogRequest } from '../adminLog';
+import type {
+  CreateChatRequest,
+  JoinRequestOffset,
+  ChatInviteLinkDraft,
+  ChatSettingChange,
+  ChatParticipantFilter,
+  ChatParticipantChange,
+  ChatInviteLinksOffset,
+} from '../chatManagement';
+import { forumDraftKey } from '../forums';
+import type { TransportMutationResult } from '../types';
+import type { TelegramForumEdit, TelegramForumOffset } from '../forums';
+import type { TelegramChatFolder } from '../chatFolders';
 import type { TelegramSearchFilters } from '../types';
 import type { TelegramWebAppRequest } from '../types';
 import type { TelegramPrivacyKey, TelegramPrivacyChange } from '../types';
@@ -1123,7 +1138,9 @@ function makeMessagingEngineModule(
         !filters?.fromPeer &&
         !filters?.minDate &&
         !filters?.maxDate &&
-        !filters?.chatType
+        !filters?.chatType &&
+        !filters?.savedPeer &&
+        !filters?.savedReactions?.length
       )
         return { messages: [], hasMore: false } satisfies TelegramSearchPage;
       const cacheKey = queryMetadataKey('message-search', [
@@ -1137,6 +1154,13 @@ function makeMessagingEngineModule(
         filters?.minDate,
         filters?.maxDate,
         filters?.chatType,
+        global ? undefined : filters?.topicId,
+        global ? undefined : filters?.savedPeer?.id,
+        global
+          ? undefined
+          : filters?.savedReactions
+            ? JSON.stringify([...filters.savedReactions].sort())
+            : undefined,
       ]);
       const cached = yield* readMetadata<TelegramSearchPage>(cacheKey);
       if (cached && !currentSnapshot().online) {
@@ -1228,10 +1252,18 @@ function makeMessagingEngineModule(
   ) {
     if (!telegramTransport.getReplies)
       return yield* Effect.fail(new Error('Comments are unavailable.'));
-    return yield* runTelegramOperation(
+    const session = sessionScope,
+      accountId = activeAccountId,
+      epoch = currentCacheEpoch;
+    const page = yield* runTelegramOperation(
       () => telegramTransport.getReplies!(peer, rootId, 50, beforeMessageId),
-      'Loading comments',
+      'Loading replies',
     );
+    if (isOperationCurrent(session, accountId) && epoch === currentCacheEpoch)
+      yield* cacheStore
+        .putMessages(page.messages.map((message) => ({ ...message, cacheEpoch: epoch })))
+        .pipe(Effect.catch((error) => reportFailure('cache', 'Could not cache replies.', error)));
+    return page;
   });
   const addPeer = Effect.fn('MessagingEngine.addPeer')(function* (
     result: TelegramPeerSearchResult,
@@ -1517,6 +1549,58 @@ function makeMessagingEngineModule(
         ),
       );
     return view;
+  });
+  const setUnreadMark = Effect.fn('MessagingEngine.setUnreadMark')(function* (
+    peer: TelegramPeer,
+    unreadMark: boolean,
+  ) {
+    const session = sessionScope;
+    const accountId = activeAccountId;
+    const operationKey = `unread-mark:${peer.id}`;
+    const operationVersion = nextMutationVersion(operationKey);
+    return yield* trackVersionedMutation(operationKey, operationVersion, () =>
+      queueMutation(operationKey, () => {
+        return Effect.gen(function* () {
+          if (versions.current('mutation', operationKey) !== operationVersion) return false;
+          return yield* Effect.gen(function* () {
+            if (!isOperationCurrent(session, accountId)) return false;
+            if (!unreadMark) {
+              const dialog = dialogForPeer(peer.id);
+              if (dialog) yield* flushInboxRead(peer.id, dialog.topMessageId);
+            }
+            yield* runTelegramOperation(
+              () => telegramTransport.setUnreadMark(peer, unreadMark),
+              'Changing unread mark',
+            );
+            if (!isOperationCurrent(session, accountId)) return false;
+            versions.next('dialog', peer.id);
+            return yield* queueDialogStateOperation(() => {
+              return Effect.gen(function* () {
+                if (!isOperationCurrent(session, accountId)) return false;
+                const dialogs = currentSnapshot().dialogs.map((dialog) =>
+                  dialog.peer.id === peer.id ? { ...dialog, unreadMark } : dialog,
+                );
+                yield* patch({ dialogs });
+                const changed = dialogs.find((dialog) => dialog.peer.id === peer.id);
+                if (changed && !changed.transient) {
+                  yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
+                }
+                return true;
+              });
+            });
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.gen(function* () {
+                if (isOperationCurrent(session, accountId)) {
+                  yield* fail('sync', 'Could not change the unread mark.', error, false);
+                }
+                return false;
+              }),
+            ),
+          );
+        });
+      }),
+    );
   });
   const setMuted = Effect.fn('MessagingEngine.setMuted')(function* (
     peer: TelegramPeer,
@@ -2529,7 +2613,8 @@ function makeMessagingEngineModule(
     if (!text.trim()) return;
     yield* requirePeerPermission(peer, 'canSendMessages', 'Sending messages');
     yield* validateTextLength(text, MAX_MESSAGE_TEXT_LENGTH, 'message');
-    const draftVersion = versions.current('draft', peer.id);
+    const draftKey = forumDraftKey(peer.id, reply?.topMessageId);
+    const draftVersion = versions.current('draft', draftKey);
     const duplicateKey = draftSendKey(text, reply, formats, draftVersion);
     return yield* resourceCache.load(
       `draft-send:${JSON.stringify([peer.id, duplicateKey])}`,
@@ -2573,16 +2658,16 @@ function makeMessagingEngineModule(
               );
               if (!isPendingOperationCurrent(session, accountId)) return;
               const drafts =
-                currentSnapshot().drafts[peer.id] === text &&
-                versions.current('draft', peer.id) === draftVersion
-                  ? { ...currentSnapshot().drafts, [peer.id]: '' }
+                currentSnapshot().drafts[draftKey] === text &&
+                versions.current('draft', draftKey) === draftVersion
+                  ? { ...currentSnapshot().drafts, [draftKey]: '' }
                   : currentSnapshot().drafts;
               const draftDetails =
                 drafts === currentSnapshot().drafts
                   ? currentSnapshot().draftDetails
                   : Object.fromEntries(
                       Object.entries(currentSnapshot().draftDetails).filter(
-                        ([peerId]) => peerId !== peer.id,
+                        ([peerId]) => peerId !== draftKey,
                       ),
                     );
               yield* patch({ drafts, draftDetails });
@@ -2626,7 +2711,8 @@ function makeMessagingEngineModule(
     const pending: PendingSend[] = [];
     const createdAt = Date.now();
     const accountId = activeAccountId ?? cachedAccountId;
-    const draftVersion = versions.current('draft', peer.id);
+    const draftKey = forumDraftKey(peer.id, reply?.topMessageId);
+    const draftVersion = versions.current('draft', draftKey);
     const appendSingle = ({
       file,
       sendAs,
@@ -2648,7 +2734,11 @@ function makeMessagingEngineModule(
             randomId: generatedRandomId,
             createdAt: createdAt + pending.length,
             attempts: 0,
-            reply: isFirst ? reply : undefined,
+            reply: isFirst
+              ? reply
+              : reply?.topMessageId !== undefined
+                ? { messageId: reply.topMessageId, topMessageId: reply.topMessageId }
+                : undefined,
             formats: isFirst ? formats : undefined,
             attachment: {
               blob: file,
@@ -2695,7 +2785,11 @@ function makeMessagingEngineModule(
             randomId: albumAttachments[0]!.randomId,
             createdAt: createdAt + pending.length,
             attempts: 0,
-            reply: isFirst ? reply : undefined,
+            reply: isFirst
+              ? reply
+              : reply?.topMessageId !== undefined
+                ? { messageId: reply.topMessageId, topMessageId: reply.topMessageId }
+                : undefined,
             formats: isFirst ? formats : undefined,
             album: { attachments: albumAttachments },
           }),
@@ -2719,7 +2813,11 @@ function makeMessagingEngineModule(
         index += count;
       }
     }
-    yield* enqueuePendingBatch(pending, { peerId: peer.id, text: caption, revision: draftVersion });
+    yield* enqueuePendingBatch(pending, {
+      peerId: draftKey,
+      text: caption,
+      revision: draftVersion,
+    });
   });
   const downloadMedia = Effect.fn('MessagingEngine.downloadMedia')(function* (
     message: TelegramMessage,
@@ -3490,6 +3588,7 @@ function makeMessagingEngineModule(
   const sendPoll = Effect.fn('MessagingEngine.sendPoll')(function* (
     peer: TelegramPeer,
     draft: TelegramPollDraft,
+    reply?: TelegramReplyTarget,
   ) {
     yield* requirePeerPermission(peer, 'canSendMessages', 'Sending polls');
     const dialog = dialogForPeer(peer.id);
@@ -3507,6 +3606,7 @@ function makeMessagingEngineModule(
       randomId: yield* randomId(),
       createdAt: Date.now(),
       attempts: 0,
+      reply,
       pollDraft: draft,
     });
     yield* enqueuePending(pending);
@@ -3514,6 +3614,7 @@ function makeMessagingEngineModule(
   const sendContact = Effect.fn('MessagingEngine.sendContact')(function* (
     peer: TelegramPeer,
     contact: TelegramContact,
+    reply?: TelegramReplyTarget,
   ) {
     yield* requirePeerPermission(peer, 'canSendMessages', 'Sending contacts');
     if (!contact.firstName.trim() || !contact.phoneNumber.trim())
@@ -3528,6 +3629,7 @@ function makeMessagingEngineModule(
       randomId: yield* randomId(),
       createdAt: Date.now(),
       attempts: 0,
+      reply,
       contact,
     });
     yield* enqueuePending(pending);
@@ -3558,6 +3660,720 @@ function makeMessagingEngineModule(
       reply,
     });
     yield* enqueuePending(pending);
+  });
+  const getManagedParticipants = Effect.fn('MessagingEngine.getManagedParticipants')(function* (
+    peer: TelegramPeer,
+    filter?: ChatParticipantFilter,
+    query?: string,
+    offset?: number,
+  ) {
+    if (!telegramTransport.getManagedParticipants)
+      return yield* Effect.fail(new Error('Participant management is unavailable.'));
+    return yield* telegramTransport.getManagedParticipants(peer, filter, query, offset);
+  });
+  const participantMutation = <A extends TransportMutationResult, E>(
+    peer: TelegramPeer,
+    effect: Effect.Effect<A, E>,
+  ) =>
+    Effect.gen(function* () {
+      const session = sessionScope,
+        accountId = activeAccountId;
+      const result = yield* effect;
+      if (!isOperationCurrent(session, accountId))
+        return yield* Effect.fail(new Error('The active account changed.'));
+      yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+      if (!isOperationCurrent(session, accountId))
+        return yield* Effect.fail(new Error('The active account changed.'));
+      yield* invalidateGroupMembers(peer.id);
+      yield* invalidateResource({ kind: 'chat-management', peerId: peer.id });
+      yield* refreshDialogHead(peer.id);
+      return result;
+    });
+  const addChatMember = Effect.fn('MessagingEngine.addChatMember')(function* (
+    peer: TelegramPeer,
+    user: TelegramPeer,
+  ) {
+    if (!telegramTransport.addChatMember)
+      return yield* Effect.fail(new Error('Adding members is unavailable.'));
+    const result = yield* participantMutation(peer, telegramTransport.addChatMember(peer, user));
+    return { missingUserIds: result.missingUserIds };
+  });
+  const editChatParticipant = Effect.fn('MessagingEngine.editChatParticipant')(function* (
+    peer: TelegramPeer,
+    user: TelegramPeer,
+    change: ChatParticipantChange,
+  ) {
+    if (!telegramTransport.editChatParticipant)
+      return yield* Effect.fail(new Error('Participant management is unavailable.'));
+    if (change.kind === 'admin' && change.rank.length > 16)
+      return yield* Effect.fail(new Error('Administrator titles can be up to 16 characters.'));
+    if (
+      change.kind === 'restrict' &&
+      (!Number.isSafeInteger(change.untilDate) ||
+        change.untilDate < 0 ||
+        change.untilDate > 2147483647)
+    )
+      return yield* Effect.fail(new Error('Choose a valid restriction end date.'));
+    yield* participantMutation(peer, telegramTransport.editChatParticipant(peer, user, change));
+  });
+  const getSavedMessagesInfo = Effect.fn('MessagingEngine.savedInfo')(function* () {
+    if (!telegramTransport.getSavedMessagesInfo)
+      return yield* Effect.fail(new Error('Saved Messages are unavailable.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    const info = yield* telegramTransport.getSavedMessagesInfo();
+    if (!isOperationCurrent(session, accountId))
+      return yield* Effect.fail(new Error('The active account changed.'));
+    yield* addPeer({
+      peer: info.peer,
+      title: 'Saved Messages',
+      initials: 'SM',
+      color: '#5288c1',
+      hasAvatar: false,
+      category: 'user',
+      bot: false,
+      isContact: false,
+    });
+    return info;
+  });
+  const getSavedDialogs = Effect.fn('MessagingEngine.savedDialogs')(function* (
+    offset?: SavedDialogsOffset,
+  ) {
+    if (!telegramTransport.getSavedDialogs)
+      return yield* Effect.fail(new Error('Saved chats are unavailable.'));
+    return yield* telegramTransport.getSavedDialogs(offset);
+  });
+  const getEarlierGroupHistory = Effect.fn('MessagingEngine.earlierGroupHistory')(function* (
+    peer: TelegramPeer,
+    beforeMessageId?: number,
+  ) {
+    if (peer.kind !== 'group')
+      return yield* Effect.fail(new Error('Choose the original basic group.'));
+    const session = sessionScope,
+      accountId = activeAccountId,
+      epoch = currentCacheEpoch;
+    const historyVersion = histories.version(peer.id);
+    const key = queryMetadataKey('earlier-group-history', [peer.id, beforeMessageId]);
+    if (!currentSnapshot().online) {
+      const cached = yield* readMetadata<import('../types').HistoryPage>(key);
+      if (cached) return cached.value;
+      const messages = (yield* cacheStore.loadMessagesBefore(
+        peer.id,
+        beforeMessageId ?? 2147483647,
+        51,
+      )).filter((message) => message.cacheEpoch === epoch);
+      if (!messages.length)
+        return yield* Effect.fail(new Error('Earlier history is unavailable offline.'));
+      return { messages: messages.slice(-50), hasOlder: messages.length > 50 };
+    }
+    const revision = messageRevisions.capture();
+    const page = yield* runTelegramOperation(
+      () => telegramTransport.getHistory(peer, 50, beforeMessageId),
+      'Loading earlier group history',
+    );
+    if (
+      !isHistoryOperationCurrent(peer.id, historyVersion, session, accountId) ||
+      epoch !== currentCacheEpoch
+    )
+      return yield* Effect.fail(new Error('The account or group history changed.'));
+    const messages = messageRevisions.merge(
+      peer.id,
+      [],
+      page.messages.filter((message) => message.peerId === peer.id),
+      revision,
+    );
+    const result = { ...page, messages };
+    yield* cacheStore.putMessages(messages.map((message) => ({ ...message, cacheEpoch: epoch })));
+    yield* writeMetadata(key, result);
+    return result;
+  });
+  const getSavedHistory = Effect.fn('MessagingEngine.savedHistory')(function* (
+    source: TelegramPeer,
+    beforeMessageId?: number,
+  ) {
+    if (!telegramTransport.getSavedHistory)
+      return yield* Effect.fail(new Error('Saved history is unavailable.'));
+    const session = sessionScope,
+      accountId = activeAccountId,
+      epoch = currentCacheEpoch;
+    const page = yield* telegramTransport.getSavedHistory(source, 50, beforeMessageId);
+    if (isOperationCurrent(session, accountId) && epoch === currentCacheEpoch)
+      yield* cacheStore
+        .putMessages(page.messages.map((message) => ({ ...message, cacheEpoch: epoch })))
+        .pipe(
+          Effect.catch((error) => reportFailure('cache', 'Could not cache saved messages.', error)),
+        );
+    return page;
+  });
+  const getSavedTags = Effect.fn('MessagingEngine.savedTags')(function* (source?: TelegramPeer) {
+    if (!telegramTransport.getSavedTags)
+      return yield* Effect.fail(new Error('Saved tags are unavailable.'));
+    return yield* telegramTransport.getSavedTags(source);
+  });
+  const renameSavedTag = Effect.fn('MessagingEngine.renameSavedTag')(function* (
+    reaction: string,
+    title: string,
+  ) {
+    if (!telegramTransport.renameSavedTag)
+      return yield* Effect.fail(new Error('Saved tags are unavailable.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    yield* telegramTransport.renameSavedTag(reaction, title.trim());
+    if (isOperationCurrent(session, accountId))
+      yield* invalidateResource({ kind: 'saved-messages' });
+  });
+  const pinSavedDialog = Effect.fn('MessagingEngine.pinSavedDialog')(function* (
+    source: TelegramPeer,
+    pinned: boolean,
+  ) {
+    if (!telegramTransport.pinSavedDialog)
+      return yield* Effect.fail(new Error('Saved chats are unavailable.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    yield* telegramTransport.pinSavedDialog(source, pinned);
+    if (isOperationCurrent(session, accountId))
+      yield* invalidateResource({ kind: 'saved-messages' });
+  });
+  const saveSavedTagsNow = Effect.fn('MessagingEngine.saveSavedTagsNow')(function* (
+    message: TelegramMessage,
+    reactions: readonly string[],
+    session: Scope.Closeable | undefined,
+    accountId: string | undefined,
+  ) {
+    if (!telegramTransport.setSavedMessageTags)
+      return yield* Effect.fail(new Error('Saved tags are unavailable.'));
+    if (!isOperationCurrent(session, accountId)) return;
+    // Telegram requires removing pre-tag reactions before converting them to tags.
+    if (!message.reactionsAsTags && message.reactions?.length) {
+      const cleared = yield* telegramTransport.setSavedMessageTags(message.id, []);
+      if (!isOperationCurrent(session, accountId)) return;
+      yield* queueMutationUpdateBatches(cleared.updateBatches, session, accountId);
+      yield* applyReactionChange(
+        message.peerId,
+        message.id,
+        [],
+        undefined,
+        { session, accountId },
+        undefined,
+        true,
+      );
+    }
+    if (!isOperationCurrent(session, accountId)) return;
+    const result = yield* telegramTransport.setSavedMessageTags(message.id, reactions);
+    if (!isOperationCurrent(session, accountId)) return;
+    yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+    yield* applyReactionChange(
+      message.peerId,
+      message.id,
+      [...new Set(reactions)].map((emoji) => ({
+        emoji,
+        count: 1,
+        chosen: true,
+        ...(emoji.startsWith('custom:') ? { customEmojiId: emoji.slice(7) } : {}),
+      })),
+      undefined,
+      { session, accountId },
+      undefined,
+      true,
+    );
+    yield* invalidateResource({ kind: 'saved-messages' });
+  });
+  const setSavedMessageTags = Effect.fn('MessagingEngine.setSavedMessageTags')(function* (
+    messageId: number,
+    reactions: readonly string[],
+  ) {
+    const session = sessionScope,
+      accountId = activeAccountId,
+      peerId = `u:${accountId}`;
+    yield* runSerialized('reaction', `${peerId}:${messageId}`, () =>
+      Effect.gen(function* () {
+        const message =
+          histories.loaded(peerId)?.messages.find((message) => message.id === messageId) ??
+          (yield* cacheStore.loadMessage(peerId, messageId));
+        if (!message)
+          return yield* Effect.fail(new Error('Open the saved message before tagging it.'));
+        yield* saveSavedTagsNow(message, reactions, session, accountId);
+      }),
+    );
+  });
+  const getAdminLog = Effect.fn('MessagingEngine.getAdminLog')(function* (
+    peer: TelegramPeer,
+    request?: AdminLogRequest,
+  ) {
+    if (!telegramTransport.getAdminLog)
+      return yield* Effect.fail(new Error('Recent actions are unavailable.'));
+    return yield* telegramTransport.getAdminLog(peer, request);
+  });
+  const upgradeChat = Effect.fn('MessagingEngine.upgradeChat')(function* (peer: TelegramPeer) {
+    if (!telegramTransport.upgradeChat)
+      return yield* Effect.fail(new Error('Upgrading this group is unavailable.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    const result = yield* telegramTransport.upgradeChat(peer);
+    if (!isOperationCurrent(session, accountId))
+      return yield* Effect.fail(new Error('The active account changed.'));
+    yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+    if (!isOperationCurrent(session, accountId))
+      return yield* Effect.fail(new Error('The active account changed.'));
+    yield* addPeer({
+      peer: result.peer,
+      title: result.title,
+      initials: result.title.slice(0, 2).toUpperCase(),
+      color: '#5288c1',
+      hasAvatar: false,
+      category: 'group',
+      bot: false,
+      isContact: false,
+    });
+    yield* refreshDialogHead(result.peer.id).pipe(Effect.catch(() => Effect.void));
+    yield* refreshDialogHead(peer.id).pipe(Effect.catch(() => Effect.void));
+    yield* invalidateResource({ kind: 'chat-management', peerId: peer.id });
+    return result.peer;
+  });
+  const getChatManagement = Effect.fn('MessagingEngine.getChatManagement')(function* (
+    peer: TelegramPeer,
+  ) {
+    if (!telegramTransport.getChatManagement)
+      return yield* Effect.fail(new Error('Chat management is unavailable.'));
+    return yield* telegramTransport.getChatManagement(peer);
+  });
+  const setChatSetting = Effect.fn('MessagingEngine.setChatSetting')(function* (
+    peer: TelegramPeer,
+    change: ChatSettingChange,
+  ) {
+    if (!telegramTransport.setChatSetting)
+      return yield* Effect.fail(new Error('Chat management is unavailable.'));
+    if (change.kind === 'title' && (!change.value.trim() || change.value.length > 128))
+      return yield* Effect.fail(new Error('Enter a name of up to 128 characters.'));
+    if (change.kind === 'about' && change.value.length > 255)
+      return yield* Effect.fail(new Error('The description must be at most 255 characters.'));
+    if (change.kind === 'username' && change.value && !/^[a-z][a-z0-9_]{4,31}$/i.test(change.value))
+      return yield* Effect.fail(
+        new Error('Use 5–32 letters, numbers or underscores, starting with a letter.'),
+      );
+    if (
+      change.kind === 'slowModeSeconds' &&
+      ![0, 10, 30, 60, 300, 900, 3600].includes(change.value)
+    )
+      return yield* Effect.fail(new Error('Choose a supported slow mode interval.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    const result = yield* telegramTransport.setChatSetting(peer, change);
+    if (!isOperationCurrent(session, accountId)) return;
+    yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+    if (!isOperationCurrent(session, accountId)) return;
+    yield* refreshDialogHead(peer.id);
+    yield* invalidateResource({ kind: 'chat-management', peerId: peer.id });
+    yield* invalidateResource({ kind: 'peer-metadata', peerId: peer.id });
+    if (change.kind === 'forum')
+      yield* invalidateResource({ kind: 'forum-topics', peerId: peer.id });
+  });
+  function validateInviteDraft(draft: ChatInviteLinkDraft) {
+    if (draft.title.length > 32)
+      return Effect.fail(new Error('Link names can be up to 32 characters.'));
+    if (
+      !Number.isSafeInteger(draft.expireDate) ||
+      draft.expireDate < 0 ||
+      draft.expireDate > 2147483647 ||
+      (draft.expireDate > 0 && draft.expireDate <= Date.now() / 1000)
+    )
+      return Effect.fail(new Error('Choose an expiration time in the future.'));
+    if (
+      !Number.isSafeInteger(draft.usageLimit) ||
+      draft.usageLimit < 0 ||
+      draft.usageLimit > 100000
+    )
+      return Effect.fail(new Error('The usage limit must be between 1 and 100000, or unlimited.'));
+    return Effect.void;
+  }
+  const inviteLinkMutation = <A, E>(peer: TelegramPeer, effect: Effect.Effect<A, E>) =>
+    Effect.gen(function* () {
+      const session = sessionScope,
+        accountId = activeAccountId;
+      const result = yield* effect;
+      if (isOperationCurrent(session, accountId))
+        yield* invalidateResource({ kind: 'invite-links', peerId: peer.id });
+      return result;
+    });
+  const getChatInviteLinks = Effect.fn('MessagingEngine.getChatInviteLinks')(function* (
+    peer: TelegramPeer,
+    revoked?: boolean,
+    offset?: ChatInviteLinksOffset,
+  ) {
+    if (!telegramTransport.getChatInviteLinks)
+      return yield* Effect.fail(new Error('Invitation links are unavailable.'));
+    return yield* telegramTransport.getChatInviteLinks(peer, revoked, offset);
+  });
+  const exportChatInviteLink = Effect.fn('MessagingEngine.exportChatInviteLink')(function* (
+    peer: TelegramPeer,
+    draft: ChatInviteLinkDraft,
+  ) {
+    if (!telegramTransport.exportChatInviteLink)
+      return yield* Effect.fail(new Error('Invitation links are unavailable.'));
+    yield* validateInviteDraft(draft);
+    return yield* inviteLinkMutation(peer, telegramTransport.exportChatInviteLink(peer, draft));
+  });
+  const editChatInviteLink = Effect.fn('MessagingEngine.editChatInviteLink')(function* (
+    peer: TelegramPeer,
+    url: string,
+    draft: ChatInviteLinkDraft,
+  ) {
+    if (!telegramTransport.editChatInviteLink)
+      return yield* Effect.fail(new Error('Invitation links are unavailable.'));
+    yield* validateInviteDraft(draft);
+    yield* inviteLinkMutation(peer, telegramTransport.editChatInviteLink(peer, url, draft));
+  });
+  const revokeChatInviteLink = Effect.fn('MessagingEngine.revokeChatInviteLink')(function* (
+    peer: TelegramPeer,
+    url: string,
+  ) {
+    if (!telegramTransport.revokeChatInviteLink)
+      return yield* Effect.fail(new Error('Invitation links are unavailable.'));
+    yield* inviteLinkMutation(peer, telegramTransport.revokeChatInviteLink(peer, url));
+  });
+  const deleteChatInviteLink = Effect.fn('MessagingEngine.deleteChatInviteLink')(function* (
+    peer: TelegramPeer,
+    url: string,
+  ) {
+    if (!telegramTransport.deleteChatInviteLink)
+      return yield* Effect.fail(new Error('Invitation links are unavailable.'));
+    yield* inviteLinkMutation(peer, telegramTransport.deleteChatInviteLink(peer, url));
+  });
+  const getJoinRequests = Effect.fn('MessagingEngine.getJoinRequests')(function* (
+    peer: TelegramPeer,
+    query?: string,
+    offset?: JoinRequestOffset,
+  ) {
+    if (!telegramTransport.getJoinRequests)
+      return yield* Effect.fail(new Error('Join requests are unavailable.'));
+    return yield* telegramTransport.getJoinRequests(peer, query, offset);
+  });
+  const resolveRequests = <E>(
+    peer: TelegramPeer,
+    effect: Effect.Effect<TransportMutationResult, E>,
+  ) =>
+    Effect.gen(function* () {
+      const session = sessionScope,
+        accountId = activeAccountId;
+      const result = yield* effect;
+      if (!isOperationCurrent(session, accountId)) return;
+      yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+      if (!isOperationCurrent(session, accountId)) return;
+      yield* invalidateResource({ kind: 'join-requests', peerId: peer.id });
+      yield* invalidateGroupMembers(peer.id);
+      yield* refreshDialogHead(peer.id);
+    });
+  const resolveJoinRequest = Effect.fn('MessagingEngine.resolveJoinRequest')(function* (
+    peer: TelegramPeer,
+    user: TelegramPeer,
+    approved: boolean,
+  ) {
+    if (!telegramTransport.resolveJoinRequest)
+      return yield* Effect.fail(new Error('Join requests are unavailable.'));
+    yield* resolveRequests(peer, telegramTransport.resolveJoinRequest(peer, user, approved));
+  });
+  const resolveAllJoinRequests = Effect.fn('MessagingEngine.resolveAllJoinRequests')(function* (
+    peer: TelegramPeer,
+    approved: boolean,
+  ) {
+    if (!telegramTransport.resolveAllJoinRequests)
+      return yield* Effect.fail(new Error('Join requests are unavailable.'));
+    yield* resolveRequests(peer, telegramTransport.resolveAllJoinRequests(peer, approved));
+  });
+  const checkChatInvite = Effect.fn('MessagingEngine.checkChatInvite')(function* (hash: string) {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(hash))
+      return yield* Effect.fail(new Error('Invalid invitation link.'));
+    if (!telegramTransport.checkChatInvite)
+      return yield* Effect.fail(new Error('Invitations are unavailable.'));
+    return yield* telegramTransport.checkChatInvite(hash);
+  });
+  const joinChatInvite = Effect.fn('MessagingEngine.joinChatInvite')(function* (hash: string) {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(hash))
+      return yield* Effect.fail(new Error('Invalid invitation link.'));
+    if (!telegramTransport.joinChatInvite)
+      return yield* Effect.fail(new Error('Invitations are unavailable.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    const result = yield* telegramTransport.joinChatInvite(hash);
+    if (!isOperationCurrent(session, accountId))
+      return yield* Effect.fail(new Error('The active account changed.'));
+    yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+    if (result.peer) yield* refreshDialogHead(result.peer.id);
+    else if (result.status === 'joined') yield* refreshDialogHeads();
+    return { status: result.status, peer: result.peer };
+  });
+  const createChat = Effect.fn('MessagingEngine.createChat')(function* (
+    request: CreateChatRequest,
+  ) {
+    const title = request.title.trim();
+    if (!title || title.length > 128)
+      return yield* Effect.fail(new Error('Enter a name of up to 128 characters.'));
+    if ((request.about?.length ?? 0) > 255)
+      return yield* Effect.fail(new Error('The description must be at most 255 characters.'));
+    const users = [...new Map(request.users.map((user) => [user.id, user])).values()];
+    if (request.kind === 'group' && (!users.length || users.some((user) => user.kind !== 'user')))
+      return yield* Effect.fail(new Error('Select at least one person for the group.'));
+    if (!telegramTransport.createChat)
+      return yield* Effect.fail(new Error('Creating chats is unavailable.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    // Creation has no idempotency key: never automatically retry a possibly successful request.
+    const result = yield* telegramTransport.createChat({ ...request, title, users });
+    if (!isOperationCurrent(session, accountId))
+      return yield* Effect.fail(new Error('The active account changed.'));
+    yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+    if (!isOperationCurrent(session, accountId))
+      return yield* Effect.fail(new Error('The active account changed.'));
+    yield* addPeer({
+      peer: result.peer,
+      title,
+      initials: title.slice(0, 2).toUpperCase(),
+      color: '#5288c1',
+      hasAvatar: false,
+      category: request.kind,
+      bot: false,
+      isContact: false,
+    });
+    yield* refreshDialogHead(result.peer.id).pipe(Effect.catch(() => Effect.void));
+    return { peer: result.peer, missingUserIds: result.missingUserIds };
+  });
+  const forumMutation = <E>(
+    peer: TelegramPeer,
+    effect: Effect.Effect<TransportMutationResult, E>,
+  ) =>
+    Effect.gen(function* () {
+      const session = sessionScope,
+        accountId = activeAccountId;
+      const result = yield* effect;
+      if (!isOperationCurrent(session, accountId)) return;
+      yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+      yield* invalidateResource({ kind: 'forum-topics', peerId: peer.id });
+    });
+  const deleteForumTopic = Effect.fn('MessagingEngine.deleteForumTopic')(function* (
+    peer: TelegramPeer,
+    topicId: number,
+  ) {
+    if (!telegramTransport.deleteForumTopic)
+      return yield* Effect.fail(new Error('Forum topics are unavailable.'));
+    if (!Number.isSafeInteger(topicId) || topicId <= 1)
+      return yield* Effect.fail(new Error('The General topic cannot be deleted.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    const result = yield* telegramTransport.deleteForumTopic(peer, topicId);
+    if (!isOperationCurrent(session, accountId)) return;
+    invalidateHistory(peer.id);
+    yield* cacheStore.replaceMessages(peer.id, []);
+    yield* cacheStore.deletePinnedMessages(peer.id);
+    yield* pinnedMessageCache.invalidate(peer.id);
+    if (peer.kind === 'channel') yield* setChannelPts(peer.id, result.pts);
+    else
+      yield* queueMutationUpdateBatches(
+        [{ updates: [{ type: 'pts-advanced', pts: result.pts, ptsCount: result.ptsCount }] }],
+        session,
+        accountId,
+      );
+    yield* refreshDialogHead(peer.id);
+    yield* invalidateResource({
+      kind: 'forum-topics',
+      peerId: peer.id,
+      queryId: `deleted:${topicId}`,
+    });
+  });
+  const getForumTopic = Effect.fn('MessagingEngine.getForumTopic')(function* (
+    peer: TelegramPeer,
+    topicId: number,
+  ) {
+    if (!telegramTransport.getForumTopic)
+      return yield* Effect.fail(new Error('Forum topics are unavailable.'));
+    return yield* telegramTransport.getForumTopic(peer, topicId);
+  });
+  const getForumTopics = Effect.fn('MessagingEngine.getForumTopics')(function* (
+    peer: TelegramPeer,
+    query?: string,
+    offset?: TelegramForumOffset,
+  ) {
+    if (!telegramTransport.getForumTopics)
+      return yield* Effect.fail(new Error('Forum topics are unavailable.'));
+    return yield* telegramTransport.getForumTopics(peer, query, offset);
+  });
+  const createForumTopic = Effect.fn('MessagingEngine.createForumTopic')(function* (
+    peer: TelegramPeer,
+    title: string,
+    iconColor: number,
+    iconEmojiId?: string,
+  ) {
+    if (!telegramTransport.createForumTopic)
+      return yield* Effect.fail(new Error('Forum topics are unavailable.'));
+    if (!title.trim() || title.trim().length > 128)
+      return yield* Effect.fail(new Error('Use a topic name of 1–128 characters.'));
+    yield* forumMutation(
+      peer,
+      telegramTransport.createForumTopic(
+        peer,
+        title.trim(),
+        iconColor,
+        yield* randomId(),
+        iconEmojiId,
+      ),
+    );
+  });
+  const editForumTopic = Effect.fn('MessagingEngine.editForumTopic')(function* (
+    peer: TelegramPeer,
+    topicId: number,
+    edit: TelegramForumEdit,
+  ) {
+    if (!telegramTransport.editForumTopic)
+      return yield* Effect.fail(new Error('Forum topics are unavailable.'));
+    if (edit.title !== undefined && (!edit.title.trim() || edit.title.trim().length > 128))
+      return yield* Effect.fail(new Error('Use a topic name of 1–128 characters.'));
+    yield* forumMutation(
+      peer,
+      telegramTransport.editForumTopic(peer, topicId, {
+        ...edit,
+        ...(edit.title !== undefined ? { title: edit.title.trim() } : {}),
+      }),
+    );
+  });
+  const pinForumTopic = Effect.fn('MessagingEngine.pinForumTopic')(function* (
+    peer: TelegramPeer,
+    topicId: number,
+    pinned: boolean,
+  ) {
+    if (!telegramTransport.pinForumTopic)
+      return yield* Effect.fail(new Error('Forum topics are unavailable.'));
+    yield* forumMutation(peer, telegramTransport.pinForumTopic(peer, topicId, pinned));
+  });
+  const readForumTopic = Effect.fn('MessagingEngine.readForumTopic')(function* (
+    peer: TelegramPeer,
+    topicId: number,
+    maxMessageId: number,
+  ) {
+    if (!telegramTransport.readForumTopic)
+      return yield* Effect.fail(new Error('Forum topics are unavailable.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    yield* telegramTransport.readForumTopic(peer, topicId, maxMessageId);
+    if (isOperationCurrent(session, accountId)) {
+      yield* refreshDialogHead(peer.id);
+      if (isOperationCurrent(session, accountId))
+        yield* invalidateResource({ kind: 'forum-topics', peerId: peer.id });
+    }
+  });
+  const getChatFolders = Effect.fn('MessagingEngine.getChatFolders')(function* () {
+    const session = sessionScope,
+      accountId = activeAccountId;
+    const key = 'chat-folders:v1';
+    if (!currentSnapshot().online || !telegramTransport.getChatFolders)
+      return (yield* readMetadata<TelegramChatFolder[]>(key))?.value ?? [];
+    const folders = yield* runTelegramOperation(
+      () => telegramTransport.getChatFolders!(),
+      'Loading chat folders',
+    );
+    if (!isOperationCurrent(session, accountId)) return [];
+    yield* writeMetadata(key, folders);
+    return folders;
+  });
+  const changeFolders = <A, E>(operation: Effect.Effect<A, E>) =>
+    Effect.gen(function* () {
+      const session = sessionScope,
+        accountId = activeAccountId;
+      const result = yield* operation;
+      if (isOperationCurrent(session, accountId))
+        yield* invalidateResource({ kind: 'chat-folders' });
+      return result;
+    });
+  const saveChatFolder = Effect.fn('MessagingEngine.saveChatFolder')(function* (
+    folder: TelegramChatFolder,
+  ) {
+    if (!telegramTransport.saveChatFolder)
+      return yield* Effect.fail(new Error('Chat folders are unavailable.'));
+    if (
+      !Number.isSafeInteger(folder.id) ||
+      folder.id < 2 ||
+      !folder.title.trim() ||
+      Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(folder.title))
+        .length > 12
+    )
+      return yield* Effect.fail(new Error('Use a folder name of 1–12 characters.'));
+    if (!folder.categories.length && !folder.included.length && !folder.pinned.length)
+      return yield* Effect.fail(new Error('Add at least one chat or chat type.'));
+    yield* changeFolders(
+      telegramTransport.saveChatFolder({ ...folder, title: folder.title.trim() }),
+    );
+  });
+  const deleteChatFolder = Effect.fn('MessagingEngine.deleteChatFolder')(function* (id: number) {
+    if (!telegramTransport.deleteChatFolder || id < 2)
+      return yield* Effect.fail(new Error('This folder cannot be deleted.'));
+    yield* changeFolders(telegramTransport.deleteChatFolder(id));
+  });
+  const reorderChatFolders = Effect.fn('MessagingEngine.reorderChatFolders')(function* (
+    ids: number[],
+  ) {
+    if (!telegramTransport.reorderChatFolders)
+      return yield* Effect.fail(new Error('Folder ordering is unavailable.'));
+    yield* changeFolders(telegramTransport.reorderChatFolders(ids));
+  });
+  const getFolderLinks = Effect.fn('MessagingEngine.getFolderLinks')(function* (id: number) {
+    if (!telegramTransport.getFolderLinks)
+      return yield* Effect.fail(new Error('Folder links are unavailable.'));
+    return yield* telegramTransport.getFolderLinks(id);
+  });
+  const exportFolderLink = Effect.fn('MessagingEngine.exportFolderLink')(function* (
+    id: number,
+    title: string,
+    peers: TelegramPeer[],
+  ) {
+    if (!telegramTransport.exportFolderLink)
+      return yield* Effect.fail(new Error('Folder links are unavailable.'));
+    return yield* changeFolders(telegramTransport.exportFolderLink(id, title, peers));
+  });
+  const deleteFolderLink = Effect.fn('MessagingEngine.deleteFolderLink')(function* (
+    id: number,
+    slug: string,
+  ) {
+    if (!telegramTransport.deleteFolderLink)
+      return yield* Effect.fail(new Error('Folder links are unavailable.'));
+    yield* changeFolders(telegramTransport.deleteFolderLink(id, slug));
+  });
+  const checkFolderInvite = Effect.fn('MessagingEngine.checkFolderInvite')(function* (
+    slug: string,
+  ) {
+    if (!telegramTransport.checkFolderInvite)
+      return yield* Effect.fail(new Error('Folder invitations are unavailable.'));
+    return yield* telegramTransport.checkFolderInvite(slug);
+  });
+  const joinFolderInvite = Effect.fn('MessagingEngine.joinFolderInvite')(function* (
+    slug: string,
+    peers: TelegramPeer[],
+  ) {
+    if (!telegramTransport.joinFolderInvite)
+      return yield* Effect.fail(new Error('Folder invitations are unavailable.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    const result = yield* telegramTransport.joinFolderInvite(slug, peers);
+    if (!isOperationCurrent(session, accountId)) return;
+    yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+    yield* refreshDialogHeads(session);
+    yield* invalidateResource({ kind: 'chat-folders' });
+  });
+  const joinFolderUpdates = Effect.fn('MessagingEngine.joinFolderUpdates')(function* (
+    id: number,
+    peers: TelegramPeer[],
+  ) {
+    if (!telegramTransport.joinFolderUpdates)
+      return yield* Effect.fail(new Error('Folder invitations are unavailable.'));
+    const session = sessionScope,
+      accountId = activeAccountId;
+    const result = yield* telegramTransport.joinFolderUpdates(id, peers);
+    if (!isOperationCurrent(session, accountId)) return;
+    yield* queueMutationUpdateBatches(result.updateBatches, session, accountId);
+    yield* refreshDialogHeads(session);
+    yield* invalidateResource({ kind: 'chat-folders' });
+  });
+  const getFolderUpdates = Effect.fn('MessagingEngine.getFolderUpdates')(function* (id: number) {
+    if (!telegramTransport.getFolderUpdates)
+      return yield* Effect.fail(new Error('Folder updates are unavailable.'));
+    return yield* telegramTransport.getFolderUpdates(id);
   });
   const getPrivacy = Effect.fn('MessagingEngine.getPrivacy')(function* (key: TelegramPrivacyKey) {
     if (!telegramTransport.getPrivacy)
@@ -3687,6 +4503,18 @@ function makeMessagingEngineModule(
       return yield* Effect.fail(error);
     }
     const previous = message.reactions ?? [];
+    if (peer.id === `u:${accountId}` && telegramTransport.setSavedMessageTags) {
+      const chosen = previous
+        .filter((reaction) => reaction.chosen)
+        .map((reaction) => reaction.emoji);
+      yield* saveSavedTagsNow(
+        message,
+        chosen.includes(emoji) ? chosen.filter((key) => key !== emoji) : [...chosen, emoji],
+        session,
+        accountId,
+      );
+      return;
+    }
     const target = previous.some((reaction) => reaction.emoji === emoji && reaction.chosen)
       ? undefined
       : emoji;
@@ -3900,6 +4728,10 @@ function makeMessagingEngineModule(
       id: yield* randomUuid(),
       accountId: activeAccountId ?? cachedAccountId,
       peer: toPeer,
+      reply:
+        options?.topMessageId !== undefined
+          ? { messageId: options.topMessageId, topMessageId: options.topMessageId }
+          : undefined,
       text: options?.hideCaption && source.media ? '' : source.text,
       randomId: yield* randomId(),
       createdAt: Date.now(),
@@ -4782,6 +5614,11 @@ function makeMessagingEngineModule(
       messageUpdate = update;
     }
     if (messageUpdate) {
+      if (
+        messageUpdate.message.service?.kind === 'topic-created' ||
+        messageUpdate.message.service?.kind === 'topic-changed'
+      )
+        yield* invalidateResource({ kind: 'forum-topics', peerId: messageUpdate.message.peerId });
       const existingMessage =
         histories
           .loaded(messageUpdate.message.peerId)
@@ -5040,6 +5877,7 @@ function makeMessagingEngineModule(
         undefined,
         undefined,
         update.unreadReaction,
+        update.reactionsAsTags,
       );
       return;
     }
@@ -5089,6 +5927,34 @@ function makeMessagingEngineModule(
       if (changed && !changed.transient) {
         yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
       }
+      return;
+    }
+    if (update.type === 'join-requests-invalidated') {
+      yield* invalidateResource({ kind: 'join-requests', peerId: update.peerId });
+      return;
+    }
+    if (update.type === 'forum-topics-invalidated') {
+      if (update.read) yield* refreshDialogHead(update.peerId);
+      yield* invalidateResource({ kind: 'forum-topics', peerId: update.peerId });
+      return;
+    }
+    if (update.type === 'saved-messages-invalidated') {
+      yield* invalidateResource({ kind: 'saved-messages' });
+      return;
+    }
+    if (update.type === 'chat-folders-invalidated') {
+      yield* invalidateResource({ kind: 'chat-folders' });
+      return;
+    }
+    if (update.type === 'dialog-unread-mark') {
+      versions.next('dialog', update.peerId);
+      const dialogs = currentSnapshot().dialogs.map((dialog) =>
+        dialog.peer.id === update.peerId ? { ...dialog, unreadMark: update.unread } : dialog,
+      );
+      yield* patch({ dialogs });
+      const changed = dialogs.find((dialog) => dialog.peer.id === update.peerId);
+      if (changed && !changed.transient)
+        yield* cacheStore.putDialog({ ...changed, cacheEpoch: currentCacheEpoch });
       return;
     }
     if (update.type === 'mute-changed') {
@@ -5285,8 +6151,12 @@ function makeMessagingEngineModule(
     expectedVersion?: number,
     operation?: { session: Scope.Closeable | undefined; accountId: string | undefined },
     unreadReaction?: boolean,
+    reactionsAsTags?: boolean,
   ) {
-    const unread = unreadReaction === undefined ? {} : { unreadReaction };
+    const unread = {
+      ...(unreadReaction === undefined ? {} : { unreadReaction }),
+      ...(reactionsAsTags === undefined ? {} : { reactionsAsTags }),
+    };
     const key = `${peerId}:${messageId}`;
     const version = expectedVersion ?? nextReactionVersion(key);
     messageRevisions.record(peerId, messageId);
@@ -5430,7 +6300,7 @@ function makeMessagingEngineModule(
     session: Scope.Closeable | undefined = sessionScope,
     accountId: string | undefined = pending.accountId,
   ) {
-    const peerId = pending.peer.id;
+    const peerId = forumDraftKey(pending.peer.id, pending.reply?.topMessageId);
     const reservation = runSerialized('draftWrite', peerId, () =>
       isPendingOperationCurrent(session, accountId)
         ? cacheStore.commitOutbox(pending, {
@@ -5480,6 +6350,7 @@ function makeMessagingEngineModule(
       draftVersion,
       text,
       reply?.messageId ?? null,
+      reply?.topMessageId ?? null,
       reply?.quoteText ?? null,
       formats?.map(({ offset, length, kind, url }) => [offset, length, kind, url ?? null]) ?? [],
     ]);
@@ -5697,6 +6568,7 @@ function makeMessagingEngineModule(
                 attempting.peer,
                 attempting.pollDraft,
                 attempting.randomId,
+                attempting.reply,
               );
               return { sentMessages: [result.message], updateBatches: result.updateBatches };
             }
@@ -5709,6 +6581,7 @@ function makeMessagingEngineModule(
                 attempting.peer,
                 attempting.contact,
                 attempting.randomId,
+                attempting.reply,
               );
               return { sentMessages: [result.message], updateBatches: result.updateBatches };
             }
@@ -6578,6 +7451,7 @@ function makeMessagingEngineModule(
     addPeer: addPeer,
     openMessageInConversationView: openMessageInConversationView,
     loadHistoryGapConversationView: loadHistoryGapConversationView,
+    setUnreadMark,
     setMuted: setMuted,
     getUserDetails: getUserDetails,
     getGroupMembers: getGroupMembers,
@@ -6638,6 +7512,50 @@ function makeMessagingEngineModule(
     getMessageReadReceipts,
     getPollVotes,
     getActiveSessions,
+    deleteForumTopic,
+    getForumTopic,
+    getForumTopics,
+    createForumTopic,
+    editForumTopic,
+    pinForumTopic,
+    readForumTopic,
+    getChatFolders,
+    createChat,
+    checkChatInvite,
+    getJoinRequests,
+    getChatInviteLinks,
+    getChatManagement,
+    upgradeChat,
+    getAdminLog,
+    getSavedMessagesInfo,
+    getSavedDialogs,
+    getSavedHistory,
+    getEarlierGroupHistory,
+    getSavedTags,
+    renameSavedTag,
+    pinSavedDialog,
+    setSavedMessageTags,
+    getManagedParticipants,
+    addChatMember,
+    editChatParticipant,
+    setChatSetting,
+    exportChatInviteLink,
+    editChatInviteLink,
+    revokeChatInviteLink,
+    deleteChatInviteLink,
+    resolveJoinRequest,
+    resolveAllJoinRequests,
+    joinChatInvite,
+    saveChatFolder,
+    deleteChatFolder,
+    reorderChatFolders,
+    getFolderUpdates,
+    joinFolderUpdates,
+    getFolderLinks,
+    exportFolderLink,
+    deleteFolderLink,
+    checkFolderInvite,
+    joinFolderInvite,
     getPrivacy,
     setPrivacy,
     getReadTimePrivacy,

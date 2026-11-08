@@ -13,6 +13,7 @@ export interface ChatSummary {
   time: string;
   lastMessageStatus?: 'sent' | 'read' | undefined;
   unread: number;
+  unreadMark?: boolean | undefined;
   unreadMentions?: number | undefined;
   unreadReactions?: number | undefined;
   muted?: boolean;

@@ -1,3 +1,5 @@
+import { type SavedDialog, type SavedMessagesInfo } from '../../telegram/savedMessages';
+import { forumDraftKey, type TelegramForumTopic } from '../../telegram/forums';
 import type { TelegramConversationEvent } from '../../telegram/types';
 import type { TelegramReadReceipts } from '../../telegram/types';
 import type { TelegramContact } from '../../telegram/types';
@@ -35,7 +37,7 @@ import { createBotSession, BotCommandSource } from '../bots/botSession';
 import { createReplyKeyboardSession } from '../bots/replyKeyboardSession';
 import { createChatDirectory } from '../chat/chatDirectory';
 import { createContactDetailsSession, GroupMemberSource } from '../chat/contactDetailsSession';
-import { QueryLoaders, querySources } from './queries';
+import { QueryLoaders, querySources, messageSearchQuery } from './queries';
 import { createComposerSession } from '../composer/composerSession';
 import { createExpressionSession, ExpressionSource } from '../composer/expressionSession';
 import { createConversationHeaderSession } from '../conversation/conversationHeaderSession';
@@ -108,6 +110,13 @@ export const createAppController = Effect.fn('createAppController')(function* (p
           snapshot: engine.snapshot(),
           authOpen: engine.snapshot().phase !== 'ready',
           activeChatId: 'empty',
+          activeTopic: undefined,
+          forumSidebar: false,
+          savedSidebar: false,
+          activeSaved: undefined,
+          savedInfo: undefined,
+          savedTagTitles: {},
+          earlierHistoryStatus: 'empty',
           activeConversation: undefined,
           initialUnreadAfterId: undefined,
           conversationLoadError: '',
@@ -119,6 +128,12 @@ export const createAppController = Effect.fn('createAppController')(function* (p
           debugReportError: '',
           clipboardError: '',
           settingsOpen: false,
+          folderInvite: undefined,
+          chatInvite: undefined,
+          joinRequestsPeerId: undefined,
+          inviteLinksPeerId: undefined,
+          managementPeerId: undefined,
+          managementInitialSetting: undefined,
           selectedMessageIds: [],
           selectionAnchor: undefined,
           selectionAction: undefined,
@@ -131,6 +146,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
           forwardDraft: undefined,
           sharingContact: undefined,
           searchOpen: false,
+          savedTagSearch: undefined,
           sharedMediaKind: undefined,
           deleteTarget: undefined,
           stopPollTarget: undefined,
@@ -146,6 +162,14 @@ export const createAppController = Effect.fn('createAppController')(function* (p
                   selectionAnchor: undefined,
                   selectionAction: undefined,
                   activeChatId: 'empty',
+                  earlierHistoryStatus: 'empty',
+                  activeTopic: undefined,
+                  forumSidebar: false,
+                  activeSaved: undefined,
+                  savedSidebar: false,
+                  savedInfo: undefined,
+                  savedTagTitles: {},
+                  savedTagSearch: undefined,
                   activeConversation: undefined,
                   initialUnreadAfterId: undefined,
                   conversationLoadError: '',
@@ -168,6 +192,13 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     snapshot: EngineSnapshot;
     authOpen: boolean;
     activeChatId: string;
+    activeTopic: TelegramForumTopic | undefined;
+    forumSidebar: boolean;
+    savedSidebar: boolean;
+    activeSaved: SavedDialog | undefined;
+    savedInfo: SavedMessagesInfo | undefined;
+    savedTagTitles: Record<string, string>;
+    earlierHistoryStatus: 'loading' | 'present' | 'empty';
     activeConversation: EffectConversation | undefined;
     initialUnreadAfterId: number | undefined;
     conversationLoadError: string;
@@ -179,6 +210,14 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     debugReportError: string;
     clipboardError: string;
     settingsOpen: boolean;
+    folderInvite: string | undefined;
+    chatInvite: string | undefined;
+    joinRequestsPeerId: string | undefined;
+    inviteLinksPeerId: string | undefined;
+    managementPeerId: string | undefined;
+    managementInitialSetting:
+      | import('../../telegram/chatManagement').ChatSettingChange['kind']
+      | undefined;
     selectedMessageIds: string[];
     selectionAnchor: string | undefined;
     selectionAction: 'forward' | 'delete' | undefined;
@@ -200,6 +239,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       | undefined;
     sharingContact: TelegramContact | undefined;
     searchOpen: boolean;
+    savedTagSearch: { reaction: string; request: number } | undefined;
     sharedMediaKind: SharedMediaKind | undefined;
     deleteTarget: ChatMessage | undefined;
     stopPollTarget: ChatMessage | undefined;
@@ -213,6 +253,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     | { type: 'Changed'; changes: Partial<AppControllerModel> }
     | { type: 'ConversationClosed' };
   let initialUrlPeerId = new URL(window.location.href).searchParams.get('chat') ?? undefined;
+  let selectingInitialPeer = false;
   const selectors = projectionCache();
   const publication = projectionSource<ReturnType<typeof project>>({
     reconcile: shareValue,
@@ -423,7 +464,12 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   };
   const activePeerMatches = () => {
     const peerId = state.model().activeChatId;
-    return peerId !== 'empty' && state.model().snapshot.activePeerId === peerId;
+    return (
+      peerId !== 'empty' &&
+      state.model().snapshot.activePeerId === peerId &&
+      state.model().snapshot.activeTopicId === state.model().activeTopic?.id &&
+      state.model().snapshot.activeSavedPeer?.id === state.model().activeSaved?.peer.id
+    );
   };
   const activeConversationReady = () =>
     activePeerMatches() && state.model().activeConversation?.peerId === state.model().activeChatId;
@@ -438,7 +484,11 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     return dialog ? permissionsForDialog(dialog) : undefined;
   };
   const canQueueMessage = () =>
-    conversationCommandsReady() && Boolean(activeSendPermissions()?.canSendMessages);
+    conversationCommandsReady() &&
+    !state.model().activeTopic?.closed &&
+    (!state.model().activeSaved ||
+      state.model().activeSaved!.peer.id === state.model().activeChatId) &&
+    Boolean(activeSendPermissions()?.canSendMessages);
   const canSendMedia = () => canQueueMessage() && Boolean(activeSendPermissions()?.canSendMedia);
   const canSendStickers = () =>
     canQueueMessage() && Boolean(activeSendPermissions()?.canSendStickers);
@@ -587,7 +637,9 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     conversation: () => state.model().activeConversation,
     runTask,
     snapshot: () => state.model().snapshot,
-    activePeerId: () => state.model().activeChatId,
+    activePeerId: () =>
+      state.model().activeConversation?.draftKey ??
+      forumDraftKey(state.model().activeChatId, state.model().activeTopic?.id),
     activeDialog,
     canSend: canQueueMessage,
     canSendMedia,
@@ -655,6 +707,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
         reactionPickerMessageId: '',
         forwardingMessage: undefined,
         searchOpen: preserveSearch && state.model().searchOpen,
+        savedTagSearch: preserveSearch ? state.model().savedTagSearch : undefined,
         sharedMediaKind: undefined,
         deleteTarget: undefined,
         stopPollTarget: undefined,
@@ -701,7 +754,11 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     },
   );
   const activeMessageEntries = selectors.select<KeyedMessageView[]>(() => {
-    return presentConversation(state.model().snapshot, state.model().activeChatId);
+    return presentConversation(
+      state.model().snapshot,
+      state.model().activeChatId,
+      state.model().activeTopic?.readOutboxMaxId,
+    );
   });
   let projectedEntries: KeyedMessageView[] | undefined;
   let projectedMessages: ChatMessage[] = [];
@@ -819,6 +876,12 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   const updateChatUrl = (peerId: string, mode: 'push' | 'replace') => {
     const url = new URL(window.location.href);
     url.searchParams.set('chat', peerId);
+    if (state.model().activeChatId === peerId && state.model().activeTopic)
+      url.searchParams.set('topic', String(state.model().activeTopic!.id));
+    else url.searchParams.delete('topic');
+    if (state.model().activeChatId === peerId && state.model().activeSaved)
+      url.searchParams.set('saved', state.model().activeSaved!.peer.id);
+    else url.searchParams.delete('saved');
     window.history[mode === 'push' ? 'pushState' : 'replaceState']({}, '', url);
   };
   const selectChat = async (
@@ -826,7 +889,65 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     linkedOpenGeneration?: number,
     urlMode: 'push' | 'replace' | 'none' = 'push',
     preserveSearch = false,
+    requestedTopic?: TelegramForumTopic,
+    requestedSaved?: SavedDialog,
   ) => {
+    if (!requestedSaved && urlMode !== 'push') {
+      const url = new URL(window.location.href);
+      const sourceId = url.searchParams.get('saved');
+      if (url.searchParams.get('chat') === id && sourceId && /^[ucg]:[1-9][0-9]*$/.test(sourceId)) {
+        const previousSelection = selectionGeneration;
+        const info = await runEffect(engine.getSavedMessagesInfo());
+        if (selectionGeneration !== previousSelection) return false;
+        if (info.peer.id === id) {
+          let offset: import('../../telegram/savedMessages').SavedDialogsOffset | undefined;
+          do {
+            const page = await runEffect(engine.getSavedDialogs(offset));
+            if (selectionGeneration !== previousSelection) return false;
+            requestedSaved = page.dialogs.find((dialog) => dialog.peer.id === sourceId);
+            if (requestedSaved || !page.nextOffset || page.nextOffset.peer.id === offset?.peer.id)
+              break;
+            offset = page.nextOffset;
+          } while (offset !== undefined);
+          state.send({ type: 'Changed', changes: { savedInfo: info } });
+          setDetailsOpen(false);
+        }
+      }
+    }
+    const selectedDialog = state.model().snapshot.dialogs.find((dialog) => dialog.peer.id === id);
+    if (selectedDialog?.forum && !requestedTopic && urlMode !== 'push') {
+      const url = new URL(window.location.href);
+      const rawTopic = url.searchParams.get('topic');
+      const topicId = Number(rawTopic);
+      if (
+        url.searchParams.get('chat') === id &&
+        rawTopic &&
+        /^[1-9]\d*$/.test(rawTopic) &&
+        Number.isSafeInteger(topicId)
+      ) {
+        const previousSelection = selectionGeneration;
+        requestedTopic = await runEffect(engine.getForumTopic(selectedDialog.peer, topicId));
+        if (selectionGeneration !== previousSelection) return false;
+      }
+    }
+
+    const topic = selectedDialog?.forum
+      ? (requestedTopic ?? {
+          id: 1,
+          title: 'General',
+          iconColor: 0x6fb9f0,
+          date: 0,
+          topMessageId: 0,
+          readInboxMaxId: 0,
+          unreadCount: 0,
+          unreadMentionsCount: 0,
+          unreadReactionsCount: 0,
+          closed: false,
+          hidden: false,
+          pinned: false,
+          own: false,
+        })
+      : undefined;
     if (!environment.tvbug) {
       environment.runtime.debugReports?.recordPeerSelection?.(id);
     }
@@ -838,19 +959,45 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     }
     if (
       id === state.model().activeChatId &&
+      topic?.id === state.model().activeTopic?.id &&
+      requestedSaved?.peer.id === state.model().activeSaved?.peer.id &&
       state.model().activeConversation?.peerId === id &&
       activePeerMatches() &&
       !state.model().snapshot.loadingMessages &&
       state.model().snapshot.messages.length > 0 &&
       state.model().snapshot.sharedMediaCounts
     ) {
+      if (requestedTopic) {
+        setMobileSidebarOpen(false);
+        state.send({ type: 'Changed', changes: { activeTopic: requestedTopic } });
+      }
       return activePeerMatches();
     }
     const generation = ++selectionGeneration;
     const previousPeerId = state.model().activeChatId;
-    const changingPeer = id !== previousPeerId;
-    const commandConversation = engine.conversation(id);
-    if (state.model().activeConversation?.peerId !== id)
+    const previousDraftKey =
+      state.model().activeConversation?.draftKey ??
+      forumDraftKey(previousPeerId, state.model().activeTopic?.id);
+    const changingPeer =
+      id !== previousPeerId ||
+      state.model().activeTopic?.id !== topic?.id ||
+      requestedSaved?.peer.id !== state.model().activeSaved?.peer.id;
+    const commandConversation = engine.conversation(id, topic?.id, requestedSaved?.peer);
+    state.send({
+      type: 'Changed',
+      changes: {
+        earlierHistoryStatus: id === previousPeerId ? state.model().earlierHistoryStatus : 'empty',
+        activeTopic: topic,
+        forumSidebar: Boolean(selectedDialog?.forum),
+        activeSaved: requestedSaved,
+        savedSidebar: id === state.model().savedInfo?.peer.id,
+      },
+    });
+    if (
+      state.model().activeConversation?.peerId !== id ||
+      state.model().activeConversation?.topicId !== topic?.id ||
+      state.model().activeConversation?.savedPeer?.id !== requestedSaved?.peer.id
+    )
       state.send({ type: 'Changed', changes: { activeConversation: commandConversation } });
     if (changingPeer) {
       closeComments();
@@ -858,8 +1005,15 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       state.send({
         type: 'Changed',
         changes: {
-          initialUnreadAfterId:
-            dialog && dialog.unreadCount > 0 ? dialog.readInboxMaxId : undefined,
+          initialUnreadAfterId: requestedSaved
+            ? undefined
+            : topic
+              ? topic.unreadCount
+                ? topic.readInboxMaxId
+                : undefined
+              : dialog && dialog.unreadCount > 0
+                ? dialog.readInboxMaxId
+                : undefined,
         },
       });
       initiallyMarkedReadPeer = '';
@@ -869,12 +1023,20 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       history.reset();
     }
     state.send({ type: 'Changed', changes: { conversationLoadError: '', activeChatId: id } });
-    setMobileSidebarOpen(false);
+    setMobileSidebarOpen(
+      Boolean(selectedDialog?.forum && !requestedTopic && viewportWidth() <= 650),
+    );
     closeConversationOverlays(preserveSearch);
-    composer.switchPeer(previousPeerId, id, changingPeer);
+    composer.switchPeer(
+      previousDraftKey,
+      commandConversation?.draftKey ?? forumDraftKey(id, topic?.id),
+      changingPeer,
+    );
     const focusAtSelection = document.activeElement;
     try {
-      const conversation = await runEffect(engine.openConversation(id));
+      const conversation = await runEffect(
+        engine.openConversation(id, topic?.id, requestedSaved?.peer),
+      );
       if (generation !== selectionGeneration || state.model().activeChatId !== id) return false;
       state.send({ type: 'Changed', changes: { activeConversation: conversation } });
       const current = engine.snapshot();
@@ -887,7 +1049,9 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       ) {
         state.send({ type: 'Changed', changes: { conversationLoadError: current.historyError } });
       }
-      if (changingPeer && document.activeElement === focusAtSelection) composer.focus();
+      if (selectedDialog?.forum && !requestedTopic && viewportWidth() <= 650)
+        setMobileSidebarOpen(true);
+      else if (changingPeer && document.activeElement === focusAtSelection) composer.focus();
       return current.activePeerId === id;
     } catch (cause) {
       if (generation === selectionGeneration && state.model().activeChatId === id) {
@@ -1117,7 +1281,9 @@ export const createAppController = Effect.fn('createAppController')(function* (p
         visible &&
         viewport.ready() &&
         state.model().initialUnreadAfterId !== undefined &&
-        initiallyMarkedReadPeer !== peerId
+        initiallyMarkedReadPeer !== peerId &&
+        state.model().activeTopic === undefined &&
+        state.model().activeSaved === undefined
       ) {
         initiallyMarkedReadPeer = peerId;
         runInBackground(
@@ -1135,6 +1301,8 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   const updateConversationVisibility = whenChanged(
     () => [
       state.model().activeChatId,
+      state.model().activeTopic?.id,
+      state.model().activeSaved?.peer.id,
       mobileSidebarOpen(),
       detailsOpen(),
       state.model().searchOpen,
@@ -1251,7 +1419,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       const target = event.target as Element;
       if (!target.closest?.('.message-context-menu'))
         state.send({ type: 'Changed', changes: { messageContextMenu: undefined } });
-      if (!target.closest?.('.reaction-picker'))
+      if (!target.closest?.('.reaction-picker, .saved-tag-dialog'))
         state.send({ type: 'Changed', changes: { reactionPickerMessageId: '' } });
       if (!target.closest?.('.bot-command-bar')) bot.closeMenu();
     };
@@ -1364,6 +1532,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       }
       const url = new URL(window.location.href);
       url.searchParams.delete('chat');
+      url.searchParams.delete('topic');
       window.history.replaceState({}, '', url);
     };
     const handleResize = () => {
@@ -1384,12 +1553,64 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     document.addEventListener('visibilitychange', refreshVisibleTelegramState);
     let mounted = true;
     let wasUnauthorized = false;
+    let topicRefreshGeneration = 0;
+    let savedTagsGeneration = 0;
+    let loadedSavedPeer = '';
+    let inspectedSavedPeer = '';
+    const refreshSavedTags = () => {
+      const info = state.model().savedInfo;
+      if (!info || !state.model().snapshot.online) return;
+      loadedSavedPeer = info.peer.id;
+      const generation = ++savedTagsGeneration;
+      void runEffect(engine.getSavedTags())
+        .then((tags) => {
+          if (
+            !mounted ||
+            generation !== savedTagsGeneration ||
+            state.model().savedInfo?.peer.id !== info.peer.id
+          )
+            return;
+          state.send({
+            type: 'Changed',
+            changes: {
+              savedTagTitles: Object.fromEntries(tags.tags.map((tag) => [tag.reaction, tag.title])),
+            },
+          });
+        })
+        .catch(() => undefined);
+    };
     const unsubscribeResources = subscribeAtUi(
       runTask,
       engine.subscribeResources((event) => {
         if (!mounted) return;
+        if (event.kind === 'saved-messages') {
+          model.invalidateQuery(messageSearchQuery.query);
+          refreshSavedTags();
+        }
         if (event.kind === 'peer-metadata') {
           model.invalidateQuery(chatAppearanceQuery);
+        }
+        const topic = state.model().activeTopic;
+        const dialog = activeDialog();
+        if (event.kind === 'forum-topics' && topic && dialog && dialog.peer.id === event.peerId) {
+          const generation = ++topicRefreshGeneration;
+          const selection = selectionGeneration;
+          void runEffect(engine.getForumTopic(dialog.peer, topic.id))
+            .then((updated) => {
+              if (
+                !mounted ||
+                generation !== topicRefreshGeneration ||
+                selection !== selectionGeneration
+              )
+                return;
+              if (
+                updated &&
+                state.model().activeChatId === dialog.peer.id &&
+                state.model().activeTopic?.id === topic.id
+              )
+                state.send({ type: 'Changed', changes: { activeTopic: updated } });
+            })
+            .catch(() => undefined);
         }
       }),
     );
@@ -1417,6 +1638,39 @@ export const createAppController = Effect.fn('createAppController')(function* (p
         mediaAssets.confirmUploads(state.model().snapshot.pending, next.messages);
         state.send({ type: 'Changed', changes: { snapshot: next } });
         reportConversationVisibility();
+        if (clearedAccount) {
+          savedTagsGeneration += 1;
+          loadedSavedPeer = '';
+          inspectedSavedPeer = '';
+        }
+        if (next.online && next.phase === 'ready') {
+          if (state.model().savedInfo && loadedSavedPeer !== state.model().savedInfo!.peer.id)
+            refreshSavedTags();
+          // Self conversations can also be opened from the ordinary chat list or a deep link.
+          if (
+            !state.model().savedInfo &&
+            next.activePeerId &&
+            inspectedSavedPeer !== next.activePeerId &&
+            next.messages.some(
+              (message) => message.outgoing && message.senderId === next.activePeerId,
+            )
+          ) {
+            inspectedSavedPeer = next.activePeerId;
+            const generation = savedTagsGeneration;
+            void runEffect(engine.getSavedMessagesInfo())
+              .then((info) => {
+                if (
+                  !mounted ||
+                  generation !== savedTagsGeneration ||
+                  state.model().snapshot.phase === 'unauthorized'
+                )
+                  return;
+                state.send({ type: 'Changed', changes: { savedInfo: info } });
+                refreshSavedTags();
+              })
+              .catch(() => undefined);
+          }
+        }
         if (clearedAccount) {
           voicePlayback.stop();
           mediaAssets.dispose();
@@ -1455,8 +1709,14 @@ export const createAppController = Effect.fn('createAppController')(function* (p
             closeConversationOverlays();
             composer.reset();
           }
-        } else if (next.phase !== 'unauthorized' && !currentExists) {
+        } else if (next.phase !== 'unauthorized' && !currentExists && !selectingInitialPeer) {
           const requestedPeerExists = next.dialogs.some(({ peer }) => peer.id === initialUrlPeerId);
+          if (
+            initialUrlPeerId &&
+            !requestedPeerExists &&
+            (next.phase === 'connecting' || next.phase === 'syncing')
+          )
+            return;
           const enginePeerExists = next.dialogs.some(({ peer }) => peer.id === next.activePeerId);
           const target = requestedPeerExists
             ? initialUrlPeerId
@@ -1470,7 +1730,12 @@ export const createAppController = Effect.fn('createAppController')(function* (p
           }
           initialUrlPeerId = undefined;
           if (target) {
-            runInBackground(selectChat(target, undefined, 'replace'));
+            selectingInitialPeer = true;
+            runInBackground(
+              selectChat(target, undefined, 'replace').finally(() => {
+                selectingInitialPeer = false;
+              }),
+            );
           }
         }
       }),
@@ -1688,7 +1953,18 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     if (!contact || !peer) return;
     state.send({ type: 'Changed', changes: { sharingContact: undefined } });
     if (result) await runEffect(engine.addPeer(result));
-    await runEffect(engine.sendContact(peer, contact));
+    await runEffect(
+      engine.sendContact(
+        peer,
+        contact,
+        state.model().activeTopic
+          ? {
+              messageId: state.model().activeTopic!.id,
+              topMessageId: state.model().activeTopic!.id,
+            }
+          : undefined,
+      ),
+    );
   };
   const openContact = async (contact: TelegramContact) => {
     if (!contact.peer) return;
@@ -1798,7 +2074,10 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       if (!(await runEffect(composer.sendPending()))) return;
       for (const message of draft.messages) {
         await runEffect(
-          engine.forwardMessage(draft.source, draft.target, Number(message.id), draft.options),
+          engine.forwardMessage(draft.source, draft.target, Number(message.id), {
+            ...draft.options,
+            topMessageId: state.model().activeTopic?.id,
+          }),
         );
         remaining = remaining.filter(({ id }) => id !== message.id);
       }
@@ -1901,8 +2180,10 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   };
   const scrollToReply = async (messageId: number) => {
     const local = state.model().snapshot.messages.find(({ id }) => id === messageId);
+    const peer = activeDialog()?.peer;
     const target =
       local ??
+      (peer ? await runEffect(engine.getLinkedMessage(peer, messageId)) : undefined) ??
       ({
         id: messageId,
         peerId: state.model().activeChatId,
@@ -1947,7 +2228,29 @@ export const createAppController = Effect.fn('createAppController')(function* (p
           }),
         );
       }
-      const selected = await selectChat(message.peerId, generation, 'push', preserveSearch);
+      const targetDialog = state
+        .model()
+        .snapshot.dialogs.find((dialog) => dialog.peer.id === message.peerId);
+      let topic: TelegramForumTopic | undefined;
+      if (targetDialog?.forum || message.topicId !== undefined) {
+        const topicId =
+          message.service?.kind === 'topic-created' ? message.id : (message.topicId ?? 1);
+        const peer = targetDialog?.peer ?? message.peer;
+        if (!peer) throw new Error('This forum is unavailable.');
+        topic = await runEffect(engine.getForumTopic(peer, topicId));
+        if (generation !== openMessageGeneration) return;
+        if (!topic) throw new Error('This topic is no longer available.');
+      }
+      const selected = await selectChat(
+        message.peerId,
+        generation,
+        'push',
+        preserveSearch,
+        topic,
+        state.model().activeSaved?.peer.id === message.savedPeerId
+          ? state.model().activeSaved
+          : undefined,
+      );
       const selection = selectionGeneration;
       if (
         !selected ||
@@ -1967,6 +2270,14 @@ export const createAppController = Effect.fn('createAppController')(function* (p
         return;
       }
       revealed = await revealMessage(message.id, message.peerId, generation, selection, reaction);
+    } catch (error) {
+      if (generation === openMessageGeneration)
+        state.send({
+          type: 'Changed',
+          changes: {
+            clipboardError: error instanceof Error ? error.message : 'Could not open this message.',
+          },
+        });
     } finally {
       if (generation === openMessageGeneration) {
         openingMessage = false;
@@ -2204,6 +2515,14 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     const selection = selectionGeneration;
     closeComments();
     state.send({ type: 'Changed', changes: { clipboardError: '' } });
+    if (target.chatInvite) {
+      state.send({ type: 'Changed', changes: { chatInvite: target.chatInvite } });
+      return;
+    }
+    if (target.folderInvite) {
+      state.send({ type: 'Changed', changes: { folderInvite: target.folderInvite } });
+      return;
+    }
     if (target.stickerPack) {
       expressions.openPackLink(target.stickerPack);
       return;
@@ -2230,6 +2549,21 @@ export const createAppController = Effect.fn('createAppController')(function* (p
           return;
       }
       if (target.messageId) {
+        if (
+          target.messageId === 1 &&
+          engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)?.forum
+        ) {
+          const topic = await runEffect(engine.getForumTopic(peer, 1));
+          if (
+            generation !== linkGeneration ||
+            selection !== selectionGeneration ||
+            publication.disposed
+          )
+            return;
+          if (!topic) throw new Error('This topic is no longer available.');
+          await selectChat(peer.id, undefined, 'push', false, topic);
+          return;
+        }
         const message = await runEffect(engine.getLinkedMessage(peer, target.messageId));
         if (
           generation !== linkGeneration ||
@@ -2237,7 +2571,25 @@ export const createAppController = Effect.fn('createAppController')(function* (p
           publication.disposed
         )
           return;
-        await openMessage(message);
+        const topicId =
+          message.service?.kind === 'topic-created'
+            ? message.id
+            : (message.topicId ?? target.topicId);
+        if (
+          message.service?.kind === 'topic-created' ||
+          (target.messageId === 1 &&
+            engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)?.forum)
+        ) {
+          const topic = await runEffect(engine.getForumTopic(peer, topicId ?? 1));
+          if (
+            generation !== linkGeneration ||
+            selection !== selectionGeneration ||
+            publication.disposed
+          )
+            return;
+          if (!topic) throw new Error('This topic is no longer available.');
+          await selectChat(peer.id, undefined, 'push', false, topic);
+        } else await openMessage(topicId !== undefined ? { ...message, topicId } : message);
         if (
           target.commentId &&
           generation === linkGeneration &&
@@ -2328,10 +2680,16 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     updateDetailsOpen,
     toggleMobileSidebar,
     retrySync,
+    searchSavedTag: (reaction: string) =>
+      state.send({
+        type: 'Changed',
+        changes: { searchOpen: true, savedTagSearch: { reaction, request: Date.now() } },
+      }),
     setSearchOpen: (value: boolean | ((previous: boolean) => boolean)) =>
       state.send({
         type: 'Changed',
         changes: {
+          savedTagSearch: undefined,
           searchOpen: typeof value === 'function' ? value(state.model().searchOpen) : value,
         },
       }),
@@ -2485,6 +2843,158 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       }),
     telegramMessageCapabilitiesForUi,
     deleteMessage,
+    openManagement: () =>
+      state.send({
+        type: 'Changed',
+        changes: {
+          managementPeerId: state.model().activeChatId,
+          managementInitialSetting: undefined,
+        },
+      }),
+    closeManagement: () =>
+      state.send({
+        type: 'Changed',
+        changes: { managementPeerId: undefined, managementInitialSetting: undefined },
+      }),
+    setEarlierHistoryStatus: (earlierHistoryStatus: 'loading' | 'present' | 'empty') =>
+      state.send({ type: 'Changed', changes: { earlierHistoryStatus } }),
+    openRelatedGroup: (peer: TelegramPeer, earlier: boolean) =>
+      runInBackground(
+        (async () => {
+          const title = activeDialog()?.title ?? 'Group';
+          const selection = selectionGeneration;
+          await runEffect(
+            engine.addPeer({
+              peer,
+              title,
+              category: 'group',
+              initials: title.slice(0, 2).toUpperCase(),
+              color: '#5288c1',
+              hasAvatar: false,
+              bot: false,
+              isContact: false,
+              ...(earlier
+                ? {
+                    permissions: {
+                      canSendMessages: false,
+                      canSendMedia: false,
+                      canSendStickers: false,
+                      canSendGifs: false,
+                      canPinMessages: false,
+                      canEditMessages: false,
+                      canDeleteMessages: false,
+                      canDeleteForEveryone: false,
+                      canDeleteChat: false,
+                      canDeleteChannel: false,
+                      canLeave: false,
+                      canViewMembers: false,
+                    },
+                  }
+                : {}),
+            }),
+          );
+          if (selection !== selectionGeneration) return;
+          setDetailsOpen(false);
+          await selectChat(peer.id);
+        })(),
+      ),
+    chatUpgraded: (
+      peer: TelegramPeer,
+      setting: import('../../telegram/chatManagement').ChatSettingChange['kind'],
+    ) => {
+      state.send({
+        type: 'Changed',
+        changes: { managementPeerId: undefined, managementInitialSetting: undefined },
+      });
+      runInBackground(
+        selectChat(peer.id).then((selected) => {
+          if (selected && state.model().activeChatId === peer.id)
+            state.send({
+              type: 'Changed',
+              changes: { managementPeerId: peer.id, managementInitialSetting: setting },
+            });
+        }),
+      );
+    },
+    chatSettingChanged: (change: import('../../telegram/chatManagement').ChatSettingChange) => {
+      if (change.kind === 'forum') {
+        state.send({
+          type: 'Changed',
+          changes: { managementPeerId: undefined, managementInitialSetting: undefined },
+        });
+        runInBackground(selectChat(state.model().activeChatId));
+      }
+    },
+    openInviteLinks: () =>
+      state.send({
+        type: 'Changed',
+        changes: {
+          inviteLinksPeerId: state.model().managementPeerId ?? state.model().activeChatId,
+        },
+      }),
+    closeInviteLinks: () =>
+      state.send({ type: 'Changed', changes: { inviteLinksPeerId: undefined } }),
+    openJoinRequests: () =>
+      state.send({
+        type: 'Changed',
+        changes: {
+          joinRequestsPeerId: state.model().managementPeerId ?? state.model().activeChatId,
+        },
+      }),
+    closeJoinRequests: () =>
+      state.send({ type: 'Changed', changes: { joinRequestsPeerId: undefined } }),
+    closeChatInvite: () => state.send({ type: 'Changed', changes: { chatInvite: undefined } }),
+    openInvitedChat: (peer: TelegramPeer, title: string) =>
+      Effect.promise(async () => {
+        if (!engine.snapshot().dialogs.some((dialog) => dialog.peer.id === peer.id))
+          await runEffect(
+            engine.addPeer({
+              peer,
+              title,
+              category: peer.kind === 'channel' ? 'channel' : 'group',
+              initials: title.slice(0, 2).toUpperCase(),
+              color: '#5288c1',
+              hasAvatar: false,
+              bot: false,
+              isContact: false,
+            }),
+          );
+        await selectChat(peer.id);
+      }),
+    closeFolderInvite: () => state.send({ type: 'Changed', changes: { folderInvite: undefined } }),
+    openSavedMessages: () =>
+      runInBackground(
+        (async () => {
+          const info = await runEffect(engine.getSavedMessagesInfo());
+          setDetailsOpen(false);
+          state.send({ type: 'Changed', changes: { savedInfo: info } });
+          await selectChat(info.peer.id);
+          state.send({ type: 'Changed', changes: { savedSidebar: true } });
+          if (viewportWidth() <= 650) setMobileSidebarOpen(true);
+        })(),
+      ),
+    selectSavedDialog: (source: SavedDialog | undefined) => {
+      setMobileSidebarOpen(false);
+      runInBackground(
+        selectChat(state.model().savedInfo!.peer.id, undefined, 'push', false, undefined, source),
+      );
+    },
+    showSavedDialogs: () => {
+      state.send({ type: 'Changed', changes: { savedSidebar: true } });
+      if (viewportWidth() <= 650) setMobileSidebarOpen(true);
+    },
+    closeSavedDialogs: () => state.send({ type: 'Changed', changes: { savedSidebar: false } }),
+    selectForumTopic: (topic: TelegramForumTopic) =>
+      runInBackground(selectChat(state.model().activeChatId, undefined, 'push', false, topic)),
+    showForumTopics: () => {
+      state.send({ type: 'Changed', changes: { forumSidebar: true } });
+      if (viewportWidth() <= 650) setMobileSidebarOpen(true);
+    },
+    closeForumTopics: () => state.send({ type: 'Changed', changes: { forumSidebar: false } }),
+    updateForumTopics: (topics: TelegramForumTopic[]) => {
+      const selected = topics.find((topic) => topic.id === state.model().activeTopic?.id);
+      if (selected) state.send({ type: 'Changed', changes: { activeTopic: selected } });
+    },
     setSettingsOpen: (value: boolean | ((previous: boolean) => boolean)) =>
       state.send({
         type: 'Changed',
@@ -2644,12 +3154,26 @@ export const createAppController = Effect.fn('createAppController')(function* (p
         : undefined,
     sharingContact: state.model().sharingContact,
     searchOpen: state.model().searchOpen,
+    savedTagSearch: state.model().savedTagSearch,
     sharedMediaKind: state.model().sharedMediaKind,
     deleteTarget: state.model().deleteTarget,
     stopPollTarget: state.model().stopPollTarget,
     readReceipts: state.model().readReceipts,
     deleteChatTarget: state.model().deleteChatTarget,
     settingsOpen: state.model().settingsOpen,
+    activeTopic: state.model().activeTopic,
+    forumSidebar: state.model().forumSidebar,
+    savedSidebar: state.model().savedSidebar,
+    activeSaved: state.model().activeSaved,
+    savedInfo: state.model().savedInfo,
+    savedTagTitles: state.model().savedTagTitles,
+    earlierHistoryStatus: state.model().earlierHistoryStatus,
+    folderInvite: state.model().folderInvite,
+    chatInvite: state.model().chatInvite,
+    joinRequestsPeerId: state.model().joinRequestsPeerId,
+    inviteLinksPeerId: state.model().inviteLinksPeerId,
+    managementPeerId: state.model().managementPeerId,
+    managementInitialSetting: state.model().managementInitialSetting,
     loggingOut: state.model().loggingOut,
     clearingCache: state.model().clearingCache,
     debugReportBusy: state.model().debugReportBusy,

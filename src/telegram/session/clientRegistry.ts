@@ -1,3 +1,5 @@
+import { messageInSavedDialog } from '../savedMessages';
+import { messageInTopic } from '../forums';
 import type { ConversationViewSnapshot, EngineSnapshot, TelegramConversationEvent } from '../types';
 
 type ConversationChange = Exclude<TelegramConversationEvent, { type: 'history-reset' }>;
@@ -12,7 +14,13 @@ export function applyConversationChange<View extends ConversationViewSnapshot>(
   let messages = view.messages;
   let pinnedMessages = view.pinnedMessages;
   if (event.type === 'message-upsert') {
-    if (event.message.peerId !== peerId) return view;
+    if (
+      event.message.peerId !== peerId ||
+      (view.activeTopicId !== undefined && !messageInTopic(event.message, view.activeTopicId)) ||
+      (view.activeSavedPeer !== undefined &&
+        !messageInSavedDialog(event.message, view.activeSavedPeer.id))
+    )
+      return view;
     const messageId = event.message.id;
     const known = messages.some(({ id }) => id === messageId);
     const newestId = messages.at(-1)?.id ?? 0;
@@ -39,7 +47,11 @@ export function applyConversationChange<View extends ConversationViewSnapshot>(
     pinnedMessages = pinnedMessages.filter(({ id }) => !deleted.has(id));
   } else {
     if (event.peerId !== peerId) return view;
-    pinnedMessages = event.messages;
+    pinnedMessages = view.activeSavedPeer
+      ? event.messages.filter((message) => messageInSavedDialog(message, view.activeSavedPeer!.id))
+      : view.activeTopicId === undefined
+        ? event.messages
+        : event.messages.filter((message) => messageInTopic(message, view.activeTopicId!));
   }
   return messages === view.messages && pinnedMessages === view.pinnedMessages
     ? view

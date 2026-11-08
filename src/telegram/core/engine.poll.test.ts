@@ -66,38 +66,44 @@ describe('poll voting', () => {
         expect(getPollVotes).not.toHaveBeenCalled();
       }),
     ));
-  it('persists a quiz in the outbox before sending it', () =>
-    run(
-      Effect.gen(function* () {
-        const transport = yield* createFixtureTelegramTransport();
-        const store = makeMemoryCacheStore();
-        const saved = vi.spyOn(store, 'commitOutbox');
-        const sent = vi.spyOn(transport, 'sendPoll');
-        const engine = yield* makeMessagingEngine(transport, store, { manageTabLease: false });
-        yield* engine.start({ apiId: 1, apiHash: 'fixture' });
-        yield* engine.loadConversationView(peer.id);
-        const draft = {
-          question: 'Question?',
-          answers: ['One', 'Two'],
-          quiz: true,
-          multipleChoice: false,
-          publicVoters: false,
-          correctAnswer: 1,
-          solution: 'Because two.',
-        };
-        yield* engine.sendPoll(peer, draft);
-        expect(saved.mock.calls[0]?.[0]).toMatchObject({ pollDraft: draft });
-        expect(sent).toHaveBeenCalledWith(peer, draft, expect.any(String));
-        expect(engine.snapshot().pending).toEqual([]);
-        expect(
-          engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)?.topMessage?.poll,
-        ).toMatchObject({ question: draft.question, quiz: true });
-        expect(
-          (yield* engine.sendPoll(peer, { ...draft, correctAnswer: 5 }).pipe(Effect.result))._tag,
-        ).toBe('Failure');
-        expect(sent).toHaveBeenCalledTimes(1);
-      }),
-    ));
+  it.each([undefined, 42])(
+    'persists a quiz in the outbox before sending it (topic %s)',
+    (topicId) =>
+      run(
+        Effect.gen(function* () {
+          const transport = yield* createFixtureTelegramTransport();
+          const store = makeMemoryCacheStore();
+          const saved = vi.spyOn(store, 'commitOutbox');
+          const sent = vi.spyOn(transport, 'sendPoll');
+          const engine = yield* makeMessagingEngine(transport, store, { manageTabLease: false });
+          yield* engine.start({ apiId: 1, apiHash: 'fixture' });
+          yield* engine.loadConversationView(peer.id);
+          const draft = {
+            question: 'Question?',
+            answers: ['One', 'Two'],
+            quiz: true,
+            multipleChoice: false,
+            publicVoters: false,
+            correctAnswer: 1,
+            solution: 'Because two.',
+          };
+          const reply =
+            topicId === undefined ? undefined : { messageId: topicId, topMessageId: topicId };
+          yield* engine.sendPoll(peer, draft, reply);
+          expect(saved.mock.calls[0]?.[0]).toMatchObject({ pollDraft: draft });
+          expect(sent).toHaveBeenCalledWith(peer, draft, expect.any(String), reply);
+          expect(engine.snapshot().pending).toEqual([]);
+          expect(
+            engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)?.topMessage
+              ?.poll,
+          ).toMatchObject({ question: draft.question, quiz: true });
+          expect(
+            (yield* engine.sendPoll(peer, { ...draft, correctAnswer: 5 }).pipe(Effect.result))._tag,
+          ).toBe('Failure');
+          expect(sent).toHaveBeenCalledTimes(1);
+        }),
+      ),
+  );
   it('applies server results to history and cache, then retracts the vote', () =>
     run(
       Effect.gen(function* () {

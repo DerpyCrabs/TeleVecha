@@ -1,14 +1,19 @@
+import { chatInviteHash } from '../../telegram/chatManagement';
+import { folderInviteSlug } from '../../telegram/chatFolders';
 export interface MiniAppLink {
   shortName?: string;
   startParam?: string;
   mode?: 'compact' | 'fullscreen';
 }
 export interface TelegramLinkTarget {
+  folderInvite?: string;
+  chatInvite?: string;
   stickerPack?: string;
   webApp?: MiniAppLink;
   username?: string;
   peerId?: string;
   messageId?: number;
+  topicId?: number;
   commentId?: number;
 }
 
@@ -47,6 +52,10 @@ export function parseTelegramLink(value: string): TelegramLinkTarget | undefined
     return undefined;
   }
   if (url.username || url.password || url.port) return undefined;
+  const chatInvite = chatInviteHash(value);
+  if (chatInvite) return { chatInvite };
+  const folderInvite = folderInviteSlug(value);
+  if (folderInvite) return { folderInvite };
   const stickerPack = parseStickerPackLink(value);
   if (stickerPack) return { stickerPack };
   const miniApp = parseMiniAppLink(url);
@@ -54,14 +63,26 @@ export function parseTelegramLink(value: string): TelegramLinkTarget | undefined
   let username: string | undefined;
   let peerId: string | undefined;
   let post: string | null | undefined;
+  let thread: string | null | undefined = url.searchParams.get('thread');
   if (url.protocol === 'tg:' && url.hostname === 'resolve') {
     if (
       [...url.searchParams.keys()].some(
-        (key) => !['domain', 'post', 'comment', 'single'].includes(key),
+        (key) => !['domain', 'post', 'comment', 'single', 'thread'].includes(key),
       )
     )
       return undefined;
     username = url.searchParams.get('domain') ?? undefined;
+    post = url.searchParams.get('post');
+  } else if (url.protocol === 'tg:' && url.hostname === 'privatepost') {
+    if (
+      [...url.searchParams.keys()].some(
+        (key) => !['channel', 'post', 'comment', 'single', 'thread'].includes(key),
+      )
+    )
+      return undefined;
+    const channel = url.searchParams.get('channel');
+    if (!channel || !/^[1-9]\d*$/.test(channel)) return undefined;
+    peerId = `c:${channel}`;
     post = url.searchParams.get('post');
   } else {
     if (
@@ -76,17 +97,26 @@ export function parseTelegramLink(value: string): TelegramLinkTarget | undefined
       ].includes(url.hostname)
     )
       return undefined;
-    if ([...url.searchParams.keys()].some((key) => !['comment', 'single'].includes(key)))
+    if ([...url.searchParams.keys()].some((key) => !['comment', 'single', 'thread'].includes(key)))
       return undefined;
     const parts = url.pathname.split('/').filter(Boolean);
     if (parts[0] === 's') parts.shift();
     if (parts[0] === 'c') {
-      if (parts.length !== 3 || !/^[1-9]\d*$/u.test(parts[1] ?? '')) return undefined;
+      if (![3, 4].includes(parts.length) || !/^[1-9]\d*$/u.test(parts[1] ?? '')) return undefined;
       peerId = `c:${parts[1]}`;
-      post = parts[2];
+      if (parts.length === 4) {
+        if (thread && thread !== parts[2]) return undefined;
+        thread = parts[2];
+        post = parts[3];
+      } else post = parts[2];
     } else {
-      if (parts.length < 1 || parts.length > 2) return undefined;
-      [username, post] = parts;
+      if (parts.length < 1 || parts.length > 3) return undefined;
+      username = parts[0];
+      if (parts.length === 3) {
+        if (thread && thread !== parts[1]) return undefined;
+        thread = parts[1];
+        post = parts[2];
+      } else post = parts[1];
     }
   }
   if (
@@ -96,12 +126,17 @@ export function parseTelegramLink(value: string): TelegramLinkTarget | undefined
     return undefined;
   if (!username && !peerId) return undefined;
   const messageId = positiveId(post);
+  const topicId = positiveId(thread);
+  if (thread !== null && thread !== undefined && (!topicId || !messageId)) return undefined;
+  for (const key of url.searchParams.keys())
+    if (url.searchParams.getAll(key).length !== 1) return undefined;
   const comment = url.searchParams.get('comment');
   const commentId = positiveId(comment);
   if ((post && !messageId) || (comment !== null && (!commentId || !messageId))) return undefined;
   return {
     ...(username ? { username } : { peerId: peerId! }),
     ...(messageId ? { messageId } : {}),
+    ...(topicId ? { topicId } : {}),
     ...(commentId ? { commentId } : {}),
   };
 }

@@ -268,6 +268,311 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
           }),
         ),
       deleteMessage: () => Effect.succeed(false),
+      deleteForumTopic: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'forum-topics',
+          }),
+        ),
+      getForumTopic: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'forum-topics',
+          }),
+        ),
+      getForumTopics: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'forum-topics',
+          }),
+        ),
+      checkChatInvite: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-invite',
+          }),
+        ),
+      joinChatInvite: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-invite',
+          }),
+        ),
+      getJoinRequests: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'join-requests',
+          }),
+        ),
+      resolveJoinRequest: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'join-requests',
+          }),
+        ),
+      resolveAllJoinRequests: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'join-requests',
+          }),
+        ),
+      getChatInviteLinks: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'invite-links',
+          }),
+        ),
+      exportChatInviteLink: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'invite-links',
+          }),
+        ),
+      editChatInviteLink: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'invite-links',
+          }),
+        ),
+      revokeChatInviteLink: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'invite-links',
+          }),
+        ),
+      deleteChatInviteLink: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'invite-links',
+          }),
+        ),
+      getAdminLog: () =>
+        Effect.fail(
+          new MessagingError({ message: 'Unavailable in debug reports.', operation: 'admin-log' }),
+        ),
+      upgradeChat: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'upgrade-chat',
+          }),
+        ),
+      getSavedMessagesInfo: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'saved-messages',
+          }),
+        ),
+      getSavedDialogs: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'saved-messages',
+          }),
+        ),
+      getEarlierGroupHistory: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'group-history',
+          }),
+        ),
+      getSavedHistory: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'saved-messages',
+          }),
+        ),
+      getSavedTags: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'saved-messages',
+          }),
+        ),
+      renameSavedTag: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'saved-messages',
+          }),
+        ),
+      pinSavedDialog: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'saved-messages',
+          }),
+        ),
+      setSavedMessageTags: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'saved-messages',
+          }),
+        ),
+      getChatManagement: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-management',
+          }),
+        ),
+      setChatSetting: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-management',
+          }),
+        ),
+      getManagedParticipants: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'participants',
+          }),
+        ),
+      addChatMember: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'participants',
+          }),
+        ),
+      editChatParticipant: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'participants',
+          }),
+        ),
+      createChat: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'create-chat',
+          }),
+        ),
+      createForumTopic: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'forum-topics',
+          }),
+        ),
+      editForumTopic: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'forum-topics',
+          }),
+        ),
+      pinForumTopic: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'forum-topics',
+          }),
+        ),
+      readForumTopic: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'forum-topics',
+          }),
+        ),
+      getChatFolders: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
+      saveChatFolder: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
+      deleteChatFolder: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
+      reorderChatFolders: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
+      getFolderUpdates: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
+      joinFolderUpdates: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
+      getFolderLinks: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
+      exportFolderLink: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
+      deleteFolderLink: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
+      checkFolderInvite: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
+      joinFolderInvite: () =>
+        Effect.fail(
+          new MessagingError({
+            message: 'Unavailable in debug reports.',
+            operation: 'chat-folders',
+          }),
+        ),
       getPrivacy: (key) => Effect.succeed({ key, rules: [], peers: [] }),
       setPrivacy: (key) => Effect.succeed({ key, rules: [], peers: [] }),
       getReadTimePrivacy: () => Effect.succeed(false),
@@ -290,6 +595,7 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
         const members = hydrated.groupMembers[peer.id]?.value ?? [];
         return Effect.succeed({ members, totalCount: members.length, hasMore: false });
       },
+      setUnreadMark: () => Effect.succeed(false),
       setMuted: () => Effect.succeed(false),
       setBlocked: () => Effect.succeed(false),
       updateContact: () => Effect.succeed(false),

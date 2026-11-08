@@ -181,7 +181,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     if (owner.read().editing) return;
     if (peerId === 'empty') return;
     const conversation = options.conversation();
-    if (!conversation || conversation.peerId !== peerId) return;
+    if (!conversation || (conversation.draftKey ?? conversation.peerId) !== peerId) return;
     const details = currentDraftDetails();
     scheduleDraftWrite({ peerId, value, ...(details ? { details } : {}), conversation });
     const dialog = options.activeDialog();
@@ -224,7 +224,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     if (
       peerId === 'empty' ||
       !conversation ||
-      conversation.peerId !== peerId ||
+      (conversation.draftKey ?? conversation.peerId) !== peerId ||
       owner.read().editing
     )
       return;
@@ -284,7 +284,7 @@ export function createComposerSession(options: ComposerSessionOptions) {
     ) {
       return false;
     }
-    const peerId = dialog.peer.id;
+    const peerId = conversation.draftKey ?? dialog.peer.id;
     const capturedReply = owner.read().reply ? { ...owner.read().reply! } : undefined;
     const telegramReply: TelegramReplyTarget | undefined = capturedReply
       ? {
@@ -492,7 +492,8 @@ export function createComposerSession(options: ComposerSessionOptions) {
       options.getMentionMembers(peer).pipe(
         Effect.tap((page) =>
           Effect.sync(() => {
-            if (options.activePeerId() === peer.id) owner.patch({ mentionMembers: page.members });
+            if (options.conversation()?.peerId === peer.id)
+              owner.patch({ mentionMembers: page.members });
           }),
         ),
         Effect.catchCause(() =>

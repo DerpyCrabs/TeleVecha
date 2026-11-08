@@ -231,3 +231,70 @@ describe('compiled search workflow', () => {
     source.dispose();
   });
 });
+
+it('gives each topic its own search identity and removes topic scope for global search', () => {
+  const host = {
+    ...hostFor(() => Effect.succeed(page([]))),
+    activeTopicId: 10,
+    activeTopicTitle: 'Development',
+  };
+  const source = createSearchProgram(host);
+  source.send(searchActions.message.Query('message'));
+  source.send(searchActions.message.Submit());
+  expect(searchArgs(source.model().props)?.filters).toMatchObject({ topicId: 10 });
+  source.send(searchActions.message.Context({ ...host, activeTopicId: 20 }));
+  expect(searchArgs(source.model().props)?.filters).toMatchObject({ topicId: 20 });
+  source.send(searchActions.message.Scope(true));
+  expect(searchArgs(source.model().props)?.filters?.topicId).toBeUndefined();
+  source.dispose();
+});
+
+it('scopes saved message searches to their original chat and clears it for global search', () => {
+  const host = {
+    ...hostFor(() => Effect.succeed(page([]))),
+    activeSavedPeer: { id: 'c:10', kind: 'channel' as const, accessHash: '100' },
+    activeSavedTitle: 'Project',
+  };
+  const source = createSearchProgram(host);
+  source.send(searchActions.message.Query('idea'));
+  source.send(searchActions.message.Submit());
+  expect(searchArgs(source.model().props)?.filters?.savedPeer?.id).toBe('c:10');
+  source.send(
+    searchActions.message.Context({
+      ...host,
+      activeSavedPeer: { ...host.activeSavedPeer, id: 'c:20' },
+    }),
+  );
+  expect(searchArgs(source.model().props)?.filters?.savedPeer?.id).toBe('c:20');
+  source.send(searchActions.message.Scope(true));
+  expect(searchArgs(source.model().props)?.filters?.savedPeer).toBeUndefined();
+  source.dispose();
+});
+
+it('opens saved tag searches without text and drops tags when switching scope or chat', () => {
+  const host = {
+    ...hostFor(unused),
+    activePeerId: 'u:self',
+    savedTagSearch: { reaction: '⭐', request: 1 },
+  };
+  const source = createSearchProgram(host);
+  expect(searchArgs(source.model().props)).toMatchObject({
+    peerId: 'u:self',
+    text: '',
+    filters: { savedReactions: ['⭐'] },
+  });
+  source.send(searchActions.message.Scope(true));
+  expect(searchArgs(source.model().props)).toBeUndefined();
+  source.send(
+    searchActions.message.Context({ ...host, savedTagSearch: { reaction: '👍', request: 2 } }),
+  );
+  expect(searchArgs(source.model().props)).toMatchObject({
+    global: false,
+    filters: { savedReactions: ['👍'] },
+  });
+  source.send(
+    searchActions.message.Context({ ...host, activePeerId: 'u:other', savedTagSearch: undefined }),
+  );
+  expect(searchArgs(source.model().props)).toBeUndefined();
+  Effect.runSync(source.close());
+});

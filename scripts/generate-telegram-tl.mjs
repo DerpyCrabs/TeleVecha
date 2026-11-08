@@ -196,6 +196,13 @@ function uniqueSorted(values) {
 async function sourceFilesForPublicScan() {
   const explicit = [
     path.join(root, 'src/telegram/transports/webTelegramTransport.ts'),
+    path.join(root, 'src/telegram/transports/chatFolderMethods.ts'),
+    path.join(root, 'src/telegram/transports/forumMethods.ts'),
+    path.join(root, 'src/telegram/transports/chatInviteMethods.ts'),
+    path.join(root, 'src/telegram/transports/chatManagementMethods.ts'),
+    path.join(root, 'src/telegram/transports/adminLogMethods.ts'),
+    path.join(root, 'src/telegram/transports/savedMessagesMethods.ts'),
+    path.join(root, 'src/telegram/transports/chatParticipantMethods.ts'),
     path.join(root, 'src/telegram/transports/qrLogin.ts'),
     path.join(root, 'src/telegram/transports/qrLogin.test.ts'),
     path.join(root, 'src/telegram/transports/webTelegramTransport.test.ts'),

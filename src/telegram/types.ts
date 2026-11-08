@@ -1,3 +1,34 @@
+import type {
+  SavedMessagesInfo,
+  SavedDialogsOffset,
+  SavedDialogsPage,
+  SavedTags,
+} from './savedMessages';
+import type { AdminLogRequest, AdminLogPage } from './adminLog';
+import type {
+  CreateChatRequest,
+  CreatedChat,
+  ChatInvitePreview,
+  JoinedChat,
+  JoinRequestOffset,
+  JoinRequestsPage,
+  ChatInviteLink,
+  ChatManagementSettings,
+  ChatSettingChange,
+  ChatParticipantFilter,
+  ChatParticipantChange,
+  ManagedParticipantsPage,
+  ChatInviteLinkDraft,
+  ChatInviteLinksOffset,
+  ChatInviteLinksPage,
+} from './chatManagement';
+import type {
+  TelegramForumPage,
+  TelegramForumOffset,
+  TelegramForumEdit,
+  TelegramForumTopic,
+} from './forums';
+import type { TelegramChatFolder, TelegramFolderLink, TelegramFolderInvite } from './chatFolders';
 import type { RichMessage } from '../domain/richMessage';
 import type { Effect, Stream } from 'effect';
 import type { MtprotoError } from './mtproto/errors';
@@ -29,6 +60,8 @@ export interface TelegramChatPermissions {
   canDeleteChannel: boolean;
   canLeave: boolean;
   canViewMembers: boolean;
+  canManageInvites?: boolean | undefined;
+  canManageChat?: boolean | undefined;
   memberCount?: number | undefined;
 }
 
@@ -51,6 +84,11 @@ export interface TelegramDialog {
   topMessageId: number;
   topMessage?: TelegramMessage | undefined;
   unreadCount: number;
+  unreadMark?: boolean | undefined;
+  isContact?: boolean | undefined;
+  broadcast?: boolean | undefined;
+  forum?: boolean | undefined;
+  protectedContent?: boolean | undefined;
   unreadMentionsCount?: number | undefined;
   unreadReactionsCount?: number | undefined;
   readInboxMaxId: number;
@@ -193,6 +231,9 @@ export interface TelegramMessage {
   protected?: boolean | undefined;
   editedAt?: number | undefined;
   replyToId?: number | undefined;
+  topicId?: number | undefined;
+  savedPeerId?: string | undefined;
+  reactionsAsTags?: boolean | undefined;
   replyQuote?: string | undefined;
   comments?: { count: number; channelId: string } | undefined;
   randomId?: string | undefined;
@@ -396,6 +437,9 @@ export interface TelegramTextFormat {
 }
 
 export interface TelegramSearchFilters {
+  savedPeer?: TelegramPeer | undefined;
+  savedReactions?: readonly string[] | undefined;
+  topicId?: number | undefined;
   kind?: SharedMediaKind | undefined;
   fromPeer?: TelegramPeer | undefined;
   minDate?: number | undefined;
@@ -418,6 +462,12 @@ export interface TelegramSearchOffset {
 
 export type SharedMediaKind = 'photos' | 'videos' | 'files' | 'audio' | 'links' | 'voice' | 'gifs';
 export type TelegramResourceKind =
+  | 'saved-messages'
+  | 'chat-management'
+  | 'invite-links'
+  | 'join-requests'
+  | 'forum-topics'
+  | 'chat-folders'
   | 'expressions'
   | 'web-app-result'
   | 'bot-commands'
@@ -443,6 +493,7 @@ export interface TelegramActivity {
 
 export interface TelegramReplyTarget {
   messageId: number;
+  topMessageId?: number | undefined;
   quoteText?: string | undefined;
 }
 
@@ -673,9 +724,15 @@ export type TransportUpdate =
       poll?: TelegramPoll | undefined;
       results: TelegramPollResults;
     }
+  | { type: 'join-requests-invalidated'; peerId: string }
+  | { type: 'forum-topics-invalidated'; peerId: string; read?: boolean }
+  | { type: 'chat-folders-invalidated' }
+  | { type: 'saved-messages-invalidated' }
   | { type: 'dialog-changed'; dialog: TelegramDialog }
+  | { type: 'dialog-unread-mark'; peerId: string; unread: boolean }
   | {
       type: 'reaction-changed';
+      reactionsAsTags?: boolean | undefined;
       unreadReaction?: boolean | undefined;
       peerId: string;
       messageId: number;
@@ -874,6 +931,123 @@ export interface TelegramTransport {
     messageId: number,
     limit: number,
   ): TransportEffect<HistoryAroundPage>;
+  getManagedParticipants?(
+    peer: TelegramPeer,
+    filter?: ChatParticipantFilter,
+    query?: string,
+    offset?: number,
+  ): TransportEffect<ManagedParticipantsPage>;
+  addChatMember?(
+    peer: TelegramPeer,
+    user: TelegramPeer,
+  ): TransportEffect<TransportMutationResult & { missingUserIds: string[] }>;
+  editChatParticipant?(
+    peer: TelegramPeer,
+    user: TelegramPeer,
+    change: ChatParticipantChange,
+  ): TransportEffect<TransportMutationResult>;
+  getAdminLog?(peer: TelegramPeer, request?: AdminLogRequest): TransportEffect<AdminLogPage>;
+  upgradeChat?(
+    peer: TelegramPeer,
+  ): TransportEffect<TransportMutationResult & { peer: TelegramPeer; title: string }>;
+  getSavedMessagesInfo?(): TransportEffect<SavedMessagesInfo>;
+  getSavedDialogs?(offset?: SavedDialogsOffset): TransportEffect<SavedDialogsPage>;
+  getSavedHistory?(
+    source: TelegramPeer,
+    limit?: number,
+    beforeMessageId?: number,
+  ): TransportEffect<{ messages: TelegramMessage[]; hasOlder: boolean }>;
+  getSavedTags?(source?: TelegramPeer): TransportEffect<SavedTags>;
+  renameSavedTag?(reaction: string, title: string): TransportEffect<void>;
+  pinSavedDialog?(source: TelegramPeer, pinned: boolean): TransportEffect<void>;
+  setSavedMessageTags?(
+    messageId: number,
+    reactions: readonly string[],
+  ): TransportEffect<TransportMutationResult>;
+  getChatManagement?(peer: TelegramPeer): TransportEffect<ChatManagementSettings>;
+  setChatSetting?(
+    peer: TelegramPeer,
+    change: ChatSettingChange,
+  ): TransportEffect<TransportMutationResult>;
+  getChatInviteLinks?(
+    peer: TelegramPeer,
+    revoked?: boolean,
+    offset?: ChatInviteLinksOffset,
+  ): TransportEffect<ChatInviteLinksPage>;
+  exportChatInviteLink?(
+    peer: TelegramPeer,
+    draft: ChatInviteLinkDraft,
+  ): TransportEffect<ChatInviteLink>;
+  editChatInviteLink?(
+    peer: TelegramPeer,
+    url: string,
+    draft: ChatInviteLinkDraft,
+  ): TransportEffect<void>;
+  revokeChatInviteLink?(peer: TelegramPeer, url: string): TransportEffect<void>;
+  deleteChatInviteLink?(peer: TelegramPeer, url: string): TransportEffect<void>;
+  getJoinRequests?(
+    peer: TelegramPeer,
+    query?: string,
+    offset?: JoinRequestOffset,
+  ): TransportEffect<JoinRequestsPage>;
+  resolveJoinRequest?(
+    peer: TelegramPeer,
+    user: TelegramPeer,
+    approved: boolean,
+  ): TransportEffect<TransportMutationResult>;
+  resolveAllJoinRequests?(
+    peer: TelegramPeer,
+    approved: boolean,
+  ): TransportEffect<TransportMutationResult>;
+  checkChatInvite?(hash: string): TransportEffect<ChatInvitePreview>;
+  joinChatInvite?(hash: string): TransportEffect<JoinedChat & TransportMutationResult>;
+  createChat?(request: CreateChatRequest): TransportEffect<CreatedChat & TransportMutationResult>;
+  getChatFolders?(): TransportEffect<TelegramChatFolder[]>;
+  saveChatFolder?(folder: TelegramChatFolder): TransportEffect<void>;
+  deleteChatFolder?(id: number): TransportEffect<void>;
+  reorderChatFolders?(ids: number[]): TransportEffect<void>;
+  deleteForumTopic?(
+    peer: TelegramPeer,
+    topicId: number,
+  ): TransportEffect<{ pts: number; ptsCount: number }>;
+  getForumTopic?(
+    peer: TelegramPeer,
+    topicId: number,
+  ): TransportEffect<TelegramForumTopic | undefined>;
+  getForumTopics?(
+    peer: TelegramPeer,
+    query?: string,
+    offset?: TelegramForumOffset,
+  ): TransportEffect<TelegramForumPage>;
+  createForumTopic?(
+    peer: TelegramPeer,
+    title: string,
+    iconColor: number,
+    randomId: string,
+    iconEmojiId?: string,
+  ): TransportEffect<TransportMutationResult>;
+  editForumTopic?(
+    peer: TelegramPeer,
+    topicId: number,
+    edit: TelegramForumEdit,
+  ): TransportEffect<TransportMutationResult>;
+  pinForumTopic?(
+    peer: TelegramPeer,
+    topicId: number,
+    pinned: boolean,
+  ): TransportEffect<TransportMutationResult>;
+  readForumTopic?(peer: TelegramPeer, topicId: number, maxMessageId: number): TransportEffect<void>;
+  getFolderUpdates?(id: number): TransportEffect<TelegramFolderInvite>;
+  joinFolderUpdates?(id: number, peers: TelegramPeer[]): TransportEffect<TransportMutationResult>;
+  getFolderLinks?(id: number): TransportEffect<TelegramFolderLink[]>;
+  exportFolderLink?(
+    id: number,
+    title: string,
+    peers: TelegramPeer[],
+  ): TransportEffect<TelegramFolderLink>;
+  deleteFolderLink?(id: number, slug: string): TransportEffect<void>;
+  checkFolderInvite?(slug: string): TransportEffect<TelegramFolderInvite>;
+  joinFolderInvite?(slug: string, peers: TelegramPeer[]): TransportEffect<TransportMutationResult>;
   getUnreadNotifications?(
     peer: TelegramPeer,
     kind: 'mention' | 'reaction',
@@ -917,6 +1091,7 @@ export interface TelegramTransport {
     offset?: number,
     query?: string,
   ): TransportEffect<TelegramGroupMemberPage>;
+  setUnreadMark(peer: TelegramPeer, unread: boolean): TransportEffect<void>;
   setMuted(peer: TelegramPeer, muted: boolean): TransportEffect<void>;
   setBlocked(peer: TelegramPeer, blocked: boolean): TransportEffect<void>;
   setPinnedDialog(peer: TelegramPeer, pinned: boolean): TransportEffect<void>;
@@ -942,11 +1117,13 @@ export interface TelegramTransport {
     peer: TelegramPeer,
     draft: TelegramPollDraft,
     randomId: string,
+    reply?: TelegramReplyTarget,
   ): TransportEffect<SendTextResult>;
   sendContact?(
     peer: TelegramPeer,
     contact: TelegramContact,
     randomId: string,
+    reply?: TelegramReplyTarget,
   ): TransportEffect<SendTextResult>;
   sendText(
     peer: TelegramPeer,
@@ -1126,6 +1303,7 @@ export interface PendingAlbumAttachment extends PendingAttachment {
 }
 
 export interface TelegramForwardOptions {
+  topMessageId?: number | undefined;
   hideAuthor?: boolean | undefined;
   hideCaption?: boolean | undefined;
 }
@@ -1191,6 +1369,8 @@ export type AccountSnapshot = {
 
 export type ConversationViewSnapshot = {
   activePeerId?: string | undefined;
+  activeTopicId?: number | undefined;
+  activeSavedPeer?: TelegramPeer | undefined;
   messages: TelegramMessage[];
   loadingMessages: boolean;
   hasOlderMessages: boolean;

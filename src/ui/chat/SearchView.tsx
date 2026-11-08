@@ -1,3 +1,4 @@
+import { SavedTagFilters } from '../saved/SavedTagFilters';
 import './search.css';
 import { Avatar } from '../shared/Avatar';
 import { SearchSenderFilter } from './SearchSenderFilter';
@@ -212,6 +213,23 @@ export const SearchView = view<{ model: SearchModel; send: Send<SearchMessage> }
             />
           </form>
         </header>
+        {!global && host.savedTags ? (
+          <SavedTagFilters
+            customEmoji={host.savedTags.customEmoji}
+            api={host.savedTags.api}
+            selfId={host.savedTags.selfId}
+            source={host.activeSavedPeer}
+            premium={host.savedTags.premium}
+            online={host.online ?? false}
+            selected={filters.savedReactions ?? []}
+            change={(selected) =>
+              dispatch.Filters({
+                ...filters,
+                savedReactions: selected.length ? selected : undefined,
+              })
+            }
+          />
+        ) : null}
         <div class="search-context">
           <button
             type="button"
@@ -219,7 +237,9 @@ export const SearchView = view<{ model: SearchModel; send: Send<SearchMessage> }
             title={global ? 'Search this chat' : 'Search all chats'}
             onClick={() => dispatch.Scope(!global)}
           >
-            {global ? 'All chats' : `In: ${dialog(host.activePeerId)?.title ?? 'this chat'}`}
+            {global
+              ? 'All chats'
+              : `In: ${host.activeSavedTitle ?? host.activeTopicTitle ?? dialog(host.activePeerId)?.title ?? 'this chat'}`}
             {!global ? <X size={14} /> : null}
           </button>
           {!global ? (

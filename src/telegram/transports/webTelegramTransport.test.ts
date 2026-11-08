@@ -64,6 +64,295 @@ const withTransport = <A, E>(
   );
 
 describe('web Telegram transport', () => {
+  it('keeps migrated basic groups read-only even for their owner', () => {
+    const invoke = (request: unknown) => {
+      if (!Api.messages.GetPeerDialogs.is(request))
+        return Effect.fail(createMtprotoError('rpc', 'Unused enrichment'));
+      return Effect.succeed(
+        createTl('messages.peerDialogs', {
+          dialogs: [
+            createTl('dialog', {
+              peer: Api.PeerChat({ chatId: 303n }),
+              topMessage: 0,
+              readInboxMaxId: 0,
+              readOutboxMaxId: 0,
+              unreadCount: 0,
+              unreadMentionsCount: 0,
+              unreadReactionsCount: 0,
+              notifySettings: createTl('peerNotifySettings', {}),
+            }),
+          ],
+          messages: [],
+          users: [],
+          chats: [
+            createTl('chat', {
+              id: 303n,
+              title: 'Old group',
+              creator: true,
+              deactivated: true,
+              migratedTo: Api.InputChannel({ channelId: 707n, accessHash: 9n }),
+              photo: Api.ChatPhotoEmpty({}),
+              participantsCount: 2,
+              date: 1,
+              version: 1,
+            }),
+          ],
+          state: createTl('updates.state', { pts: 1, qts: 0, date: 1, seq: 1, unreadCount: 0 }),
+        }),
+      );
+    };
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const dialog = yield* transport.getDialog!({ id: 'g:303', kind: 'group' });
+            expect(dialog?.permissions?.canSendMessages).toBe(false);
+            expect(dialog?.permissions?.canEditMessages).toBe(false);
+            expect(dialog?.permissions?.canManageChat).not.toBe(true);
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it.each([true, false])('sends the correct approval flag for a join request (%s)', (approved) => {
+    const invoke = vi.fn((request: unknown) => {
+      expect(Api.messages.HideChatJoinRequest.is(request)).toBe(true);
+      expect(request).toMatchObject({
+        peer: { channelId: 202n, accessHash: 5n },
+        userId: { userId: 101n, accessHash: 7n },
+      });
+      if (approved) expect(request).toHaveProperty('approved', true);
+      else expect(request).not.toHaveProperty('approved');
+      return Effect.succeed(Api.Updates({ updates: [], users: [], chats: [], seq: 1, date: 1 }));
+    });
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            yield* transport.resolveJoinRequest!(
+              { id: 'c:202', kind: 'channel', accessHash: '5' },
+              { id: 'u:101', kind: 'user', accessHash: '7' },
+              approved,
+            );
+            expect(invoke).toHaveBeenCalledTimes(1);
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+  it('paginates join requests by the server date and user cursor', () => {
+    const invoke = vi.fn((request: unknown) => {
+      expect(request).toMatchObject({
+        requested: true,
+        q: 'Nina',
+        offsetDate: 200,
+        offsetUser: { userId: 101n, accessHash: 7n },
+        limit: 50,
+      });
+      return Effect.succeed(
+        createTl('messages.chatInviteImporters', {
+          count: 51,
+          importers: Array.from({ length: 50 }, (_, index) =>
+            createTl('chatInviteImporter', {
+              userId: BigInt(index + 1),
+              date: 100 - index,
+              requested: true as const,
+              about: 'Hello',
+            }),
+          ),
+          users: [],
+        }),
+      );
+    });
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const page = yield* transport.getJoinRequests!(
+              { id: 'c:202', kind: 'channel', accessHash: '5' },
+              ' Nina ',
+              { date: 200, user: { id: 'u:101', kind: 'user', accessHash: '7' } },
+            );
+            expect(page.people).toHaveLength(50);
+            expect(page.nextOffset).toMatchObject({ date: 51, user: { id: 'u:50' } });
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it('recognizes an approval request from the structured RPC error without claiming membership', () => {
+    const invoke = vi.fn(() =>
+      Effect.fail(
+        createMtprotoError('rpc', 'Telegram RPC failed: INVITE_REQUEST_SENT', {
+          code: 400,
+          details: { errorMessage: 'INVITE_REQUEST_SENT' },
+        }),
+      ),
+    );
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            expect(yield* transport.joinChatInvite!('request')).toEqual({ status: 'requested' });
+            expect(invoke).toHaveBeenCalledTimes(1);
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+  it('reads invitation approval and subscription requirements without joining', () => {
+    const invoke = vi.fn((request: unknown) => {
+      expect(Api.messages.CheckChatInvite.is(request)).toBe(true);
+      return Effect.succeed(
+        createTl('chatInvite', {
+          title: 'Plans',
+          about: 'Welcome',
+          photo: createTl('photoEmpty', { id: 0n }),
+          participantsCount: 42,
+          color: 1,
+          requestNeeded: true as const,
+          broadcast: true as const,
+          subscriptionPricing: createTl('starsSubscriptionPricing', {
+            period: 2592000,
+            amount: 100n,
+          }),
+        }),
+      );
+    });
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            expect(yield* transport.checkChatInvite!('invite')).toMatchObject({
+              title: 'Plans',
+              participantsCount: 42,
+              requestNeeded: true,
+              paid: true,
+              alreadyJoined: false,
+            });
+            expect(invoke).toHaveBeenCalledTimes(1);
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+  it('unwraps the current-layer invitation join result and remembers the new peer access hash', () => {
+    const invoke = vi.fn(() =>
+      Effect.succeed(
+        createTl('messages.chatInviteJoinResultOk', {
+          updates: Api.Updates({
+            updates: [],
+            users: [],
+            chats: [
+              createTl('channel', {
+                id: 6000n,
+                accessHash: 66n,
+                title: 'Plans',
+                photo: Api.ChatPhotoEmpty({}),
+                date: 100,
+              }),
+            ],
+            date: 100,
+            seq: 1,
+          }),
+        }),
+      ),
+    );
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            expect(yield* transport.joinChatInvite!('invite')).toMatchObject({
+              status: 'joined',
+              peer: { id: 'c:6000', accessHash: '66' },
+            });
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+  });
+
+  it.each(['group', 'channel'] as const)(
+    'creates a %s and preserves partial invitation results',
+    (kind) => {
+      const invoke = vi.fn((request: unknown) => {
+        if (kind === 'group') {
+          expect(Api.messages.CreateChat.is(request)).toBe(true);
+          expect(request).toMatchObject({
+            title: 'Weekend',
+            users: [{ userId: 101n, accessHash: 5n }],
+          });
+        } else {
+          expect(Api.channels.CreateChannel.is(request)).toBe(true);
+          expect(request).toMatchObject({ title: 'Weekend', about: 'Plans', broadcast: true });
+        }
+        const chats =
+          kind === 'group'
+            ? [
+                createTl('chat', {
+                  id: 5000n,
+                  title: 'Weekend',
+                  creator: true as const,
+                  photo: Api.ChatPhotoEmpty({}),
+                  participantsCount: 2,
+                  date: 100,
+                  version: 1,
+                }),
+              ]
+            : [
+                createTl('channel', {
+                  id: 5000n,
+                  accessHash: 99n,
+                  title: 'Weekend',
+                  creator: true as const,
+                  broadcast: true as const,
+                  photo: Api.ChatPhotoEmpty({}),
+                  date: 100,
+                }),
+              ];
+        const updates = Api.Updates({ updates: [], chats, users: [], date: 100, seq: 1 });
+        return Effect.succeed(
+          kind === 'group'
+            ? createTl('messages.invitedUsers', {
+                updates,
+                missingInvitees: [createTl('missingInvitee', { userId: 101n })],
+              })
+            : updates,
+        );
+      });
+      return Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              const result = yield* transport.createChat!({
+                kind,
+                title: 'Weekend',
+                about: 'Plans',
+                users: [{ id: 'u:101', kind: 'user', accessHash: '5' }],
+              });
+              expect(result.peer).toMatchObject({
+                id: kind === 'group' ? 'g:5000' : 'c:5000',
+                kind,
+              });
+              if (kind === 'channel') expect(result.peer.accessHash).toBe('99');
+              expect(result.missingUserIds).toEqual(kind === 'group' ? ['u:101'] : []);
+              expect(invoke).toHaveBeenCalledTimes(1);
+            }),
+          () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+        ),
+      );
+    },
+  );
+
   it('searches participants with a server cursor even when an entity is unavailable', () => {
     const invoke = vi.fn((_request: unknown) =>
       Effect.succeed(
@@ -256,6 +545,7 @@ describe('web Telegram transport', () => {
               { messageId: 42 },
               {
                 kind: 'photos',
+                topicId: 10,
                 fromPeer: { id: 'u:101', kind: 'user', accessHash: '123' },
                 minDate: 1700000000,
                 maxDate: 1700086399,
@@ -270,6 +560,7 @@ describe('web Telegram transport', () => {
               minDate: 1700000000,
               maxDate: 1700086399,
               offsetId: 42,
+              topMsgId: 10,
               limit: 51,
             });
             if (Api.messages.Search.is(request))
@@ -961,6 +1252,36 @@ describe('web Telegram transport', () => {
       ),
     );
   });
+
+  it.each([true, false])(
+    'writes manual unread mark %s without inventing message receipts',
+    (unread) =>
+      Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              yield* transport.setUnreadMark(
+                { id: 'u:101', kind: 'user', accessHash: '10' },
+                unread,
+              );
+            }),
+          () =>
+            Effect.succeed(
+              clientDouble({
+                invoke: ((request: unknown) => {
+                  expect(Api.messages.MarkDialogUnread.is(request)).toBe(true);
+                  if (Api.messages.MarkDialogUnread.is(request)) {
+                    expect(Boolean(request.unread)).toBe(unread);
+                    expect(request.peer).toMatchObject({ peer: { userId: 101n, accessHash: 10n } });
+                  }
+                  return Effect.succeed(true);
+                }) as MtprotoClient['invoke'],
+              }),
+            ),
+        ),
+      ),
+  );
 
   it.each(['mention', 'reaction'] as const)(
     'marks all %s notifications using the bulk RPC until offset is drained',
@@ -1835,6 +2156,46 @@ describe('web Telegram transport', () => {
     );
   });
 
+  it.each(['inbox', 'outbox'] as const)(
+    'invalidates topic metadata for discussion %s receipts',
+    (direction) => {
+      return Effect.runPromise(
+        Effect.scoped(
+          providePlatform(
+            Effect.gen(function* () {
+              const events = yield* PubSub.sliding<MtprotoClientEvent>(8);
+              const client = clientDouble({ events: Stream.fromPubSub(events) });
+              const target = yield* createWebTelegramTransport(makeMemoryCacheStore(), {
+                createClient: () => Effect.succeed(client),
+              });
+              yield* target.connect({ apiId: 1, apiHash: 'hash' });
+              const received = yield* target.updates.pipe(
+                Stream.runHead,
+                Effect.forkChild({ startImmediately: true }),
+              );
+              const args = { channelId: 202n, topMsgId: 10, readMaxId: 110 };
+              yield* PubSub.publish(
+                events,
+                updateEvent(
+                  direction === 'inbox'
+                    ? Api.UpdateReadChannelDiscussionInbox(args)
+                    : Api.UpdateReadChannelDiscussionOutbox(args),
+                ),
+              );
+              const batch = yield* Fiber.join(received);
+              expect(batch).toMatchObject({
+                _tag: 'Some',
+                value: {
+                  updates: [{ type: 'forum-topics-invalidated', peerId: 'c:202', read: true }],
+                },
+              });
+            }),
+          ),
+        ),
+      );
+    },
+  );
+
   it('publishes MTProto updates through its bounded update stream', () => {
     return Effect.runPromise(
       Effect.scoped(
@@ -2196,4 +2557,154 @@ it.each([
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it('keeps a saved source on short live updates addressed to self', () =>
+  Effect.runPromise(
+    Effect.scoped(
+      providePlatform(
+        Effect.gen(function* () {
+          const events = yield* PubSub.sliding<MtprotoClientEvent>(8);
+          const client = clientDouble({
+            events: Stream.fromPubSub(events),
+            getMe: Effect.succeed(Api.User({ id: 991n, self: true, firstName: 'Self' })),
+          });
+          const target = yield* createWebTelegramTransport(makeMemoryCacheStore(), {
+            createClient: () => Effect.succeed(client),
+          });
+          yield* target.connect({ apiId: 1, apiHash: 'hash' });
+          yield* target.getAuthorizedAccountId!();
+          const received = yield* target.updates.pipe(
+            Stream.runHead,
+            Effect.forkChild({ startImmediately: true }),
+          );
+          yield* PubSub.publish(
+            events,
+            updateEvent(
+              Api.UpdateShortMessage({
+                id: 80,
+                userId: 991n,
+                out: true,
+                message: 'Saved source',
+                pts: 1,
+                ptsCount: 1,
+                date: 10,
+                fwdFrom: createTl('messageFwdHeader', {
+                  date: 9,
+                  savedFromPeer: Api.PeerChannel({ channelId: 202n }),
+                  savedFromMsgId: 7,
+                }),
+              }),
+            ),
+          );
+          const batch = yield* Fiber.join(received);
+          expect(batch).toMatchObject({
+            _tag: 'Some',
+            value: {
+              updates: [
+                {
+                  type: 'new-message',
+                  message: { peerId: 'u:991', senderId: 'u:991', savedPeerId: 'c:202' },
+                },
+              ],
+            },
+          });
+        }),
+      ),
+    ),
+  ));
+
+it('searches migrated groups through the old peer while retaining filters and original message IDs', () => {
+  const requests: unknown[] = [];
+  const old = createTl('chat', {
+    id: 303n,
+    title: 'Team',
+    photo: Api.ChatPhotoEmpty({}),
+    participantsCount: 1,
+    date: 1,
+    version: 1,
+  });
+  const channel = createTl('channel', {
+    id: 202n,
+    accessHash: 5n,
+    title: 'Team',
+    photo: Api.ChatPhotoEmpty({}),
+    megagroup: true as const,
+    date: 1,
+  });
+  const invoke = (request: unknown) => {
+    requests.push(request);
+    if (Api.channels.GetFullChannel.is(request))
+      return Effect.succeed(
+        createTl('messages.chatFull', {
+          fullChat: createTl('channelFull', {
+            id: 202n,
+            about: '',
+            migratedFromChatId: 303n,
+            migratedFromMaxId: 80,
+          }),
+          chats: [old, channel],
+          users: [],
+        }),
+      );
+    if (Api.messages.Search.is(request))
+      return Effect.succeed(
+        Api.messages.Messages({
+          topics: [],
+          users: [],
+          chats: [old, channel],
+          messages: Api.InputPeerChat.is(request.peer)
+            ? [
+                Api.Message({
+                  id: 70,
+                  peerId: Api.PeerChat({ chatId: 303n }),
+                  date: 1,
+                  message: 'Earlier photo',
+                }),
+              ]
+            : [],
+        }),
+      );
+    if (Api.messages.GetSearchCounters.is(request))
+      return Effect.succeed(
+        request.filters.map((filter) =>
+          createTl('messages.searchCounter', {
+            filter,
+            count: Api.InputPeerChat.is(request.peer) ? 2 : 3,
+          }),
+        ),
+      );
+    return Effect.fail(createMtprotoError('protocol', 'Unexpected migration test RPC'));
+  };
+  return Effect.runPromise(
+    withTransport(
+      (transport) =>
+        Effect.gen(function* () {
+          yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+          const peer = { id: 'c:202', kind: 'channel' as const, accessHash: '5' };
+          const page = yield* transport.searchMessages('Earlier', peer, 50, undefined, {
+            topicId: 1,
+            kind: 'photos',
+            minDate: 1,
+          });
+          expect(page.messages[0]).toMatchObject({ id: 70, peerId: 'g:303' });
+          const searches = requests.filter((request) => Api.messages.Search.is(request));
+          expect(searches).toHaveLength(2);
+          expect(searches[0]).toMatchObject({ peer: { channelId: 202n }, topMsgId: 1 });
+          expect(searches[1]).toMatchObject({
+            peer: { chatId: 303n },
+            q: 'Earlier',
+            minDate: 1,
+            filter: { _: 'inputMessagesFilterPhotos' },
+          });
+          expect(searches[1]).not.toHaveProperty('topMsgId');
+          const counts = yield* transport.getSharedMediaCounts(peer);
+          expect(counts.photos).toBe(5);
+          expect(
+            requests.filter((request) => Api.channels.GetFullChannel.is(request)),
+          ).toHaveLength(1);
+        }),
+      () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+    ),
+  );
 });

@@ -431,7 +431,15 @@ export function createConversationViewport(options: ConversationViewportOptions)
       dispatch({ type: 'history-target-opened' });
     },
     reconcileLayout: () => {
-      dispatch({ type: 'geometry-changed' });
+      // Native textarea edits may briefly shrink field-sizing content and clamp
+      // scrollTop before the input handler runs. This is an explicit composer
+      // layout change, not a user scroll; retain the existing reading mode.
+      geometryDirty = true;
+      source.send({
+        type: 'Viewport',
+        event: { type: 'geometry-changed' },
+        scroller: options.scroller(),
+      });
     },
     preserveReadingPosition: (scroller: HTMLDivElement) => {
       dispatch({ type: 'reading-anchor-requested' }, scroller);

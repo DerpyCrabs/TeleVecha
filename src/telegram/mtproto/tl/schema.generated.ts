@@ -11674,6 +11674,129 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     fields: [],
   },
   {
+    id: 2432722695,
+    name: 'channels.createChannel',
+    typeName: 'channels.CreateChannel',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'broadcast',
+        wireName: 'broadcast',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'megagroup',
+        wireName: 'megagroup',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'forImport',
+        wireName: 'for_import',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 3,
+        },
+      },
+      {
+        name: 'forum',
+        wireName: 'forum',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 5,
+        },
+      },
+      {
+        name: 'title',
+        wireName: 'title',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'about',
+        wireName: 'about',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'geoPoint',
+        wireName: 'geo_point',
+        type: {
+          kind: 'object',
+          name: 'InputGeoPoint',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'address',
+        wireName: 'address',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'ttlPeriod',
+        wireName: 'ttl_period',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 4,
+        },
+      },
+    ],
+  },
+  {
     id: 3222347747,
     name: 'channels.deleteChannel',
     typeName: 'channels.DeleteChannel',
@@ -11725,6 +11848,230 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
             name: 'int',
           },
           bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 2593697128,
+    name: 'channels.editAdmin',
+    typeName: 'channels.EditAdmin',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+      {
+        name: 'userId',
+        wireName: 'user_id',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'adminRights',
+        wireName: 'admin_rights',
+        type: {
+          kind: 'object',
+          name: 'ChatAdminRights',
+          bare: false,
+        },
+      },
+      {
+        name: 'rank',
+        wireName: 'rank',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+    ],
+  },
+  {
+    id: 2531708289,
+    name: 'channels.editBanned',
+    typeName: 'channels.EditBanned',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+      {
+        name: 'participant',
+        wireName: 'participant',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'bannedRights',
+        wireName: 'banned_rights',
+        type: {
+          kind: 'object',
+          name: 'ChatBannedRights',
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 1450044624,
+    name: 'channels.editTitle',
+    typeName: 'channels.EditTitle',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+      {
+        name: 'title',
+        wireName: 'title',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
+    id: 870184064,
+    name: 'channels.getAdminLog',
+    typeName: 'channels.GetAdminLog',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'channels.AdminLogResults',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+      {
+        name: 'q',
+        wireName: 'q',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'eventsFilter',
+        wireName: 'events_filter',
+        type: {
+          kind: 'object',
+          name: 'ChannelAdminLogEventsFilter',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'admins',
+        wireName: 'admins',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'object',
+            name: 'InputUser',
+            bare: false,
+          },
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'maxId',
+        wireName: 'max_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+      {
+        name: 'minId',
+        wireName: 'min_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
         },
       },
     ],
@@ -11894,6 +12241,41 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         type: {
           kind: 'primitive',
           name: 'long',
+        },
+      },
+    ],
+  },
+  {
+    id: 3387112788,
+    name: 'channels.inviteToChannel',
+    typeName: 'channels.InviteToChannel',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.InvitedUsers',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+      {
+        name: 'users',
+        wireName: 'users',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'object',
+            name: 'InputUser',
+            bare: false,
+          },
+          bare: false,
         },
       },
     ],
@@ -12091,6 +12473,133 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
       bare: false,
     },
     fields: [],
+  },
+  {
+    id: 1073174324,
+    name: 'channels.toggleForum',
+    typeName: 'channels.ToggleForum',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+      {
+        name: 'enabled',
+        wireName: 'enabled',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
+        },
+      },
+      {
+        name: 'tabs',
+        wireName: 'tabs',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
+        },
+      },
+    ],
+  },
+  {
+    id: 3938171212,
+    name: 'channels.togglePreHistoryHidden',
+    typeName: 'channels.TogglePreHistoryHidden',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+      {
+        name: 'enabled',
+        wireName: 'enabled',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
+        },
+      },
+    ],
+  },
+  {
+    id: 3990134512,
+    name: 'channels.toggleSlowMode',
+    typeName: 'channels.ToggleSlowMode',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+      {
+        name: 'seconds',
+        wireName: 'seconds',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
+    id: 890549214,
+    name: 'channels.updateUsername',
+    typeName: 'channels.UpdateUsername',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'channel',
+        wireName: 'channel',
+        type: {
+          kind: 'object',
+          name: 'InputChannel',
+          bare: false,
+        },
+      },
+      {
+        name: 'username',
+        wireName: 'username',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
   },
   {
     id: 1103884886,
@@ -13946,6 +14455,99 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 1103171583,
+    name: 'chatlists.checkChatlistInvite',
+    typeName: 'chatlists.CheckChatlistInvite',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'chatlists.ChatlistInvite',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'slug',
+        wireName: 'slug',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
+    id: 1906072670,
+    name: 'chatlists.deleteExportedInvite',
+    typeName: 'chatlists.DeleteExportedInvite',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'chatlist',
+        wireName: 'chatlist',
+        type: {
+          kind: 'object',
+          name: 'InputChatlist',
+          bare: false,
+        },
+      },
+      {
+        name: 'slug',
+        wireName: 'slug',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
+    id: 2222081934,
+    name: 'chatlists.exportChatlistInvite',
+    typeName: 'chatlists.ExportChatlistInvite',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'chatlists.ExportedChatlistInvite',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'chatlist',
+        wireName: 'chatlist',
+        type: {
+          kind: 'object',
+          name: 'InputChatlist',
+          bare: false,
+        },
+      },
+      {
+        name: 'title',
+        wireName: 'title',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'peers',
+        wireName: 'peers',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'object',
+            name: 'InputPeer',
+            bare: false,
+          },
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
     id: 283567014,
     name: 'chatlists.exportedChatlistInvite',
     typeName: 'chatlists.ExportedChatlistInvite',
@@ -14021,6 +14623,119 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
           item: {
             kind: 'object',
             name: 'User',
+            bare: false,
+          },
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 2302776609,
+    name: 'chatlists.getChatlistUpdates',
+    typeName: 'chatlists.GetChatlistUpdates',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'chatlists.ChatlistUpdates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'chatlist',
+        wireName: 'chatlist',
+        type: {
+          kind: 'object',
+          name: 'InputChatlist',
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 3456359043,
+    name: 'chatlists.getExportedInvites',
+    typeName: 'chatlists.GetExportedInvites',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'chatlists.ExportedInvites',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'chatlist',
+        wireName: 'chatlist',
+        type: {
+          kind: 'object',
+          name: 'InputChatlist',
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 2796675994,
+    name: 'chatlists.joinChatlistInvite',
+    typeName: 'chatlists.JoinChatlistInvite',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'slug',
+        wireName: 'slug',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'peers',
+        wireName: 'peers',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'object',
+            name: 'InputPeer',
+            bare: false,
+          },
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 3767138549,
+    name: 'chatlists.joinChatlistUpdates',
+    typeName: 'chatlists.JoinChatlistUpdates',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'chatlist',
+        wireName: 'chatlist',
+        type: {
+          kind: 'object',
+          name: 'InputChatlist',
+          bare: false,
+        },
+      },
+      {
+        name: 'peers',
+        wireName: 'peers',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'object',
+            name: 'InputPeer',
             bare: false,
           },
           bare: false,
@@ -22399,6 +23114,27 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
       bare: false,
     },
     fields: [],
+  },
+  {
+    id: 1642330196,
+    name: 'help.getAppConfig',
+    typeName: 'help.GetAppConfig',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'help.AppConfig',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
   },
   {
     id: 3304659051,
@@ -42433,6 +43169,44 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 3418804487,
+    name: 'messages.addChatUser',
+    typeName: 'messages.AddChatUser',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.InvitedUsers',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'chatId',
+        wireName: 'chat_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+      {
+        name: 'userId',
+        wireName: 'user_id',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'fwdLimit',
+        wireName: 'fwd_limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
     id: 4019011180,
     name: 'messages.affectedFoundMessages',
     typeName: 'messages.AffectedFoundMessages',
@@ -43405,6 +44179,27 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 1051570619,
+    name: 'messages.checkChatInvite',
+    typeName: 'messages.CheckChatInvite',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'ChatInvite',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
     id: 2723014423,
     name: 'messages.checkedHistoryImportPeer',
     typeName: 'messages.CheckedHistoryImportPeer',
@@ -43492,6 +44287,157 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 2463030740,
+    name: 'messages.createChat',
+    typeName: 'messages.CreateChat',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.InvitedUsers',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'users',
+        wireName: 'users',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'object',
+            name: 'InputUser',
+            bare: false,
+          },
+          bare: false,
+        },
+      },
+      {
+        name: 'title',
+        wireName: 'title',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'ttlPeriod',
+        wireName: 'ttl_period',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+    ],
+  },
+  {
+    id: 798540757,
+    name: 'messages.createForumTopic',
+    typeName: 'messages.CreateForumTopic',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'titleMissing',
+        wireName: 'title_missing',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 4,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'title',
+        wireName: 'title',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'iconColor',
+        wireName: 'icon_color',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'iconEmojiId',
+        wireName: 'icon_emoji_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+        flag: {
+          field: 'flags',
+          bit: 3,
+        },
+      },
+      {
+        name: 'randomId',
+        wireName: 'random_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+      {
+        name: 'sendAs',
+        wireName: 'send_as',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+    ],
+  },
+  {
     id: 1540419152,
     name: 'messages.deleteChat',
     typeName: 'messages.DeleteChat',
@@ -43558,6 +44504,35 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
           kind: 'object',
           name: 'InputUser',
           bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 3563365419,
+    name: 'messages.deleteExportedChatInvite',
+    typeName: 'messages.DeleteExportedChatInvite',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'link',
+        wireName: 'link',
+        type: {
+          kind: 'primitive',
+          name: 'string',
         },
       },
     ],
@@ -43691,6 +44666,36 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
             name: 'int',
           },
           bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 3531697936,
+    name: 'messages.deleteTopicHistory',
+    typeName: 'messages.DeleteTopicHistory',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.AffectedHistory',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'topMsgId',
+        wireName: 'top_msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
         },
       },
     ],
@@ -44073,6 +45078,318 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 3740665751,
+    name: 'messages.editChatAbout',
+    typeName: 'messages.EditChatAbout',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'about',
+        wireName: 'about',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
+    id: 2824589762,
+    name: 'messages.editChatAdmin',
+    typeName: 'messages.EditChatAdmin',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'chatId',
+        wireName: 'chat_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+      {
+        name: 'userId',
+        wireName: 'user_id',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'isAdmin',
+        wireName: 'is_admin',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
+        },
+      },
+    ],
+  },
+  {
+    id: 2777049921,
+    name: 'messages.editChatDefaultBannedRights',
+    typeName: 'messages.EditChatDefaultBannedRights',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'bannedRights',
+        wireName: 'banned_rights',
+        type: {
+          kind: 'object',
+          name: 'ChatBannedRights',
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 1937260541,
+    name: 'messages.editChatTitle',
+    typeName: 'messages.EditChatTitle',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'chatId',
+        wireName: 'chat_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+      {
+        name: 'title',
+        wireName: 'title',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
+    id: 3184144245,
+    name: 'messages.editExportedChatInvite',
+    typeName: 'messages.EditExportedChatInvite',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.ExportedChatInvite',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'revoked',
+        wireName: 'revoked',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'link',
+        wireName: 'link',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+      {
+        name: 'expireDate',
+        wireName: 'expire_date',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'usageLimit',
+        wireName: 'usage_limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'requestNeeded',
+        wireName: 'request_needed',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
+        },
+        flag: {
+          field: 'flags',
+          bit: 3,
+        },
+      },
+      {
+        name: 'title',
+        wireName: 'title',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 4,
+        },
+      },
+    ],
+  },
+  {
+    id: 3469480244,
+    name: 'messages.editForumTopic',
+    typeName: 'messages.EditForumTopic',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'topicId',
+        wireName: 'topic_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'title',
+        wireName: 'title',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'iconEmojiId',
+        wireName: 'icon_emoji_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'closed',
+        wireName: 'closed',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'hidden',
+        wireName: 'hidden',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
+        },
+        flag: {
+          field: 'flags',
+          bit: 3,
+        },
+      },
+    ],
+  },
+  {
     id: 2970019436,
     name: 'messages.editMessage',
     typeName: 'messages.EditMessage',
@@ -44403,6 +45720,110 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
       bare: false,
     },
     fields: [],
+  },
+  {
+    id: 2757090960,
+    name: 'messages.exportChatInvite',
+    typeName: 'messages.ExportChatInvite',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'ExportedChatInvite',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'legacyRevokePermanent',
+        wireName: 'legacy_revoke_permanent',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'requestNeeded',
+        wireName: 'request_needed',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 3,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'expireDate',
+        wireName: 'expire_date',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'usageLimit',
+        wireName: 'usage_limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'title',
+        wireName: 'title',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 4,
+        },
+      },
+      {
+        name: 'subscriptionPricing',
+        wireName: 'subscription_pricing',
+        type: {
+          kind: 'object',
+          name: 'StarsSubscriptionPricing',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 5,
+        },
+      },
+    ],
   },
   {
     id: 410107472,
@@ -45351,6 +46772,110 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 3741637966,
+    name: 'messages.getChatInviteImporters',
+    typeName: 'messages.GetChatInviteImporters',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.ChatInviteImporters',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'requested',
+        wireName: 'requested',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'subscriptionExpired',
+        wireName: 'subscription_expired',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 3,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'link',
+        wireName: 'link',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'q',
+        wireName: 'q',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'offsetDate',
+        wireName: 'offset_date',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'offsetUser',
+        wireName: 'offset_user',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
     id: 1240027791,
     name: 'messages.getChats',
     typeName: 'messages.GetChats',
@@ -45403,6 +46928,39 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         },
       },
     ],
+  },
+  {
+    id: 3187225640,
+    name: 'messages.getDefaultTagReactions',
+    typeName: 'messages.GetDefaultTagReactions',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.Reactions',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
+    id: 4023684233,
+    name: 'messages.getDialogFilters',
+    typeName: 'messages.GetDialogFilters',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.DialogFilters',
+      bare: false,
+    },
+    fields: [],
   },
   {
     id: 2700397391,
@@ -45522,6 +47080,90 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 2729812982,
+    name: 'messages.getExportedChatInvites',
+    typeName: 'messages.GetExportedChatInvites',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.ExportedChatInvites',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'revoked',
+        wireName: 'revoked',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 3,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'adminId',
+        wireName: 'admin_id',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+      {
+        name: 'offsetDate',
+        wireName: 'offset_date',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'offsetLink',
+        wireName: 'offset_link',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 2,
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
     id: 82946729,
     name: 'messages.getFavedStickers',
     typeName: 'messages.GetFavedStickers',
@@ -45538,6 +47180,115 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         type: {
           kind: 'primitive',
           name: 'long',
+        },
+      },
+    ],
+  },
+  {
+    id: 1000635391,
+    name: 'messages.getForumTopics',
+    typeName: 'messages.GetForumTopics',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.ForumTopics',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'q',
+        wireName: 'q',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'offsetDate',
+        wireName: 'offset_date',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'offsetId',
+        wireName: 'offset_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'offsetTopic',
+        wireName: 'offset_topic',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
+  },
+  {
+    id: 2936687112,
+    name: 'messages.getForumTopicsByID',
+    typeName: 'messages.GetForumTopicsByID',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.ForumTopics',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'topics',
+        wireName: 'topics',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'primitive',
+            name: 'int',
+          },
+          bare: false,
         },
       },
     ],
@@ -45920,6 +47671,18 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 3594360032,
+    name: 'messages.getPinnedSavedDialogs',
+    typeName: 'messages.GetPinnedSavedDialogs',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.SavedDialogs',
+      bare: false,
+    },
+    fields: [],
+  },
+  {
     id: 3986940731,
     name: 'messages.getPollResults',
     typeName: 'messages.GetPollResults',
@@ -46157,6 +47920,94 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 512883865,
+    name: 'messages.getSavedDialogs',
+    typeName: 'messages.GetSavedDialogs',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.SavedDialogs',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'excludePinned',
+        wireName: 'exclude_pinned',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'parentPeer',
+        wireName: 'parent_peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'offsetDate',
+        wireName: 'offset_date',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'offsetId',
+        wireName: 'offset_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'offsetPeer',
+        wireName: 'offset_peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
     id: 1559270965,
     name: 'messages.getSavedGifs',
     typeName: 'messages.GetSavedGifs',
@@ -46167,6 +48018,149 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
       bare: false,
     },
     fields: [
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
+    id: 2576003081,
+    name: 'messages.getSavedHistory',
+    typeName: 'messages.GetSavedHistory',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.Messages',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'parentPeer',
+        wireName: 'parent_peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'offsetId',
+        wireName: 'offset_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'offsetDate',
+        wireName: 'offset_date',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'addOffset',
+        wireName: 'add_offset',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'limit',
+        wireName: 'limit',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'maxId',
+        wireName: 'max_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'minId',
+        wireName: 'min_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'long',
+        },
+      },
+    ],
+  },
+  {
+    id: 909631579,
+    name: 'messages.getSavedReactionTags',
+    typeName: 'messages.GetSavedReactionTags',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.SavedReactionTags',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
       {
         name: 'hash',
         wireName: 'hash',
@@ -46460,6 +48454,113 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 3766875370,
+    name: 'messages.hideAllChatJoinRequests',
+    typeName: 'messages.HideAllChatJoinRequests',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'approved',
+        wireName: 'approved',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'link',
+        wireName: 'link',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+    ],
+  },
+  {
+    id: 2145904661,
+    name: 'messages.hideChatJoinRequest',
+    typeName: 'messages.HideChatJoinRequest',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'approved',
+        wireName: 'approved',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'userId',
+        wireName: 'user_id',
+        type: {
+          kind: 'object',
+          name: 'InputUser',
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
     id: 2587622809,
     name: 'messages.highScores',
     typeName: 'messages.HighScores',
@@ -46578,6 +48679,27 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 3734061934,
+    name: 'messages.importChatInvite',
+    typeName: 'messages.ImportChatInvite',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'messages.ChatInviteJoinResult',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'hash',
+        wireName: 'hash',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+      },
+    ],
+  },
+  {
     id: 2837970629,
     name: 'messages.inactiveChats',
     typeName: 'messages.InactiveChats',
@@ -46688,6 +48810,61 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
             name: 'MissingInvitee',
             bare: false,
           },
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 2354054904,
+    name: 'messages.markDialogUnread',
+    typeName: 'messages.MarkDialogUnread',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'unread',
+        wireName: 'unread',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'parentPeer',
+        wireName: 'parent_peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 1,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputDialogPeer',
           bare: false,
         },
       },
@@ -47073,6 +49250,27 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
             bare: false,
           },
           bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 2726777625,
+    name: 'messages.migrateChat',
+    typeName: 'messages.MigrateChat',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'chatId',
+        wireName: 'chat_id',
+        type: {
+          kind: 'primitive',
+          name: 'long',
         },
       },
     ],
@@ -47504,6 +49702,43 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
       bare: false,
     },
     fields: [],
+  },
+  {
+    id: 4147227124,
+    name: 'messages.readDiscussion',
+    typeName: 'messages.ReadDiscussion',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'msgId',
+        wireName: 'msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'readMaxId',
+        wireName: 'read_max_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+    ],
   },
   {
     id: 238054714,
@@ -50763,6 +52998,99 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 2986875445,
+    name: 'messages.toggleNoForwards',
+    typeName: 'messages.ToggleNoForwards',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'enabled',
+        wireName: 'enabled',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
+        },
+      },
+      {
+        name: 'requestMsgId',
+        wireName: 'request_msg_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+    ],
+  },
+  {
+    id: 2894183390,
+    name: 'messages.toggleSavedDialogPin',
+    typeName: 'messages.ToggleSavedDialogPin',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'pinned',
+        wireName: 'pinned',
+        type: {
+          kind: 'primitive',
+          name: 'true',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputDialogPeer',
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
     id: 3485063511,
     name: 'messages.transcribedAudio',
     typeName: 'messages.TranscribedAudio',
@@ -50910,6 +53238,110 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
     ],
   },
   {
+    id: 450142282,
+    name: 'messages.updateDialogFilter',
+    typeName: 'messages.UpdateDialogFilter',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'id',
+        wireName: 'id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'filter',
+        wireName: 'filter',
+        type: {
+          kind: 'object',
+          name: 'DialogFilter',
+          bare: false,
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
+        },
+      },
+    ],
+  },
+  {
+    id: 3311649252,
+    name: 'messages.updateDialogFiltersOrder',
+    typeName: 'messages.UpdateDialogFiltersOrder',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'order',
+        wireName: 'order',
+        type: {
+          kind: 'vector',
+          item: {
+            kind: 'primitive',
+            name: 'int',
+          },
+          bare: false,
+        },
+      },
+    ],
+  },
+  {
+    id: 392032849,
+    name: 'messages.updatePinnedForumTopic',
+    typeName: 'messages.UpdatePinnedForumTopic',
+    kind: 'method',
+    result: {
+      kind: 'object',
+      name: 'Updates',
+      bare: false,
+    },
+    fields: [
+      {
+        name: 'peer',
+        wireName: 'peer',
+        type: {
+          kind: 'object',
+          name: 'InputPeer',
+          bare: false,
+        },
+      },
+      {
+        name: 'topicId',
+        wireName: 'topic_id',
+        type: {
+          kind: 'primitive',
+          name: 'int',
+        },
+      },
+      {
+        name: 'pinned',
+        wireName: 'pinned',
+        type: {
+          kind: 'primitive',
+          name: 'Bool',
+        },
+      },
+    ],
+  },
+  {
     id: 3534419948,
     name: 'messages.updatePinnedMessage',
     typeName: 'messages.UpdatePinnedMessage',
@@ -50980,6 +53412,48 @@ export const RAW_TL_DESCRIPTORS: readonly TlDescriptor[] = [
         type: {
           kind: 'primitive',
           name: 'int',
+        },
+      },
+    ],
+  },
+  {
+    id: 1613331948,
+    name: 'messages.updateSavedReactionTag',
+    typeName: 'messages.UpdateSavedReactionTag',
+    kind: 'method',
+    result: {
+      kind: 'primitive',
+      name: 'Bool',
+    },
+    fields: [
+      {
+        name: 'flags',
+        wireName: 'flags',
+        type: {
+          kind: 'primitive',
+          name: '#',
+        },
+        flagIndicator: true,
+      },
+      {
+        name: 'reaction',
+        wireName: 'reaction',
+        type: {
+          kind: 'object',
+          name: 'Reaction',
+          bare: false,
+        },
+      },
+      {
+        name: 'title',
+        wireName: 'title',
+        type: {
+          kind: 'primitive',
+          name: 'string',
+        },
+        flag: {
+          field: 'flags',
+          bit: 0,
         },
       },
     ],

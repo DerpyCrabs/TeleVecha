@@ -10,6 +10,7 @@ type DirectorySource = Pick<
   | 'searchPeers'
   | 'addPeer'
   | 'getUserDetails'
+  | 'setUnreadMark'
   | 'setMuted'
   | 'setBlocked'
   | 'setPinnedDialog'
@@ -32,8 +33,11 @@ export function createChatDirectory(
   };
   return {
     search: (query: string) => source.searchPeers(query),
-    select(peerId: string) {
-      openGeneration += 1;
+    async select(peerId: string) {
+      const generation = ++openGeneration;
+      if (dialog(peerId).unreadMark)
+        await runEffect(source.setUnreadMark(dialog(peerId).peer, false));
+      if (generation !== openGeneration) return false;
       return selectPeer(peerId);
     },
     async open(result: TelegramPeerSearchResult) {
@@ -45,6 +49,8 @@ export function createChatDirectory(
     cachedDetails: (peerId: string) =>
       dialogs().find(({ peer }) => peer.id === peerId)?.userDetails,
     details: (peerId: string) => source.getUserDetails(dialog(peerId).peer),
+    setUnreadMark: (peerId: string, unread: boolean) =>
+      runEffect(source.setUnreadMark(dialog(peerId).peer, unread)),
     setMuted: (peerId: string, muted: boolean) =>
       runEffect(source.setMuted(dialog(peerId).peer, muted)),
     setBlocked: (peerId: string, blocked: boolean) =>

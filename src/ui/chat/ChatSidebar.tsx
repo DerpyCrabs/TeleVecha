@@ -1,3 +1,16 @@
+import Bookmark from '@effectweb/lucide/icons/bookmark';
+import { CreateChatDialog } from '../groups/CreateChatDialog';
+import type { ChatCreationApi } from '../../telegram/chatManagement';
+import SquarePen from '@effectweb/lucide/icons/square-pen';
+import {
+  folderContains,
+  type ChatFoldersApi,
+  type TelegramChatFolder,
+} from '../../telegram/chatFolders';
+import { folderSubscription } from '../folders/folderSubscription';
+import { FolderSettings } from '../folders/FolderSettings';
+import { Dialog } from '../shared/Dialog';
+import FolderCog from '@effectweb/lucide/icons/folder-cog';
 import { list, component, domBinding, sequence, view } from 'effectweb';
 import { cachedLoad } from '../shared/cachedLoad';
 import { Effect } from 'effect';
@@ -10,6 +23,7 @@ import ArchiveRestore from '@effectweb/lucide/icons/archive-restore';
 import ArrowLeft from '@effectweb/lucide/icons/arrow-left';
 import Ban from '@effectweb/lucide/icons/ban';
 import BellOff from '@effectweb/lucide/icons/bell-off';
+import Mail from '@effectweb/lucide/icons/mail';
 import Check from '@effectweb/lucide/icons/check';
 import CheckCheck from '@effectweb/lucide/icons/check-check';
 import Pin from '@effectweb/lucide/icons/pin';
@@ -26,18 +40,19 @@ import { describeUnreadCount, formatUnreadCount, normalizeUnreadCount } from './
 const commandPeers = 'peers';
 const commandContextUser = 'context-user';
 
-type ChatFilter = 'all' | 'unread' | 'groups' | 'archived';
+type ChatFilter = 'all' | 'unread' | 'groups' | 'archived' | `folder:${number}`;
 const CHAT_ROW_HEIGHT = 64;
 const CHAT_LIST_OVERSCAN = 8;
 const CHAT_LIST_VIRTUALIZATION_THRESHOLD = 120;
 interface UnreadBadgeProps {
   count: number;
+  marked?: boolean | undefined;
   muted?: boolean | undefined;
   compact?: boolean | undefined;
 }
 const UnreadBadge = view<UnreadBadgeProps, never>((props, _send) => {
   const count = () => normalizeUnreadCount(props.count);
-  return count() > 0 ? (
+  return count() > 0 || props.marked ? (
     <span
       class="chat-unread-badge grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-accent px-1.5 text-[10px] leading-none font-bold text-white"
       classList={{
@@ -49,9 +64,9 @@ const UnreadBadge = view<UnreadBadgeProps, never>((props, _send) => {
         'bg-[#626873]': Boolean(props.muted),
       }}
       aria-hidden="true"
-      title={describeUnreadCount(count())}
+      title={count() > 0 ? describeUnreadCount(count()) : 'Marked as unread'}
     >
-      {formatUnreadCount(count())}
+      {count() > 0 ? formatUnreadCount(count()) : '•'}
     </span>
   ) : null;
 });
@@ -59,6 +74,9 @@ const MutedIcon = view<Record<string, never>, never>((_props, _send) => {
   return <BellOff size={12} class="chat-muted-icon size-3 shrink-0" aria-label="Muted" />;
 });
 interface ChatSidebarProps {
+  foldersApi: ChatFoldersApi;
+  creationApi: ChatCreationApi;
+  foldersReady: boolean;
   chats: ChatSummary[];
   dialogs: TelegramDialog[];
   activeChatId: string;
@@ -68,9 +86,13 @@ interface ChatSidebarProps {
   directory: ChatDirectory;
   requestDelete: (peerId: string) => void;
   openSettings: () => void;
+  openSaved: () => void;
 }
 type ContextUser = NonNullable<ReturnType<ChatDirectory['cachedDetails']>>;
 type ChatSidebarState = {
+  folders: TelegramChatFolder[];
+  foldersOpen: boolean;
+  createOpen: boolean;
   peers: TelegramPeerSearchResult[];
   peersLoading: boolean;
   peersError: boolean;
@@ -85,6 +107,10 @@ type ChatSidebarState = {
 };
 type ChatSidebarModel = ChatSidebarState & { readonly props: ChatSidebarProps };
 type ChatSidebarMessage =
+  | { type: 'CreateOpen'; open: boolean }
+  | { type: 'LoadFolders' }
+  | { type: 'FoldersLoaded'; folders: TelegramChatFolder[] }
+  | { type: 'FoldersOpen'; open: boolean }
   | { type: 'RetrySearch' }
   | { type: 'Peers'; values: TelegramPeerSearchResult[]; error: boolean }
   | { type: 'ContextUser'; value: ContextUser | undefined }
@@ -233,6 +259,9 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
   {
     init: () => ({
       peers: [],
+      folders: [],
+      foldersOpen: false,
+      createOpen: false,
       peersLoading: false,
       peersError: false,
       searchKey: '',
@@ -252,6 +281,41 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
       }),
     update: (model, message) => {
       switch (message.type) {
+        case 'LoadFolders':
+          return {
+            model,
+            commands: [
+              {
+                key: ['sidebar', 'folders'],
+                policy: 'replace',
+                effect: model.props.foldersApi
+                  .getChatFolders()
+                  .pipe(
+                    Effect.match({
+                      onSuccess: (folders) => ({ type: 'FoldersLoaded', folders }) as const,
+                      onFailure: () => ({ type: 'FoldersLoaded', folders: model.folders }) as const,
+                    }),
+                  ),
+              },
+            ],
+          };
+        case 'FoldersLoaded':
+          return {
+            model: {
+              ...model,
+              folders: message.folders,
+              filter:
+                model.filter.startsWith('folder:') &&
+                !message.folders.some((folder) => `folder:${folder.id}` === model.filter)
+                  ? 'all'
+                  : model.filter,
+            },
+          };
+        case 'CreateOpen':
+          return { model: { ...model, createOpen: message.open } };
+        case 'FoldersOpen':
+          return { model: { ...model, foldersOpen: message.open } };
+
         case 'RetrySearch':
           return refreshSidebar(model, true);
         case 'Peers':
@@ -297,21 +361,31 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
       archivedChats.reduce((total, chat) => total + normalizeUnreadCount(chat.unread), 0))();
     const archivedUnreadMuted = (() =>
       archivedUnreadCount > 0 && !archivedChats.some((chat) => chat.unread > 0 && !chat.muted))();
+    const selectedFolder = model.folders.find((folder) => `folder:${folder.id}` === model.filter);
     const filteredChats = (() => {
       const term = model.query.trim().toLocaleLowerCase();
       return props.chats.filter((chat) => {
         const matchesQuery =
           !term ||
           `${chat.title} ${chat.username ?? ''} ${chat.preview}`.toLocaleLowerCase().includes(term);
+        if (selectedFolder) {
+          const dialog = props.dialogs.find((dialog) => dialog.peer.id === chat.id);
+          return Boolean(matchesQuery && dialog && folderContains(selectedFolder, dialog));
+        }
         const matchesArchive = archiveOpen() ? Boolean(chat.archived) : !chat.archived;
         const matchesFilter =
           model.filter === 'all' ||
-          (model.filter === 'unread' && chat.unread > 0) ||
+          (model.filter === 'unread' && (chat.unread > 0 || chat.unreadMark)) ||
           (model.filter === 'groups' && chat.kind === 'group') ||
           model.filter === 'archived';
         return matchesQuery && matchesArchive && matchesFilter;
       });
-    })();
+    })().sort((left, right) => {
+      if (!selectedFolder) return 0;
+      const l = selectedFolder.pinned.findIndex((peer) => peer.id === left.id),
+        r = selectedFolder.pinned.findIndex((peer) => peer.id === right.id);
+      return (l < 0 ? Infinity : l) - (r < 0 ? Infinity : r);
+    });
     const visiblePeerResults = (() => {
       const localIds = new Set(filteredChats.map(({ id }) => id));
       return peerResults.filter(
@@ -351,6 +425,11 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
         tabIndex={props.layout.mobileOpen && props.layout.viewportWidth <= 650 ? -1 : undefined}
       >
         <header
+          use={folderSubscription(
+            props.foldersApi,
+            () => send({ type: 'LoadFolders' }),
+            props.foldersReady,
+          )}
           class="sidebar-header flex h-[3.6rem] items-center gap-3 px-4"
           classList={{
             hidden: compact() && !archiveOpen(),
@@ -385,7 +464,10 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
 
         <div
           class="chat-filters flex items-center gap-2 overflow-x-auto px-4 pb-3 text-xs font-medium text-muted"
-          classList={{ hidden: compact() }}
+          classList={{
+            hidden: compact() && !model.folders.length,
+            '!flex-col !px-0 !gap-0': compact(),
+          }}
           onWheel={scrollFilters}
         >
           {list(sequence(['all', 'unread', 'groups', 'archived'] as const), (value) => (
@@ -407,6 +489,31 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
                     : 'Archived'}
             </button>
           ))}
+          {list(idRows(model.folders), (folder) => (
+            <button
+              class="shrink-0 rounded-full px-3 py-1.5"
+              classList={{
+                'bg-[var(--accent-soft)] text-[var(--accent)]':
+                  model.filter === `folder:${folder.id}`,
+              }}
+              title={folder.title}
+              aria-label={folder.title}
+              aria-pressed={model.filter === `folder:${folder.id}`}
+              onClick={() => send({ type: 'Filter', value: `folder:${folder.id}` })}
+            >
+              {compact()
+                ? folder.emoticon || folder.title.slice(0, 2)
+                : `${folder.emoticon ?? ''} ${folder.title}`}
+            </button>
+          ))}
+          <button
+            class="icon-button shrink-0"
+            title="Edit chat folders"
+            aria-label="Edit chat folders"
+            onClick={() => send({ type: 'FoldersOpen', open: true })}
+          >
+            <FolderCog size={18} />
+          </button>
         </div>
 
         {compact() && model.filter === 'all' && archivedChats.length > 0 ? (
@@ -502,7 +609,14 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
                 loadCached={() => props.media.loadAvatar(chat.id, true)}
                 load={props.online ? () => props.media.loadAvatar(chat.id) : undefined}
               />
-              {compact() ? <UnreadBadge count={chat.unread} muted={chat.muted} compact /> : null}
+              {compact() ? (
+                <UnreadBadge
+                  count={chat.unread}
+                  marked={chat.unreadMark}
+                  muted={chat.muted}
+                  compact
+                />
+              ) : null}
               <span class="min-w-0 flex-1 text-left" classList={{ hidden: compact() }}>
                 <span class="flex items-baseline justify-between gap-3">
                   <span class="truncate text-[14px] font-semibold">{chat.title}</span>
@@ -544,7 +658,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
                       </span>
                     ) : null}
                     {chat.muted ? <MutedIcon /> : null}
-                    <UnreadBadge count={chat.unread} muted={chat.muted} />
+                    <UnreadBadge count={chat.unread} marked={chat.unreadMark} muted={chat.muted} />
                   </span>
                 </span>
               </span>
@@ -649,6 +763,28 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
                   >
                     <button
                       role="menuitem"
+                      disabled={!props.online}
+                      onClick={() => {
+                        const selected = chat();
+                        send({ type: 'ContextMenu', value: undefined });
+                        if (selected)
+                          runInBackground(
+                            props.directory.setUnreadMark(
+                              selected.id,
+                              !(selected.unread > 0 || selected.unreadMark),
+                            ),
+                          );
+                      }}
+                    >
+                      {chat()?.unread || chat()?.unreadMark ? (
+                        <CheckCheck size={16} />
+                      ) : (
+                        <Mail size={16} />
+                      )}
+                      {chat()?.unread || chat()?.unreadMark ? 'Mark as read' : 'Mark as unread'}
+                    </button>
+                    <button
+                      role="menuitem"
                       onClick={() => {
                         const selected = chat();
                         send({ type: 'ContextMenu', value: undefined });
@@ -724,10 +860,72 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
               })(model.contextMenu!)
             : null}
         </div>
+        {model.createOpen ? (
+          <CreateChatDialog
+            api={props.creationApi}
+            directory={props.directory}
+            dialogs={props.dialogs}
+            media={props.media}
+            online={props.online}
+            close={() => send({ type: 'CreateOpen', open: false })}
+          />
+        ) : null}
+        {model.foldersOpen ? (
+          <Dialog title="Chat Folders" onClose={() => send({ type: 'FoldersOpen', open: false })}>
+            <div class="scroll-area min-h-0 overflow-y-auto">
+              <FolderSettings
+                api={props.foldersApi}
+                online={props.online}
+                dialogs={props.dialogs}
+                media={props.media}
+              />
+            </div>
+          </Dialog>
+        ) : null}
+        {compact() ? (
+          <div class="sidebar-quick-actions flex shrink-0 flex-col py-2">
+            <button
+              class="icon-button shrink-0 self-center"
+              aria-label="Saved Messages"
+              title="Saved Messages"
+              onClick={props.openSaved}
+            >
+              <Bookmark size={20} />
+            </button>
+            <button
+              class="icon-button shrink-0 self-center"
+              aria-label="New message"
+              title="New message"
+              onClick={() => send({ type: 'CreateOpen', open: true })}
+            >
+              <SquarePen size={20} />
+            </button>
+          </div>
+        ) : null}
         <footer
-          class="sidebar-settings-footer shrink-0 border-t border-line px-3 py-[0.55rem]"
+          class="sidebar-settings-footer flex shrink-0 border-t border-line px-3 py-[0.55rem]"
           classList={{ '!px-0': compact() }}
         >
+          {!compact() ? (
+            <>
+              <button
+                class="icon-button shrink-0 self-center"
+                aria-label="Saved Messages"
+                title="Saved Messages"
+                onClick={props.openSaved}
+              >
+                <Bookmark size={20} />
+              </button>
+              <button
+                class="icon-button shrink-0 self-center"
+                aria-label="New message"
+                title="New message"
+                onClick={() => send({ type: 'CreateOpen', open: true })}
+              >
+                <SquarePen size={20} />
+              </button>
+            </>
+          ) : null}
           <button
             class="flex min-h-11 w-full items-center gap-[0.65rem] rounded-[0.55rem] border-0 bg-transparent px-[0.7rem] py-[0.6rem] text-left text-muted hover:bg-[var(--surface-hover)] hover:text-ink"
             classList={{ '!justify-center !rounded-none !px-0': compact() }}

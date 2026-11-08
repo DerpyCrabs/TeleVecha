@@ -213,3 +213,25 @@ it('reuses complete history for unrelated snapshot changes and invalidates pendi
   expect(present({ ...initialState, activePeerId: 'user:2' }, peer.id)).toEqual([]);
   expect(present(initialState, peer.id)).toEqual(initial);
 });
+
+it('uses the topic read boundary rather than the group boundary and refreshes cached checks', () => {
+  const present = createConversationPresenter();
+  const state = {
+    ...snapshot([
+      {
+        id: 5,
+        peerId: peer.id,
+        text: 'Topic message',
+        senderId: 'self',
+        date: 100,
+        outgoing: true,
+        topicId: 3,
+      },
+    ]),
+    activeTopicId: 3,
+    dialogs: [{ ...dialog, readOutboxMaxId: 100 }],
+  };
+  expect(present(state, peer.id, 4)[0]!.message.status).toBe('sent');
+  expect(present(state, peer.id, 5)[0]!.message.status).toBe('read');
+  expect(present(state, peer.id, 4)[0]!.message.status).toBe('sent');
+});

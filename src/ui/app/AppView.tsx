@@ -1,3 +1,13 @@
+import { EarlierGroupHistory } from '../groups/EarlierGroupHistory';
+import { SavedTagPicker } from '../saved/SavedTagPicker';
+import { SavedDialogs } from '../saved/SavedDialogs';
+import { ChatManagementDialog } from '../groups/ChatManagementDialog';
+import { InviteLinksDialog } from '../groups/InviteLinksDialog';
+import { JoinRequestsDialog } from '../groups/JoinRequestsDialog';
+import { ChatInviteDialog } from '../groups/ChatInviteDialog';
+import { ForumTopics } from '../forums/ForumTopics';
+import ArrowLeft from '@effectweb/lucide/icons/arrow-left';
+import { FolderSettings } from '../folders/FolderSettings';
 import { StickerPackManager } from '../composer/StickerPackManager';
 import { WebAppLaunchDialog } from '../bots/WebAppLaunchDialog';
 import { WebAppDialog } from '../bots/WebAppDialog';
@@ -301,6 +311,21 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             }}
             dialogs={snapshot.dialogs}
             activePeerId={activeChatId}
+            activeTopicId={model.activeTopic?.id}
+            activeTopicTitle={model.activeTopic?.title}
+            activeSavedPeer={model.activeSaved?.peer}
+            savedTagSearch={model.savedTagSearch}
+            activeSavedTitle={model.activeSaved?.title}
+            savedTags={
+              model.savedInfo?.peer.id === activeChatId
+                ? {
+                    api: engine,
+                    customEmoji: model.queries.customEmoji,
+                    selfId: activeChatId,
+                    premium: model.savedInfo.premium,
+                  }
+                : undefined
+            }
             results={model.queries.messageSearch}
             more={model.queries.moreMessages}
             refresh={model.queries.refreshMessages}
@@ -310,8 +335,31 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             }}
             close={() => setSearchOpen(false)}
           />
+        ) : model.savedSidebar && model.savedInfo ? (
+          <SavedDialogs
+            api={engine}
+            selfId={model.savedInfo.peer.id}
+            online={online}
+            media={mediaAssets}
+            selected={model.activeSaved?.peer.id}
+            select={model.selectSavedDialog}
+            back={model.closeSavedDialogs}
+          />
+        ) : model.forumSidebar && dialogForPeer(activeChatId)?.forum ? (
+          <ForumTopics
+            api={engine}
+            dialog={dialogForPeer(activeChatId)!}
+            online={online}
+            selected={model.activeTopic?.id}
+            select={model.selectForumTopic}
+            updateTopics={model.updateForumTopics}
+            back={model.closeForumTopics}
+          />
         ) : (
           <ChatSidebar
+            foldersApi={engine}
+            creationApi={engine}
+            foldersReady={snapshot.phase === 'ready' && snapshot.online}
             chats={visibleChats}
             activeChatId={activeChatId}
             online={online}
@@ -323,6 +371,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
               if (dialog) setDeleteChatTarget(dialog);
             }}
             openSettings={openSettings}
+            openSaved={model.openSavedMessages}
             dialogs={snapshot.dialogs}
           />
         )}
@@ -359,27 +408,79 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
               >
                 <Menu size={19} />
               </button>
+              {model.savedInfo?.peer.id === activeChatId ? (
+                <button
+                  class="icon-button"
+                  aria-label="Show saved chats"
+                  title="Show saved chats"
+                  onClick={model.showSavedDialogs}
+                >
+                  <ArrowLeft size={20} />
+                </button>
+              ) : null}
+              {model.activeTopic ? (
+                <button
+                  class="icon-button"
+                  aria-label="Show topics"
+                  title="Show topics"
+                  onClick={model.showForumTopics}
+                >
+                  <ArrowLeft size={20} />
+                </button>
+              ) : null}
               <Avatar
-                identity={`${activeChat.id}:${snapshot.dialogs.find((dialog) => dialog.peer.id === activeChat.id)?.avatarId ?? 'none'}`}
-                initials={activeChat.initials}
-                color={activeChat.color}
+                identity={
+                  model.activeSaved
+                    ? `${model.activeSaved.peer.id}:${model.activeSaved.avatarId ?? 'none'}`
+                    : `${activeChat.id}:${snapshot.dialogs.find((dialog) => dialog.peer.id === activeChat.id)?.avatarId ?? 'none'}`
+                }
+                initials={model.activeSaved?.initials ?? activeChat.initials}
+                color={model.activeSaved?.color ?? activeChat.color}
                 size="sm"
                 online={activeChat.presence === 'online'}
-                loadCached={() => mediaAssets.loadAvatar(activeChat.id, true)}
-                load={online ? () => mediaAssets.loadAvatar(activeChat.id) : undefined}
+                loadCached={
+                  model.activeSaved ? undefined : () => mediaAssets.loadAvatar(activeChat.id, true)
+                }
+                load={
+                  online
+                    ? model.activeSaved
+                      ? () =>
+                          mediaAssets.loadPeerAvatar(
+                            model.activeSaved!.peer,
+                            model.activeSaved!.hasAvatar,
+                            model.activeSaved!.avatarId,
+                          )
+                      : () => mediaAssets.loadAvatar(activeChat.id)
+                    : undefined
+                }
               />
               <span class="min-w-0">
-                <strong class="block truncate text-sm font-semibold">{activeChat.title}</strong>
-                <span
-                  class="block text-xs"
-                  classList={{
-                    'text-emerald-400': activeChat.presence === 'online',
-                    'text-muted': activeChat.presence !== 'online',
-                  }}
-                  role="status"
-                >
-                  {activeStatus}
-                </span>
+                <strong class="block truncate text-sm font-semibold">
+                  {model.activeSaved?.title ?? model.activeTopic?.title ?? activeChat.title}
+                </strong>
+                {model.activeTopic ? (
+                  <span class="block text-xs text-muted">
+                    {activeChat.title}
+                    {model.activeTopic.closed ? ' · Closed topic' : ''}
+                  </span>
+                ) : null}
+                {model.activeSaved ? (
+                  <span class="block text-xs text-muted">Saved Messages</span>
+                ) : null}
+                {!model.activeTopic && !model.activeSaved ? (
+                  <span
+                    class="block text-xs"
+                    classList={{
+                      'text-emerald-400': activeChat.presence === 'online',
+                      'text-muted': activeChat.presence !== 'online',
+                    }}
+                    role="status"
+                  >
+                    {model.savedInfo?.peer.id === activeChatId
+                      ? 'Your personal cloud storage'
+                      : activeStatus}
+                  </span>
+                ) : null}
               </span>
             </div>
             <nav class="flex items-center gap-1">
@@ -598,6 +699,44 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                       {conversationRetrying ? 'Retrying…' : 'Retry history'}
                     </button>
                   </div>
+                ) : null}
+                {activeDialog?.peer.kind === 'channel' &&
+                !activeDialog.broadcast &&
+                (model.activeTopic === undefined || model.activeTopic.id === 1) ? (
+                  <EarlierGroupHistory
+                    api={engine}
+                    peer={activeDialog.peer}
+                    online={online}
+                    enabled={
+                      activePeerMatches &&
+                      !conversationSwitching &&
+                      !snapshot.loadingMessages &&
+                      !snapshot.hasOlderMessages
+                    }
+                    media={mediaAssets}
+                    queries={model.queries}
+                    status={model.setEarlierHistoryStatus}
+                    beforeChange={viewport.captureAnchor}
+                    open={(message) => runInBackground(openMessage(message))}
+                    openContact={model.openContact}
+                    addContact={model.addContactCard}
+                    openPeer={(peer, name) =>
+                      runInBackground(
+                        runEffect(
+                          engine.addPeer({
+                            peer,
+                            title: name,
+                            initials: name.slice(0, 2),
+                            color: '#5288c1',
+                            hasAvatar: false,
+                            category: peer.kind === 'user' ? 'user' : 'group',
+                            bot: false,
+                            isContact: false,
+                          }),
+                        ).then(() => model.selectChat(peer.id)),
+                      )
+                    }
+                  />
                 ) : null}
                 {messageRows.messages!.length ? (
                   list(messageEntries(messageRows.entries), (entry, index) => {
@@ -1049,34 +1188,58 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 )
                               : null}
                             {!message.service && Number.isSafeInteger(Number(message.id)) ? (
-                              <MessageActions
-                                message={message}
-                                pickerOpen={reactionPickerMessageId === message.id}
-                                setPickerOpen={(open) =>
-                                  setReactionPickerMessageId(open ? message.id : '')
-                                }
-                                react={(emoji) =>
-                                  runInBackground(reactToMessage(message.id, emoji))
-                                }
-                                reactionPeople={(emoji, revision) =>
-                                  model.queries.reactionPeople(
-                                    message.peerId ?? activeChatId,
-                                    Number(message.id),
-                                    emoji,
-                                    revision,
-                                  )
-                                }
-                                loadReactionAvatar={(person, cachedOnly) =>
-                                  mediaAssets.loadPeerAvatar(
-                                    person.peer,
-                                    person.hasAvatar,
-                                    person.avatarId,
-                                    cachedOnly || !online,
-                                  )
-                                }
-                                reply={(article) => composer.beginReply(message, article)}
-                                customEmoji={model.queries.customEmoji}
-                              />
+                              <>
+                                {model.savedInfo?.peer.id === activeChatId &&
+                                reactionPickerMessageId === message.id ? (
+                                  <SavedTagPicker
+                                    api={engine}
+                                    customEmoji={model.queries.customEmoji}
+                                    selfId={activeChatId}
+                                    messageId={Number(message.id)}
+                                    selected={(message.reactions ?? [])
+                                      .filter((reaction) => reaction.chosen)
+                                      .map((reaction) => reaction.emoji)}
+                                    premium={model.savedInfo.premium}
+                                    online={online}
+                                    close={() => setReactionPickerMessageId('')}
+                                  />
+                                ) : null}
+                                <MessageActions
+                                  message={message}
+                                  savedTags={model.savedInfo?.peer.id === activeChatId}
+                                  tagTitles={model.savedTagTitles}
+                                  searchTag={model.searchSavedTag}
+                                  pickerOpen={reactionPickerMessageId === message.id}
+                                  setPickerOpen={(open) =>
+                                    setReactionPickerMessageId(open ? message.id : '')
+                                  }
+                                  react={(emoji) =>
+                                    runInBackground(reactToMessage(message.id, emoji))
+                                  }
+                                  reactionPeople={(emoji, revision) =>
+                                    model.queries.reactionPeople(
+                                      message.peerId ?? activeChatId,
+                                      Number(message.id),
+                                      emoji,
+                                      revision,
+                                    )
+                                  }
+                                  loadReactionAvatar={(person, cachedOnly) =>
+                                    mediaAssets.loadPeerAvatar(
+                                      person.peer,
+                                      person.hasAvatar,
+                                      person.avatarId,
+                                      cachedOnly || !online,
+                                    )
+                                  }
+                                  reply={
+                                    canQueueMessage
+                                      ? (article) => composer.beginReply(message, article)
+                                      : undefined
+                                  }
+                                  customEmoji={model.queries.customEmoji}
+                                />
+                              </>
                             ) : null}
                             <footer
                               aria-label={
@@ -1162,6 +1325,8 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                   !conversationLoadError &&
                   !activeHistoryError &&
                   activeMessages.length === 0 &&
+                  (model.earlierHistoryStatus === 'empty' ||
+                    (model.activeTopic !== undefined && model.activeTopic.id !== 1)) &&
                   activeChatId !== 'empty' ? (
                   <div class="mx-auto my-auto flex max-w-xs flex-col items-center text-center">
                     <div class="mb-4 grid size-14 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
@@ -1232,16 +1397,18 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                       }}
                                     />
                                   ) : null}
-                                  <button
-                                    role="menuitem"
-                                    onClick={() => {
-                                      const message = target;
-                                      setMessageContextMenu(undefined);
-                                      model.replyTo(message);
-                                    }}
-                                  >
-                                    <Reply size={15} /> Reply
-                                  </button>
+                                  {canQueueMessage ? (
+                                    <button
+                                      role="menuitem"
+                                      onClick={() => {
+                                        const message = target;
+                                        setMessageContextMenu(undefined);
+                                        model.replyTo(message);
+                                      }}
+                                    >
+                                      <Reply size={15} /> Reply
+                                    </button>
+                                  ) : null}
                                   <button
                                     role="menuitem"
                                     onClick={() => model.selectMessage(target)}
@@ -1472,41 +1639,62 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
               }
             />
           ) : null}
-          <ChatComposer
-            forwardDraft={
-              model.forwardDraft
-                ? {
-                    ...model.forwardDraft,
-                    media: mediaAssets,
-                    cancel: model.cancelForwardDraft,
-                    remove: model.removeForwardMessage,
-                    changeRecipient: () => model.setForwardRecipientOpen(true),
-                    configure: model.setForwardOptions,
-                    send: () => runInBackground(model.sendForwardDraft()),
-                  }
-                : undefined
-            }
-            conversationId={activeChatId}
-            placeholder={visibleReplyKeyboard?.keyboard.placeholder}
-            enabled={canQueueMessage}
-            canSendMedia={canSendMedia}
-            canSendPolls={canQueueMessage && activeDialog?.permissions?.canSendPolls !== false}
-            sendPoll={(draft) =>
-              activeDialog
-                ? engine.sendPoll(activeDialog.peer, draft)
-                : Effect.fail(new Error('Conversation is unavailable.'))
-            }
-            canSendStickers={canSendStickers}
-            canSendGifs={canSendGifs}
-            composer={composer}
-            expressions={expressions}
-            editLastMessage={editLastMessage}
-            onGeometryChange={viewport.reconcileLayout}
-            media={{
-              loadSticker: (sticker) => mediaAssets.loadSticker(sticker),
-              stickerUrl: (sticker) => mediaAssets.sticker(sticker).cached(),
-            }}
-          />
+          {model.activeSaved && model.activeSaved.peer.id !== activeChatId ? (
+            <div class="saved-source-footer">
+              <span>Saved from {model.activeSaved.title}</span>
+              <button class="secondary-button" onClick={() => model.selectSavedDialog(undefined)}>
+                Write in Saved Messages
+              </button>
+            </div>
+          ) : (
+            <ChatComposer
+              forwardDraft={
+                model.forwardDraft
+                  ? {
+                      ...model.forwardDraft,
+                      media: mediaAssets,
+                      cancel: model.cancelForwardDraft,
+                      remove: model.removeForwardMessage,
+                      changeRecipient: () => model.setForwardRecipientOpen(true),
+                      configure: model.setForwardOptions,
+                      send: () => runInBackground(model.sendForwardDraft()),
+                    }
+                  : undefined
+              }
+              conversationId={
+                model.activeSaved
+                  ? `${activeChatId}/saved/${model.activeSaved.peer.id}`
+                  : model.activeTopic
+                    ? `${activeChatId}/topic/${model.activeTopic.id}`
+                    : activeChatId
+              }
+              placeholder={visibleReplyKeyboard?.keyboard.placeholder}
+              enabled={canQueueMessage}
+              canSendMedia={canSendMedia}
+              canSendPolls={canQueueMessage && activeDialog?.permissions?.canSendPolls !== false}
+              sendPoll={(draft) =>
+                activeDialog
+                  ? engine.sendPoll(
+                      activeDialog.peer,
+                      draft,
+                      model.activeTopic
+                        ? { messageId: model.activeTopic.id, topMessageId: model.activeTopic.id }
+                        : undefined,
+                    )
+                  : Effect.fail(new Error('Conversation is unavailable.'))
+              }
+              canSendStickers={canSendStickers}
+              canSendGifs={canSendGifs}
+              composer={composer}
+              expressions={expressions}
+              editLastMessage={editLastMessage}
+              onGeometryChange={viewport.reconcileLayout}
+              media={{
+                loadSticker: (sticker) => mediaAssets.loadSticker(sticker),
+                stickerUrl: (sticker) => mediaAssets.sticker(sticker).cached(),
+              }}
+            />
+          )}
         </section>
 
         {mediaViewer
@@ -1834,8 +2022,67 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             ))(bot.urlAuth!)
           : null}
 
+        {model.managementPeerId &&
+        !model.inviteLinksPeerId &&
+        !model.joinRequestsPeerId &&
+        dialogForPeer(model.managementPeerId) ? (
+          <ChatManagementDialog
+            api={engine}
+            dialog={dialogForPeer(model.managementPeerId)!}
+            online={online}
+            close={model.closeManagement}
+            links={model.openInviteLinks}
+            requests={model.openJoinRequests}
+            changed={model.chatSettingChanged}
+            upgraded={model.chatUpgraded}
+            initialSetting={model.managementInitialSetting}
+            media={mediaAssets}
+            dialogs={snapshot.dialogs}
+          />
+        ) : null}
+        {model.inviteLinksPeerId && dialogForPeer(model.inviteLinksPeerId) ? (
+          <InviteLinksDialog
+            api={engine}
+            dialog={dialogForPeer(model.inviteLinksPeerId)!}
+            online={online}
+            close={model.closeInviteLinks}
+          />
+        ) : null}
+        {model.joinRequestsPeerId && dialogForPeer(model.joinRequestsPeerId) ? (
+          <JoinRequestsDialog
+            api={engine}
+            dialog={dialogForPeer(model.joinRequestsPeerId)!}
+            online={online}
+            media={mediaAssets}
+            close={model.closeJoinRequests}
+          />
+        ) : null}
+        {model.chatInvite ? (
+          <ChatInviteDialog
+            hash={model.chatInvite}
+            api={engine}
+            online={online}
+            open={model.openInvitedChat}
+            close={model.closeChatInvite}
+          />
+        ) : null}
+        {model.folderInvite ? (
+          <Dialog title="Add Chat Folder" onClose={model.closeFolderInvite}>
+            <div class="settings-scroll">
+              <FolderSettings
+                api={engine}
+                online={online}
+                dialogs={snapshot.dialogs}
+                media={mediaAssets}
+                initialInvite={model.folderInvite}
+                onJoined={model.closeFolderInvite}
+              />
+            </div>
+          </Dialog>
+        ) : null}
         {settingsOpen ? (
           <SettingsDialog
+            folders={engine}
             sessions={engine}
             privacy={engine}
             media={mediaAssets}
@@ -1868,6 +2115,9 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
         ) : null}
 
         <DetailsPane
+          api={engine}
+          peer={activeDialog?.peer}
+          openRelatedGroup={model.openRelatedGroup}
           chat={activeChat}
           avatarIdentity={`${activeChat.id}:${activeDialog?.avatarId ?? 'none'}`}
           counts={activeSharedCounts}
@@ -1876,6 +2126,11 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
           modal={detailsOpen && viewportWidth <= 1100}
           media={mediaAssets}
           details={contactDetails}
+          openManagement={
+            activeDialog?.permissions?.canManageChat || activeDialog?.permissions?.canManageInvites
+              ? model.openManagement
+              : undefined
+          }
           close={() => updateDetailsOpen(false)}
           openShared={(kind) => {
             if (activeConversationReady) setSharedMediaKind(kind);

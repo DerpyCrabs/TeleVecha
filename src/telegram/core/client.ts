@@ -1,6 +1,6 @@
 import type { MessagingEngine } from './engine';
 import type { EffectConversation } from './conversation';
-import type { EngineSnapshot } from '../types';
+import type { TelegramPeer, EngineSnapshot } from '../types';
 import type { Effect } from 'effect';
 import type { MessagingError } from './messagingError';
 
@@ -55,6 +55,51 @@ export const messagingCapabilities = [
   'getMessageReadReceipts',
   'getPollVotes',
   'getActiveSessions',
+  'deleteForumTopic',
+  'getForumTopic',
+  'getForumTopics',
+  'createForumTopic',
+  'editForumTopic',
+  'pinForumTopic',
+  'readForumTopic',
+  'getJoinRequests',
+  'resolveJoinRequest',
+  'resolveAllJoinRequests',
+  'getChatInviteLinks',
+  'exportChatInviteLink',
+  'editChatInviteLink',
+  'revokeChatInviteLink',
+  'deleteChatInviteLink',
+  'getChatManagement',
+  'upgradeChat',
+  'getAdminLog',
+  'getSavedMessagesInfo',
+  'getSavedDialogs',
+  'getSavedHistory',
+  'getEarlierGroupHistory',
+  'getSavedTags',
+  'renameSavedTag',
+  'pinSavedDialog',
+  'setSavedMessageTags',
+
+  'setChatSetting',
+  'getManagedParticipants',
+  'addChatMember',
+  'editChatParticipant',
+  'createChat',
+  'checkChatInvite',
+  'joinChatInvite',
+  'getChatFolders',
+  'saveChatFolder',
+  'deleteChatFolder',
+  'reorderChatFolders',
+  'getFolderUpdates',
+  'joinFolderUpdates',
+  'getFolderLinks',
+  'exportFolderLink',
+  'deleteFolderLink',
+  'checkFolderInvite',
+  'joinFolderInvite',
   'getPrivacy',
   'setPrivacy',
   'getReadTimePrivacy',
@@ -72,6 +117,7 @@ export const messagingCapabilities = [
   'addPeer',
   'getUserDetails',
   'getGroupMembers',
+  'setUnreadMark',
   'setMuted',
   'setBlocked',
   'updateContact',
@@ -132,8 +178,16 @@ type EffectEngineClient = {
 export type EffectMessagingClient = EffectEngineClient & {
   snapshot(): EngineSnapshot;
   subscribe(listener: (snapshot: EngineSnapshot) => void): Effect.Effect<Effect.Effect<void>>;
-  conversation(peerId: string): EffectConversation | undefined;
-  openConversation(peerId: string): Effect.Effect<EffectConversation, MessagingError>;
+  conversation(
+    peerId: string,
+    topicId?: number,
+    savedPeer?: TelegramPeer,
+  ): EffectConversation | undefined;
+  openConversation(
+    peerId: string,
+    topicId?: number,
+    savedPeer?: TelegramPeer,
+  ): Effect.Effect<EffectConversation, MessagingError>;
 };
 
 const _capabilitiesMatchClient: readonly (keyof EffectMessagingClient)[] = messagingCapabilities;

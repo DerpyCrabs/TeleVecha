@@ -1,3 +1,4 @@
+import Tag from '@effectweb/lucide/icons/tag';
 import { list } from 'effectweb';
 import { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
@@ -26,6 +27,9 @@ const reactionRows = collection<NonNullable<ChatMessage['reactions']>[number]>(
 type Optional<A> = Source<AsyncResult.AsyncResult<A | undefined, never>>;
 interface MessageActionsProps {
   message: ChatMessage;
+  savedTags?: boolean | undefined;
+  tagTitles?: Record<string, string> | undefined;
+  searchTag?: ((reaction: string) => void) | undefined;
   pickerOpen: boolean;
   setPickerOpen: (open: boolean) => void;
   react: (emoji: string) => void;
@@ -35,7 +39,7 @@ interface MessageActionsProps {
     person: TelegramReactionPerson,
     cachedOnly: boolean,
   ) => Effect.Effect<string | undefined, unknown>;
-  reply: (article: HTMLElement) => void;
+  reply?: ((article: HTMLElement) => void) | undefined;
   customEmoji?: ((documentId: string) => Optional<CustomEmojiAsset>) | undefined;
 }
 const customReaction = (asset: CustomEmojiAsset | undefined) =>
@@ -50,7 +54,7 @@ const customReaction = (asset: CustomEmojiAsset | undefined) =>
   ) : (
     <span class="custom-reaction-placeholder" />
   );
-const CustomReaction = view<{ asset?: Optional<CustomEmojiAsset> | undefined }>((props) =>
+export const CustomReaction = view<{ asset?: Optional<CustomEmojiAsset> | undefined }>((props) =>
   props.asset
     ? observe(props.asset, (result) => customReaction(available(result)))
     : customReaction(undefined),
@@ -209,44 +213,67 @@ export const MessageActions = view<MessageActionsProps, never>((props, _send) =>
   const reply = (event: { preventDefault(): void; currentTarget: HTMLButtonElement }) => {
     event.preventDefault();
     const article = event.currentTarget.closest<HTMLElement>('article.message');
-    if (article) props.reply(article);
+    if (article) props.reply?.(article);
   };
   return (
     <div class="message-reactions">
-      {list(reactionRows(props.message.reactions ?? []), (reaction) => (
-        <ReactionButton
-          message={props.message}
-          reaction={reaction}
-          react={props.react}
-          people={props.reactionPeople}
-          loadAvatar={props.loadReactionAvatar}
-          customEmoji={props.customEmoji}
-        />
-      ))}
+      {list(reactionRows(props.message.reactions ?? []), (reaction) =>
+        props.savedTags ? (
+          <button
+            class="reaction chosen"
+            title="Search by tag"
+            aria-label={`Search saved tag ${props.tagTitles?.[reaction.emoji] || (reaction.customEmojiId ? 'custom emoji' : reaction.emoji)}`}
+            onClick={() => props.searchTag?.(reaction.emoji)}
+          >
+            {reaction.customEmojiId ? (
+              <CustomReaction asset={props.customEmoji?.(reaction.customEmojiId)} />
+            ) : (
+              <span>{reaction.emoji}</span>
+            )}
+            {props.tagTitles?.[reaction.emoji] ? (
+              <span>{props.tagTitles[reaction.emoji]}</span>
+            ) : (
+              <Tag size={11} />
+            )}
+          </button>
+        ) : (
+          <ReactionButton
+            message={props.message}
+            reaction={reaction}
+            react={props.react}
+            people={props.reactionPeople}
+            loadAvatar={props.loadReactionAvatar}
+            customEmoji={props.customEmoji}
+          />
+        ),
+      )}
       {Number.isSafeInteger(Number(props.message.id)) ? (
         <>
-          <button
-            class="reply-message"
-            onPointerDown={reply}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' && event.key !== ' ') return;
-              event.preventDefault();
-              reply(event);
-            }}
-            aria-label={`Reply to message ${props.message.id}`}
-            title="Reply; select text first to quote it"
-          >
-            <Reply size={14} />
-          </button>
+          {props.reply ? (
+            <button
+              class="reply-message"
+              onPointerDown={reply}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                reply(event);
+              }}
+              aria-label={`Reply to message ${props.message.id}`}
+              title="Reply; select text first to quote it"
+            >
+              <Reply size={14} />
+            </button>
+          ) : null}
           <button
             class="add-reaction"
             onClick={() => props.setPickerOpen(!props.pickerOpen)}
-            aria-label={`React to message ${props.message.id}`}
+            aria-label={`${props.savedTags ? 'Edit tags for' : 'React to'} message ${props.message.id}`}
+            title={props.savedTags ? 'Edit tags' : 'Add reaction'}
             aria-expanded={props.pickerOpen}
           >
-            <SmilePlus size={14} />
+            {props.savedTags ? <Tag size={14} /> : <SmilePlus size={14} />}
           </button>
-          {props.pickerOpen ? (
+          {props.pickerOpen && !props.savedTags ? (
             <div
               class="reaction-picker"
               role="dialog"

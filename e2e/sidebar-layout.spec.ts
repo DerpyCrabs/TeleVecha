@@ -219,7 +219,9 @@ test('coalesces a burst of resize events without rerendering chat or message nod
   expect(result.sameMessage).toBe(true);
 });
 
-test('collapses an excessively narrow chat sidebar to avatar-only rows', async ({ page }) => {
+test('collapses an excessively narrow chat sidebar to avatar-only rows', async ({
+  page,
+}, testInfo) => {
   const sidebar = page.getByTestId('chat-sidebar');
   const separator = page.getByRole('separator', { name: 'Resize chat list' });
   await separator.focus();
@@ -254,6 +256,10 @@ test('collapses an excessively narrow chat sidebar to avatar-only rows', async (
   await selected.click();
   await expect(selected).toHaveCSS('border-radius', '0px');
   await expect(selected).toHaveCSS('box-shadow', 'none');
+  await page.screenshot({
+    path: testInfo.outputPath('compact-sidebar.png'),
+    animations: 'disabled',
+  });
 
   await separator.press('End');
   await expect(sidebar).toHaveAttribute('data-compact', 'false');

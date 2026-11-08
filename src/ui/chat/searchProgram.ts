@@ -1,4 +1,8 @@
-import type { TelegramPeerSearchResult, TelegramSearchFilters } from '../../telegram/types';
+import type {
+  TelegramPeer,
+  TelegramPeerSearchResult,
+  TelegramSearchFilters,
+} from '../../telegram/types';
 import type { MediaAssets } from '../media/mediaAssets';
 import { searchDateRange } from './searchFilters';
 import {
@@ -35,6 +39,19 @@ export interface SearchPanelProps {
     offset: number,
   ) => Effect.Effect<import('../../telegram/types').TelegramGroupMemberPage, unknown>;
   activePeerId: string;
+  activeTopicId?: number | undefined;
+  activeTopicTitle?: string | undefined;
+  activeSavedPeer?: TelegramPeer | undefined;
+  activeSavedTitle?: string | undefined;
+  savedTagSearch?: { reaction: string; request: number } | undefined;
+  savedTags?:
+    | {
+        api: import('../../telegram/core/client').EffectMessagingClient;
+        customEmoji: import('../app/queries').QuerySources['customEmoji'];
+        selfId: string;
+        premium: boolean;
+      }
+    | undefined;
   /** Cached results for one submitted search. */
   results: (args: MessageSearchArgs) => Source<SearchResults>;
   more: (args: MessageSearchArgs) => Effect.Effect<unknown, unknown>;
@@ -71,7 +88,20 @@ export const searchArgs = (input: SearchInput): MessageSearchArgs | undefined =>
         peerId: input.global ? '' : input.host.activePeerId,
         text: input.submitted,
         global: input.global,
-        ...(hasFilters ? { filters } : {}),
+        ...(hasFilters ||
+        (!input.global && (input.host.activeTopicId !== undefined || input.host.activeSavedPeer))
+          ? {
+              filters: {
+                ...filters,
+                ...(!input.global && input.host.activeSavedPeer
+                  ? { savedPeer: input.host.activeSavedPeer }
+                  : {}),
+                ...(!input.global && input.host.activeTopicId !== undefined
+                  ? { topicId: input.host.activeTopicId }
+                  : {}),
+              },
+            }
+          : {}),
       }
     : undefined;
 };
@@ -181,7 +211,12 @@ export const searchActions = defineActions<SearchModel>()({
       model,
       {
         global,
-        filters: { ...model.props.filters, fromPeer: undefined, chatType: undefined },
+        filters: {
+          ...model.props.filters,
+          fromPeer: undefined,
+          chatType: undefined,
+          savedReactions: undefined,
+        },
         ready: true,
         submitted: model.props.query.trim(),
       },
@@ -189,13 +224,27 @@ export const searchActions = defineActions<SearchModel>()({
     ),
   Submit: (model) => change(model, { ready: true, submitted: model.props.query.trim() }, true),
   Context: (model, host: SearchPanelProps) =>
-    model.props.host.activePeerId === host.activePeerId
-      ? { model: { ...model, props: { ...model.props, host } } }
-      : change(model, {
+    host.savedTagSearch && host.savedTagSearch !== model.props.host.savedTagSearch
+      ? change(model, {
           host,
-          filters: { ...model.props.filters, fromPeer: undefined },
-          submitted: model.props.query.trim(),
-        }),
+          global: false,
+          ready: true,
+          submitted: '',
+          query: '',
+          filters: { savedReactions: [host.savedTagSearch.reaction] },
+          fromDate: '',
+          untilDate: '',
+          dateError: '',
+        })
+      : model.props.host.activePeerId === host.activePeerId &&
+          model.props.host.activeTopicId === host.activeTopicId &&
+          model.props.host.activeSavedPeer?.id === host.activeSavedPeer?.id
+        ? { model: { ...model, props: { ...model.props, host } } }
+        : change(model, {
+            host,
+            filters: { ...model.props.filters, fromPeer: undefined, savedReactions: undefined },
+            submitted: model.props.query.trim(),
+          }),
   More: more,
   /** Retry the failed page, or the search itself. */
   Retry: (model) => {
@@ -244,8 +293,8 @@ export function createSearchProgram(props: SearchPanelProps) {
         query: '',
         global: false,
         submitted: '',
-        ready: false,
-        filters: {},
+        ready: Boolean(props.savedTagSearch),
+        filters: props.savedTagSearch ? { savedReactions: [props.savedTagSearch.reaction] } : {},
         fromDate: '',
         untilDate: '',
         dateError: '',

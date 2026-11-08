@@ -81,35 +81,49 @@ export function createConversationPresenter() {
         pending: EngineSnapshot['pending'];
         peerId: string;
         activePeerId: string | undefined;
+        activeTopicId: number | undefined;
         readOutboxMaxId: number;
         result: KeyedMessageView[];
       }
     | undefined;
-  return (snapshot: EngineSnapshot, peerId: string) => {
+  return (snapshot: EngineSnapshot, peerId: string, topicReadMaxId: number = 0) => {
     const readOutboxMaxId =
-      snapshot.dialogs.find(({ peer }) => peer.id === peerId)?.readOutboxMaxId ?? 0;
+      snapshot.activeTopicId !== undefined
+        ? topicReadMaxId
+        : (snapshot.dialogs.find(({ peer }) => peer.id === peerId)?.readOutboxMaxId ?? 0);
     if (
       previous &&
       previous.messages === snapshot.messages &&
       previous.pending === snapshot.pending &&
       previous.peerId === peerId &&
       previous.activePeerId === snapshot.activePeerId &&
+      previous.activeTopicId === snapshot.activeTopicId &&
       previous.readOutboxMaxId === readOutboxMaxId
     )
       return previous.result;
-    const result = presentConversation(snapshot, peerId, (message, readOutboxMaxId, reply) => {
-      const read = message.outgoing && message.id <= readOutboxMaxId;
-      const previous = cache.get(message);
-      if (previous && previous.reply === reply && previous.read === read) return previous.view;
-      const view = presentMessage(message, readOutboxMaxId, reply);
-      cache.set(message, { reply, read, view });
-      return view;
-    });
+    const result = presentConversation(
+      snapshot,
+      peerId,
+      (message, readOutboxMaxId, reply) => {
+        const read = message.outgoing && message.id <= readOutboxMaxId;
+        const previous = cache.get(message);
+        if (previous && previous.reply === reply && previous.read === read) return previous.view;
+        const displayMessage =
+          snapshot.activeTopicId !== undefined && message.replyToId === snapshot.activeTopicId
+            ? { ...message, replyToId: undefined, replyQuote: undefined }
+            : message;
+        const view = presentMessage(displayMessage, readOutboxMaxId, reply);
+        cache.set(message, { reply, read, view });
+        return view;
+      },
+      readOutboxMaxId,
+    );
     previous = {
       messages: snapshot.messages,
       pending: snapshot.pending,
       peerId,
       activePeerId: snapshot.activePeerId,
+      activeTopicId: snapshot.activeTopicId,
       readOutboxMaxId,
       result,
     };
@@ -121,10 +135,13 @@ export function presentConversation(
   snapshot: EngineSnapshot,
   peerId: string,
   project = presentMessage,
+  topicReadMaxId: number = 0,
 ): KeyedMessageView[] {
   if (snapshot.activePeerId !== peerId) return [];
   const readOutboxMaxId =
-    snapshot.dialogs.find(({ peer }) => peer.id === peerId)?.readOutboxMaxId ?? 0;
+    snapshot.activeTopicId !== undefined
+      ? topicReadMaxId
+      : (snapshot.dialogs.find(({ peer }) => peer.id === peerId)?.readOutboxMaxId ?? 0);
   const messagesById = new Map(snapshot.messages.map((message) => [message.id, message]));
   const confirmedRandomIds = new Set(
     snapshot.messages
@@ -138,6 +155,8 @@ export function presentConversation(
       .filter(
         (send) =>
           send.peer.id === peerId &&
+          (snapshot.activeTopicId === undefined ||
+            send.reply?.topMessageId === snapshot.activeTopicId) &&
           send.album?.attachments.some(({ randomId }) => !confirmedRandomIds.has(randomId)),
       )
       .flatMap((send) => send.album!.attachments.map(({ randomId }) => randomId)),
@@ -155,7 +174,12 @@ export function presentConversation(
       ),
     }));
   const pending = snapshot.pending
-    .filter((send) => send.peer.id === peerId)
+    .filter(
+      (send) =>
+        send.peer.id === peerId &&
+        (snapshot.activeTopicId === undefined ||
+          send.reply?.topMessageId === snapshot.activeTopicId),
+    )
     .flatMap((send): KeyedMessageView[] => {
       if (send.album) {
         return send.album.attachments.flatMap((attachment, index) =>

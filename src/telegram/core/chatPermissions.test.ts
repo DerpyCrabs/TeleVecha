@@ -75,6 +75,15 @@ describe('Telegram chat permissions', () => {
     );
     expect(messageCapabilities(dialog('user'), message({ poll })).canEdit).toBe(false);
   });
+  it('applies updated chat-wide protection to messages that were already loaded', () => {
+    expect(
+      messageCapabilities(
+        { ...dialog('channel'), protectedContent: true },
+        message({ protected: false }),
+      ).canForward,
+    ).toBe(false);
+  });
+
   it('does not offer local channel deletion or editing for non-editable media', () => {
     const channel = dialog('channel');
     const sticker = message({

@@ -27,8 +27,10 @@ export function createDrawerFocusSession(options: {
     const root = options.root();
     const sidebar = root?.querySelector<HTMLElement>('[data-testid="chat-sidebar"]');
     const details = root?.querySelector<HTMLElement>('.details-pane');
-    const panel = sidebarModal ? sidebar : details;
-    const nextKind = sidebarModal ? 'sidebar' : 'details';
+    // Details can open above the navigation drawer. Never make the active
+    // focus scope inert, and release the old scope when the top panel changes.
+    const panel = detailsModal ? details : sidebar;
+    const nextKind = detailsModal ? 'details' : 'sidebar';
     if (panel === active && kind === nextKind) return;
     release?.();
     release = undefined;
@@ -39,13 +41,13 @@ export function createDrawerFocusSession(options: {
     kind = nextKind;
     release = activateFocusScope({
       root: panel,
-      close: sidebarModal ? options.closeMobile : options.closeDetails,
+      close: detailsModal ? options.closeDetails : options.closeMobile,
       inert: [options.conversationPane(), detailsModal ? sidebar : undefined],
       initialFocus: () => panel,
       restoreFocus: () =>
-        sidebarModal
-          ? options.mobileTrigger()
-          : document.querySelector<HTMLElement>('button[aria-label="Open details"]'),
+        detailsModal
+          ? document.querySelector<HTMLElement>('button[aria-label="Open details"]')
+          : options.mobileTrigger(),
     });
   };
   return {

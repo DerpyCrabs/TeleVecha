@@ -2408,3 +2408,53 @@ article.message[data-selection-active] .message-sender-avatar {
   padding: 0.75rem;
   color: var(--accent);
 }
+.earlier-group-history {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.earlier-group-history[hidden] {
+  display: none;
+}
+.earlier-history-sentinel {
+  display: block;
+  height: 1px;
+  flex: 0 0 1px;
+}
+.earlier-history-boundary {
+  align-self: center;
+  margin: 12px 0;
+  padding: 4px 12px;
+  border-radius: 16px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-size: 12px;
+}
+.earlier-message-actions {
+  position: absolute;
+  top: 50%;
+  right: -32px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--muted);
+  opacity: 0;
+}
+.earlier-group-history .outgoing .earlier-message-actions {
+  left: -32px;
+  right: auto;
+}
+.earlier-group-history .message:hover .earlier-message-actions,
+.earlier-message-actions:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .earlier-message-actions {
+    opacity: 1;
+  }
+}

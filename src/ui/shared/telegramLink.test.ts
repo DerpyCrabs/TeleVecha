@@ -20,8 +20,6 @@ describe('Telegram chat and post links', () => {
     'https://t.me.evil.test/name/1',
     'https://t.me@evil.test/name/1',
     'https://evil.test/t.me/name/1',
-    'https://t.me/+invite',
-    'https://t.me/joinchat/invite',
     'https://t.me/share/url?url=https://example.com',
     'https://t.me/some_bot?start=payload',
     'https://t.me/user/story/42',
@@ -30,7 +28,7 @@ describe('Telegram chat and post links', () => {
     'https://t.me/name/1?comment=invalid',
     'https://t.me/name?comment=42',
     'tg://resolve?domain=some_bot&start=payload',
-    'https://t.me/name/1/2',
+    'https://t.me/name/1/2/3',
     'https://t.me/login',
     'https://t.me:8443/name',
     'javascript:alert(1)',
@@ -92,4 +90,64 @@ describe('sticker pack links', () => {
   ])('leaves unsupported or ambiguous pack links alone: %s', (url) => {
     expect(parseTelegramLink(url)).toBeUndefined();
   });
+});
+
+describe('shared folder links', () => {
+  it.each(['https://t.me/addlist/Abc_123-x', 'tg://addlist?slug=Abc_123-x'])(
+    'opens a folder preview for %s',
+    (url) => {
+      expect(parseTelegramLink(url)).toEqual({ folderInvite: 'Abc_123-x' });
+    },
+  );
+  it.each([
+    'https://t.me.evil.test/addlist/a',
+    'https://x@t.me/addlist/a',
+    'tg://addlist?slug=a&slug=b',
+    'tg://addlist?slug=a%2Fb',
+    'https://t.me/addlist/a?other=b',
+  ])('rejects malformed invitation %s', (url) => {
+    expect(parseTelegramLink(url)).toBeUndefined();
+  });
+});
+
+describe('forum message links', () => {
+  it.each([
+    ['https://t.me/forum_group/42/80', { username: 'forum_group', topicId: 42, messageId: 80 }],
+    ['https://t.me/c/202/42/80', { peerId: 'c:202', topicId: 42, messageId: 80 }],
+    ['https://t.me/c/202/80?thread=42', { peerId: 'c:202', topicId: 42, messageId: 80 }],
+    [
+      'tg://resolve?domain=forum_group&post=80&thread=42',
+      { username: 'forum_group', topicId: 42, messageId: 80 },
+    ],
+    [
+      'tg://privatepost?channel=202&post=80&thread=42',
+      { peerId: 'c:202', topicId: 42, messageId: 80 },
+    ],
+  ])('recognizes %s', (url, target) => expect(parseTelegramLink(url as string)).toEqual(target));
+  it.each([
+    'https://t.me/c/202/0/80',
+    'https://t.me/forum_group/x/80',
+    'https://t.me/forum_group/42/80?thread=43',
+    'https://t.me/forum_group/80?thread=42&thread=43',
+    'tg://privatepost?channel=bad&post=80',
+  ])('rejects malformed topic link %s', (url) => expect(parseTelegramLink(url)).toBeUndefined());
+});
+
+describe('private chat invitations', () => {
+  it.each([
+    'https://t.me/+Invite_12-abc',
+    'https://telegram.me/joinchat/Invite_12-abc',
+    'tg://join?invite=Invite_12-abc',
+  ])('recognizes %s', (url) =>
+    expect(parseTelegramLink(url)).toEqual({ chatInvite: 'Invite_12-abc' }),
+  );
+  it.each([
+    'https://t.me.evil.test/+Invite',
+    'https://user@t.me/+Invite',
+    'https://t.me/+Invite/extra',
+    'tg://join?invite=one&invite=two',
+    'https://t.me/+Invite?redirect=evil',
+    'https://t.me/+Invite#other',
+    'https://t.me/joinchat/',
+  ])('rejects malformed invitation %s', (url) => expect(parseTelegramLink(url)).toBeUndefined());
 });

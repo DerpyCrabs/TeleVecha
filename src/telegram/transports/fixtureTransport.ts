@@ -1,3 +1,10 @@
+import { migratedSearchPage } from '../migratedSearch';
+import { messageInSavedDialog } from '../savedMessages';
+import type { AdminLogEntry } from '../adminLog';
+import { adminRightKeys } from '../chatManagement';
+import type { ChatInviteLink, ChatManagementSettings, ManagedParticipant } from '../chatManagement';
+import { messageInTopic, type TelegramForumTopic } from '../forums';
+import type { TelegramChatFolder, TelegramFolderLink } from '../chatFolders';
 import type { TelegramPollVotes } from '../types';
 import type { TelegramStickerPack } from '../types';
 import type { TelegramSearchFilters } from '../types';
@@ -417,6 +424,8 @@ function fixtureDialog(peer: TelegramPeer, title: string, color: string): Telegr
       canDeleteChannel: peer.kind === 'channel',
       canLeave: peer.kind !== 'user',
       canViewMembers: peer.kind !== 'user',
+      canManageInvites: peer.kind !== 'user',
+      canManageChat: peer.kind !== 'user',
       ...(peer.kind === 'user' ? {} : { memberCount: 2 }),
     },
     hasAvatar: true,
@@ -537,11 +546,46 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
     >();
     const blockedPeers = new Set<string>();
     const pinnedPeers = new Set<string>();
+    let chatFolders: TelegramChatFolder[] = [];
+    const folderLinks = new Map<number, TelegramFolderLink[]>();
     const archivedPeers = new Set<string>();
+    const unreadMarkedPeers = new Set<string>();
     const deletedPeers = new Set<string>();
     const scenario = new URLSearchParams(window.location.search).get('scenario') ?? '';
     const scenarios = new Set(scenario.split('+').filter(Boolean));
     const hasScenario = (value: string) => scenarios.has(value);
+    const forumTopics: TelegramForumTopic[] = [1, 10].map((id) => ({
+      id,
+      title: id === 1 ? 'General' : 'Development',
+      iconColor: 0x6fb9f0,
+      date: 1700000000,
+      topMessageId: 200,
+      readInboxMaxId: 0,
+      unreadCount: 2,
+      unreadMentionsCount: 0,
+      unreadReactionsCount: 0,
+      closed: false,
+      hidden: false,
+      pinned: false,
+      own: true,
+    }));
+    if (hasScenario('forums'))
+      messages.set(
+        'c:202',
+        Array.from({ length: 120 }, (_, index): TelegramMessage => ({
+          id: index + 101,
+          peerId: 'c:202',
+          peer: peers[1]!,
+          senderId: 'u:101',
+          senderName: 'Alice Fixture',
+          text: `${index % 2 ? 'Development' : 'General'} message ${index + 1}`,
+          date: 1700000100 + index,
+          outgoing: false,
+          topicId: index % 2 ? 10 : 1,
+          replyToId: index % 2 ? 10 : 1,
+        })),
+      );
+
     let authorized = !scenario.startsWith('auth');
     let connected = false;
     let pendingConnect: Deferred.Deferred<void> | undefined;
@@ -756,11 +800,200 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         return { type: 'complete' as const, pts, updates: [] };
       });
     }
+    const migratedGroups = new Map<string, TelegramPeer>();
+    const managementSettings = new Map<string, ChatManagementSettings>();
+    const peerManagement = (peer: TelegramPeer): ChatManagementSettings => {
+      let settings = managementSettings.get(peer.id);
+      if (!settings) {
+        const limited = hasScenario('management-limited');
+        settings = {
+          title:
+            peer.id === 'g:303'
+              ? 'Fixture Group'
+              : peer.id === 'c:202'
+                ? 'Release Channel'
+                : (createdDialogs.find((dialog) => dialog.peer.id === peer.id)?.title ?? 'Group'),
+          about: 'A place for our team.',
+          username: '',
+          broadcast: peer.id === 'c:202' && !hasScenario('forums'),
+          forum: peer.id === 'c:202' && hasScenario('forums'),
+          slowModeSeconds: 0,
+          hiddenHistory: false,
+          protectedContent: false,
+          grantableAdminRights: Object.fromEntries(
+            adminRightKeys.map((key) => [
+              key,
+              !limited || ['changeInfo', 'inviteUsers'].includes(key),
+            ]),
+          ),
+          defaultRestrictions: { sendPolls: true },
+          rights: {
+            changeInfo: true,
+            changeType: !limited,
+            manageInvites: true,
+            manageAdmins: !limited,
+            restrictMembers: !limited,
+            manageTopics: !limited,
+            viewLog: peer.kind === 'channel',
+          },
+        };
+        managementSettings.set(peer.id, settings);
+      }
+      return settings;
+    };
+    const participantLists = new Map<string, ManagedParticipant[]>();
+    const peerParticipants = (peer: TelegramPeer) => {
+      let people = participantLists.get(peer.id);
+      if (!people) {
+        people = [
+          {
+            peer: { id: 'u:900000001', kind: 'user', accessHash: '1' },
+            title: 'Fixture Owner',
+            initials: 'FO',
+            color: '#5288c1',
+            hasAvatar: false,
+            role: 'owner',
+            self: true,
+            editable: false,
+            rank: '',
+            adminRights: {},
+            restrictions: {},
+            untilDate: 0,
+          },
+          {
+            peer: { id: 'u:701', kind: 'user', accessHash: '1' },
+            title: 'Nina Member',
+            initials: 'NM',
+            color: '#b26b3f',
+            hasAvatar: false,
+            role: 'member',
+            self: false,
+            editable: true,
+            rank: '',
+            adminRights: {},
+            restrictions: {},
+            untilDate: 0,
+          },
+          {
+            peer: { id: 'u:702', kind: 'user', accessHash: '2' },
+            title: 'Alex Admin',
+            initials: 'AA',
+            color: '#5288c1',
+            hasAvatar: false,
+            role: 'admin',
+            self: false,
+            editable: false,
+            rank: 'Moderator',
+            adminRights: { inviteUsers: true },
+            restrictions: {},
+            untilDate: 0,
+          },
+        ];
+        participantLists.set(peer.id, people);
+      }
+      return people;
+    };
+    const inviteLinkLists = new Map<string, ChatInviteLink[]>();
+    let inviteLinkId = 1;
+    const peerInviteLinks = (peer: TelegramPeer) => {
+      let links = inviteLinkLists.get(peer.id);
+      if (!links) {
+        links = [
+          {
+            url: `https://t.me/+primary_${peer.id.replace(':', '_')}`,
+            title: '',
+            adminId: 'u:900000001',
+            date: 1700000000,
+            permanent: true,
+            revoked: false,
+            requestNeeded: false,
+            expireDate: 0,
+            usageLimit: 0,
+            usage: 12,
+            requested: 0,
+            paid: false,
+          },
+        ];
+        inviteLinkLists.set(peer.id, links);
+      }
+      return links;
+    };
+    const createdDialogs: TelegramDialog[] = [];
+    const savedSelf: TelegramPeer = { id: 'u:900000001', kind: 'user', accessHash: '1' };
+    const savedPins = new Set<string>();
+    const savedTagNames = new Map<string, string>([['⭐', 'Ideas']]);
+    const ensureSaved = () => {
+      if (messages.has(savedSelf.id)) return;
+      const saved: TelegramMessage[] = [
+        {
+          id: 6001,
+          peerId: savedSelf.id,
+          peer: savedSelf,
+          savedPeerId: 'u:101',
+          senderId: 'u:101',
+          senderName: 'Alice Fixture',
+          text: 'Saved from Alice',
+          date: 1700006001,
+          outgoing: true,
+          reactionsAsTags: true,
+          reactions: [{ emoji: '⭐', count: 1, chosen: true }],
+        },
+        {
+          id: 6002,
+          peerId: savedSelf.id,
+          peer: savedSelf,
+          savedPeerId: 'c:202',
+          senderId: 'c:202',
+          senderName: 'Release Channel',
+          text: 'Saved release checklist',
+          date: 1700006002,
+          outgoing: true,
+        },
+        {
+          id: 6003,
+          peerId: savedSelf.id,
+          peer: savedSelf,
+          savedPeerId: savedSelf.id,
+          senderId: savedSelf.id,
+          text: 'My personal note',
+          date: 1700006003,
+          outgoing: true,
+        },
+      ];
+      messages.set(savedSelf.id, saved);
+      createdDialogs.push({
+        ...fixtureDialog(savedSelf, 'Saved Messages', '#5288c1'),
+        hasAvatar: false,
+      });
+    };
+
+    let joinRequestPeople = [
+      {
+        peer: { id: 'u:701', kind: 'user' as const, accessHash: '1' },
+        title: 'Nina Request',
+        initials: 'NR',
+        color: '#5288c1',
+        hasAvatar: false,
+        date: 1700000000,
+        about: 'I would like to join the project.',
+      },
+      {
+        peer: { id: 'u:702', kind: 'user' as const, accessHash: '2' },
+        title: 'Alex Request',
+        initials: 'AR',
+        color: '#b26b3f',
+        hasAvatar: false,
+        date: 1700000100,
+        about: '',
+      },
+    ];
     function getDialogs() {
       return Effect.sync(() => {
+        if (new URLSearchParams(window.location.search).get('chat') === savedSelf.id) ensureSaved();
         stats.getDialogs += 1;
         return {
           dialogs: [
+            ...createdDialogs,
             {
               ...fixtureDialog(peers[0]!, 'Alice Fixture', '#7c5cff'),
               ...(scenario === 'single-unread' ? { unreadCount: 1, readInboxMaxId: 79 } : {}),
@@ -782,8 +1015,31 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
             .filter((dialog) => !deletedPeers.has(dialog.peer.id))
             .map((dialog) => ({
               ...dialog,
+              ...(migratedGroups.has(dialog.peer.id)
+                ? {
+                    permissions: {
+                      ...dialog.permissions!,
+                      canSendMessages: false,
+                      canSendMedia: false,
+                      canManageChat: false,
+                      canManageInvites: false,
+                    },
+                  }
+                : {}),
               pinned: pinnedPeers.has(dialog.peer.id),
               archived: archivedPeers.has(dialog.peer.id),
+              broadcast: dialog.broadcast ?? (dialog.peer.id === 'c:202' && !hasScenario('forums')),
+              forum: dialog.peer.id === 'c:202' && hasScenario('forums'),
+              ...(managementSettings.has(dialog.peer.id)
+                ? {
+                    title: managementSettings.get(dialog.peer.id)!.title,
+                    username: managementSettings.get(dialog.peer.id)!.username,
+                    forum: managementSettings.get(dialog.peer.id)!.forum,
+                    protectedContent: managementSettings.get(dialog.peer.id)!.protectedContent,
+                  }
+                : {}),
+              isContact: dialog.peer.id === 'u:101',
+              unreadMark: unreadMarkedPeers.has(dialog.peer.id),
             })),
         };
       });
@@ -853,6 +1109,17 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       limit: number,
       before?: number,
     ) {
+      if (hasScenario('forums') && peer.id === 'c:202') {
+        const all = (messages.get(peer.id) ?? []).filter(
+          (message) => messageInTopic(message, rootId) && (!before || message.id < before),
+        );
+        const page = all.slice(-limit);
+        return {
+          messages: page,
+          hasOlder: all.length > page.length,
+          nextBeforeMessageId: page[0]?.id,
+        };
+      }
       if (commentFailure) {
         commentFailure = false;
         return yield* Effect.fail(createMtprotoError('transport', 'Could not load comments.'));
@@ -1102,6 +1369,28 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       offset?: TelegramSearchOffset,
       filters?: TelegramSearchFilters,
     ) {
+      const previous =
+        peer && (filters?.topicId === undefined || filters.topicId === 1)
+          ? peerManagement(peer).migratedFrom
+          : undefined;
+      if (!peer || !previous) return searchSinglePeer(query, peer, limit, offset, filters);
+      return migratedSearchPage(peer, previous, limit, offset, (target, size, cursor) =>
+        searchSinglePeer(
+          query,
+          target,
+          size,
+          cursor,
+          target.id === previous.id ? { ...filters, topicId: undefined } : filters,
+        ),
+      );
+    }
+    function searchSinglePeer(
+      query: string,
+      peer?: TelegramPeer,
+      limit: number = 50,
+      offset?: TelegramSearchOffset,
+      filters?: TelegramSearchFilters,
+    ) {
       return Effect.sync(() => {
         stats.searchMessages += 1;
         const term = query.toLocaleLowerCase();
@@ -1111,6 +1400,20 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
           .filter((message) => message.text.toLocaleLowerCase().includes(term))
           .filter((message) => !filters?.minDate || message.date >= filters.minDate)
           .filter((message) => !filters?.maxDate || message.date <= filters.maxDate)
+          .filter(
+            (message) =>
+              !peer || filters?.topicId === undefined || messageInTopic(message, filters.topicId),
+          )
+          .filter(
+            (message) => !filters?.savedPeer || messageInSavedDialog(message, filters.savedPeer.id),
+          )
+          .filter(
+            (message) =>
+              !filters?.savedReactions?.length ||
+              filters.savedReactions.every((emoji) =>
+                message.reactions?.some((reaction) => reaction.emoji === emoji),
+              ),
+          )
           .filter((message) => !filters?.fromPeer || message.senderId === filters.fromPeer.id)
           .filter((message) => !filters?.kind || matchesMediaKind(message, filters.kind))
           .filter(
@@ -1502,8 +1805,9 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       peer: TelegramPeer,
       draft: TelegramPollDraft,
       randomId: string,
+      reply?: TelegramReplyTarget,
     ) {
-      const result = yield* sendText(peer, '', randomId);
+      const result = yield* sendText(peer, '', randomId, reply);
       const poll = pendingPoll(draft, randomId);
       poll.results = {
         totalVoters: 0,
@@ -1525,8 +1829,9 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       peer: TelegramPeer,
       contact: TelegramContact,
       randomId: string,
+      reply?: TelegramReplyTarget,
     ) {
-      const sent = yield* sendText(peer, '', randomId);
+      const sent = yield* sendText(peer, '', randomId, reply);
       const message = { ...sent.message, contact };
       messages.set(
         peer.id,
@@ -1558,6 +1863,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         date: Math.floor(Date.now() / 1000),
         outgoing: true,
         randomId,
+        topicId: reply?.topMessageId,
         replyToId: reply?.messageId,
         replyQuote: reply?.quoteText,
         formats: formats?.filter(({ kind }) => kind !== 'textUrl'),
@@ -1641,6 +1947,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         outgoing: true,
         randomId,
         groupedId,
+        topicId: options.reply?.topMessageId,
         replyToId: options.reply?.messageId,
         replyQuote: options.reply?.quoteText,
         formats:
@@ -2228,6 +2535,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
             date: Math.floor(Date.now() / 1000),
             outgoing: true,
             randomId,
+            topicId: reply?.topMessageId,
             replyToId: reply?.messageId,
             replyQuote: reply?.quoteText,
             media: {
@@ -2546,6 +2854,8 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
               }),
         id: (messages.get(toPeer.id)?.at(-1)?.id ?? 0) + 1,
         peerId: toPeer.id,
+        topicId: options?.topMessageId,
+        replyToId: options?.topMessageId,
         senderId: 'self',
         outgoing: true,
         date: Math.floor(Date.now() / 1000),
@@ -2730,6 +3040,11 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       getReplies,
       searchPeers,
       getPinnedMessages,
+      setUnreadMark: (peer, unread) =>
+        Effect.sync(() => {
+          if (unread) unreadMarkedPeers.add(peer.id);
+          else unreadMarkedPeers.delete(peer.id);
+        }),
       setMuted,
       getUserDetails,
       updateContact,
@@ -2800,6 +3115,510 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       getMessageReadReceipts,
       getPollVotes,
       getActiveSessions,
+      getManagedParticipants: (peer, filter = 'members', query = '') =>
+        Effect.sync(() => {
+          const people = peerParticipants(peer).filter(
+            (person) =>
+              (filter === 'members'
+                ? person.role !== 'removed'
+                : filter === 'admins'
+                  ? person.role === 'admin' || person.role === 'owner'
+                  : person.role === filter) &&
+              (!query || person.title.toLowerCase().includes(query.toLowerCase())),
+          );
+          return { people: structuredClone(people), count: people.length };
+        }),
+      addChatMember: (peer, user) =>
+        Effect.sync(() => {
+          if (hasScenario('create-partial')) return { missingUserIds: [user.id] };
+          const people = peerParticipants(peer);
+          if (!people.some((person) => person.peer.id === user.id))
+            people.push({
+              peer: user,
+              title: user.id === 'u:101' ? 'Alice Fixture' : user.id,
+              initials: 'AF',
+              color: '#5288c1',
+              hasAvatar: false,
+              role: 'member',
+              self: false,
+              editable: true,
+              rank: '',
+              adminRights: {},
+              restrictions: {},
+              untilDate: 0,
+            });
+          return { missingUserIds: [] };
+        }),
+      editChatParticipant: (peer, user, change) =>
+        Effect.sync(() => {
+          const person = peerParticipants(peer).find((person) => person.peer.id === user.id);
+          if (person && person.editable) {
+            if (change.kind === 'admin') {
+              person.adminRights = change.rights;
+              person.rank = change.rank;
+              person.role = Object.values(change.rights).some(Boolean) ? 'admin' : 'member';
+            }
+            if (change.kind === 'restrict') {
+              person.restrictions = change.restrictions;
+              person.untilDate = change.untilDate;
+              person.role = Object.values(change.restrictions).some(Boolean)
+                ? 'restricted'
+                : 'member';
+            }
+            if (change.kind === 'remove') {
+              if (peer.kind === 'group')
+                participantLists.set(
+                  peer.id,
+                  peerParticipants(peer).filter((person) => person.peer.id !== user.id),
+                );
+              else person.role = 'removed';
+            }
+            if (change.kind === 'unban')
+              participantLists.set(
+                peer.id,
+                peerParticipants(peer).filter((person) => person.peer.id !== user.id),
+              );
+          }
+          return {};
+        }),
+      getAdminLog: (peer, request = {}) =>
+        Effect.sync(() => {
+          const people = peerParticipants(peer);
+          const owner = people[0]!;
+          const entries: AdminLogEntry[] = [
+            {
+              id: '9007199254741010',
+              date: 1760000010,
+              actor: owner,
+              action: 'changed the name',
+              details: [
+                { label: 'Previous', text: 'Old team' },
+                { label: 'New', text: 'New team' },
+              ],
+            },
+            {
+              id: '9007199254741009',
+              date: 1760000009,
+              actor: owner,
+              action: 'deleted a message',
+              details: [{ label: 'Message', text: 'Removed message text' }],
+            },
+          ];
+          const events = entries.filter(
+            (event) =>
+              (!request.beforeId || BigInt(event.id) < BigInt(request.beforeId)) &&
+              (!request.actor || request.actor.id === event.actor.peer.id) &&
+              (!request.query ||
+                JSON.stringify(event).toLowerCase().includes(request.query.toLowerCase())) &&
+              (!request.filter ||
+                request.filter === 'all' ||
+                (request.filter === 'messages'
+                  ? event.action.includes('message')
+                  : request.filter === 'settings'
+                    ? event.action.includes('name')
+                    : false)),
+          );
+          return {
+            events: events.slice(0, 1),
+            nextId: events.length > 1 ? events[0]!.id : undefined,
+          };
+        }),
+      upgradeChat: (peer) =>
+        Effect.sync(() => {
+          const existing = migratedGroups.get(peer.id);
+          if (existing) return { peer: existing, title: peerManagement(existing).title };
+          const target: TelegramPeer = {
+            id: `c:${7000 + migratedGroups.size}`,
+            kind: 'channel',
+            accessHash: '1',
+          };
+          const settings = structuredClone(peerManagement(peer));
+          settings.rights.viewLog = true;
+          settings.migratedFrom = peer;
+          peerManagement(peer).migratedTo = target;
+          managementSettings.set(target.id, settings);
+          migratedGroups.set(peer.id, target);
+          participantLists.set(target.id, structuredClone(peerParticipants(peer)));
+          createdDialogs.push({
+            ...fixtureDialog(target, settings.title, '#5288c1'),
+            broadcast: false,
+          });
+          messages.set(target.id, []);
+          return { peer: target, title: settings.title };
+        }),
+      getSavedMessagesInfo: () =>
+        Effect.sync(() => {
+          ensureSaved();
+          return { peer: savedSelf, premium: !hasScenario('saved-free') };
+        }),
+      getSavedDialogs: () =>
+        Effect.sync(() => {
+          ensureSaved();
+          return {
+            dialogs: [savedSelf, peers[0]!, peers[1]!]
+              .map((peer) => ({
+                peer,
+                title:
+                  peer.id === savedSelf.id
+                    ? 'My Notes'
+                    : peer.id === 'u:101'
+                      ? 'Alice Fixture'
+                      : 'Release Channel',
+                initials: peer.id === savedSelf.id ? 'MN' : 'S',
+                color: '#5288c1',
+                hasAvatar: false,
+                pinned: savedPins.has(peer.id),
+                topMessage: messages
+                  .get(savedSelf.id)!
+                  .filter((message) => messageInSavedDialog(message, peer.id))
+                  .at(-1),
+              }))
+              .sort((a, b) => Number(b.pinned) - Number(a.pinned)),
+          };
+        }),
+      getSavedHistory: (peer, limit = 50, before) =>
+        Effect.sync(() => {
+          ensureSaved();
+          const all = messages
+            .get(savedSelf.id)!
+            .filter(
+              (message) =>
+                messageInSavedDialog(message, peer.id) && (!before || message.id < before),
+            );
+          return { messages: all.slice(-limit), hasOlder: all.length > limit };
+        }),
+      pinSavedDialog: (peer, pinned) =>
+        Effect.sync(() => {
+          if (pinned) savedPins.add(peer.id);
+          else savedPins.delete(peer.id);
+        }),
+      getSavedTags: (source) =>
+        Effect.sync(() => {
+          ensureSaved();
+          const counts = new Map<string, number>();
+          for (const message of messages.get(savedSelf.id)!)
+            if (!source || messageInSavedDialog(message, source.id))
+              for (const reaction of message.reactions ?? [])
+                counts.set(reaction.emoji, (counts.get(reaction.emoji) ?? 0) + 1);
+          return {
+            tags: [...counts].map(([reaction, count]) => ({
+              reaction,
+              title: savedTagNames.get(reaction) ?? '',
+              count,
+            })),
+            recommended: ['⭐', '❤', '👍'].filter((reaction) => !counts.has(reaction)),
+          };
+        }),
+      renameSavedTag: (reaction, title) =>
+        hasScenario('saved-free')
+          ? Effect.fail(createMtprotoError('rpc', 'PREMIUM_ACCOUNT_REQUIRED'))
+          : Effect.sync(() => {
+              savedTagNames.set(reaction, title);
+            }),
+      setSavedMessageTags: (id, reactions) =>
+        hasScenario('saved-free')
+          ? Effect.fail(createMtprotoError('rpc', 'PREMIUM_ACCOUNT_REQUIRED'))
+          : Effect.sync(() => {
+              ensureSaved();
+              const mapped = reactions.map((emoji) => ({ emoji, chosen: true, count: 1 }));
+              messages.set(
+                savedSelf.id,
+                messages
+                  .get(savedSelf.id)!
+                  .map((message) =>
+                    message.id === id
+                      ? { ...message, reactions: mapped, reactionsAsTags: true }
+                      : message,
+                  ),
+              );
+              return {};
+            }),
+      getChatManagement: (peer) => Effect.sync(() => structuredClone(peerManagement(peer))),
+      setChatSetting: (peer, change) =>
+        Effect.sync(() => {
+          Object.assign(peerManagement(peer), { [change.kind]: change.value });
+          return {};
+        }),
+      getChatInviteLinks: (peer, revoked = false) =>
+        Effect.sync(() => {
+          const links = peerInviteLinks(peer).filter((link) => link.revoked === revoked);
+          return { links: structuredClone(links), count: links.length };
+        }),
+      exportChatInviteLink: (peer, draft) =>
+        Effect.sync(() => {
+          const link: ChatInviteLink = {
+            ...draft,
+            url: `https://t.me/+created_${inviteLinkId++}`,
+            adminId: 'u:900000001',
+            date: Math.floor(Date.now() / 1000),
+            permanent: false,
+            revoked: false,
+            usage: 0,
+            requested: 0,
+            paid: false,
+          };
+          peerInviteLinks(peer).push(link);
+          return structuredClone(link);
+        }),
+      editChatInviteLink: (peer, url, draft) =>
+        Effect.sync(() => {
+          const link = peerInviteLinks(peer).find((link) => link.url === url);
+          if (link) Object.assign(link, draft);
+        }),
+      revokeChatInviteLink: (peer, url) =>
+        Effect.sync(() => {
+          const link = peerInviteLinks(peer).find((link) => link.url === url);
+          if (link) {
+            link.revoked = true;
+            if (link.permanent)
+              peerInviteLinks(peer).push({
+                ...link,
+                url: `https://t.me/+primary_${inviteLinkId++}`,
+                revoked: false,
+              });
+          }
+        }),
+      deleteChatInviteLink: (peer, url) =>
+        Effect.sync(() => {
+          inviteLinkLists.set(
+            peer.id,
+            peerInviteLinks(peer).filter((link) => link.url !== url || !link.revoked),
+          );
+        }),
+      getJoinRequests: (_peer, query = '') =>
+        Effect.sync(() => {
+          const people = joinRequestPeople.filter((person) =>
+            person.title.toLowerCase().includes(query.toLowerCase()),
+          );
+          return { people: structuredClone(people), count: people.length };
+        }),
+      resolveJoinRequest: (_peer, user, _approved) =>
+        Effect.sync(() => {
+          joinRequestPeople = joinRequestPeople.filter((person) => person.peer.id !== user.id);
+          return {};
+        }),
+      resolveAllJoinRequests: () =>
+        Effect.sync(() => {
+          joinRequestPeople = [];
+          return {};
+        }),
+      checkChatInvite: (hash) =>
+        hash === 'expired'
+          ? Effect.fail(createMtprotoError('rpc', 'This invitation link has expired.'))
+          : Effect.succeed({
+              title: 'Invited community',
+              about: 'A place to make plans together.',
+              participantsCount: 42,
+              broadcast: false,
+              requestNeeded: hash === 'request',
+              alreadyJoined: hash === 'already',
+              paid: hash === 'paid',
+              peer: hash === 'already' ? peers[2]! : undefined,
+            }),
+      joinChatInvite: (hash) =>
+        Effect.sync(() => {
+          if (hash === 'request') return { status: 'requested' as const };
+          const peer: TelegramPeer = { id: 'g:6000', kind: 'group' };
+          messages.set(peer.id, []);
+          if (!createdDialogs.some((dialog) => dialog.peer.id === peer.id))
+            createdDialogs.push(fixtureDialog(peer, 'Invited community', '#5288c1'));
+          return { status: 'joined' as const, peer };
+        }),
+      createChat: (request) =>
+        Effect.sync(() => {
+          const id = 5000 + createdDialogs.length;
+          const peer: TelegramPeer = {
+            id: `${request.kind === 'group' ? 'g' : 'c'}:${id}`,
+            kind: request.kind === 'group' ? 'group' : 'channel',
+            accessHash: '1',
+          };
+          messages.set(peer.id, []);
+          createdDialogs.push({
+            ...fixtureDialog(peer, request.title, '#5288c1'),
+            broadcast: request.kind === 'channel',
+          });
+          return {
+            peer,
+            missingUserIds:
+              scenario === 'create-partial' ? request.users.map((user) => user.id) : [],
+          };
+        }),
+      deleteForumTopic: (peer, topicId) =>
+        Effect.sync(() => {
+          const index = forumTopics.findIndex((topic) => topic.id === topicId);
+          if (index >= 0) forumTopics.splice(index, 1);
+          messages.set(
+            peer.id,
+            (messages.get(peer.id) ?? []).filter((message) => !messageInTopic(message, topicId)),
+          );
+          return { pts: cursor.pts, ptsCount: 0 };
+        }),
+      getForumTopic: (_peer, topicId) =>
+        Effect.sync(() => structuredClone(forumTopics.find((topic) => topic.id === topicId))),
+      getForumTopics: (peer, query = '') =>
+        Effect.sync(() => {
+          const selected = forumTopics
+            .filter((topic) => topic.title.toLowerCase().includes(query.toLowerCase()))
+            .map((topic) => ({
+              ...topic,
+              topMessageId:
+                (messages.get(peer.id) ?? [])
+                  .filter((message) => messageInTopic(message, topic.id))
+                  .at(-1)?.id ?? 0,
+            }));
+          return {
+            topics: structuredClone(selected),
+            messages: selected.flatMap((topic) => {
+              const message = messages
+                .get(peer.id)
+                ?.find((message) => message.id === topic.topMessageId);
+              return message ? [message] : [];
+            }),
+            count: selected.length,
+            canCreate: true,
+            canManage: true,
+          };
+        }),
+      createForumTopic: (_peer, title, iconColor) =>
+        Effect.sync(() => {
+          forumTopics.push({
+            ...forumTopics[0]!,
+            id:
+              Math.max(
+                ...(messages.get('c:202') ?? []).map((message) => message.id),
+                ...forumTopics.map((topic) => topic.id),
+              ) + 1,
+            title,
+            iconColor,
+            unreadCount: 0,
+            readInboxMaxId: 0,
+            topMessageId: 0,
+            closed: false,
+            hidden: false,
+            pinned: false,
+          });
+          return {};
+        }),
+      editForumTopic: (_peer, id, change) =>
+        Effect.sync(() => {
+          const topic = forumTopics.find((topic) => topic.id === id);
+          if (topic) Object.assign(topic, change);
+          return {};
+        }),
+      pinForumTopic: (_peer, id, pinned) =>
+        Effect.sync(() => {
+          const topic = forumTopics.find((topic) => topic.id === id);
+          if (topic) topic.pinned = pinned;
+          return {};
+        }),
+      readForumTopic: (_peer, id, maxId) =>
+        Effect.sync(() => {
+          const topic = forumTopics.find((topic) => topic.id === id);
+          if (topic) {
+            topic.unreadCount = 0;
+            topic.readInboxMaxId = maxId;
+          }
+        }),
+      getChatFolders: () => Effect.sync(() => structuredClone(chatFolders)),
+      saveChatFolder: (folder) =>
+        Effect.sync(() => {
+          const at = chatFolders.findIndex((item) => item.id === folder.id);
+          if (at < 0) chatFolders.push(structuredClone(folder));
+          else chatFolders[at] = structuredClone(folder);
+        }),
+      deleteChatFolder: (id) =>
+        Effect.sync(() => {
+          chatFolders = chatFolders.filter((folder) => folder.id !== id);
+        }),
+      reorderChatFolders: (ids) =>
+        Effect.sync(() => {
+          chatFolders.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+        }),
+      getFolderUpdates: (id) =>
+        Effect.sync(() => ({
+          slug: '',
+          folderId: id,
+          title: 'New chats in folder',
+          already: [],
+          peers: chatFolders
+            .find((folder) => folder.id === id)
+            ?.included.some((peer) => peer.id === peers[1]!.id)
+            ? []
+            : [
+                {
+                  peer: peers[1]!,
+                  category: 'channel' as const,
+                  title: 'Release Channel',
+                  initials: 'RC',
+                  color: '#408acf',
+                  bot: false,
+                  isContact: false,
+                  hasAvatar: false,
+                },
+              ],
+        })),
+      joinFolderUpdates: (id, selected) =>
+        Effect.sync(() => {
+          const folder = chatFolders.find((item) => item.id === id);
+          if (folder)
+            folder.included.push(
+              ...selected.filter((peer) => !folder.included.some((item) => item.id === peer.id)),
+            );
+          return {};
+        }),
+      getFolderLinks: (id) => Effect.sync(() => structuredClone(folderLinks.get(id) ?? [])),
+      exportFolderLink: (id, title, selected) =>
+        Effect.sync(() => {
+          const link = {
+            title,
+            url: `https://t.me/addlist/fixture-${id}-${(folderLinks.get(id)?.length ?? 0) + 1}`,
+            peers: selected,
+          };
+          folderLinks.set(id, [...(folderLinks.get(id) ?? []), link]);
+          chatFolders = chatFolders.map((folder) =>
+            folder.id === id ? { ...folder, shared: true } : folder,
+          );
+          return link;
+        }),
+      deleteFolderLink: (id, slug) =>
+        Effect.sync(() => {
+          folderLinks.set(
+            id,
+            (folderLinks.get(id) ?? []).filter((link) => !link.url.endsWith(`/${slug}`)),
+          );
+        }),
+      checkFolderInvite: (slug) =>
+        Effect.sync(() => ({
+          slug,
+          title: 'Shared fixture folder',
+          already: [],
+          peers: [
+            {
+              peer: peers[2]!,
+              category: 'group' as const,
+              title: 'Fixture Group',
+              initials: 'FG',
+              color: '#408acf',
+              bot: false,
+              isContact: false,
+              hasAvatar: false,
+            },
+          ],
+        })),
+      joinFolderInvite: (_slug, selected) =>
+        Effect.sync(() => {
+          chatFolders.push({
+            id: Math.max(1, ...chatFolders.map((folder) => folder.id)) + 1,
+            title: 'Shared',
+            shared: true,
+            included: selected,
+            excluded: [],
+            pinned: [],
+            categories: [],
+            exclusions: [],
+          });
+          return {};
+        }),
       getPrivacy,
       setPrivacy,
       getReadTimePrivacy,

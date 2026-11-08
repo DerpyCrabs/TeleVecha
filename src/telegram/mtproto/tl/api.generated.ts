@@ -27,6 +27,14 @@ const $BotInlineMediaResult = createTlFactory<
 >('botInlineMediaResult');
 const $BotMenuButton = createTlFactory<Tl.BotMenuButton, Tl.BotMenuButtonFields>('botMenuButton');
 const $Channel = createTlFactory<Tl.Channel, Tl.ChannelFields>('channel');
+const $ChannelAdminLogEvent = createTlFactory<
+  Tl.ChannelAdminLogEvent,
+  Tl.ChannelAdminLogEventFields
+>('channelAdminLogEvent');
+const $ChannelAdminLogEventsFilter = createTlFactory<
+  Tl.ChannelAdminLogEventsFilter,
+  Tl.ChannelAdminLogEventsFilterFields
+>('channelAdminLogEventsFilter');
 const $ChannelForbidden = createTlFactory<Tl.ChannelForbidden, Tl.ChannelForbiddenFields>(
   'channelForbidden',
 );
@@ -42,14 +50,30 @@ const $ChannelParticipantAdmin = createTlFactory<
   Tl.ChannelParticipantAdmin,
   Tl.ChannelParticipantAdminFields
 >('channelParticipantAdmin');
+const $ChannelParticipantBanned = createTlFactory<
+  Tl.ChannelParticipantBanned,
+  Tl.ChannelParticipantBannedFields
+>('channelParticipantBanned');
 const $ChannelParticipantCreator = createTlFactory<
   Tl.ChannelParticipantCreator,
   Tl.ChannelParticipantCreatorFields
 >('channelParticipantCreator');
+const $ChannelParticipantSelf = createTlFactory<
+  Tl.ChannelParticipantSelf,
+  Tl.ChannelParticipantSelfFields
+>('channelParticipantSelf');
 const $ChannelParticipantsAdmins = createTlFactory<
   Tl.ChannelParticipantsAdmins,
   Tl.ChannelParticipantsAdminsFields
 >('channelParticipantsAdmins');
+const $ChannelParticipantsBanned = createTlFactory<
+  Tl.ChannelParticipantsBanned,
+  Tl.ChannelParticipantsBannedFields
+>('channelParticipantsBanned');
+const $ChannelParticipantsKicked = createTlFactory<
+  Tl.ChannelParticipantsKicked,
+  Tl.ChannelParticipantsKickedFields
+>('channelParticipantsKicked');
 const $ChannelParticipantsRecent = createTlFactory<
   Tl.ChannelParticipantsRecent,
   Tl.ChannelParticipantsRecentFields
@@ -59,7 +83,21 @@ const $ChannelParticipantsSearch = createTlFactory<
   Tl.ChannelParticipantsSearchFields
 >('channelParticipantsSearch');
 const $Chat = createTlFactory<Tl.Chat, Tl.ChatFields>('chat');
+const $ChatAdminRights = createTlFactory<Tl.ChatAdminRights, Tl.ChatAdminRightsFields>(
+  'chatAdminRights',
+);
+const $ChatBannedRights = createTlFactory<Tl.ChatBannedRights, Tl.ChatBannedRightsFields>(
+  'chatBannedRights',
+);
+const $ChatForbidden = createTlFactory<Tl.ChatForbidden, Tl.ChatForbiddenFields>('chatForbidden');
 const $ChatFull = createTlFactory<Tl.ChatFull, Tl.ChatFullFields>('chatFull');
+const $ChatInvite = createTlFactory<Tl.ChatInvite, Tl.ChatInviteFields>('chatInvite');
+const $ChatInviteAlready = createTlFactory<Tl.ChatInviteAlready, Tl.ChatInviteAlreadyFields>(
+  'chatInviteAlready',
+);
+const $ChatInviteExported = createTlFactory<Tl.ChatInviteExported, Tl.ChatInviteExportedFields>(
+  'chatInviteExported',
+);
 const $ChatParticipantAdmin = createTlFactory<
   Tl.ChatParticipantAdmin,
   Tl.ChatParticipantAdminFields
@@ -88,6 +126,12 @@ const $DhGenFail = createTlFactory<Tl.DhGenFail, Tl.DhGenFailFields>('dh_gen_fai
 const $DhGenOk = createTlFactory<Tl.DhGenOk, Tl.DhGenOkFields>('dh_gen_ok');
 const $DhGenRetry = createTlFactory<Tl.DhGenRetry, Tl.DhGenRetryFields>('dh_gen_retry');
 const $Dialog = createTlFactory<Tl.Dialog, Tl.DialogFields>('dialog');
+const $DialogFilter = createTlFactory<Tl.DialogFilter, Tl.DialogFilterFields>('dialogFilter');
+const $DialogFilterChatlist = createTlFactory<
+  Tl.DialogFilterChatlist,
+  Tl.DialogFilterChatlistFields
+>('dialogFilterChatlist');
+const $DialogPeer = createTlFactory<Tl.DialogPeer, Tl.DialogPeerFields>('dialogPeer');
 const $Document = createTlFactory<Tl.Document, Tl.DocumentFields>('document');
 const $DocumentAttributeAnimated = createTlFactory<
   Tl.DocumentAttributeAnimated,
@@ -113,6 +157,11 @@ const $DocumentAttributeVideo = createTlFactory<
   Tl.DocumentAttributeVideo,
   Tl.DocumentAttributeVideoFields
 >('documentAttributeVideo');
+const $ExportedChatlistInvite = createTlFactory<
+  Tl.ExportedChatlistInvite,
+  Tl.ExportedChatlistInviteFields
+>('exportedChatlistInvite');
+const $ForumTopic = createTlFactory<Tl.ForumTopic, Tl.ForumTopicFields>('forumTopic');
 const $GeoPoint = createTlFactory<Tl.GeoPoint, Tl.GeoPointFields>('geoPoint');
 const $GlobalPrivacySettings = createTlFactory<
   Tl.GlobalPrivacySettings,
@@ -129,6 +178,10 @@ const $InputBotAppShortName = createTlFactory<
   Tl.InputBotAppShortNameFields
 >('inputBotAppShortName');
 const $InputChannel = createTlFactory<Tl.InputChannel, Tl.InputChannelFields>('inputChannel');
+const $InputChatlistDialogFilter = createTlFactory<
+  Tl.InputChatlistDialogFilter,
+  Tl.InputChatlistDialogFilterFields
+>('inputChatlistDialogFilter');
 const $InputCheckPasswordSRP = createTlFactory<
   Tl.InputCheckPasswordSRP,
   Tl.InputCheckPasswordSRPFields
@@ -233,6 +286,7 @@ const $InputPeerNotifySettings = createTlFactory<
   Tl.InputPeerNotifySettings,
   Tl.InputPeerNotifySettingsFields
 >('inputPeerNotifySettings');
+const $InputPeerSelf = createTlFactory<Tl.InputPeerSelf, Tl.InputPeerSelfFields>('inputPeerSelf');
 const $InputPeerUser = createTlFactory<Tl.InputPeerUser, Tl.InputPeerUserFields>('inputPeerUser');
 const $InputPhoto = createTlFactory<Tl.InputPhoto, Tl.InputPhotoFields>('inputPhoto');
 const $InputPrivacyKeyAbout = createTlFactory<
@@ -349,6 +403,9 @@ const $InputStickerSetShortName = createTlFactory<
   Tl.InputStickerSetShortNameFields
 >('inputStickerSetShortName');
 const $InputUser = createTlFactory<Tl.InputUser, Tl.InputUserFields>('inputUser');
+const $InputUserEmpty = createTlFactory<Tl.InputUserEmpty, Tl.InputUserEmptyFields>(
+  'inputUserEmpty',
+);
 const $InputUserSelf = createTlFactory<Tl.InputUserSelf, Tl.InputUserSelfFields>('inputUserSelf');
 const $InvokeAfterMsg = createTlFactory<Tl.InvokeAfterMsg, Tl.InvokeAfterMsgFields>(
   'invokeAfterMsg',
@@ -356,6 +413,8 @@ const $InvokeAfterMsg = createTlFactory<Tl.InvokeAfterMsg, Tl.InvokeAfterMsgFiel
 const $InvokeWithLayer = createTlFactory<Tl.InvokeWithLayer, Tl.InvokeWithLayerFields>(
   'invokeWithLayer',
 );
+const $JsonNumber = createTlFactory<Tl.JsonNumber, Tl.JsonNumberFields>('jsonNumber');
+const $JsonObject = createTlFactory<Tl.JsonObject, Tl.JsonObjectFields>('jsonObject');
 const $KeyboardButton = createTlFactory<Tl.KeyboardButton, Tl.KeyboardButtonFields>(
   'keyboardButton',
 );
@@ -949,9 +1008,23 @@ const $UpdateDeleteMessages = createTlFactory<
   Tl.UpdateDeleteMessages,
   Tl.UpdateDeleteMessagesFields
 >('updateDeleteMessages');
+const $UpdateDialogFilter = createTlFactory<Tl.UpdateDialogFilter, Tl.UpdateDialogFilterFields>(
+  'updateDialogFilter',
+);
+const $UpdateDialogFilterOrder = createTlFactory<
+  Tl.UpdateDialogFilterOrder,
+  Tl.UpdateDialogFilterOrderFields
+>('updateDialogFilterOrder');
+const $UpdateDialogFilters = createTlFactory<Tl.UpdateDialogFilters, Tl.UpdateDialogFiltersFields>(
+  'updateDialogFilters',
+);
 const $UpdateDialogPinned = createTlFactory<Tl.UpdateDialogPinned, Tl.UpdateDialogPinnedFields>(
   'updateDialogPinned',
 );
+const $UpdateDialogUnreadMark = createTlFactory<
+  Tl.UpdateDialogUnreadMark,
+  Tl.UpdateDialogUnreadMarkFields
+>('updateDialogUnreadMark');
 const $UpdateEditChannelMessage = createTlFactory<
   Tl.UpdateEditChannelMessage,
   Tl.UpdateEditChannelMessageFields
@@ -999,6 +1072,10 @@ const $UpdateNotifySettings = createTlFactory<
 const $UpdatePeerBlocked = createTlFactory<Tl.UpdatePeerBlocked, Tl.UpdatePeerBlockedFields>(
   'updatePeerBlocked',
 );
+const $UpdatePendingJoinRequests = createTlFactory<
+  Tl.UpdatePendingJoinRequests,
+  Tl.UpdatePendingJoinRequestsFields
+>('updatePendingJoinRequests');
 const $UpdatePinnedChannelMessages = createTlFactory<
   Tl.UpdatePinnedChannelMessages,
   Tl.UpdatePinnedChannelMessagesFields
@@ -1006,13 +1083,33 @@ const $UpdatePinnedChannelMessages = createTlFactory<
 const $UpdatePinnedDialogs = createTlFactory<Tl.UpdatePinnedDialogs, Tl.UpdatePinnedDialogsFields>(
   'updatePinnedDialogs',
 );
+const $UpdatePinnedForumTopic = createTlFactory<
+  Tl.UpdatePinnedForumTopic,
+  Tl.UpdatePinnedForumTopicFields
+>('updatePinnedForumTopic');
+const $UpdatePinnedForumTopics = createTlFactory<
+  Tl.UpdatePinnedForumTopics,
+  Tl.UpdatePinnedForumTopicsFields
+>('updatePinnedForumTopics');
 const $UpdatePinnedMessages = createTlFactory<
   Tl.UpdatePinnedMessages,
   Tl.UpdatePinnedMessagesFields
 >('updatePinnedMessages');
+const $UpdatePinnedSavedDialogs = createTlFactory<
+  Tl.UpdatePinnedSavedDialogs,
+  Tl.UpdatePinnedSavedDialogsFields
+>('updatePinnedSavedDialogs');
 const $UpdatePtsChanged = createTlFactory<Tl.UpdatePtsChanged, Tl.UpdatePtsChangedFields>(
   'updatePtsChanged',
 );
+const $UpdateReadChannelDiscussionInbox = createTlFactory<
+  Tl.UpdateReadChannelDiscussionInbox,
+  Tl.UpdateReadChannelDiscussionInboxFields
+>('updateReadChannelDiscussionInbox');
+const $UpdateReadChannelDiscussionOutbox = createTlFactory<
+  Tl.UpdateReadChannelDiscussionOutbox,
+  Tl.UpdateReadChannelDiscussionOutboxFields
+>('updateReadChannelDiscussionOutbox');
 const $UpdateReadChannelInbox = createTlFactory<
   Tl.UpdateReadChannelInbox,
   Tl.UpdateReadChannelInboxFields
@@ -1037,9 +1134,17 @@ const $UpdateRecentStickers = createTlFactory<
   Tl.UpdateRecentStickers,
   Tl.UpdateRecentStickersFields
 >('updateRecentStickers');
+const $UpdateSavedDialogPinned = createTlFactory<
+  Tl.UpdateSavedDialogPinned,
+  Tl.UpdateSavedDialogPinnedFields
+>('updateSavedDialogPinned');
 const $UpdateSavedGifs = createTlFactory<Tl.UpdateSavedGifs, Tl.UpdateSavedGifsFields>(
   'updateSavedGifs',
 );
+const $UpdateSavedReactionTags = createTlFactory<
+  Tl.UpdateSavedReactionTags,
+  Tl.UpdateSavedReactionTagsFields
+>('updateSavedReactionTags');
 const $UpdateShort = createTlFactory<Tl.UpdateShort, Tl.UpdateShortFields>('updateShort');
 const $UpdateShortChatMessage = createTlFactory<
   Tl.UpdateShortChatMessage,
@@ -1239,6 +1344,10 @@ const $channels_ChannelParticipants = createTlFactory<
   Tl.channels.ChannelParticipants,
   Tl.channels.ChannelParticipantsFields
 >('channels.channelParticipants');
+const $channels_CreateChannel = createTlFactory<
+  Tl.channels.CreateChannel,
+  Tl.channels.CreateChannelFields
+>('channels.createChannel');
 const $channels_DeleteChannel = createTlFactory<
   Tl.channels.DeleteChannel,
   Tl.channels.DeleteChannelFields
@@ -1247,6 +1356,19 @@ const $channels_DeleteMessages = createTlFactory<
   Tl.channels.DeleteMessages,
   Tl.channels.DeleteMessagesFields
 >('channels.deleteMessages');
+const $channels_EditAdmin = createTlFactory<Tl.channels.EditAdmin, Tl.channels.EditAdminFields>(
+  'channels.editAdmin',
+);
+const $channels_EditBanned = createTlFactory<Tl.channels.EditBanned, Tl.channels.EditBannedFields>(
+  'channels.editBanned',
+);
+const $channels_EditTitle = createTlFactory<Tl.channels.EditTitle, Tl.channels.EditTitleFields>(
+  'channels.editTitle',
+);
+const $channels_GetAdminLog = createTlFactory<
+  Tl.channels.GetAdminLog,
+  Tl.channels.GetAdminLogFields
+>('channels.getAdminLog');
 const $channels_GetChannels = createTlFactory<
   Tl.channels.GetChannels,
   Tl.channels.GetChannelsFields
@@ -1267,6 +1389,10 @@ const $channels_GetParticipants = createTlFactory<
   Tl.channels.GetParticipants,
   Tl.channels.GetParticipantsFields
 >('channels.getParticipants');
+const $channels_InviteToChannel = createTlFactory<
+  Tl.channels.InviteToChannel,
+  Tl.channels.InviteToChannelFields
+>('channels.inviteToChannel');
 const $channels_LeaveChannel = createTlFactory<
   Tl.channels.LeaveChannel,
   Tl.channels.LeaveChannelFields
@@ -1279,6 +1405,54 @@ const $channels_ReadMessageContents = createTlFactory<
   Tl.channels.ReadMessageContents,
   Tl.channels.ReadMessageContentsFields
 >('channels.readMessageContents');
+const $channels_ToggleForum = createTlFactory<
+  Tl.channels.ToggleForum,
+  Tl.channels.ToggleForumFields
+>('channels.toggleForum');
+const $channels_TogglePreHistoryHidden = createTlFactory<
+  Tl.channels.TogglePreHistoryHidden,
+  Tl.channels.TogglePreHistoryHiddenFields
+>('channels.togglePreHistoryHidden');
+const $channels_ToggleSlowMode = createTlFactory<
+  Tl.channels.ToggleSlowMode,
+  Tl.channels.ToggleSlowModeFields
+>('channels.toggleSlowMode');
+const $channels_UpdateUsername = createTlFactory<
+  Tl.channels.UpdateUsername,
+  Tl.channels.UpdateUsernameFields
+>('channels.updateUsername');
+const $chatlists_ChatlistInviteAlready = createTlFactory<
+  Tl.chatlists.ChatlistInviteAlready,
+  Tl.chatlists.ChatlistInviteAlreadyFields
+>('chatlists.chatlistInviteAlready');
+const $chatlists_CheckChatlistInvite = createTlFactory<
+  Tl.chatlists.CheckChatlistInvite,
+  Tl.chatlists.CheckChatlistInviteFields
+>('chatlists.checkChatlistInvite');
+const $chatlists_DeleteExportedInvite = createTlFactory<
+  Tl.chatlists.DeleteExportedInvite,
+  Tl.chatlists.DeleteExportedInviteFields
+>('chatlists.deleteExportedInvite');
+const $chatlists_ExportChatlistInvite = createTlFactory<
+  Tl.chatlists.ExportChatlistInvite,
+  Tl.chatlists.ExportChatlistInviteFields
+>('chatlists.exportChatlistInvite');
+const $chatlists_GetChatlistUpdates = createTlFactory<
+  Tl.chatlists.GetChatlistUpdates,
+  Tl.chatlists.GetChatlistUpdatesFields
+>('chatlists.getChatlistUpdates');
+const $chatlists_GetExportedInvites = createTlFactory<
+  Tl.chatlists.GetExportedInvites,
+  Tl.chatlists.GetExportedInvitesFields
+>('chatlists.getExportedInvites');
+const $chatlists_JoinChatlistInvite = createTlFactory<
+  Tl.chatlists.JoinChatlistInvite,
+  Tl.chatlists.JoinChatlistInviteFields
+>('chatlists.joinChatlistInvite');
+const $chatlists_JoinChatlistUpdates = createTlFactory<
+  Tl.chatlists.JoinChatlistUpdates,
+  Tl.chatlists.JoinChatlistUpdatesFields
+>('chatlists.joinChatlistUpdates');
 const $contacts_AddContact = createTlFactory<Tl.contacts.AddContact, Tl.contacts.AddContactFields>(
   'contacts.addContact',
 );
@@ -1307,6 +1481,12 @@ const $folders_EditPeerFolders = createTlFactory<
   Tl.folders.EditPeerFolders,
   Tl.folders.EditPeerFoldersFields
 >('folders.editPeerFolders');
+const $help_AppConfig = createTlFactory<Tl.help.AppConfig, Tl.help.AppConfigFields>(
+  'help.appConfig',
+);
+const $help_GetAppConfig = createTlFactory<Tl.help.GetAppConfig, Tl.help.GetAppConfigFields>(
+  'help.getAppConfig',
+);
 const $help_GetConfig = createTlFactory<Tl.help.GetConfig, Tl.help.GetConfigFields>(
   'help.getConfig',
 );
@@ -1314,6 +1494,10 @@ const $messages_AcceptUrlAuth = createTlFactory<
   Tl.messages.AcceptUrlAuth,
   Tl.messages.AcceptUrlAuthFields
 >('messages.acceptUrlAuth');
+const $messages_AddChatUser = createTlFactory<
+  Tl.messages.AddChatUser,
+  Tl.messages.AddChatUserFields
+>('messages.addChatUser');
 const $messages_AffectedMessages = createTlFactory<
   Tl.messages.AffectedMessages,
   Tl.messages.AffectedMessagesFields
@@ -1329,6 +1513,21 @@ const $messages_ChannelMessages = createTlFactory<
   Tl.messages.ChannelMessages,
   Tl.messages.ChannelMessagesFields
 >('messages.channelMessages');
+const $messages_ChatInviteJoinResultOk = createTlFactory<
+  Tl.messages.ChatInviteJoinResultOk,
+  Tl.messages.ChatInviteJoinResultOkFields
+>('messages.chatInviteJoinResultOk');
+const $messages_CheckChatInvite = createTlFactory<
+  Tl.messages.CheckChatInvite,
+  Tl.messages.CheckChatInviteFields
+>('messages.checkChatInvite');
+const $messages_CreateChat = createTlFactory<Tl.messages.CreateChat, Tl.messages.CreateChatFields>(
+  'messages.createChat',
+);
+const $messages_CreateForumTopic = createTlFactory<
+  Tl.messages.CreateForumTopic,
+  Tl.messages.CreateForumTopicFields
+>('messages.createForumTopic');
 const $messages_DeleteChat = createTlFactory<Tl.messages.DeleteChat, Tl.messages.DeleteChatFields>(
   'messages.deleteChat',
 );
@@ -1336,6 +1535,10 @@ const $messages_DeleteChatUser = createTlFactory<
   Tl.messages.DeleteChatUser,
   Tl.messages.DeleteChatUserFields
 >('messages.deleteChatUser');
+const $messages_DeleteExportedChatInvite = createTlFactory<
+  Tl.messages.DeleteExportedChatInvite,
+  Tl.messages.DeleteExportedChatInviteFields
+>('messages.deleteExportedChatInvite');
 const $messages_DeleteHistory = createTlFactory<
   Tl.messages.DeleteHistory,
   Tl.messages.DeleteHistoryFields
@@ -1344,6 +1547,10 @@ const $messages_DeleteMessages = createTlFactory<
   Tl.messages.DeleteMessages,
   Tl.messages.DeleteMessagesFields
 >('messages.deleteMessages');
+const $messages_DeleteTopicHistory = createTlFactory<
+  Tl.messages.DeleteTopicHistory,
+  Tl.messages.DeleteTopicHistoryFields
+>('messages.deleteTopicHistory');
 const $messages_DialogsNotModified = createTlFactory<
   Tl.messages.DialogsNotModified,
   Tl.messages.DialogsNotModifiedFields
@@ -1356,10 +1563,38 @@ const $messages_DiscussionMessage = createTlFactory<
   Tl.messages.DiscussionMessage,
   Tl.messages.DiscussionMessageFields
 >('messages.discussionMessage');
+const $messages_EditChatAbout = createTlFactory<
+  Tl.messages.EditChatAbout,
+  Tl.messages.EditChatAboutFields
+>('messages.editChatAbout');
+const $messages_EditChatAdmin = createTlFactory<
+  Tl.messages.EditChatAdmin,
+  Tl.messages.EditChatAdminFields
+>('messages.editChatAdmin');
+const $messages_EditChatDefaultBannedRights = createTlFactory<
+  Tl.messages.EditChatDefaultBannedRights,
+  Tl.messages.EditChatDefaultBannedRightsFields
+>('messages.editChatDefaultBannedRights');
+const $messages_EditChatTitle = createTlFactory<
+  Tl.messages.EditChatTitle,
+  Tl.messages.EditChatTitleFields
+>('messages.editChatTitle');
+const $messages_EditExportedChatInvite = createTlFactory<
+  Tl.messages.EditExportedChatInvite,
+  Tl.messages.EditExportedChatInviteFields
+>('messages.editExportedChatInvite');
+const $messages_EditForumTopic = createTlFactory<
+  Tl.messages.EditForumTopic,
+  Tl.messages.EditForumTopicFields
+>('messages.editForumTopic');
 const $messages_EditMessage = createTlFactory<
   Tl.messages.EditMessage,
   Tl.messages.EditMessageFields
 >('messages.editMessage');
+const $messages_ExportChatInvite = createTlFactory<
+  Tl.messages.ExportChatInvite,
+  Tl.messages.ExportChatInviteFields
+>('messages.exportChatInvite');
 const $messages_FaveSticker = createTlFactory<
   Tl.messages.FaveSticker,
   Tl.messages.FaveStickerFields
@@ -1391,6 +1626,10 @@ const $messages_GetBotCallbackAnswer = createTlFactory<
   Tl.messages.GetBotCallbackAnswer,
   Tl.messages.GetBotCallbackAnswerFields
 >('messages.getBotCallbackAnswer');
+const $messages_GetChatInviteImporters = createTlFactory<
+  Tl.messages.GetChatInviteImporters,
+  Tl.messages.GetChatInviteImportersFields
+>('messages.getChatInviteImporters');
 const $messages_GetChats = createTlFactory<Tl.messages.GetChats, Tl.messages.GetChatsFields>(
   'messages.getChats',
 );
@@ -1398,6 +1637,14 @@ const $messages_GetCustomEmojiDocuments = createTlFactory<
   Tl.messages.GetCustomEmojiDocuments,
   Tl.messages.GetCustomEmojiDocumentsFields
 >('messages.getCustomEmojiDocuments');
+const $messages_GetDefaultTagReactions = createTlFactory<
+  Tl.messages.GetDefaultTagReactions,
+  Tl.messages.GetDefaultTagReactionsFields
+>('messages.getDefaultTagReactions');
+const $messages_GetDialogFilters = createTlFactory<
+  Tl.messages.GetDialogFilters,
+  Tl.messages.GetDialogFiltersFields
+>('messages.getDialogFilters');
 const $messages_GetDialogs = createTlFactory<Tl.messages.GetDialogs, Tl.messages.GetDialogsFields>(
   'messages.getDialogs',
 );
@@ -1405,10 +1652,22 @@ const $messages_GetDiscussionMessage = createTlFactory<
   Tl.messages.GetDiscussionMessage,
   Tl.messages.GetDiscussionMessageFields
 >('messages.getDiscussionMessage');
+const $messages_GetExportedChatInvites = createTlFactory<
+  Tl.messages.GetExportedChatInvites,
+  Tl.messages.GetExportedChatInvitesFields
+>('messages.getExportedChatInvites');
 const $messages_GetFavedStickers = createTlFactory<
   Tl.messages.GetFavedStickers,
   Tl.messages.GetFavedStickersFields
 >('messages.getFavedStickers');
+const $messages_GetForumTopics = createTlFactory<
+  Tl.messages.GetForumTopics,
+  Tl.messages.GetForumTopicsFields
+>('messages.getForumTopics');
+const $messages_GetForumTopicsByID = createTlFactory<
+  Tl.messages.GetForumTopicsByID,
+  Tl.messages.GetForumTopicsByIDFields
+>('messages.getForumTopicsByID');
 const $messages_GetFullChat = createTlFactory<
   Tl.messages.GetFullChat,
   Tl.messages.GetFullChatFields
@@ -1444,6 +1703,10 @@ const $messages_GetPinnedDialogs = createTlFactory<
   Tl.messages.GetPinnedDialogs,
   Tl.messages.GetPinnedDialogsFields
 >('messages.getPinnedDialogs');
+const $messages_GetPinnedSavedDialogs = createTlFactory<
+  Tl.messages.GetPinnedSavedDialogs,
+  Tl.messages.GetPinnedSavedDialogsFields
+>('messages.getPinnedSavedDialogs');
 const $messages_GetPollResults = createTlFactory<
   Tl.messages.GetPollResults,
   Tl.messages.GetPollResultsFields
@@ -1459,10 +1722,22 @@ const $messages_GetRecentStickers = createTlFactory<
 const $messages_GetReplies = createTlFactory<Tl.messages.GetReplies, Tl.messages.GetRepliesFields>(
   'messages.getReplies',
 );
+const $messages_GetSavedDialogs = createTlFactory<
+  Tl.messages.GetSavedDialogs,
+  Tl.messages.GetSavedDialogsFields
+>('messages.getSavedDialogs');
 const $messages_GetSavedGifs = createTlFactory<
   Tl.messages.GetSavedGifs,
   Tl.messages.GetSavedGifsFields
 >('messages.getSavedGifs');
+const $messages_GetSavedHistory = createTlFactory<
+  Tl.messages.GetSavedHistory,
+  Tl.messages.GetSavedHistoryFields
+>('messages.getSavedHistory');
+const $messages_GetSavedReactionTags = createTlFactory<
+  Tl.messages.GetSavedReactionTags,
+  Tl.messages.GetSavedReactionTagsFields
+>('messages.getSavedReactionTags');
 const $messages_GetSearchCounters = createTlFactory<
   Tl.messages.GetSearchCounters,
   Tl.messages.GetSearchCountersFields
@@ -1479,10 +1754,30 @@ const $messages_GetUnreadReactions = createTlFactory<
   Tl.messages.GetUnreadReactions,
   Tl.messages.GetUnreadReactionsFields
 >('messages.getUnreadReactions');
+const $messages_HideAllChatJoinRequests = createTlFactory<
+  Tl.messages.HideAllChatJoinRequests,
+  Tl.messages.HideAllChatJoinRequestsFields
+>('messages.hideAllChatJoinRequests');
+const $messages_HideChatJoinRequest = createTlFactory<
+  Tl.messages.HideChatJoinRequest,
+  Tl.messages.HideChatJoinRequestFields
+>('messages.hideChatJoinRequest');
+const $messages_ImportChatInvite = createTlFactory<
+  Tl.messages.ImportChatInvite,
+  Tl.messages.ImportChatInviteFields
+>('messages.importChatInvite');
 const $messages_InstallStickerSet = createTlFactory<
   Tl.messages.InstallStickerSet,
   Tl.messages.InstallStickerSetFields
 >('messages.installStickerSet');
+const $messages_InvitedUsers = createTlFactory<
+  Tl.messages.InvitedUsers,
+  Tl.messages.InvitedUsersFields
+>('messages.invitedUsers');
+const $messages_MarkDialogUnread = createTlFactory<
+  Tl.messages.MarkDialogUnread,
+  Tl.messages.MarkDialogUnreadFields
+>('messages.markDialogUnread');
 const $messages_Messages = createTlFactory<Tl.messages.Messages, Tl.messages.MessagesFields>(
   'messages.messages',
 );
@@ -1494,6 +1789,10 @@ const $messages_MessagesSlice = createTlFactory<
   Tl.messages.MessagesSlice,
   Tl.messages.MessagesSliceFields
 >('messages.messagesSlice');
+const $messages_MigrateChat = createTlFactory<
+  Tl.messages.MigrateChat,
+  Tl.messages.MigrateChatFields
+>('messages.migrateChat');
 const $messages_PeerDialogs = createTlFactory<
   Tl.messages.PeerDialogs,
   Tl.messages.PeerDialogsFields
@@ -1502,6 +1801,10 @@ const $messages_ProlongWebView = createTlFactory<
   Tl.messages.ProlongWebView,
   Tl.messages.ProlongWebViewFields
 >('messages.prolongWebView');
+const $messages_ReadDiscussion = createTlFactory<
+  Tl.messages.ReadDiscussion,
+  Tl.messages.ReadDiscussionFields
+>('messages.readDiscussion');
 const $messages_ReadHistory = createTlFactory<
   Tl.messages.ReadHistory,
   Tl.messages.ReadHistoryFields
@@ -1542,6 +1845,14 @@ const $messages_RequestWebView = createTlFactory<
   Tl.messages.RequestWebView,
   Tl.messages.RequestWebViewFields
 >('messages.requestWebView');
+const $messages_SavedDialogs = createTlFactory<
+  Tl.messages.SavedDialogs,
+  Tl.messages.SavedDialogsFields
+>('messages.savedDialogs');
+const $messages_SavedDialogsSlice = createTlFactory<
+  Tl.messages.SavedDialogsSlice,
+  Tl.messages.SavedDialogsSliceFields
+>('messages.savedDialogsSlice');
 const $messages_SavedGifs = createTlFactory<Tl.messages.SavedGifs, Tl.messages.SavedGifsFields>(
   'messages.savedGifs',
 );
@@ -1603,14 +1914,38 @@ const $messages_ToggleDialogPin = createTlFactory<
   Tl.messages.ToggleDialogPin,
   Tl.messages.ToggleDialogPinFields
 >('messages.toggleDialogPin');
+const $messages_ToggleNoForwards = createTlFactory<
+  Tl.messages.ToggleNoForwards,
+  Tl.messages.ToggleNoForwardsFields
+>('messages.toggleNoForwards');
+const $messages_ToggleSavedDialogPin = createTlFactory<
+  Tl.messages.ToggleSavedDialogPin,
+  Tl.messages.ToggleSavedDialogPinFields
+>('messages.toggleSavedDialogPin');
 const $messages_UninstallStickerSet = createTlFactory<
   Tl.messages.UninstallStickerSet,
   Tl.messages.UninstallStickerSetFields
 >('messages.uninstallStickerSet');
+const $messages_UpdateDialogFilter = createTlFactory<
+  Tl.messages.UpdateDialogFilter,
+  Tl.messages.UpdateDialogFilterFields
+>('messages.updateDialogFilter');
+const $messages_UpdateDialogFiltersOrder = createTlFactory<
+  Tl.messages.UpdateDialogFiltersOrder,
+  Tl.messages.UpdateDialogFiltersOrderFields
+>('messages.updateDialogFiltersOrder');
+const $messages_UpdatePinnedForumTopic = createTlFactory<
+  Tl.messages.UpdatePinnedForumTopic,
+  Tl.messages.UpdatePinnedForumTopicFields
+>('messages.updatePinnedForumTopic');
 const $messages_UpdatePinnedMessage = createTlFactory<
   Tl.messages.UpdatePinnedMessage,
   Tl.messages.UpdatePinnedMessageFields
 >('messages.updatePinnedMessage');
+const $messages_UpdateSavedReactionTag = createTlFactory<
+  Tl.messages.UpdateSavedReactionTag,
+  Tl.messages.UpdateSavedReactionTagFields
+>('messages.updateSavedReactionTag');
 const $messages_UploadMedia = createTlFactory<
   Tl.messages.UploadMedia,
   Tl.messages.UploadMediaFields
@@ -1681,17 +2016,29 @@ export const Api = Object.freeze({
   BotInlineMediaResult: $BotInlineMediaResult,
   BotMenuButton: $BotMenuButton,
   Channel: $Channel,
+  ChannelAdminLogEvent: $ChannelAdminLogEvent,
+  ChannelAdminLogEventsFilter: $ChannelAdminLogEventsFilter,
   ChannelForbidden: $ChannelForbidden,
   ChannelFull: $ChannelFull,
   ChannelMessagesFilterEmpty: $ChannelMessagesFilterEmpty,
   ChannelParticipant: $ChannelParticipant,
   ChannelParticipantAdmin: $ChannelParticipantAdmin,
+  ChannelParticipantBanned: $ChannelParticipantBanned,
   ChannelParticipantCreator: $ChannelParticipantCreator,
   ChannelParticipantsAdmins: $ChannelParticipantsAdmins,
+  ChannelParticipantsBanned: $ChannelParticipantsBanned,
+  ChannelParticipantSelf: $ChannelParticipantSelf,
+  ChannelParticipantsKicked: $ChannelParticipantsKicked,
   ChannelParticipantsRecent: $ChannelParticipantsRecent,
   ChannelParticipantsSearch: $ChannelParticipantsSearch,
   Chat: $Chat,
+  ChatAdminRights: $ChatAdminRights,
+  ChatBannedRights: $ChatBannedRights,
+  ChatForbidden: $ChatForbidden,
   ChatFull: $ChatFull,
+  ChatInvite: $ChatInvite,
+  ChatInviteAlready: $ChatInviteAlready,
+  ChatInviteExported: $ChatInviteExported,
   ChatParticipantAdmin: $ChatParticipantAdmin,
   ChatParticipantCreator: $ChatParticipantCreator,
   ChatParticipants: $ChatParticipants,
@@ -1706,6 +2053,9 @@ export const Api = Object.freeze({
   DhGenOk: $DhGenOk,
   DhGenRetry: $DhGenRetry,
   Dialog: $Dialog,
+  DialogFilter: $DialogFilter,
+  DialogFilterChatlist: $DialogFilterChatlist,
+  DialogPeer: $DialogPeer,
   Document: $Document,
   DocumentAttributeAnimated: $DocumentAttributeAnimated,
   DocumentAttributeAudio: $DocumentAttributeAudio,
@@ -1713,6 +2063,8 @@ export const Api = Object.freeze({
   DocumentAttributeImageSize: $DocumentAttributeImageSize,
   DocumentAttributeSticker: $DocumentAttributeSticker,
   DocumentAttributeVideo: $DocumentAttributeVideo,
+  ExportedChatlistInvite: $ExportedChatlistInvite,
+  ForumTopic: $ForumTopic,
   GeoPoint: $GeoPoint,
   GlobalPrivacySettings: $GlobalPrivacySettings,
   GzipPacked: $GzipPacked,
@@ -1721,6 +2073,7 @@ export const Api = Object.freeze({
   InputBotAppID: $InputBotAppID,
   InputBotAppShortName: $InputBotAppShortName,
   InputChannel: $InputChannel,
+  InputChatlistDialogFilter: $InputChatlistDialogFilter,
   InputCheckPasswordSRP: $InputCheckPasswordSRP,
   InputDialogPeer: $InputDialogPeer,
   InputDocument: $InputDocument,
@@ -1753,6 +2106,7 @@ export const Api = Object.freeze({
   InputPeerChat: $InputPeerChat,
   InputPeerEmpty: $InputPeerEmpty,
   InputPeerNotifySettings: $InputPeerNotifySettings,
+  InputPeerSelf: $InputPeerSelf,
   InputPeerUser: $InputPeerUser,
   InputPhoto: $InputPhoto,
   InputPrivacyKeyAbout: $InputPrivacyKeyAbout,
@@ -1785,9 +2139,12 @@ export const Api = Object.freeze({
   InputStickerSetID: $InputStickerSetID,
   InputStickerSetShortName: $InputStickerSetShortName,
   InputUser: $InputUser,
+  InputUserEmpty: $InputUserEmpty,
   InputUserSelf: $InputUserSelf,
   InvokeAfterMsg: $InvokeAfterMsg,
   InvokeWithLayer: $InvokeWithLayer,
+  JsonNumber: $JsonNumber,
+  JsonObject: $JsonObject,
   KeyboardButton: $KeyboardButton,
   KeyboardButtonCallback: $KeyboardButtonCallback,
   KeyboardButtonCopy: $KeyboardButtonCopy,
@@ -1995,7 +2352,11 @@ export const Api = Object.freeze({
   UpdateChatUserTyping: $UpdateChatUserTyping,
   UpdateDeleteChannelMessages: $UpdateDeleteChannelMessages,
   UpdateDeleteMessages: $UpdateDeleteMessages,
+  UpdateDialogFilter: $UpdateDialogFilter,
+  UpdateDialogFilterOrder: $UpdateDialogFilterOrder,
+  UpdateDialogFilters: $UpdateDialogFilters,
   UpdateDialogPinned: $UpdateDialogPinned,
+  UpdateDialogUnreadMark: $UpdateDialogUnreadMark,
   UpdateEditChannelMessage: $UpdateEditChannelMessage,
   UpdateEditMessage: $UpdateEditMessage,
   UpdateFavedStickers: $UpdateFavedStickers,
@@ -2010,10 +2371,16 @@ export const Api = Object.freeze({
   UpdateNewStickerSet: $UpdateNewStickerSet,
   UpdateNotifySettings: $UpdateNotifySettings,
   UpdatePeerBlocked: $UpdatePeerBlocked,
+  UpdatePendingJoinRequests: $UpdatePendingJoinRequests,
   UpdatePinnedChannelMessages: $UpdatePinnedChannelMessages,
   UpdatePinnedDialogs: $UpdatePinnedDialogs,
+  UpdatePinnedForumTopic: $UpdatePinnedForumTopic,
+  UpdatePinnedForumTopics: $UpdatePinnedForumTopics,
   UpdatePinnedMessages: $UpdatePinnedMessages,
+  UpdatePinnedSavedDialogs: $UpdatePinnedSavedDialogs,
   UpdatePtsChanged: $UpdatePtsChanged,
+  UpdateReadChannelDiscussionInbox: $UpdateReadChannelDiscussionInbox,
+  UpdateReadChannelDiscussionOutbox: $UpdateReadChannelDiscussionOutbox,
   UpdateReadChannelInbox: $UpdateReadChannelInbox,
   UpdateReadChannelOutbox: $UpdateReadChannelOutbox,
   UpdateReadHistoryInbox: $UpdateReadHistoryInbox,
@@ -2021,7 +2388,9 @@ export const Api = Object.freeze({
   UpdateReadMessagesContents: $UpdateReadMessagesContents,
   UpdateRecentStickers: $UpdateRecentStickers,
   Updates: $Updates,
+  UpdateSavedDialogPinned: $UpdateSavedDialogPinned,
   UpdateSavedGifs: $UpdateSavedGifs,
+  UpdateSavedReactionTags: $UpdateSavedReactionTags,
   UpdatesCombined: $UpdatesCombined,
   UpdateShort: $UpdateShort,
   UpdateShortChatMessage: $UpdateShortChatMessage,
@@ -2092,16 +2461,36 @@ export const Api = Object.freeze({
   channels: Object.freeze({
     ChannelParticipant: $channels_ChannelParticipant,
     ChannelParticipants: $channels_ChannelParticipants,
+    CreateChannel: $channels_CreateChannel,
     DeleteChannel: $channels_DeleteChannel,
     DeleteMessages: $channels_DeleteMessages,
+    EditAdmin: $channels_EditAdmin,
+    EditBanned: $channels_EditBanned,
+    EditTitle: $channels_EditTitle,
+    GetAdminLog: $channels_GetAdminLog,
     GetChannels: $channels_GetChannels,
     GetFullChannel: $channels_GetFullChannel,
     GetMessages: $channels_GetMessages,
     GetParticipant: $channels_GetParticipant,
     GetParticipants: $channels_GetParticipants,
+    InviteToChannel: $channels_InviteToChannel,
     LeaveChannel: $channels_LeaveChannel,
     ReadHistory: $channels_ReadHistory,
     ReadMessageContents: $channels_ReadMessageContents,
+    ToggleForum: $channels_ToggleForum,
+    TogglePreHistoryHidden: $channels_TogglePreHistoryHidden,
+    ToggleSlowMode: $channels_ToggleSlowMode,
+    UpdateUsername: $channels_UpdateUsername,
+  }),
+  chatlists: Object.freeze({
+    ChatlistInviteAlready: $chatlists_ChatlistInviteAlready,
+    CheckChatlistInvite: $chatlists_CheckChatlistInvite,
+    DeleteExportedInvite: $chatlists_DeleteExportedInvite,
+    ExportChatlistInvite: $chatlists_ExportChatlistInvite,
+    GetChatlistUpdates: $chatlists_GetChatlistUpdates,
+    GetExportedInvites: $chatlists_GetExportedInvites,
+    JoinChatlistInvite: $chatlists_JoinChatlistInvite,
+    JoinChatlistUpdates: $chatlists_JoinChatlistUpdates,
   }),
   contacts: Object.freeze({
     AddContact: $contacts_AddContact,
@@ -2116,22 +2505,38 @@ export const Api = Object.freeze({
     EditPeerFolders: $folders_EditPeerFolders,
   }),
   help: Object.freeze({
+    AppConfig: $help_AppConfig,
+    GetAppConfig: $help_GetAppConfig,
     GetConfig: $help_GetConfig,
   }),
   messages: Object.freeze({
     AcceptUrlAuth: $messages_AcceptUrlAuth,
+    AddChatUser: $messages_AddChatUser,
     AffectedMessages: $messages_AffectedMessages,
     AllStickers: $messages_AllStickers,
     BotResults: $messages_BotResults,
     ChannelMessages: $messages_ChannelMessages,
+    ChatInviteJoinResultOk: $messages_ChatInviteJoinResultOk,
+    CheckChatInvite: $messages_CheckChatInvite,
+    CreateChat: $messages_CreateChat,
+    CreateForumTopic: $messages_CreateForumTopic,
     DeleteChat: $messages_DeleteChat,
     DeleteChatUser: $messages_DeleteChatUser,
+    DeleteExportedChatInvite: $messages_DeleteExportedChatInvite,
     DeleteHistory: $messages_DeleteHistory,
     DeleteMessages: $messages_DeleteMessages,
+    DeleteTopicHistory: $messages_DeleteTopicHistory,
     DialogsNotModified: $messages_DialogsNotModified,
     DialogsSlice: $messages_DialogsSlice,
     DiscussionMessage: $messages_DiscussionMessage,
+    EditChatAbout: $messages_EditChatAbout,
+    EditChatAdmin: $messages_EditChatAdmin,
+    EditChatDefaultBannedRights: $messages_EditChatDefaultBannedRights,
+    EditChatTitle: $messages_EditChatTitle,
+    EditExportedChatInvite: $messages_EditExportedChatInvite,
+    EditForumTopic: $messages_EditForumTopic,
     EditMessage: $messages_EditMessage,
+    ExportChatInvite: $messages_ExportChatInvite,
     FavedStickers: $messages_FavedStickers,
     FaveSticker: $messages_FaveSticker,
     ForwardMessages: $messages_ForwardMessages,
@@ -2140,11 +2545,17 @@ export const Api = Object.freeze({
     GetAllStickers: $messages_GetAllStickers,
     GetBotApp: $messages_GetBotApp,
     GetBotCallbackAnswer: $messages_GetBotCallbackAnswer,
+    GetChatInviteImporters: $messages_GetChatInviteImporters,
     GetChats: $messages_GetChats,
     GetCustomEmojiDocuments: $messages_GetCustomEmojiDocuments,
+    GetDefaultTagReactions: $messages_GetDefaultTagReactions,
+    GetDialogFilters: $messages_GetDialogFilters,
     GetDialogs: $messages_GetDialogs,
     GetDiscussionMessage: $messages_GetDiscussionMessage,
+    GetExportedChatInvites: $messages_GetExportedChatInvites,
     GetFavedStickers: $messages_GetFavedStickers,
+    GetForumTopics: $messages_GetForumTopics,
+    GetForumTopicsByID: $messages_GetForumTopicsByID,
     GetFullChat: $messages_GetFullChat,
     GetHistory: $messages_GetHistory,
     GetInlineBotResults: $messages_GetInlineBotResults,
@@ -2154,21 +2565,32 @@ export const Api = Object.freeze({
     GetOutboxReadDate: $messages_GetOutboxReadDate,
     GetPeerDialogs: $messages_GetPeerDialogs,
     GetPinnedDialogs: $messages_GetPinnedDialogs,
+    GetPinnedSavedDialogs: $messages_GetPinnedSavedDialogs,
     GetPollResults: $messages_GetPollResults,
     GetPollVotes: $messages_GetPollVotes,
     GetRecentStickers: $messages_GetRecentStickers,
     GetReplies: $messages_GetReplies,
+    GetSavedDialogs: $messages_GetSavedDialogs,
     GetSavedGifs: $messages_GetSavedGifs,
+    GetSavedHistory: $messages_GetSavedHistory,
+    GetSavedReactionTags: $messages_GetSavedReactionTags,
     GetSearchCounters: $messages_GetSearchCounters,
     GetStickerSet: $messages_GetStickerSet,
     GetUnreadMentions: $messages_GetUnreadMentions,
     GetUnreadReactions: $messages_GetUnreadReactions,
+    HideAllChatJoinRequests: $messages_HideAllChatJoinRequests,
+    HideChatJoinRequest: $messages_HideChatJoinRequest,
+    ImportChatInvite: $messages_ImportChatInvite,
     InstallStickerSet: $messages_InstallStickerSet,
+    InvitedUsers: $messages_InvitedUsers,
+    MarkDialogUnread: $messages_MarkDialogUnread,
     Messages: $messages_Messages,
     MessagesNotModified: $messages_MessagesNotModified,
     MessagesSlice: $messages_MessagesSlice,
+    MigrateChat: $messages_MigrateChat,
     PeerDialogs: $messages_PeerDialogs,
     ProlongWebView: $messages_ProlongWebView,
+    ReadDiscussion: $messages_ReadDiscussion,
     ReadHistory: $messages_ReadHistory,
     ReadMentions: $messages_ReadMentions,
     ReadMessageContents: $messages_ReadMessageContents,
@@ -2179,6 +2601,8 @@ export const Api = Object.freeze({
     RequestSimpleWebView: $messages_RequestSimpleWebView,
     RequestUrlAuth: $messages_RequestUrlAuth,
     RequestWebView: $messages_RequestWebView,
+    SavedDialogs: $messages_SavedDialogs,
+    SavedDialogsSlice: $messages_SavedDialogsSlice,
     SavedGifs: $messages_SavedGifs,
     Search: $messages_Search,
     SearchGlobal: $messages_SearchGlobal,
@@ -2196,8 +2620,14 @@ export const Api = Object.freeze({
     StickerSet: $messages_StickerSet,
     StickerSetInstallResultSuccess: $messages_StickerSetInstallResultSuccess,
     ToggleDialogPin: $messages_ToggleDialogPin,
+    ToggleNoForwards: $messages_ToggleNoForwards,
+    ToggleSavedDialogPin: $messages_ToggleSavedDialogPin,
     UninstallStickerSet: $messages_UninstallStickerSet,
+    UpdateDialogFilter: $messages_UpdateDialogFilter,
+    UpdateDialogFiltersOrder: $messages_UpdateDialogFiltersOrder,
+    UpdatePinnedForumTopic: $messages_UpdatePinnedForumTopic,
     UpdatePinnedMessage: $messages_UpdatePinnedMessage,
+    UpdateSavedReactionTag: $messages_UpdateSavedReactionTag,
     UploadMedia: $messages_UploadMedia,
     VotesList: $messages_VotesList,
   }),

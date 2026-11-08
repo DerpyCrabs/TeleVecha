@@ -143,7 +143,7 @@ export function messageCapabilities(
     canDelete: actionable && canDelete,
     canDeleteForMe: actionable && canDeleteForMe,
     canDeleteForEveryone: actionable && canDeleteForEveryone,
-    canForward: !message.protected && !message.service,
+    canForward: !dialog.protectedContent && !message.protected && !message.service,
   };
 }
 

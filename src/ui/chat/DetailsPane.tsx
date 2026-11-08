@@ -1,3 +1,7 @@
+import { GroupHistoryLink } from '../groups/GroupHistoryLink';
+import type { EffectMessagingClient } from '../../telegram/core/client';
+import type { TelegramPeer } from '../../telegram/types';
+import Settings from '@effectweb/lucide/icons/settings';
 import { list } from 'effectweb';
 import type { ChatSummary } from '../../domain/models';
 import type { SharedMediaCounts, SharedMediaKind, TelegramGroupMember } from '../../telegram/types';
@@ -20,6 +24,9 @@ import { AutoLinkText } from '../shared/AutoLinkText';
 import { Avatar } from '../shared/Avatar';
 import type { ContactDetailsSession } from './contactDetailsSession';
 interface DetailsPaneProps {
+  api: EffectMessagingClient;
+  peer?: TelegramPeer | undefined;
+  openRelatedGroup: (peer: TelegramPeer, earlier: boolean) => void;
   chat: ChatSummary;
   avatarIdentity: string;
   counts?: SharedMediaCounts | undefined;
@@ -29,6 +36,7 @@ interface DetailsPaneProps {
   media: MediaAssets;
   details: ContactDetailsSession;
   close: () => void;
+  openManagement?: (() => void) | undefined;
   openShared: (kind: SharedMediaKind) => void;
   setBlocked: (blocked: boolean) => void;
 }
@@ -98,6 +106,20 @@ export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
           <h2 class="mt-4 font-semibold">{props.chat.title}</h2>
           <p class="mt-1 text-xs text-[var(--muted)]">{status()}</p>
         </section>
+        {props.openManagement ? (
+          <button class={detailRowClass} onClick={props.openManagement}>
+            <Settings size={18} />
+            <span>{props.chat.kind === 'channel' ? 'Manage channel' : 'Manage group'}</span>
+          </button>
+        ) : null}
+        {props.peer && props.peer.kind !== 'user' ? (
+          <GroupHistoryLink
+            api={props.api}
+            peer={props.peer}
+            online={props.online}
+            open={props.openRelatedGroup}
+          />
+        ) : null}
         {props.chat.kind === 'user' && props.details.userDetails ? (
           <section class="grid gap-4 border-b border-line px-5 py-4 [&_a]:grid [&_a]:gap-1 [&_a]:text-ink [&_a]:no-underline [&_a>span]:text-[#65bff0] [&_div]:grid [&_div]:gap-1 [&_small]:text-xs [&_small]:text-muted [&_.autolink-text]:whitespace-pre-wrap [&_.autolink-text]:[overflow-wrap:anywhere] [&_.autolink-text_a]:inline [&_.autolink-text_a]:text-[#65bff0]">
             {phone() ? (

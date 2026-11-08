@@ -64,6 +64,8 @@ export function mergeAccountSnapshot(previous: EngineSnapshot, next: AccountSnap
 export function conversationViewSnapshot(snapshot: EngineSnapshot): ConversationViewSnapshot {
   const {
     activePeerId,
+    activeTopicId,
+    activeSavedPeer,
     messages,
     loadingMessages,
     hasOlderMessages,
@@ -76,6 +78,8 @@ export function conversationViewSnapshot(snapshot: EngineSnapshot): Conversation
   } = snapshot;
   return {
     ...(activePeerId === undefined ? {} : { activePeerId }),
+    activeTopicId,
+    activeSavedPeer,
     messages,
     loadingMessages,
     hasOlderMessages,

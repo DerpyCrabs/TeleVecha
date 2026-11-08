@@ -35,6 +35,32 @@ afterEach(() => {
 });
 
 describe('MessagingEngine', () => {
+  it('reads earlier group history without replacing the open conversation and caches the original peer', () =>
+    Effect.runPromise(
+      withEngine((engine, transport, cache) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          const view = yield* engine.loadConversationView('u:101');
+          const snapshot = engine.snapshot();
+          const source = { id: 'g:303', kind: 'group' as const };
+          const page = yield* engine.getEarlierGroupHistory(source);
+          expect(page.messages.length).toBeGreaterThan(0);
+          expect(page.messages.every((message) => message.peerId === source.id)).toBe(true);
+          expect(engine.snapshot()).toEqual(snapshot);
+          expect((yield* cache.loadMessage(source.id, page.messages[0]!.id))?.text).toBe(
+            'Group fixture message',
+          );
+          expect(view.activePeerId).toBe('u:101');
+          const spy = vi.spyOn(transport, 'getHistory');
+          const failure = yield* engine
+            .getEarlierGroupHistory({ id: 'c:202', kind: 'channel' })
+            .pipe(Effect.result);
+          expect(failure._tag).toBe('Failure');
+          expect(spy).not.toHaveBeenCalled();
+        }),
+      ),
+    ));
+
   it('searches group senders without replacing the complete member cache', () =>
     Effect.runPromise(
       withEngine((engine, transport) =>
@@ -470,7 +496,7 @@ describe('MessagingEngine', () => {
           };
           yield* engine.sendContact(peer, contact);
           expect(save.mock.calls[0]?.[0]).toMatchObject({ text: '', contact });
-          expect(send).toHaveBeenCalledWith(peer, contact, expect.any(String));
+          expect(send).toHaveBeenCalledWith(peer, contact, expect.any(String), undefined);
           expect(engine.snapshot().pending).toEqual([]);
           expect(
             engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)?.topMessage

@@ -37,16 +37,33 @@ export declare namespace Tl {
     | Tl.auth.SendCode
     | Tl.auth.SignIn
     | Tl.bots.InvokeWebViewCustomMethod
+    | Tl.channels.CreateChannel
     | Tl.channels.DeleteChannel
     | Tl.channels.DeleteMessages
+    | Tl.channels.EditAdmin
+    | Tl.channels.EditBanned
+    | Tl.channels.EditTitle
+    | Tl.channels.GetAdminLog
     | Tl.channels.GetChannels
     | Tl.channels.GetFullChannel
     | Tl.channels.GetMessages
     | Tl.channels.GetParticipant
     | Tl.channels.GetParticipants
+    | Tl.channels.InviteToChannel
     | Tl.channels.LeaveChannel
     | Tl.channels.ReadHistory
     | Tl.channels.ReadMessageContents
+    | Tl.channels.ToggleForum
+    | Tl.channels.TogglePreHistoryHidden
+    | Tl.channels.ToggleSlowMode
+    | Tl.channels.UpdateUsername
+    | Tl.chatlists.CheckChatlistInvite
+    | Tl.chatlists.DeleteExportedInvite
+    | Tl.chatlists.ExportChatlistInvite
+    | Tl.chatlists.GetChatlistUpdates
+    | Tl.chatlists.GetExportedInvites
+    | Tl.chatlists.JoinChatlistInvite
+    | Tl.chatlists.JoinChatlistUpdates
     | Tl.contacts.AddContact
     | Tl.contacts.Block
     | Tl.contacts.DeleteContacts
@@ -54,23 +71,43 @@ export declare namespace Tl {
     | Tl.contacts.Search
     | Tl.contacts.Unblock
     | Tl.folders.EditPeerFolders
+    | Tl.help.GetAppConfig
     | Tl.help.GetConfig
     | Tl.messages.AcceptUrlAuth
+    | Tl.messages.AddChatUser
+    | Tl.messages.CheckChatInvite
+    | Tl.messages.CreateChat
+    | Tl.messages.CreateForumTopic
     | Tl.messages.DeleteChat
     | Tl.messages.DeleteChatUser
+    | Tl.messages.DeleteExportedChatInvite
     | Tl.messages.DeleteHistory
     | Tl.messages.DeleteMessages
+    | Tl.messages.DeleteTopicHistory
+    | Tl.messages.EditChatAbout
+    | Tl.messages.EditChatAdmin
+    | Tl.messages.EditChatDefaultBannedRights
+    | Tl.messages.EditChatTitle
+    | Tl.messages.EditExportedChatInvite
+    | Tl.messages.EditForumTopic
     | Tl.messages.EditMessage
+    | Tl.messages.ExportChatInvite
     | Tl.messages.FaveSticker
     | Tl.messages.ForwardMessages
     | Tl.messages.GetAllStickers
     | Tl.messages.GetBotApp
     | Tl.messages.GetBotCallbackAnswer
+    | Tl.messages.GetChatInviteImporters
     | Tl.messages.GetChats
     | Tl.messages.GetCustomEmojiDocuments
+    | Tl.messages.GetDefaultTagReactions
+    | Tl.messages.GetDialogFilters
     | Tl.messages.GetDialogs
     | Tl.messages.GetDiscussionMessage
+    | Tl.messages.GetExportedChatInvites
     | Tl.messages.GetFavedStickers
+    | Tl.messages.GetForumTopics
+    | Tl.messages.GetForumTopicsByID
     | Tl.messages.GetFullChat
     | Tl.messages.GetHistory
     | Tl.messages.GetInlineBotResults
@@ -80,17 +117,27 @@ export declare namespace Tl {
     | Tl.messages.GetOutboxReadDate
     | Tl.messages.GetPeerDialogs
     | Tl.messages.GetPinnedDialogs
+    | Tl.messages.GetPinnedSavedDialogs
     | Tl.messages.GetPollResults
     | Tl.messages.GetPollVotes
     | Tl.messages.GetRecentStickers
     | Tl.messages.GetReplies
+    | Tl.messages.GetSavedDialogs
     | Tl.messages.GetSavedGifs
+    | Tl.messages.GetSavedHistory
+    | Tl.messages.GetSavedReactionTags
     | Tl.messages.GetSearchCounters
     | Tl.messages.GetStickerSet
     | Tl.messages.GetUnreadMentions
     | Tl.messages.GetUnreadReactions
+    | Tl.messages.HideAllChatJoinRequests
+    | Tl.messages.HideChatJoinRequest
+    | Tl.messages.ImportChatInvite
     | Tl.messages.InstallStickerSet
+    | Tl.messages.MarkDialogUnread
+    | Tl.messages.MigrateChat
     | Tl.messages.ProlongWebView
+    | Tl.messages.ReadDiscussion
     | Tl.messages.ReadHistory
     | Tl.messages.ReadMentions
     | Tl.messages.ReadMessageContents
@@ -114,8 +161,14 @@ export declare namespace Tl {
     | Tl.messages.SetTyping
     | Tl.messages.StartBot
     | Tl.messages.ToggleDialogPin
+    | Tl.messages.ToggleNoForwards
+    | Tl.messages.ToggleSavedDialogPin
     | Tl.messages.UninstallStickerSet
+    | Tl.messages.UpdateDialogFilter
+    | Tl.messages.UpdateDialogFiltersOrder
+    | Tl.messages.UpdatePinnedForumTopic
     | Tl.messages.UpdatePinnedMessage
+    | Tl.messages.UpdateSavedReactionTag
     | Tl.messages.UploadMedia
     | Tl.updates.GetChannelDifference
     | Tl.updates.GetDifference
@@ -441,6 +494,362 @@ export declare namespace Tl {
     weeklyOpen: readonly Tl.TypeBusinessWeeklyOpen[];
   }>;
   export type Channel = TlObject<'channel'> & ChannelFields;
+  export type ChannelAdminLogEvent = TlObject<'channelAdminLogEvent'> & ChannelAdminLogEventFields;
+  export type ChannelAdminLogEventActionChangeAbout =
+    TlObject<'channelAdminLogEventActionChangeAbout'> & ChannelAdminLogEventActionChangeAboutFields;
+  export type ChannelAdminLogEventActionChangeAboutFields = Readonly<{
+    prevValue: string;
+    newValue: string;
+  }>;
+  export type ChannelAdminLogEventActionChangeAvailableReactions =
+    TlObject<'channelAdminLogEventActionChangeAvailableReactions'> &
+      ChannelAdminLogEventActionChangeAvailableReactionsFields;
+  export type ChannelAdminLogEventActionChangeAvailableReactionsFields = Readonly<{
+    prevValue: Tl.TypeChatReactions;
+    newValue: Tl.TypeChatReactions;
+  }>;
+  export type ChannelAdminLogEventActionChangeEmojiStatus =
+    TlObject<'channelAdminLogEventActionChangeEmojiStatus'> &
+      ChannelAdminLogEventActionChangeEmojiStatusFields;
+  export type ChannelAdminLogEventActionChangeEmojiStatusFields = Readonly<{
+    prevValue: Tl.TypeEmojiStatus;
+    newValue: Tl.TypeEmojiStatus;
+  }>;
+  export type ChannelAdminLogEventActionChangeEmojiStickerSet =
+    TlObject<'channelAdminLogEventActionChangeEmojiStickerSet'> &
+      ChannelAdminLogEventActionChangeEmojiStickerSetFields;
+  export type ChannelAdminLogEventActionChangeEmojiStickerSetFields = Readonly<{
+    prevStickerset: Tl.TypeInputStickerSet;
+    newStickerset: Tl.TypeInputStickerSet;
+  }>;
+  export type ChannelAdminLogEventActionChangeHistoryTTL =
+    TlObject<'channelAdminLogEventActionChangeHistoryTTL'> &
+      ChannelAdminLogEventActionChangeHistoryTTLFields;
+  export type ChannelAdminLogEventActionChangeHistoryTTLFields = Readonly<{
+    prevValue: number;
+    newValue: number;
+  }>;
+  export type ChannelAdminLogEventActionChangeLinkedChat =
+    TlObject<'channelAdminLogEventActionChangeLinkedChat'> &
+      ChannelAdminLogEventActionChangeLinkedChatFields;
+  export type ChannelAdminLogEventActionChangeLinkedChatFields = Readonly<{
+    prevValue: bigint;
+    newValue: bigint;
+  }>;
+  export type ChannelAdminLogEventActionChangeLocation =
+    TlObject<'channelAdminLogEventActionChangeLocation'> &
+      ChannelAdminLogEventActionChangeLocationFields;
+  export type ChannelAdminLogEventActionChangeLocationFields = Readonly<{
+    prevValue: Tl.TypeChannelLocation;
+    newValue: Tl.TypeChannelLocation;
+  }>;
+  export type ChannelAdminLogEventActionChangePeerColor =
+    TlObject<'channelAdminLogEventActionChangePeerColor'> &
+      ChannelAdminLogEventActionChangePeerColorFields;
+  export type ChannelAdminLogEventActionChangePeerColorFields = Readonly<{
+    prevValue: Tl.TypePeerColor;
+    newValue: Tl.TypePeerColor;
+  }>;
+  export type ChannelAdminLogEventActionChangePhoto =
+    TlObject<'channelAdminLogEventActionChangePhoto'> & ChannelAdminLogEventActionChangePhotoFields;
+  export type ChannelAdminLogEventActionChangePhotoFields = Readonly<{
+    prevPhoto: Tl.TypePhoto;
+    newPhoto: Tl.TypePhoto;
+  }>;
+  export type ChannelAdminLogEventActionChangeProfilePeerColor =
+    TlObject<'channelAdminLogEventActionChangeProfilePeerColor'> &
+      ChannelAdminLogEventActionChangeProfilePeerColorFields;
+  export type ChannelAdminLogEventActionChangeProfilePeerColorFields = Readonly<{
+    prevValue: Tl.TypePeerColor;
+    newValue: Tl.TypePeerColor;
+  }>;
+  export type ChannelAdminLogEventActionChangeStickerSet =
+    TlObject<'channelAdminLogEventActionChangeStickerSet'> &
+      ChannelAdminLogEventActionChangeStickerSetFields;
+  export type ChannelAdminLogEventActionChangeStickerSetFields = Readonly<{
+    prevStickerset: Tl.TypeInputStickerSet;
+    newStickerset: Tl.TypeInputStickerSet;
+  }>;
+  export type ChannelAdminLogEventActionChangeTitle =
+    TlObject<'channelAdminLogEventActionChangeTitle'> & ChannelAdminLogEventActionChangeTitleFields;
+  export type ChannelAdminLogEventActionChangeTitleFields = Readonly<{
+    prevValue: string;
+    newValue: string;
+  }>;
+  export type ChannelAdminLogEventActionChangeUsername =
+    TlObject<'channelAdminLogEventActionChangeUsername'> &
+      ChannelAdminLogEventActionChangeUsernameFields;
+  export type ChannelAdminLogEventActionChangeUsernameFields = Readonly<{
+    prevValue: string;
+    newValue: string;
+  }>;
+  export type ChannelAdminLogEventActionChangeUsernames =
+    TlObject<'channelAdminLogEventActionChangeUsernames'> &
+      ChannelAdminLogEventActionChangeUsernamesFields;
+  export type ChannelAdminLogEventActionChangeUsernamesFields = Readonly<{
+    prevValue: readonly string[];
+    newValue: readonly string[];
+  }>;
+  export type ChannelAdminLogEventActionChangeWallpaper =
+    TlObject<'channelAdminLogEventActionChangeWallpaper'> &
+      ChannelAdminLogEventActionChangeWallpaperFields;
+  export type ChannelAdminLogEventActionChangeWallpaperFields = Readonly<{
+    prevValue: Tl.TypeWallPaper;
+    newValue: Tl.TypeWallPaper;
+  }>;
+  export type ChannelAdminLogEventActionCreateTopic =
+    TlObject<'channelAdminLogEventActionCreateTopic'> & ChannelAdminLogEventActionCreateTopicFields;
+  export type ChannelAdminLogEventActionCreateTopicFields = Readonly<{
+    topic: Tl.TypeForumTopic;
+  }>;
+  export type ChannelAdminLogEventActionDefaultBannedRights =
+    TlObject<'channelAdminLogEventActionDefaultBannedRights'> &
+      ChannelAdminLogEventActionDefaultBannedRightsFields;
+  export type ChannelAdminLogEventActionDefaultBannedRightsFields = Readonly<{
+    prevBannedRights: Tl.TypeChatBannedRights;
+    newBannedRights: Tl.TypeChatBannedRights;
+  }>;
+  export type ChannelAdminLogEventActionDeleteMessage =
+    TlObject<'channelAdminLogEventActionDeleteMessage'> &
+      ChannelAdminLogEventActionDeleteMessageFields;
+  export type ChannelAdminLogEventActionDeleteMessageFields = Readonly<{
+    message: Tl.TypeMessage;
+  }>;
+  export type ChannelAdminLogEventActionDeleteTopic =
+    TlObject<'channelAdminLogEventActionDeleteTopic'> & ChannelAdminLogEventActionDeleteTopicFields;
+  export type ChannelAdminLogEventActionDeleteTopicFields = Readonly<{
+    topic: Tl.TypeForumTopic;
+  }>;
+  export type ChannelAdminLogEventActionDiscardGroupCall =
+    TlObject<'channelAdminLogEventActionDiscardGroupCall'> &
+      ChannelAdminLogEventActionDiscardGroupCallFields;
+  export type ChannelAdminLogEventActionDiscardGroupCallFields = Readonly<{
+    call: Tl.TypeInputGroupCall;
+  }>;
+  export type ChannelAdminLogEventActionEditMessage =
+    TlObject<'channelAdminLogEventActionEditMessage'> & ChannelAdminLogEventActionEditMessageFields;
+  export type ChannelAdminLogEventActionEditMessageFields = Readonly<{
+    prevMessage: Tl.TypeMessage;
+    newMessage: Tl.TypeMessage;
+  }>;
+  export type ChannelAdminLogEventActionEditTopic =
+    TlObject<'channelAdminLogEventActionEditTopic'> & ChannelAdminLogEventActionEditTopicFields;
+  export type ChannelAdminLogEventActionEditTopicFields = Readonly<{
+    prevTopic: Tl.TypeForumTopic;
+    newTopic: Tl.TypeForumTopic;
+  }>;
+  export type ChannelAdminLogEventActionExportedInviteDelete =
+    TlObject<'channelAdminLogEventActionExportedInviteDelete'> &
+      ChannelAdminLogEventActionExportedInviteDeleteFields;
+  export type ChannelAdminLogEventActionExportedInviteDeleteFields = Readonly<{
+    invite: Tl.TypeExportedChatInvite;
+  }>;
+  export type ChannelAdminLogEventActionExportedInviteEdit =
+    TlObject<'channelAdminLogEventActionExportedInviteEdit'> &
+      ChannelAdminLogEventActionExportedInviteEditFields;
+  export type ChannelAdminLogEventActionExportedInviteEditFields = Readonly<{
+    prevInvite: Tl.TypeExportedChatInvite;
+    newInvite: Tl.TypeExportedChatInvite;
+  }>;
+  export type ChannelAdminLogEventActionExportedInviteRevoke =
+    TlObject<'channelAdminLogEventActionExportedInviteRevoke'> &
+      ChannelAdminLogEventActionExportedInviteRevokeFields;
+  export type ChannelAdminLogEventActionExportedInviteRevokeFields = Readonly<{
+    invite: Tl.TypeExportedChatInvite;
+  }>;
+  export type ChannelAdminLogEventActionParticipantEditRank =
+    TlObject<'channelAdminLogEventActionParticipantEditRank'> &
+      ChannelAdminLogEventActionParticipantEditRankFields;
+  export type ChannelAdminLogEventActionParticipantEditRankFields = Readonly<{
+    userId: bigint;
+    prevRank: string;
+    newRank: string;
+  }>;
+  export type ChannelAdminLogEventActionParticipantInvite =
+    TlObject<'channelAdminLogEventActionParticipantInvite'> &
+      ChannelAdminLogEventActionParticipantInviteFields;
+  export type ChannelAdminLogEventActionParticipantInviteFields = Readonly<{
+    participant: Tl.TypeChannelParticipant;
+  }>;
+  export type ChannelAdminLogEventActionParticipantJoin =
+    TlObject<'channelAdminLogEventActionParticipantJoin'> &
+      ChannelAdminLogEventActionParticipantJoinFields;
+  export type ChannelAdminLogEventActionParticipantJoinByInvite =
+    TlObject<'channelAdminLogEventActionParticipantJoinByInvite'> &
+      ChannelAdminLogEventActionParticipantJoinByInviteFields;
+  export type ChannelAdminLogEventActionParticipantJoinByInviteFields = Readonly<{
+    viaChatlist?: true;
+    invite: Tl.TypeExportedChatInvite;
+  }>;
+  export type ChannelAdminLogEventActionParticipantJoinByRequest =
+    TlObject<'channelAdminLogEventActionParticipantJoinByRequest'> &
+      ChannelAdminLogEventActionParticipantJoinByRequestFields;
+  export type ChannelAdminLogEventActionParticipantJoinByRequestFields = Readonly<{
+    invite: Tl.TypeExportedChatInvite;
+    approvedBy: bigint;
+  }>;
+  export type ChannelAdminLogEventActionParticipantJoinFields = Readonly<Record<never, never>>;
+  export type ChannelAdminLogEventActionParticipantLeave =
+    TlObject<'channelAdminLogEventActionParticipantLeave'> &
+      ChannelAdminLogEventActionParticipantLeaveFields;
+  export type ChannelAdminLogEventActionParticipantLeaveFields = Readonly<Record<never, never>>;
+  export type ChannelAdminLogEventActionParticipantMute =
+    TlObject<'channelAdminLogEventActionParticipantMute'> &
+      ChannelAdminLogEventActionParticipantMuteFields;
+  export type ChannelAdminLogEventActionParticipantMuteFields = Readonly<{
+    participant: Tl.TypeGroupCallParticipant;
+  }>;
+  export type ChannelAdminLogEventActionParticipantSubExtend =
+    TlObject<'channelAdminLogEventActionParticipantSubExtend'> &
+      ChannelAdminLogEventActionParticipantSubExtendFields;
+  export type ChannelAdminLogEventActionParticipantSubExtendFields = Readonly<{
+    prevParticipant: Tl.TypeChannelParticipant;
+    newParticipant: Tl.TypeChannelParticipant;
+  }>;
+  export type ChannelAdminLogEventActionParticipantToggleAdmin =
+    TlObject<'channelAdminLogEventActionParticipantToggleAdmin'> &
+      ChannelAdminLogEventActionParticipantToggleAdminFields;
+  export type ChannelAdminLogEventActionParticipantToggleAdminFields = Readonly<{
+    prevParticipant: Tl.TypeChannelParticipant;
+    newParticipant: Tl.TypeChannelParticipant;
+  }>;
+  export type ChannelAdminLogEventActionParticipantToggleBan =
+    TlObject<'channelAdminLogEventActionParticipantToggleBan'> &
+      ChannelAdminLogEventActionParticipantToggleBanFields;
+  export type ChannelAdminLogEventActionParticipantToggleBanFields = Readonly<{
+    prevParticipant: Tl.TypeChannelParticipant;
+    newParticipant: Tl.TypeChannelParticipant;
+  }>;
+  export type ChannelAdminLogEventActionParticipantUnmute =
+    TlObject<'channelAdminLogEventActionParticipantUnmute'> &
+      ChannelAdminLogEventActionParticipantUnmuteFields;
+  export type ChannelAdminLogEventActionParticipantUnmuteFields = Readonly<{
+    participant: Tl.TypeGroupCallParticipant;
+  }>;
+  export type ChannelAdminLogEventActionParticipantVolume =
+    TlObject<'channelAdminLogEventActionParticipantVolume'> &
+      ChannelAdminLogEventActionParticipantVolumeFields;
+  export type ChannelAdminLogEventActionParticipantVolumeFields = Readonly<{
+    participant: Tl.TypeGroupCallParticipant;
+  }>;
+  export type ChannelAdminLogEventActionPinTopic = TlObject<'channelAdminLogEventActionPinTopic'> &
+    ChannelAdminLogEventActionPinTopicFields;
+  export type ChannelAdminLogEventActionPinTopicFields = Readonly<{
+    prevTopic?: Tl.TypeForumTopic;
+    newTopic?: Tl.TypeForumTopic;
+  }>;
+  export type ChannelAdminLogEventActionSendMessage =
+    TlObject<'channelAdminLogEventActionSendMessage'> & ChannelAdminLogEventActionSendMessageFields;
+  export type ChannelAdminLogEventActionSendMessageFields = Readonly<{
+    message: Tl.TypeMessage;
+  }>;
+  export type ChannelAdminLogEventActionStartGroupCall =
+    TlObject<'channelAdminLogEventActionStartGroupCall'> &
+      ChannelAdminLogEventActionStartGroupCallFields;
+  export type ChannelAdminLogEventActionStartGroupCallFields = Readonly<{
+    call: Tl.TypeInputGroupCall;
+  }>;
+  export type ChannelAdminLogEventActionStopPoll = TlObject<'channelAdminLogEventActionStopPoll'> &
+    ChannelAdminLogEventActionStopPollFields;
+  export type ChannelAdminLogEventActionStopPollFields = Readonly<{
+    message: Tl.TypeMessage;
+  }>;
+  export type ChannelAdminLogEventActionToggleAntiSpam =
+    TlObject<'channelAdminLogEventActionToggleAntiSpam'> &
+      ChannelAdminLogEventActionToggleAntiSpamFields;
+  export type ChannelAdminLogEventActionToggleAntiSpamFields = Readonly<{
+    newValue: boolean;
+  }>;
+  export type ChannelAdminLogEventActionToggleAutotranslation =
+    TlObject<'channelAdminLogEventActionToggleAutotranslation'> &
+      ChannelAdminLogEventActionToggleAutotranslationFields;
+  export type ChannelAdminLogEventActionToggleAutotranslationFields = Readonly<{
+    newValue: boolean;
+  }>;
+  export type ChannelAdminLogEventActionToggleForum =
+    TlObject<'channelAdminLogEventActionToggleForum'> & ChannelAdminLogEventActionToggleForumFields;
+  export type ChannelAdminLogEventActionToggleForumFields = Readonly<{
+    newValue: boolean;
+  }>;
+  export type ChannelAdminLogEventActionToggleGroupCallSetting =
+    TlObject<'channelAdminLogEventActionToggleGroupCallSetting'> &
+      ChannelAdminLogEventActionToggleGroupCallSettingFields;
+  export type ChannelAdminLogEventActionToggleGroupCallSettingFields = Readonly<{
+    joinMuted: boolean;
+  }>;
+  export type ChannelAdminLogEventActionToggleInvites =
+    TlObject<'channelAdminLogEventActionToggleInvites'> &
+      ChannelAdminLogEventActionToggleInvitesFields;
+  export type ChannelAdminLogEventActionToggleInvitesFields = Readonly<{
+    newValue: boolean;
+  }>;
+  export type ChannelAdminLogEventActionToggleNoForwards =
+    TlObject<'channelAdminLogEventActionToggleNoForwards'> &
+      ChannelAdminLogEventActionToggleNoForwardsFields;
+  export type ChannelAdminLogEventActionToggleNoForwardsFields = Readonly<{
+    newValue: boolean;
+  }>;
+  export type ChannelAdminLogEventActionTogglePreHistoryHidden =
+    TlObject<'channelAdminLogEventActionTogglePreHistoryHidden'> &
+      ChannelAdminLogEventActionTogglePreHistoryHiddenFields;
+  export type ChannelAdminLogEventActionTogglePreHistoryHiddenFields = Readonly<{
+    newValue: boolean;
+  }>;
+  export type ChannelAdminLogEventActionToggleSignatureProfiles =
+    TlObject<'channelAdminLogEventActionToggleSignatureProfiles'> &
+      ChannelAdminLogEventActionToggleSignatureProfilesFields;
+  export type ChannelAdminLogEventActionToggleSignatureProfilesFields = Readonly<{
+    newValue: boolean;
+  }>;
+  export type ChannelAdminLogEventActionToggleSignatures =
+    TlObject<'channelAdminLogEventActionToggleSignatures'> &
+      ChannelAdminLogEventActionToggleSignaturesFields;
+  export type ChannelAdminLogEventActionToggleSignaturesFields = Readonly<{
+    newValue: boolean;
+  }>;
+  export type ChannelAdminLogEventActionToggleSlowMode =
+    TlObject<'channelAdminLogEventActionToggleSlowMode'> &
+      ChannelAdminLogEventActionToggleSlowModeFields;
+  export type ChannelAdminLogEventActionToggleSlowModeFields = Readonly<{
+    prevValue: number;
+    newValue: number;
+  }>;
+  export type ChannelAdminLogEventActionUpdatePinned =
+    TlObject<'channelAdminLogEventActionUpdatePinned'> &
+      ChannelAdminLogEventActionUpdatePinnedFields;
+  export type ChannelAdminLogEventActionUpdatePinnedFields = Readonly<{
+    message: Tl.TypeMessage;
+  }>;
+  export type ChannelAdminLogEventFields = Readonly<{
+    id: bigint;
+    date: number;
+    userId: bigint;
+    action: Tl.TypeChannelAdminLogEventAction;
+  }>;
+  export type ChannelAdminLogEventsFilter = TlObject<'channelAdminLogEventsFilter'> &
+    ChannelAdminLogEventsFilterFields;
+  export type ChannelAdminLogEventsFilterFields = Readonly<{
+    join?: true;
+    leave?: true;
+    invite?: true;
+    ban?: true;
+    unban?: true;
+    kick?: true;
+    unkick?: true;
+    promote?: true;
+    demote?: true;
+    info?: true;
+    settings?: true;
+    pinned?: true;
+    edit?: true;
+    delete?: true;
+    groupCall?: true;
+    invites?: true;
+    send?: true;
+    forums?: true;
+    subExtend?: true;
+    editRank?: true;
+  }>;
   export type ChannelFields = Readonly<{
     creator?: true;
     left?: true;
@@ -773,6 +1182,11 @@ export declare namespace Tl {
     availableReactions?: Tl.TypeChatReactions;
     reactionsLimit?: number;
   }>;
+  export type ChatInvite = TlObject<'chatInvite'> & ChatInviteFields;
+  export type ChatInviteAlready = TlObject<'chatInviteAlready'> & ChatInviteAlreadyFields;
+  export type ChatInviteAlreadyFields = Readonly<{
+    chat: Tl.TypeChat;
+  }>;
   export type ChatInviteExported = TlObject<'chatInviteExported'> & ChatInviteExportedFields;
   export type ChatInviteExportedFields = Readonly<{
     revoked?: true;
@@ -789,6 +1203,40 @@ export declare namespace Tl {
     subscriptionExpired?: number;
     title?: string;
     subscriptionPricing?: Tl.TypeStarsSubscriptionPricing;
+  }>;
+  export type ChatInviteFields = Readonly<{
+    channel?: true;
+    broadcast?: true;
+    public?: true;
+    megagroup?: true;
+    requestNeeded?: true;
+    verified?: true;
+    scam?: true;
+    fake?: true;
+    canRefulfillSubscription?: true;
+    title: string;
+    about?: string;
+    photo: Tl.TypePhoto;
+    participantsCount: number;
+    participants?: readonly Tl.TypeUser[];
+    color: number;
+    subscriptionPricing?: Tl.TypeStarsSubscriptionPricing;
+    subscriptionFormId?: bigint;
+    botVerification?: Tl.TypeBotVerification;
+  }>;
+  export type ChatInviteImporter = TlObject<'chatInviteImporter'> & ChatInviteImporterFields;
+  export type ChatInviteImporterFields = Readonly<{
+    requested?: true;
+    viaChatlist?: true;
+    userId: bigint;
+    date: number;
+    about?: string;
+    approvedBy?: bigint;
+  }>;
+  export type ChatInvitePeek = TlObject<'chatInvitePeek'> & ChatInvitePeekFields;
+  export type ChatInvitePeekFields = Readonly<{
+    chat: Tl.TypeChat;
+    expires: number;
   }>;
   export type ChatInvitePublicJoinRequests = TlObject<'chatInvitePublicJoinRequests'> &
     ChatInvitePublicJoinRequestsFields;
@@ -1287,6 +1735,13 @@ export declare namespace Tl {
     replyMarkup?: Tl.TypeReplyMarkup;
     replyTo?: Tl.TypeMessageReplyHeader;
   }>;
+  export type ExportedChatlistInvite = TlObject<'exportedChatlistInvite'> &
+    ExportedChatlistInviteFields;
+  export type ExportedChatlistInviteFields = Readonly<{
+    title: string;
+    url: string;
+    peers: readonly Tl.TypePeer[];
+  }>;
   export type FactCheck = TlObject<'factCheck'> & FactCheckFields;
   export type FactCheckFields = Readonly<{
     needCheck?: true;
@@ -1553,6 +2008,11 @@ export declare namespace Tl {
     peer: Tl.TypeInputPeer;
     msgId: number;
     channelId: bigint;
+  }>;
+  export type InputChatlistDialogFilter = TlObject<'inputChatlistDialogFilter'> &
+    InputChatlistDialogFilterFields;
+  export type InputChatlistDialogFilterFields = Readonly<{
+    filterId: number;
   }>;
   export type InputCheckPasswordEmpty = TlObject<'inputCheckPasswordEmpty'> &
     InputCheckPasswordEmptyFields;
@@ -3525,6 +3985,24 @@ export declare namespace Tl {
     reactions?: Tl.TypeMessageReactions;
     ttlPeriod?: number;
   }>;
+  export type MissingInvitee = TlObject<'missingInvitee'> & MissingInviteeFields;
+  export type MissingInviteeFields = Readonly<{
+    premiumWouldAllowInvite?: true;
+    premiumRequiredForPm?: true;
+    userId: bigint;
+  }>;
+  export type MonoForumDialog = TlObject<'monoForumDialog'> & MonoForumDialogFields;
+  export type MonoForumDialogFields = Readonly<{
+    unreadMark?: true;
+    nopaidMessagesException?: true;
+    peer: Tl.TypePeer;
+    topMessage: number;
+    readInboxMaxId: number;
+    readOutboxMaxId: number;
+    unreadCount: number;
+    unreadReactionsCount: number;
+    draft?: Tl.TypeDraftMessage;
+  }>;
   export type MsgDetailedInfo = TlObject<'msg_detailed_info'> & MsgDetailedInfoFields;
   export type MsgDetailedInfoFields = Readonly<{
     msgId: bigint;
@@ -4471,6 +4949,18 @@ export declare namespace Tl {
     errorCode: number;
     errorMessage: string;
   }>;
+  export type SavedDialog = TlObject<'savedDialog'> & SavedDialogFields;
+  export type SavedDialogFields = Readonly<{
+    pinned?: true;
+    peer: Tl.TypePeer;
+    topMessage: number;
+  }>;
+  export type SavedReactionTag = TlObject<'savedReactionTag'> & SavedReactionTagFields;
+  export type SavedReactionTagFields = Readonly<{
+    reaction: Tl.TypeReaction;
+    title?: string;
+    count: number;
+  }>;
   export type SearchPostsFlood = TlObject<'searchPostsFlood'> & SearchPostsFloodFields;
   export type SearchPostsFloodFields = Readonly<{
     queryIsFree?: true;
@@ -5239,6 +5729,61 @@ export declare namespace Tl {
   export type TypeBusinessRecipients = Tl.BusinessRecipients;
   export type TypeBusinessWeeklyOpen = Tl.BusinessWeeklyOpen;
   export type TypeBusinessWorkHours = Tl.BusinessWorkHours;
+  export type TypeChannelAdminLogEvent = Tl.ChannelAdminLogEvent;
+  export type TypeChannelAdminLogEventAction =
+    | Tl.ChannelAdminLogEventActionChangeAbout
+    | Tl.ChannelAdminLogEventActionChangeAvailableReactions
+    | Tl.ChannelAdminLogEventActionChangeEmojiStatus
+    | Tl.ChannelAdminLogEventActionChangeEmojiStickerSet
+    | Tl.ChannelAdminLogEventActionChangeHistoryTTL
+    | Tl.ChannelAdminLogEventActionChangeLinkedChat
+    | Tl.ChannelAdminLogEventActionChangeLocation
+    | Tl.ChannelAdminLogEventActionChangePeerColor
+    | Tl.ChannelAdminLogEventActionChangePhoto
+    | Tl.ChannelAdminLogEventActionChangeProfilePeerColor
+    | Tl.ChannelAdminLogEventActionChangeStickerSet
+    | Tl.ChannelAdminLogEventActionChangeTitle
+    | Tl.ChannelAdminLogEventActionChangeUsername
+    | Tl.ChannelAdminLogEventActionChangeUsernames
+    | Tl.ChannelAdminLogEventActionChangeWallpaper
+    | Tl.ChannelAdminLogEventActionCreateTopic
+    | Tl.ChannelAdminLogEventActionDefaultBannedRights
+    | Tl.ChannelAdminLogEventActionDeleteMessage
+    | Tl.ChannelAdminLogEventActionDeleteTopic
+    | Tl.ChannelAdminLogEventActionDiscardGroupCall
+    | Tl.ChannelAdminLogEventActionEditMessage
+    | Tl.ChannelAdminLogEventActionEditTopic
+    | Tl.ChannelAdminLogEventActionExportedInviteDelete
+    | Tl.ChannelAdminLogEventActionExportedInviteEdit
+    | Tl.ChannelAdminLogEventActionExportedInviteRevoke
+    | Tl.ChannelAdminLogEventActionParticipantEditRank
+    | Tl.ChannelAdminLogEventActionParticipantInvite
+    | Tl.ChannelAdminLogEventActionParticipantJoin
+    | Tl.ChannelAdminLogEventActionParticipantJoinByInvite
+    | Tl.ChannelAdminLogEventActionParticipantJoinByRequest
+    | Tl.ChannelAdminLogEventActionParticipantLeave
+    | Tl.ChannelAdminLogEventActionParticipantMute
+    | Tl.ChannelAdminLogEventActionParticipantSubExtend
+    | Tl.ChannelAdminLogEventActionParticipantToggleAdmin
+    | Tl.ChannelAdminLogEventActionParticipantToggleBan
+    | Tl.ChannelAdminLogEventActionParticipantUnmute
+    | Tl.ChannelAdminLogEventActionParticipantVolume
+    | Tl.ChannelAdminLogEventActionPinTopic
+    | Tl.ChannelAdminLogEventActionSendMessage
+    | Tl.ChannelAdminLogEventActionStartGroupCall
+    | Tl.ChannelAdminLogEventActionStopPoll
+    | Tl.ChannelAdminLogEventActionToggleAntiSpam
+    | Tl.ChannelAdminLogEventActionToggleAutotranslation
+    | Tl.ChannelAdminLogEventActionToggleForum
+    | Tl.ChannelAdminLogEventActionToggleGroupCallSetting
+    | Tl.ChannelAdminLogEventActionToggleInvites
+    | Tl.ChannelAdminLogEventActionToggleNoForwards
+    | Tl.ChannelAdminLogEventActionTogglePreHistoryHidden
+    | Tl.ChannelAdminLogEventActionToggleSignatureProfiles
+    | Tl.ChannelAdminLogEventActionToggleSignatures
+    | Tl.ChannelAdminLogEventActionToggleSlowMode
+    | Tl.ChannelAdminLogEventActionUpdatePinned;
+  export type TypeChannelAdminLogEventsFilter = Tl.ChannelAdminLogEventsFilter;
   export type TypeChannelLocation = Tl.ChannelLocation | Tl.ChannelLocationEmpty;
   export type TypeChannelMessagesFilter = Tl.ChannelMessagesFilter | Tl.ChannelMessagesFilterEmpty;
   export type TypeChannelParticipant =
@@ -5268,6 +5813,8 @@ export declare namespace Tl {
   export type TypeChatAdminRights = Tl.ChatAdminRights;
   export type TypeChatBannedRights = Tl.ChatBannedRights;
   export type TypeChatFull = Tl.ChannelFull | Tl.ChatFull | Tl.CommunityFull;
+  export type TypeChatInvite = Tl.ChatInvite | Tl.ChatInviteAlready | Tl.ChatInvitePeek;
+  export type TypeChatInviteImporter = Tl.ChatInviteImporter;
   export type TypeChatParticipant =
     | Tl.ChatParticipant
     | Tl.ChatParticipantAdmin
@@ -5315,6 +5862,7 @@ export declare namespace Tl {
   export type TypeEncryptedMessage = Tl.EncryptedMessage | Tl.EncryptedMessageService;
   export type TypeEphemeralMessage = Tl.EphemeralMessage;
   export type TypeExportedChatInvite = Tl.ChatInviteExported | Tl.ChatInvitePublicJoinRequests;
+  export type TypeExportedChatlistInvite = Tl.ExportedChatlistInvite;
   export type TypeFactCheck = Tl.FactCheck;
   export type TypeFileHash = Tl.FileHash;
   export type TypeFolder = Tl.Folder;
@@ -5346,6 +5894,7 @@ export declare namespace Tl {
     | Tl.InputChannel
     | Tl.InputChannelEmpty
     | Tl.InputChannelFromMessage;
+  export type TypeInputChatlist = Tl.InputChatlistDialogFilter;
   export type TypeInputCheckPasswordSRP = Tl.InputCheckPasswordEmpty | Tl.InputCheckPasswordSRP;
   export type TypeInputClientProxy = Tl.InputClientProxy;
   export type TypeInputDialogPeer =
@@ -5676,6 +6225,7 @@ export declare namespace Tl {
     | Tl.InputMessagesFilterUrl
     | Tl.InputMessagesFilterVideo
     | Tl.InputMessagesFilterVoice;
+  export type TypeMissingInvitee = Tl.MissingInvitee;
   export type TypeNotificationSound =
     | Tl.NotificationSoundDefault
     | Tl.NotificationSoundLocal
@@ -5874,6 +6424,8 @@ export declare namespace Tl {
     | Tl.TextSuperscript
     | Tl.TextUnderline
     | Tl.TextUrl;
+  export type TypeSavedDialog = Tl.MonoForumDialog | Tl.SavedDialog;
+  export type TypeSavedReactionTag = Tl.SavedReactionTag;
   export type TypeSearchPostsFlood = Tl.SearchPostsFlood;
   export type TypeSecureCredentialsEncrypted = Tl.SecureCredentialsEncrypted;
   export type TypeSecureData = Tl.SecureData;
@@ -7957,6 +8509,12 @@ export declare namespace Tl {
     }>;
   }
   export namespace channels {
+    export type AdminLogResults = TlObject<'channels.adminLogResults'> & AdminLogResultsFields;
+    export type AdminLogResultsFields = Readonly<{
+      events: readonly Tl.TypeChannelAdminLogEvent[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+    }>;
     export type ChannelParticipant = TlObject<'channels.channelParticipant'> &
       ChannelParticipantFields;
     export type ChannelParticipantFields = Readonly<{
@@ -7975,6 +8533,20 @@ export declare namespace Tl {
     export type ChannelParticipantsNotModified =
       TlObject<'channels.channelParticipantsNotModified'> & ChannelParticipantsNotModifiedFields;
     export type ChannelParticipantsNotModifiedFields = Readonly<Record<never, never>>;
+    export type CreateChannel = TlObject<'channels.createChannel'> &
+      CreateChannelFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type CreateChannelFields = Readonly<{
+      broadcast?: true;
+      megagroup?: true;
+      forImport?: true;
+      forum?: true;
+      title: string;
+      about: string;
+      geoPoint?: Tl.TypeInputGeoPoint;
+      address?: string;
+      ttlPeriod?: number;
+    }>;
     export type DeleteChannel = TlObject<'channels.deleteChannel'> &
       DeleteChannelFields &
       TlRequest<Tl.TypeUpdates>;
@@ -7987,6 +8559,42 @@ export declare namespace Tl {
     export type DeleteMessagesFields = Readonly<{
       channel: Tl.TypeInputChannel;
       id: readonly number[];
+    }>;
+    export type EditAdmin = TlObject<'channels.editAdmin'> &
+      EditAdminFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type EditAdminFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+      userId: Tl.TypeInputUser;
+      adminRights: Tl.TypeChatAdminRights;
+      rank?: string;
+    }>;
+    export type EditBanned = TlObject<'channels.editBanned'> &
+      EditBannedFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type EditBannedFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+      participant: Tl.TypeInputPeer;
+      bannedRights: Tl.TypeChatBannedRights;
+    }>;
+    export type EditTitle = TlObject<'channels.editTitle'> &
+      EditTitleFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type EditTitleFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+      title: string;
+    }>;
+    export type GetAdminLog = TlObject<'channels.getAdminLog'> &
+      GetAdminLogFields &
+      TlRequest<Tl.channels.TypeAdminLogResults>;
+    export type GetAdminLogFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+      q: string;
+      eventsFilter?: Tl.TypeChannelAdminLogEventsFilter;
+      admins?: readonly Tl.TypeInputUser[];
+      maxId: bigint;
+      minId: bigint;
+      limit: number;
     }>;
     export type GetChannels = TlObject<'channels.getChannels'> &
       GetChannelsFields &
@@ -8024,6 +8632,13 @@ export declare namespace Tl {
       limit: number;
       hash: bigint;
     }>;
+    export type InviteToChannel = TlObject<'channels.inviteToChannel'> &
+      InviteToChannelFields &
+      TlRequest<Tl.messages.TypeInvitedUsers>;
+    export type InviteToChannelFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+      users: readonly Tl.TypeInputUser[];
+    }>;
     export type LeaveChannel = TlObject<'channels.leaveChannel'> &
       LeaveChannelFields &
       TlRequest<Tl.TypeUpdates>;
@@ -8044,10 +8659,131 @@ export declare namespace Tl {
       channel: Tl.TypeInputChannel;
       id: readonly number[];
     }>;
+    export type ToggleForum = TlObject<'channels.toggleForum'> &
+      ToggleForumFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type ToggleForumFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+      enabled: boolean;
+      tabs: boolean;
+    }>;
+    export type TogglePreHistoryHidden = TlObject<'channels.togglePreHistoryHidden'> &
+      TogglePreHistoryHiddenFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type TogglePreHistoryHiddenFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+      enabled: boolean;
+    }>;
+    export type ToggleSlowMode = TlObject<'channels.toggleSlowMode'> &
+      ToggleSlowModeFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type ToggleSlowModeFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+      seconds: number;
+    }>;
+    export type TypeAdminLogResults = Tl.channels.AdminLogResults;
     export type TypeChannelParticipant = Tl.channels.ChannelParticipant;
     export type TypeChannelParticipants =
       | Tl.channels.ChannelParticipants
       | Tl.channels.ChannelParticipantsNotModified;
+    export type UpdateUsername = TlObject<'channels.updateUsername'> &
+      UpdateUsernameFields &
+      TlRequest<boolean>;
+    export type UpdateUsernameFields = Readonly<{
+      channel: Tl.TypeInputChannel;
+      username: string;
+    }>;
+  }
+  export namespace chatlists {
+    export type ChatlistInvite = TlObject<'chatlists.chatlistInvite'> & ChatlistInviteFields;
+    export type ChatlistInviteAlready = TlObject<'chatlists.chatlistInviteAlready'> &
+      ChatlistInviteAlreadyFields;
+    export type ChatlistInviteAlreadyFields = Readonly<{
+      filterId: number;
+      missingPeers: readonly Tl.TypePeer[];
+      alreadyPeers: readonly Tl.TypePeer[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+    }>;
+    export type ChatlistInviteFields = Readonly<{
+      titleNoanimate?: true;
+      title: Tl.TypeTextWithEntities;
+      emoticon?: string;
+      peers: readonly Tl.TypePeer[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+    }>;
+    export type ChatlistUpdates = TlObject<'chatlists.chatlistUpdates'> & ChatlistUpdatesFields;
+    export type ChatlistUpdatesFields = Readonly<{
+      missingPeers: readonly Tl.TypePeer[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+    }>;
+    export type CheckChatlistInvite = TlObject<'chatlists.checkChatlistInvite'> &
+      CheckChatlistInviteFields &
+      TlRequest<Tl.chatlists.TypeChatlistInvite>;
+    export type CheckChatlistInviteFields = Readonly<{
+      slug: string;
+    }>;
+    export type DeleteExportedInvite = TlObject<'chatlists.deleteExportedInvite'> &
+      DeleteExportedInviteFields &
+      TlRequest<boolean>;
+    export type DeleteExportedInviteFields = Readonly<{
+      chatlist: Tl.TypeInputChatlist;
+      slug: string;
+    }>;
+    export type ExportChatlistInvite = TlObject<'chatlists.exportChatlistInvite'> &
+      ExportChatlistInviteFields &
+      TlRequest<Tl.chatlists.TypeExportedChatlistInvite>;
+    export type ExportChatlistInviteFields = Readonly<{
+      chatlist: Tl.TypeInputChatlist;
+      title: string;
+      peers: readonly Tl.TypeInputPeer[];
+    }>;
+    export type ExportedChatlistInvite = TlObject<'chatlists.exportedChatlistInvite'> &
+      ExportedChatlistInviteFields;
+    export type ExportedChatlistInviteFields = Readonly<{
+      filter: Tl.TypeDialogFilter;
+      invite: Tl.TypeExportedChatlistInvite;
+    }>;
+    export type ExportedInvites = TlObject<'chatlists.exportedInvites'> & ExportedInvitesFields;
+    export type ExportedInvitesFields = Readonly<{
+      invites: readonly Tl.TypeExportedChatlistInvite[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+    }>;
+    export type GetChatlistUpdates = TlObject<'chatlists.getChatlistUpdates'> &
+      GetChatlistUpdatesFields &
+      TlRequest<Tl.chatlists.TypeChatlistUpdates>;
+    export type GetChatlistUpdatesFields = Readonly<{
+      chatlist: Tl.TypeInputChatlist;
+    }>;
+    export type GetExportedInvites = TlObject<'chatlists.getExportedInvites'> &
+      GetExportedInvitesFields &
+      TlRequest<Tl.chatlists.TypeExportedInvites>;
+    export type GetExportedInvitesFields = Readonly<{
+      chatlist: Tl.TypeInputChatlist;
+    }>;
+    export type JoinChatlistInvite = TlObject<'chatlists.joinChatlistInvite'> &
+      JoinChatlistInviteFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type JoinChatlistInviteFields = Readonly<{
+      slug: string;
+      peers: readonly Tl.TypeInputPeer[];
+    }>;
+    export type JoinChatlistUpdates = TlObject<'chatlists.joinChatlistUpdates'> &
+      JoinChatlistUpdatesFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type JoinChatlistUpdatesFields = Readonly<{
+      chatlist: Tl.TypeInputChatlist;
+      peers: readonly Tl.TypeInputPeer[];
+    }>;
+    export type TypeChatlistInvite =
+      | Tl.chatlists.ChatlistInvite
+      | Tl.chatlists.ChatlistInviteAlready;
+    export type TypeChatlistUpdates = Tl.chatlists.ChatlistUpdates;
+    export type TypeExportedChatlistInvite = Tl.chatlists.ExportedChatlistInvite;
+    export type TypeExportedInvites = Tl.chatlists.ExportedInvites;
   }
   export namespace contacts {
     export type AddContact = TlObject<'contacts.addContact'> &
@@ -8118,6 +8854,20 @@ export declare namespace Tl {
     }>;
   }
   export namespace help {
+    export type AppConfig = TlObject<'help.appConfig'> & AppConfigFields;
+    export type AppConfigFields = Readonly<{
+      hash: number;
+      config: Tl.TypeJSONValue;
+    }>;
+    export type AppConfigNotModified = TlObject<'help.appConfigNotModified'> &
+      AppConfigNotModifiedFields;
+    export type AppConfigNotModifiedFields = Readonly<Record<never, never>>;
+    export type GetAppConfig = TlObject<'help.getAppConfig'> &
+      GetAppConfigFields &
+      TlRequest<Tl.help.TypeAppConfig>;
+    export type GetAppConfigFields = Readonly<{
+      hash: number;
+    }>;
     export type GetConfig = TlObject<'help.getConfig'> & GetConfigFields & TlRequest<Tl.TypeConfig>;
     export type GetConfigFields = Readonly<Record<never, never>>;
     export type TermsOfService = TlObject<'help.termsOfService'> & TermsOfServiceFields;
@@ -8128,6 +8878,7 @@ export declare namespace Tl {
       entities: readonly Tl.TypeMessageEntity[];
       minAgeConfirm?: number;
     }>;
+    export type TypeAppConfig = Tl.help.AppConfig | Tl.help.AppConfigNotModified;
     export type TypeTermsOfService = Tl.help.TermsOfService;
   }
   export namespace messages {
@@ -8142,6 +8893,14 @@ export declare namespace Tl {
       buttonId?: number;
       url?: string;
       matchCode?: string;
+    }>;
+    export type AddChatUser = TlObject<'messages.addChatUser'> &
+      AddChatUserFields &
+      TlRequest<Tl.messages.TypeInvitedUsers>;
+    export type AddChatUserFields = Readonly<{
+      chatId: bigint;
+      userId: Tl.TypeInputUser;
+      fwdLimit: number;
     }>;
     export type AffectedHistory = TlObject<'messages.affectedHistory'> & AffectedHistoryFields;
     export type AffectedHistoryFields = Readonly<{
@@ -8207,6 +8966,25 @@ export declare namespace Tl {
       chats: readonly Tl.TypeChat[];
       users: readonly Tl.TypeUser[];
     }>;
+    export type ChatInviteImporters = TlObject<'messages.chatInviteImporters'> &
+      ChatInviteImportersFields;
+    export type ChatInviteImportersFields = Readonly<{
+      count: number;
+      importers: readonly Tl.TypeChatInviteImporter[];
+      users: readonly Tl.TypeUser[];
+    }>;
+    export type ChatInviteJoinResultOk = TlObject<'messages.chatInviteJoinResultOk'> &
+      ChatInviteJoinResultOkFields;
+    export type ChatInviteJoinResultOkFields = Readonly<{
+      updates: Tl.TypeUpdates;
+    }>;
+    export type ChatInviteJoinResultWebView = TlObject<'messages.chatInviteJoinResultWebView'> &
+      ChatInviteJoinResultWebViewFields;
+    export type ChatInviteJoinResultWebViewFields = Readonly<{
+      botId: bigint;
+      queryId: bigint;
+      users: readonly Tl.TypeUser[];
+    }>;
     export type Chats = TlObject<'messages.chats'> & ChatsFields;
     export type ChatsFields = Readonly<{
       chats: readonly Tl.TypeChat[];
@@ -8215,6 +8993,32 @@ export declare namespace Tl {
     export type ChatsSliceFields = Readonly<{
       count: number;
       chats: readonly Tl.TypeChat[];
+    }>;
+    export type CheckChatInvite = TlObject<'messages.checkChatInvite'> &
+      CheckChatInviteFields &
+      TlRequest<Tl.TypeChatInvite>;
+    export type CheckChatInviteFields = Readonly<{
+      hash: string;
+    }>;
+    export type CreateChat = TlObject<'messages.createChat'> &
+      CreateChatFields &
+      TlRequest<Tl.messages.TypeInvitedUsers>;
+    export type CreateChatFields = Readonly<{
+      users: readonly Tl.TypeInputUser[];
+      title: string;
+      ttlPeriod?: number;
+    }>;
+    export type CreateForumTopic = TlObject<'messages.createForumTopic'> &
+      CreateForumTopicFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type CreateForumTopicFields = Readonly<{
+      titleMissing?: true;
+      peer: Tl.TypeInputPeer;
+      title: string;
+      iconColor?: number;
+      iconEmojiId?: bigint;
+      randomId: bigint;
+      sendAs?: Tl.TypeInputPeer;
     }>;
     export type DeleteChat = TlObject<'messages.deleteChat'> &
       DeleteChatFields &
@@ -8229,6 +9033,13 @@ export declare namespace Tl {
       revokeHistory?: true;
       chatId: bigint;
       userId: Tl.TypeInputUser;
+    }>;
+    export type DeleteExportedChatInvite = TlObject<'messages.deleteExportedChatInvite'> &
+      DeleteExportedChatInviteFields &
+      TlRequest<boolean>;
+    export type DeleteExportedChatInviteFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      link: string;
     }>;
     export type DeleteHistory = TlObject<'messages.deleteHistory'> &
       DeleteHistoryFields &
@@ -8247,6 +9058,18 @@ export declare namespace Tl {
     export type DeleteMessagesFields = Readonly<{
       revoke?: true;
       id: readonly number[];
+    }>;
+    export type DeleteTopicHistory = TlObject<'messages.deleteTopicHistory'> &
+      DeleteTopicHistoryFields &
+      TlRequest<Tl.messages.TypeAffectedHistory>;
+    export type DeleteTopicHistoryFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      topMsgId: number;
+    }>;
+    export type DialogFilters = TlObject<'messages.dialogFilters'> & DialogFiltersFields;
+    export type DialogFiltersFields = Readonly<{
+      tagsEnabled?: true;
+      filters: readonly Tl.TypeDialogFilter[];
     }>;
     export type Dialogs = TlObject<'messages.dialogs'> & DialogsFields;
     export type DialogsFields = Readonly<{
@@ -8278,6 +9101,58 @@ export declare namespace Tl {
       unreadCount: number;
       chats: readonly Tl.TypeChat[];
       users: readonly Tl.TypeUser[];
+    }>;
+    export type EditChatAbout = TlObject<'messages.editChatAbout'> &
+      EditChatAboutFields &
+      TlRequest<boolean>;
+    export type EditChatAboutFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      about: string;
+    }>;
+    export type EditChatAdmin = TlObject<'messages.editChatAdmin'> &
+      EditChatAdminFields &
+      TlRequest<boolean>;
+    export type EditChatAdminFields = Readonly<{
+      chatId: bigint;
+      userId: Tl.TypeInputUser;
+      isAdmin: boolean;
+    }>;
+    export type EditChatDefaultBannedRights = TlObject<'messages.editChatDefaultBannedRights'> &
+      EditChatDefaultBannedRightsFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type EditChatDefaultBannedRightsFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      bannedRights: Tl.TypeChatBannedRights;
+    }>;
+    export type EditChatTitle = TlObject<'messages.editChatTitle'> &
+      EditChatTitleFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type EditChatTitleFields = Readonly<{
+      chatId: bigint;
+      title: string;
+    }>;
+    export type EditExportedChatInvite = TlObject<'messages.editExportedChatInvite'> &
+      EditExportedChatInviteFields &
+      TlRequest<Tl.messages.TypeExportedChatInvite>;
+    export type EditExportedChatInviteFields = Readonly<{
+      revoked?: true;
+      peer: Tl.TypeInputPeer;
+      link: string;
+      expireDate?: number;
+      usageLimit?: number;
+      requestNeeded?: boolean;
+      title?: string;
+    }>;
+    export type EditForumTopic = TlObject<'messages.editForumTopic'> &
+      EditForumTopicFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type EditForumTopicFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      topicId: number;
+      title?: string;
+      iconEmojiId?: bigint;
+      closed?: boolean;
+      hidden?: boolean;
     }>;
     export type EditMessage = TlObject<'messages.editMessage'> &
       EditMessageFields &
@@ -8314,6 +9189,38 @@ export declare namespace Tl {
     export type EmojiGameUnavailable = TlObject<'messages.emojiGameUnavailable'> &
       EmojiGameUnavailableFields;
     export type EmojiGameUnavailableFields = Readonly<Record<never, never>>;
+    export type ExportChatInvite = TlObject<'messages.exportChatInvite'> &
+      ExportChatInviteFields &
+      TlRequest<Tl.TypeExportedChatInvite>;
+    export type ExportChatInviteFields = Readonly<{
+      legacyRevokePermanent?: true;
+      requestNeeded?: true;
+      peer: Tl.TypeInputPeer;
+      expireDate?: number;
+      usageLimit?: number;
+      title?: string;
+      subscriptionPricing?: Tl.TypeStarsSubscriptionPricing;
+    }>;
+    export type ExportedChatInvite = TlObject<'messages.exportedChatInvite'> &
+      ExportedChatInviteFields;
+    export type ExportedChatInviteFields = Readonly<{
+      invite: Tl.TypeExportedChatInvite;
+      users: readonly Tl.TypeUser[];
+    }>;
+    export type ExportedChatInviteReplaced = TlObject<'messages.exportedChatInviteReplaced'> &
+      ExportedChatInviteReplacedFields;
+    export type ExportedChatInviteReplacedFields = Readonly<{
+      invite: Tl.TypeExportedChatInvite;
+      newInvite: Tl.TypeExportedChatInvite;
+      users: readonly Tl.TypeUser[];
+    }>;
+    export type ExportedChatInvites = TlObject<'messages.exportedChatInvites'> &
+      ExportedChatInvitesFields;
+    export type ExportedChatInvitesFields = Readonly<{
+      count: number;
+      invites: readonly Tl.TypeExportedChatInvite[];
+      users: readonly Tl.TypeUser[];
+    }>;
     export type FaveSticker = TlObject<'messages.faveSticker'> &
       FaveStickerFields &
       TlRequest<boolean>;
@@ -8330,6 +9237,16 @@ export declare namespace Tl {
     export type FavedStickersNotModified = TlObject<'messages.favedStickersNotModified'> &
       FavedStickersNotModifiedFields;
     export type FavedStickersNotModifiedFields = Readonly<Record<never, never>>;
+    export type ForumTopics = TlObject<'messages.forumTopics'> & ForumTopicsFields;
+    export type ForumTopicsFields = Readonly<{
+      orderByCreateDate?: true;
+      count: number;
+      topics: readonly Tl.TypeForumTopic[];
+      messages: readonly Tl.TypeMessage[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+      pts: number;
+    }>;
     export type ForwardMessages = TlObject<'messages.forwardMessages'> &
       ForwardMessagesFields &
       TlRequest<Tl.TypeUpdates>;
@@ -8398,6 +9315,19 @@ export declare namespace Tl {
       data?: Uint8Array;
       password?: Tl.TypeInputCheckPasswordSRP;
     }>;
+    export type GetChatInviteImporters = TlObject<'messages.getChatInviteImporters'> &
+      GetChatInviteImportersFields &
+      TlRequest<Tl.messages.TypeChatInviteImporters>;
+    export type GetChatInviteImportersFields = Readonly<{
+      requested?: true;
+      subscriptionExpired?: true;
+      peer: Tl.TypeInputPeer;
+      link?: string;
+      q?: string;
+      offsetDate: number;
+      offsetUser: Tl.TypeInputUser;
+      limit: number;
+    }>;
     export type GetChats = TlObject<'messages.getChats'> &
       GetChatsFields &
       TlRequest<Tl.messages.TypeChats>;
@@ -8410,6 +9340,16 @@ export declare namespace Tl {
     export type GetCustomEmojiDocumentsFields = Readonly<{
       documentId: readonly bigint[];
     }>;
+    export type GetDefaultTagReactions = TlObject<'messages.getDefaultTagReactions'> &
+      GetDefaultTagReactionsFields &
+      TlRequest<Tl.messages.TypeReactions>;
+    export type GetDefaultTagReactionsFields = Readonly<{
+      hash: bigint;
+    }>;
+    export type GetDialogFilters = TlObject<'messages.getDialogFilters'> &
+      GetDialogFiltersFields &
+      TlRequest<Tl.messages.TypeDialogFilters>;
+    export type GetDialogFiltersFields = Readonly<Record<never, never>>;
     export type GetDialogs = TlObject<'messages.getDialogs'> &
       GetDialogsFields &
       TlRequest<Tl.messages.TypeDialogs>;
@@ -8429,11 +9369,40 @@ export declare namespace Tl {
       peer: Tl.TypeInputPeer;
       msgId: number;
     }>;
+    export type GetExportedChatInvites = TlObject<'messages.getExportedChatInvites'> &
+      GetExportedChatInvitesFields &
+      TlRequest<Tl.messages.TypeExportedChatInvites>;
+    export type GetExportedChatInvitesFields = Readonly<{
+      revoked?: true;
+      peer: Tl.TypeInputPeer;
+      adminId: Tl.TypeInputUser;
+      offsetDate?: number;
+      offsetLink?: string;
+      limit: number;
+    }>;
     export type GetFavedStickers = TlObject<'messages.getFavedStickers'> &
       GetFavedStickersFields &
       TlRequest<Tl.messages.TypeFavedStickers>;
     export type GetFavedStickersFields = Readonly<{
       hash: bigint;
+    }>;
+    export type GetForumTopics = TlObject<'messages.getForumTopics'> &
+      GetForumTopicsFields &
+      TlRequest<Tl.messages.TypeForumTopics>;
+    export type GetForumTopicsByID = TlObject<'messages.getForumTopicsByID'> &
+      GetForumTopicsByIDFields &
+      TlRequest<Tl.messages.TypeForumTopics>;
+    export type GetForumTopicsByIDFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      topics: readonly number[];
+    }>;
+    export type GetForumTopicsFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      q?: string;
+      offsetDate: number;
+      offsetId: number;
+      offsetTopic: number;
+      limit: number;
     }>;
     export type GetFullChat = TlObject<'messages.getFullChat'> &
       GetFullChatFields &
@@ -8506,6 +9475,10 @@ export declare namespace Tl {
     export type GetPinnedDialogsFields = Readonly<{
       folderId: number;
     }>;
+    export type GetPinnedSavedDialogs = TlObject<'messages.getPinnedSavedDialogs'> &
+      GetPinnedSavedDialogsFields &
+      TlRequest<Tl.messages.TypeSavedDialogs>;
+    export type GetPinnedSavedDialogsFields = Readonly<Record<never, never>>;
     export type GetPollResults = TlObject<'messages.getPollResults'> &
       GetPollResultsFields &
       TlRequest<Tl.TypeUpdates>;
@@ -8545,10 +9518,43 @@ export declare namespace Tl {
       minId: number;
       hash: bigint;
     }>;
+    export type GetSavedDialogs = TlObject<'messages.getSavedDialogs'> &
+      GetSavedDialogsFields &
+      TlRequest<Tl.messages.TypeSavedDialogs>;
+    export type GetSavedDialogsFields = Readonly<{
+      excludePinned?: true;
+      parentPeer?: Tl.TypeInputPeer;
+      offsetDate: number;
+      offsetId: number;
+      offsetPeer: Tl.TypeInputPeer;
+      limit: number;
+      hash: bigint;
+    }>;
     export type GetSavedGifs = TlObject<'messages.getSavedGifs'> &
       GetSavedGifsFields &
       TlRequest<Tl.messages.TypeSavedGifs>;
     export type GetSavedGifsFields = Readonly<{
+      hash: bigint;
+    }>;
+    export type GetSavedHistory = TlObject<'messages.getSavedHistory'> &
+      GetSavedHistoryFields &
+      TlRequest<Tl.messages.TypeMessages>;
+    export type GetSavedHistoryFields = Readonly<{
+      parentPeer?: Tl.TypeInputPeer;
+      peer: Tl.TypeInputPeer;
+      offsetId: number;
+      offsetDate: number;
+      addOffset: number;
+      limit: number;
+      maxId: number;
+      minId: number;
+      hash: bigint;
+    }>;
+    export type GetSavedReactionTags = TlObject<'messages.getSavedReactionTags'> &
+      GetSavedReactionTagsFields &
+      TlRequest<Tl.messages.TypeSavedReactionTags>;
+    export type GetSavedReactionTagsFields = Readonly<{
+      peer?: Tl.TypeInputPeer;
       hash: bigint;
     }>;
     export type GetSearchCounters = TlObject<'messages.getSearchCounters'> &
@@ -8592,12 +9598,47 @@ export declare namespace Tl {
       maxId: number;
       minId: number;
     }>;
+    export type HideAllChatJoinRequests = TlObject<'messages.hideAllChatJoinRequests'> &
+      HideAllChatJoinRequestsFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type HideAllChatJoinRequestsFields = Readonly<{
+      approved?: true;
+      peer: Tl.TypeInputPeer;
+      link?: string;
+    }>;
+    export type HideChatJoinRequest = TlObject<'messages.hideChatJoinRequest'> &
+      HideChatJoinRequestFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type HideChatJoinRequestFields = Readonly<{
+      approved?: true;
+      peer: Tl.TypeInputPeer;
+      userId: Tl.TypeInputUser;
+    }>;
+    export type ImportChatInvite = TlObject<'messages.importChatInvite'> &
+      ImportChatInviteFields &
+      TlRequest<Tl.messages.TypeChatInviteJoinResult>;
+    export type ImportChatInviteFields = Readonly<{
+      hash: string;
+    }>;
     export type InstallStickerSet = TlObject<'messages.installStickerSet'> &
       InstallStickerSetFields &
       TlRequest<Tl.messages.TypeStickerSetInstallResult>;
     export type InstallStickerSetFields = Readonly<{
       stickerset: Tl.TypeInputStickerSet;
       archived: boolean;
+    }>;
+    export type InvitedUsers = TlObject<'messages.invitedUsers'> & InvitedUsersFields;
+    export type InvitedUsersFields = Readonly<{
+      updates: Tl.TypeUpdates;
+      missingInvitees: readonly Tl.TypeMissingInvitee[];
+    }>;
+    export type MarkDialogUnread = TlObject<'messages.markDialogUnread'> &
+      MarkDialogUnreadFields &
+      TlRequest<boolean>;
+    export type MarkDialogUnreadFields = Readonly<{
+      unread?: true;
+      parentPeer?: Tl.TypeInputPeer;
+      peer: Tl.TypeInputDialogPeer;
     }>;
     export type MessageReactionsList = TlObject<'messages.messageReactionsList'> &
       MessageReactionsListFields;
@@ -8632,6 +9673,12 @@ export declare namespace Tl {
       chats: readonly Tl.TypeChat[];
       users: readonly Tl.TypeUser[];
     }>;
+    export type MigrateChat = TlObject<'messages.migrateChat'> &
+      MigrateChatFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type MigrateChatFields = Readonly<{
+      chatId: bigint;
+    }>;
     export type PeerDialogs = TlObject<'messages.peerDialogs'> & PeerDialogsFields;
     export type PeerDialogsFields = Readonly<{
       dialogs: readonly Tl.TypeDialog[];
@@ -8650,6 +9697,22 @@ export declare namespace Tl {
       queryId: bigint;
       replyTo?: Tl.TypeInputReplyTo;
       sendAs?: Tl.TypeInputPeer;
+    }>;
+    export type Reactions = TlObject<'messages.reactions'> & ReactionsFields;
+    export type ReactionsFields = Readonly<{
+      hash: bigint;
+      reactions: readonly Tl.TypeReaction[];
+    }>;
+    export type ReactionsNotModified = TlObject<'messages.reactionsNotModified'> &
+      ReactionsNotModifiedFields;
+    export type ReactionsNotModifiedFields = Readonly<Record<never, never>>;
+    export type ReadDiscussion = TlObject<'messages.readDiscussion'> &
+      ReadDiscussionFields &
+      TlRequest<boolean>;
+    export type ReadDiscussionFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      msgId: number;
+      readMaxId: number;
     }>;
     export type ReadHistory = TlObject<'messages.readHistory'> &
       ReadHistoryFields &
@@ -8755,6 +9818,27 @@ export declare namespace Tl {
       replyTo?: Tl.TypeInputReplyTo;
       sendAs?: Tl.TypeInputPeer;
     }>;
+    export type SavedDialogs = TlObject<'messages.savedDialogs'> & SavedDialogsFields;
+    export type SavedDialogsFields = Readonly<{
+      dialogs: readonly Tl.TypeSavedDialog[];
+      messages: readonly Tl.TypeMessage[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+    }>;
+    export type SavedDialogsNotModified = TlObject<'messages.savedDialogsNotModified'> &
+      SavedDialogsNotModifiedFields;
+    export type SavedDialogsNotModifiedFields = Readonly<{
+      count: number;
+    }>;
+    export type SavedDialogsSlice = TlObject<'messages.savedDialogsSlice'> &
+      SavedDialogsSliceFields;
+    export type SavedDialogsSliceFields = Readonly<{
+      count: number;
+      dialogs: readonly Tl.TypeSavedDialog[];
+      messages: readonly Tl.TypeMessage[];
+      chats: readonly Tl.TypeChat[];
+      users: readonly Tl.TypeUser[];
+    }>;
     export type SavedGifs = TlObject<'messages.savedGifs'> & SavedGifsFields;
     export type SavedGifsFields = Readonly<{
       hash: bigint;
@@ -8763,6 +9847,15 @@ export declare namespace Tl {
     export type SavedGifsNotModified = TlObject<'messages.savedGifsNotModified'> &
       SavedGifsNotModifiedFields;
     export type SavedGifsNotModifiedFields = Readonly<Record<never, never>>;
+    export type SavedReactionTags = TlObject<'messages.savedReactionTags'> &
+      SavedReactionTagsFields;
+    export type SavedReactionTagsFields = Readonly<{
+      tags: readonly Tl.TypeSavedReactionTag[];
+      hash: bigint;
+    }>;
+    export type SavedReactionTagsNotModified = TlObject<'messages.savedReactionTagsNotModified'> &
+      SavedReactionTagsNotModifiedFields;
+    export type SavedReactionTagsNotModifiedFields = Readonly<Record<never, never>>;
     export type Search = TlObject<'messages.search'> &
       SearchFields &
       TlRequest<Tl.messages.TypeMessages>;
@@ -8985,6 +10078,21 @@ export declare namespace Tl {
       pinned?: true;
       peer: Tl.TypeInputDialogPeer;
     }>;
+    export type ToggleNoForwards = TlObject<'messages.toggleNoForwards'> &
+      ToggleNoForwardsFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type ToggleNoForwardsFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      enabled: boolean;
+      requestMsgId?: number;
+    }>;
+    export type ToggleSavedDialogPin = TlObject<'messages.toggleSavedDialogPin'> &
+      ToggleSavedDialogPinFields &
+      TlRequest<boolean>;
+    export type ToggleSavedDialogPinFields = Readonly<{
+      pinned?: true;
+      peer: Tl.TypeInputDialogPeer;
+    }>;
     export type TypeAffectedHistory = Tl.messages.AffectedHistory;
     export type TypeAffectedMessages = Tl.messages.AffectedMessages;
     export type TypeAllStickers = Tl.messages.AllStickers | Tl.messages.AllStickersNotModified;
@@ -8992,7 +10100,12 @@ export declare namespace Tl {
     export type TypeBotCallbackAnswer = Tl.messages.BotCallbackAnswer;
     export type TypeBotResults = Tl.messages.BotResults;
     export type TypeChatFull = Tl.messages.ChatFull;
+    export type TypeChatInviteImporters = Tl.messages.ChatInviteImporters;
+    export type TypeChatInviteJoinResult =
+      | Tl.messages.ChatInviteJoinResultOk
+      | Tl.messages.ChatInviteJoinResultWebView;
     export type TypeChats = Tl.messages.Chats | Tl.messages.ChatsSlice;
+    export type TypeDialogFilters = Tl.messages.DialogFilters;
     export type TypeDialogs =
       | Tl.messages.Dialogs
       | Tl.messages.DialogsNotModified
@@ -9002,15 +10115,21 @@ export declare namespace Tl {
       | Tl.messages.EmojiGameDiceInfo
       | Tl.messages.EmojiGameUnavailable;
     export type TypeEmojiGameOutcome = Tl.messages.EmojiGameOutcome;
+    export type TypeExportedChatInvite =
+      | Tl.messages.ExportedChatInvite
+      | Tl.messages.ExportedChatInviteReplaced;
+    export type TypeExportedChatInvites = Tl.messages.ExportedChatInvites;
     export type TypeFavedStickers =
       | Tl.messages.FavedStickers
       | Tl.messages.FavedStickersNotModified;
+    export type TypeForumTopics = Tl.messages.ForumTopics;
     export type TypeFoundStickerSets =
       | Tl.messages.FoundStickerSets
       | Tl.messages.FoundStickerSetsNotModified;
     export type TypeFoundStickers =
       | Tl.messages.FoundStickers
       | Tl.messages.FoundStickersNotModified;
+    export type TypeInvitedUsers = Tl.messages.InvitedUsers;
     export type TypeMessageReactionsList = Tl.messages.MessageReactionsList;
     export type TypeMessages =
       | Tl.messages.ChannelMessages
@@ -9018,10 +10137,18 @@ export declare namespace Tl {
       | Tl.messages.MessagesNotModified
       | Tl.messages.MessagesSlice;
     export type TypePeerDialogs = Tl.messages.PeerDialogs;
+    export type TypeReactions = Tl.messages.Reactions | Tl.messages.ReactionsNotModified;
     export type TypeRecentStickers =
       | Tl.messages.RecentStickers
       | Tl.messages.RecentStickersNotModified;
+    export type TypeSavedDialogs =
+      | Tl.messages.SavedDialogs
+      | Tl.messages.SavedDialogsNotModified
+      | Tl.messages.SavedDialogsSlice;
     export type TypeSavedGifs = Tl.messages.SavedGifs | Tl.messages.SavedGifsNotModified;
+    export type TypeSavedReactionTags =
+      | Tl.messages.SavedReactionTags
+      | Tl.messages.SavedReactionTagsNotModified;
     export type TypeSearchCounter = Tl.messages.SearchCounter;
     export type TypeStickerSet = Tl.messages.StickerSet | Tl.messages.StickerSetNotModified;
     export type TypeStickerSetInstallResult =
@@ -9034,6 +10161,27 @@ export declare namespace Tl {
     export type UninstallStickerSetFields = Readonly<{
       stickerset: Tl.TypeInputStickerSet;
     }>;
+    export type UpdateDialogFilter = TlObject<'messages.updateDialogFilter'> &
+      UpdateDialogFilterFields &
+      TlRequest<boolean>;
+    export type UpdateDialogFilterFields = Readonly<{
+      id: number;
+      filter?: Tl.TypeDialogFilter;
+    }>;
+    export type UpdateDialogFiltersOrder = TlObject<'messages.updateDialogFiltersOrder'> &
+      UpdateDialogFiltersOrderFields &
+      TlRequest<boolean>;
+    export type UpdateDialogFiltersOrderFields = Readonly<{
+      order: readonly number[];
+    }>;
+    export type UpdatePinnedForumTopic = TlObject<'messages.updatePinnedForumTopic'> &
+      UpdatePinnedForumTopicFields &
+      TlRequest<Tl.TypeUpdates>;
+    export type UpdatePinnedForumTopicFields = Readonly<{
+      peer: Tl.TypeInputPeer;
+      topicId: number;
+      pinned: boolean;
+    }>;
     export type UpdatePinnedMessage = TlObject<'messages.updatePinnedMessage'> &
       UpdatePinnedMessageFields &
       TlRequest<Tl.TypeUpdates>;
@@ -9043,6 +10191,13 @@ export declare namespace Tl {
       pmOneside?: true;
       peer: Tl.TypeInputPeer;
       id: number;
+    }>;
+    export type UpdateSavedReactionTag = TlObject<'messages.updateSavedReactionTag'> &
+      UpdateSavedReactionTagFields &
+      TlRequest<boolean>;
+    export type UpdateSavedReactionTagFields = Readonly<{
+      reaction: Tl.TypeReaction;
+      title?: string;
     }>;
     export type UploadMedia = TlObject<'messages.uploadMedia'> &
       UploadMediaFields &

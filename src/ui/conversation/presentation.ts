@@ -144,6 +144,7 @@ export function presentDialog(dialog: TelegramDialog, pending?: PendingSend): Ch
         }
       : {}),
     unread: dialog.unreadCount,
+    unreadMark: dialog.unreadMark,
     unreadMentions: dialog.unreadMentionsCount,
     unreadReactions: dialog.unreadReactionsCount,
     muted: dialog.muted,
@@ -153,7 +154,10 @@ export function presentDialog(dialog: TelegramDialog, pending?: PendingSend): Ch
     bot: Boolean(dialog.bot),
     ...(dialog.presence ? { presence: dialog.presence } : {}),
     lastSeenAt: dialog.lastSeenAt,
-    kind: dialog.peer.kind,
+    kind:
+      dialog.forum || (dialog.peer.kind === 'channel' && dialog.broadcast === false)
+        ? 'group'
+        : dialog.peer.kind,
   };
 }
 

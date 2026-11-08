@@ -133,3 +133,51 @@ it('inserts a message that arrives after a newer one, but not into a history gap
     message(3),
   ]);
 });
+
+it('keeps live messages and delayed loads scoped to the selected forum topic', () => {
+  const view = { ...conversation(), activeTopicId: 10 };
+  const sibling = { ...message(101), topicId: 20 };
+  const own = { ...message(102), topicId: 10 };
+  expect(applyConversationChange(view, { type: 'message-upsert', message: sibling })).toBe(view);
+  expect(applyConversationChange(view, { type: 'message-upsert', message: own }).messages).toEqual([
+    own,
+  ]);
+  const registry = makeClientRegistry();
+  registry.setSnapshot('tab', view);
+  const oldLoad = registry.beginConversationLoad('tab', 'peer-1');
+  registry.setSnapshot('tab', { ...view, activeTopicId: 20 });
+  const newLoad = registry.beginConversationLoad('tab', 'peer-1');
+  registry.recordConversationChange({ type: 'message-upsert', message: own });
+  registry.recordConversationChange({ type: 'message-upsert', message: sibling });
+  expect(oldLoad.complete(view)).toBeUndefined();
+  expect(newLoad.complete({ ...view, activeTopicId: 20 })?.messages).toEqual([sibling]);
+});
+
+it('isolates saved sources during live updates and superseded history requests', () => {
+  const first = { id: 'c:10', kind: 'channel' as const };
+  const second = { id: 'c:20', kind: 'channel' as const };
+  const view = { ...conversation(), activeSavedPeer: first };
+  const own = { ...message(101), savedPeerId: first.id };
+  const other = { ...message(102), savedPeerId: second.id };
+  expect(applyConversationChange(view, { type: 'message-upsert', message: other })).toBe(view);
+  expect(applyConversationChange(view, { type: 'message-upsert', message: own }).messages).toEqual([
+    own,
+  ]);
+  expect(
+    applyConversationChange(view, {
+      type: 'pinned-messages',
+      peerId: 'peer-1',
+      messages: [own, other],
+    }).pinnedMessages,
+  ).toEqual([own]);
+  const registry = makeClientRegistry();
+  registry.setSnapshot('tab', view);
+  const old = registry.beginConversationLoad('tab', 'peer-1');
+  const nextView = { ...view, activeSavedPeer: second };
+  registry.setSnapshot('tab', nextView);
+  const next = registry.beginConversationLoad('tab', 'peer-1');
+  registry.recordConversationChange({ type: 'message-upsert', message: own });
+  registry.recordConversationChange({ type: 'message-upsert', message: other });
+  expect(old.complete(view)).toBeUndefined();
+  expect(next.complete(nextView)?.messages).toEqual([other]);
+});

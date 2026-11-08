@@ -123,5 +123,44 @@ describe('Conversation', () => {
       undefined,
     );
     await expect(Effect.runPromise(conversation.loadOlder())).rejects.toThrow('no longer selected');
+    const topic = makeConversation(host, peer, 42);
+    await Effect.runPromise(topic.setDraft('Topic draft'));
+    expect(host.setDraft).toHaveBeenLastCalledWith('u:1/topic/42', 'Topic draft', undefined);
+    await Effect.runPromise(topic.sendDraft('Topic reply', { messageId: 77 }));
+    expect(sendDraft).toHaveBeenLastCalledWith(
+      peer,
+      'Topic reply',
+      { messageId: 77, topMessageId: 42 },
+      undefined,
+    );
+    await Effect.runPromise(topic.sendAttachments([], 'Files'));
+    expect(host.sendAttachments).toHaveBeenLastCalledWith(
+      peer,
+      [],
+      'Files',
+      { messageId: 42, topMessageId: 42 },
+      undefined,
+    );
+    const savedSource = { id: 'c:9', kind: 'channel' as const, accessHash: '99' };
+    const saved = makeConversation(host, peer, undefined, savedSource);
+    await Effect.runPromise(saved.setDraft('Source draft'));
+    expect(host.setDraft).toHaveBeenLastCalledWith('u:1/saved/c:9', 'Source draft', undefined);
+    await Effect.runPromise(saved.search('idea', false));
+    expect(host.searchConversationMessages).toHaveBeenLastCalledWith(
+      peer,
+      'idea',
+      false,
+      undefined,
+      { savedPeer: savedSource },
+    );
+    await Effect.runPromise(saved.sharedMedia('photos'));
+    expect(host.searchConversationMessages).toHaveBeenLastCalledWith(peer, '', false, undefined, {
+      savedPeer: savedSource,
+      kind: 'photos',
+    });
+    current = { ...snapshot(peer.id), activeSavedPeer: { id: 'c:8', kind: 'channel' } };
+    await expect(Effect.runPromise(saved.loadOlder())).rejects.toThrow('no longer selected');
+    current = { ...snapshot(peer.id), activeTopicId: 43 };
+    await expect(Effect.runPromise(topic.loadOlder())).rejects.toThrow('no longer selected');
   });
 });

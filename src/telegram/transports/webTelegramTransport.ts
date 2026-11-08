@@ -1,3 +1,12 @@
+import { migratedSearchPage } from '../migratedSearch';
+import { savedMessagesMethods, savedReaction } from './savedMessagesMethods';
+import { adminLogMethods } from './adminLogMethods';
+import { chatParticipantMethods } from './chatParticipantMethods';
+import { chatManagementMethods } from './chatManagementMethods';
+import { chatInviteMethods } from './chatInviteMethods';
+import type { CreateChatRequest, ChatInvitePreview, JoinRequestOffset } from '../chatManagement';
+import { forumMethods } from './forumMethods';
+import { chatFolderMethods } from './chatFolderMethods';
 import type { TelegramPollVotes } from '../types';
 import type { TelegramStickerSearchPage } from '../types';
 import type { TelegramSearchFilters } from '../types';
@@ -144,6 +153,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     stickerDocuments: new Map<string, Tl.Document>(),
     wallpaperDocuments: new Map<string, Tl.Document>(),
     entities: new Map<string, Tl.TypeUser | Tl.TypeChat>(),
+    migrationSources: new Map<string, TelegramPeer | undefined>(),
     channelSenderRoles: new Map<string, { label: string; kind: 'owner' | 'admin' }>(),
     channelRolesLoaded: new Set<string>(),
     notifyDefaults: new Map<'users' | 'groups' | 'channels', Tl.TypePeerNotifySettings>(),
@@ -156,6 +166,41 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         : Effect.succeed(client),
     ),
   );
+  const forums = forumMethods({
+    client: getClient,
+    inputPeer: toInputPeer,
+    message: mapMessage,
+    remember: rememberEntities,
+    rights: (peer) => {
+      const entity = state.entities.get(peer.id);
+      if (!Api.Channel.is(entity) || !entity.forum) return { canCreate: false, canManage: false };
+      const canManage = Boolean(entity.creator || entity.adminRights?.manageTopics);
+      return {
+        canManage,
+        canCreate:
+          canManage ||
+          (mapDialogPermissions(peer, entity).canSendMessages &&
+            !entity.bannedRights?.manageTopics &&
+            !entity.defaultBannedRights?.manageTopics),
+      };
+    },
+  });
+  const folders = chatFolderMethods({
+    client: getClient,
+    toInputPeer,
+    self: () => {
+      const user = [...state.entities.values()].find(
+        (entity) => Api.User.is(entity) && entity.self,
+      );
+      return user && Api.User.is(user) ? peerFromId(`u:${user.id}`, state.entities) : undefined;
+    },
+    peer: (value) => mapPeer(value, state.entities),
+    person: (value) => {
+      const peer = mapPeer(value, state.entities);
+      return peer ? peerSearchResult(peer, state.entities.get(peer.id)) : undefined;
+    },
+    remember: rememberEntities,
+  });
   const storageError = (cause: unknown) =>
     createMtprotoError('session', 'Could not persist the Telegram authorization session.', {
       cause,
@@ -286,6 +331,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
           createMtprotoError('protocol', 'Telegram did not return the authorized account.'),
         );
       }
+      rememberEntities([self], []);
       return self.id.toString();
     },
   );
@@ -708,6 +754,217 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     }
     return found;
   });
+  const savedMessages = savedMessagesMethods({
+    client: getClient,
+    inputPeer: toInputPeer,
+    peer: (peer) => mapPeer(peer, state.entities),
+    person: (peer) => peerSearchResult(peer, state.entities.get(peer.id)),
+    remember: rememberEntities,
+    message: mapMessage,
+  });
+  const participants = chatParticipantMethods({
+    client: getClient,
+    inputPeer: toInputPeer,
+    inputChannel,
+    inputUser,
+    remember: rememberEntities,
+    person: (id) => peerSearchResult(peerFromId(id, state.entities), state.entities.get(id)),
+  });
+  const adminLog = adminLogMethods({
+    client: getClient,
+    inputChannel,
+    inputUser,
+    remember: rememberEntities,
+    person: (id) => peerSearchResult(peerFromId(id, state.entities), state.entities.get(id)),
+  });
+  const management = chatManagementMethods({
+    client: getClient,
+    inputPeer: toInputPeer,
+    inputChannel,
+    remember: rememberEntities,
+  });
+  const getChatManagement = Effect.fn('WebTelegramTransport.chatManagement')(function* (
+    peer: TelegramPeer,
+  ) {
+    const settings = yield* management.getChatManagement(peer);
+    rememberBounded(state.migrationSources, peer.id, settings.migratedFrom, MAX_ENTITY_ENTRIES);
+    return settings;
+  });
+  const migrationSource = Effect.fn('WebTelegramTransport.migrationSource')(function* (
+    peer: TelegramPeer,
+  ) {
+    if (peer.kind !== 'channel') return undefined;
+    if (state.migrationSources.has(peer.id)) return state.migrationSources.get(peer.id);
+    const entity = state.entities.get(peer.id);
+    if (Api.Channel.is(entity) && entity.broadcast) return undefined;
+    return (yield* getChatManagement(peer)).migratedFrom;
+  });
+  const getJoinRequests = Effect.fn('WebTelegramTransport.getJoinRequests')(function* (
+    peer: TelegramPeer,
+    query: string = '',
+    offset?: JoinRequestOffset,
+  ) {
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.GetChatInviteImporters({
+        peer: toInputPeer(peer),
+        requested: true,
+        ...(query.trim() ? { q: query.trim() } : {}),
+        offsetDate: offset?.date ?? 0,
+        offsetUser: offset ? inputUser(offset.user) : Api.InputUserEmpty({}),
+        limit: 50,
+      }),
+    );
+    rememberEntities(result.users, []);
+    const people = result.importers.map((importer) => {
+      const peer = peerFromId(`u:${importer.userId}`, state.entities);
+      const person = peerSearchResult(peer, state.entities.get(peer.id));
+      return { ...person, date: importer.date, about: importer.about ?? '' };
+    });
+    const last = result.importers.at(-1);
+    return {
+      people,
+      count: result.count,
+      nextOffset:
+        last && result.importers.length === 50
+          ? { date: last.date, user: peerFromId(`u:${last.userId}`, state.entities) }
+          : undefined,
+    };
+  });
+  const resolveJoinRequest = Effect.fn('WebTelegramTransport.resolveJoinRequest')(function* (
+    peer: TelegramPeer,
+    user: TelegramPeer,
+    approved: boolean,
+  ) {
+    const updates = yield* (yield* getClient).invoke(
+      Api.messages.HideChatJoinRequest({
+        peer: toInputPeer(peer),
+        userId: inputUser(user),
+        ...(approved ? { approved: true } : {}),
+      }),
+    );
+    return { updateBatches: toUpdateBatches(updates) };
+  });
+  const resolveAllJoinRequests = Effect.fn('WebTelegramTransport.resolveAllJoinRequests')(
+    function* (peer: TelegramPeer, approved: boolean) {
+      const updates = yield* (yield* getClient).invoke(
+        Api.messages.HideAllChatJoinRequests({
+          peer: toInputPeer(peer),
+          ...(approved ? { approved: true } : {}),
+        }),
+      );
+      return { updateBatches: toUpdateBatches(updates) };
+    },
+  );
+  const checkChatInvite = Effect.fn('WebTelegramTransport.checkChatInvite')(function* (
+    hash: string,
+  ): Effect.fn.Return<ChatInvitePreview, MtprotoError> {
+    const result = yield* (yield* getClient).invoke(Api.messages.CheckChatInvite({ hash }));
+    if (Api.ChatInvite.is(result)) {
+      rememberEntities(result.participants ?? [], []);
+      return {
+        title: result.title,
+        about: result.about ?? '',
+        participantsCount: result.participantsCount,
+        broadcast: Boolean(result.broadcast),
+        requestNeeded: Boolean(result.requestNeeded),
+        alreadyJoined: false,
+        paid: Boolean(result.subscriptionPricing),
+      };
+    }
+    const chat = result.chat;
+    rememberEntities([], [chat]);
+    const peer =
+      Api.Chat.is(chat) || Api.ChatForbidden.is(chat)
+        ? peerFromId(`g:${chat.id}`, state.entities)
+        : Api.Channel.is(chat) || Api.ChannelForbidden.is(chat)
+          ? peerFromId(`c:${chat.id}`, state.entities)
+          : undefined;
+    return {
+      title: 'title' in chat ? chat.title : 'Chat',
+      about: '',
+      participantsCount: 'participantsCount' in chat ? (chat.participantsCount ?? 0) : 0,
+      broadcast: 'broadcast' in chat && Boolean(chat.broadcast),
+      requestNeeded: false,
+      alreadyJoined: Api.ChatInviteAlready.is(result),
+      paid: false,
+      peer,
+    };
+  });
+  const joinChatInvite = Effect.fn('WebTelegramTransport.joinChatInvite')(function* (hash: string) {
+    const result = yield* (yield* getClient).invoke(Api.messages.ImportChatInvite({ hash })).pipe(
+      Effect.catch((error) => {
+        if (telegramRpcErrorMessage(error) === 'INVITE_REQUEST_SENT')
+          return Effect.succeed(undefined);
+        return Effect.fail(error);
+      }),
+    );
+    if (!result) return { status: 'requested' as const };
+    if (!Api.messages.ChatInviteJoinResultOk.is(result))
+      return yield* Effect.fail(
+        createMtprotoError(
+          'rpc',
+          'This invitation requires a bot verification step. Open the invitation in Telegram to complete it.',
+        ),
+      );
+    const updates = result.updates;
+    if (!Api.Updates.is(updates) && !Api.UpdatesCombined.is(updates))
+      return yield* Effect.fail(
+        createMtprotoError(
+          'protocol',
+          'Telegram did not return the joined chat. Check your chat list before trying again.',
+        ),
+      );
+    rememberEntities(updates.users, updates.chats);
+    const chat = updates.chats.find((chat) => Api.Chat.is(chat) || Api.Channel.is(chat));
+    const peer =
+      chat && (Api.Chat.is(chat) || Api.Channel.is(chat))
+        ? peerFromId(`${Api.Chat.is(chat) ? 'g' : 'c'}:${chat.id}`, state.entities)
+        : undefined;
+    return { status: 'joined' as const, peer, updateBatches: toUpdateBatches(updates) };
+  });
+  const createChat = Effect.fn('WebTelegramTransport.createChat')(function* (
+    request: CreateChatRequest,
+  ) {
+    const client = yield* getClient;
+    const result =
+      request.kind === 'group'
+        ? yield* client.invoke(
+            Api.messages.CreateChat({ title: request.title, users: request.users.map(inputUser) }),
+          )
+        : yield* client.invoke(
+            Api.channels.CreateChannel({
+              title: request.title,
+              about: request.about ?? '',
+              broadcast: true,
+            }),
+          );
+    const invited = Api.messages.InvitedUsers.is(result) ? result : undefined;
+    const updates = invited ? invited.updates : (result as Tl.TypeUpdates);
+    if (!Api.Updates.is(updates) && !Api.UpdatesCombined.is(updates))
+      return yield* Effect.fail(
+        createMtprotoError(
+          'protocol',
+          'Telegram created the chat without returning its details. Check your chat list before trying again.',
+        ),
+      );
+    rememberEntities(updates.users, updates.chats);
+    const chat = updates.chats.find((chat) =>
+      request.kind === 'group' ? Api.Chat.is(chat) : Api.Channel.is(chat),
+    );
+    if (!chat || (!Api.Chat.is(chat) && !Api.Channel.is(chat)))
+      return yield* Effect.fail(
+        createMtprotoError(
+          'protocol',
+          'The created chat was not included in the Telegram response.',
+        ),
+      );
+    const peer = peerFromId(`${Api.Chat.is(chat) ? 'g' : 'c'}:${chat.id}`, state.entities);
+    return {
+      peer,
+      missingUserIds: invited?.missingInvitees.map((user) => `u:${user.userId}`) ?? [],
+      updateBatches: toUpdateBatches(updates),
+    };
+  });
   const getDialog = Effect.fn('WebTelegramTransport.getDialog')(function* (peer: TelegramPeer) {
     const result = yield* (yield* getClient).invoke(
       Api.messages.GetPeerDialogs({ peers: [Api.InputDialogPeer({ peer: toInputPeer(peer) })] }),
@@ -928,9 +1185,20 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     peer: TelegramPeer,
   ) {
     const filters = sharedMediaFilters();
-    const counters = yield* (yield* getClient).invoke(
-      Api.messages.GetSearchCounters({ peer: toInputPeer(peer), filters: Object.values(filters) }),
+    const previous = yield* migrationSource(peer);
+    const client = yield* getClient;
+    const pages = yield* Effect.forEach(previous ? [peer, previous] : [peer], (target) =>
+      client.invoke(
+        Api.messages.GetSearchCounters({
+          peer: toInputPeer(target),
+          filters: Object.values(filters),
+        }),
+      ),
     );
+    const counters = pages[0]!.map((counter, index) => ({
+      ...counter,
+      count: counter.count + (pages[1]?.[index]?.count ?? 0),
+    }));
     return {
       photos: counters[0]?.count ?? 0,
       videos: counters[1]?.count ?? 0,
@@ -947,27 +1215,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     limit: number,
     offset?: TelegramSearchOffset,
   ) {
-    const filters = sharedMediaFilters();
-    const result = yield* (yield* getClient).invoke(
-      Api.messages.Search({
-        peer: toInputPeer(peer),
-        q: '',
-        filter: filters[kind],
-        minDate: 0,
-        maxDate: 0,
-        offsetId: offset?.messageId ?? 0,
-        addOffset: 0,
-        limit: limit + 1,
-        maxId: 0,
-        minId: 0,
-        hash: 0n,
-      }),
-    );
-    if (Api.messages.MessagesNotModified.is(result)) {
-      return { messages: [], hasMore: false };
-    }
-    rememberEntities(result.users, result.chats);
-    return mapSearchPage(result, limit, false);
+    return yield* searchMessages('', peer, limit, offset, { kind });
   });
   function sharedMediaFilters() {
     return {
@@ -980,7 +1228,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       gifs: Api.InputMessagesFilterGif(),
     } satisfies Record<SharedMediaKind, Tl.TypeMessagesFilter>;
   }
-  const searchMessages = Effect.fn('WebTelegramTransport.searchMessages')(function* (
+  const searchSinglePeer = Effect.fn('WebTelegramTransport.searchSinglePeer')(function* (
     query: string,
     peer?: TelegramPeer,
     limit: number = 50,
@@ -991,7 +1239,12 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       ? yield* (yield* getClient).invoke(
           Api.messages.Search({
             peer: toInputPeer(peer),
+            ...(filters?.savedPeer ? { savedPeerId: toInputPeer(filters.savedPeer) } : {}),
+            ...(filters?.savedReactions?.length
+              ? { savedReaction: filters.savedReactions.map(savedReaction) }
+              : {}),
             ...(filters?.fromPeer ? { fromId: toInputPeer(filters.fromPeer) } : {}),
+            ...(filters?.topicId !== undefined ? { topMsgId: filters.topicId } : {}),
             q: query,
             filter: filters?.kind
               ? sharedMediaFilters()[filters.kind]
@@ -1029,6 +1282,34 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     rememberEntities(result.users, result.chats);
     return mapSearchPage(result, limit, !peer);
   });
+  const searchMessages = Effect.fn('WebTelegramTransport.searchMessages')(function* (
+    query: string,
+    peer?: TelegramPeer,
+    limit: number = 50,
+    offset?: TelegramSearchOffset,
+    filters?: TelegramSearchFilters,
+  ) {
+    if (
+      !peer ||
+      (filters?.topicId !== undefined && filters.topicId !== 1) ||
+      filters?.savedPeer ||
+      filters?.savedReactions?.length
+    )
+      return yield* searchSinglePeer(query, peer, limit, offset, filters);
+    const previous = yield* migrationSource(peer);
+    return yield* migratedSearchPage(peer, previous, limit, offset, (target, size, cursor) =>
+      searchSinglePeer(
+        query,
+        target,
+        size,
+        cursor,
+        target.id === previous?.id && filters?.topicId === 1
+          ? { ...filters, topicId: undefined }
+          : filters,
+      ),
+    );
+  });
+
   const getPinnedMessages = Effect.fn('WebTelegramTransport.getPinnedMessages')(function* (
     peer: TelegramPeer,
   ) {
@@ -1052,6 +1333,17 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     return result.messages
       .map((message) => mapMessage(message))
       .filter((message): message is TelegramMessage => Boolean(message));
+  });
+  const setUnreadMark = Effect.fn('WebTelegramTransport.setUnreadMark')(function* (
+    peer: TelegramPeer,
+    unread: boolean,
+  ) {
+    yield* (yield* getClient).invoke(
+      Api.messages.MarkDialogUnread({
+        peer: Api.InputDialogPeer({ peer: toInputPeer(peer) }),
+        ...(unread ? { unread: true as const } : {}),
+      }),
+    );
   });
   const setMuted = Effect.fn('WebTelegramTransport.setMuted')(function* (
     peer: TelegramPeer,
@@ -1437,11 +1729,13 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     peer: TelegramPeer,
     draft: TelegramPollDraft,
     randomId: string,
+    reply?: TelegramReplyTarget,
   ) {
     const result = yield* (yield* getClient).invoke(
       Api.messages.SendMedia({
         peer: toInputPeer(peer),
         randomId: telegramLong(randomId),
+        ...(reply ? { replyTo: inputReply(reply) } : {}),
         message: '',
         media: Api.InputMediaPoll({
           poll: Api.Poll({
@@ -1478,12 +1772,14 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     peer: TelegramPeer,
     contact: TelegramContact,
     randomId: string,
+    reply?: TelegramReplyTarget,
   ) {
     const result = yield* (yield* getClient).invoke(
       Api.messages.SendMedia({
         peer: toInputPeer(peer),
         message: '',
         randomId: telegramLong(randomId),
+        ...(reply ? { replyTo: inputReply(reply) } : {}),
         media: Api.InputMediaContact({
           phoneNumber: contact.phoneNumber,
           firstName: contact.firstName,
@@ -1493,7 +1789,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       }),
     );
     if (Api.UpdateShortSentMessage.is(result)) {
-      const sent = yield* mapShortSentMessage(peer, '', randomId, result);
+      const sent = yield* mapShortSentMessage(peer, '', randomId, result, reply);
       const message = { ...sent.message, contact };
       return { message, updateBatches: toUpdateBatches(result, [message]) };
     }
@@ -2898,6 +3194,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         id: [messageId],
         randomId: [telegramLong(randomId)],
         toPeer: toInputPeer(toPeer),
+        ...(options?.topMessageId !== undefined ? { topMsgId: options.topMessageId } : {}),
       }),
     );
     return yield* mapOutgoingSendResult(
@@ -2917,6 +3214,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     if (Api.UpdatesTooLong.is(raw)) return { updates: [{ type: 'too-long' }] };
     if (Api.UpdateShortMessage.is(raw)) {
       const peerId = `u:${raw.userId}`;
+      const entity = state.entities.get(peerId);
+      const saved = Api.User.is(entity) && entity.self;
       return {
         date: raw.date,
         updates: [
@@ -2927,12 +3226,20 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
             message: {
               id: raw.id,
               peerId,
-              senderId: raw.out ? 'self' : peerId,
+              senderId: saved ? peerId : raw.out ? 'self' : peerId,
+              savedPeerId: saved
+                ? (toPeerId(raw.fwdFrom?.savedFromPeer) ??
+                  (raw.fwdFrom?.fromId ? peerId : raw.fwdFrom?.fromName ? 'u:2666000' : peerId))
+                : undefined,
               text: raw.message,
               date: raw.date,
               outgoing: Boolean(raw.out),
               mediaUnread: Boolean(raw.mediaUnread),
               unreadMention: Boolean(raw.mentioned && raw.mediaUnread),
+              topicId:
+                Api.MessageReplyHeader.is(raw.replyTo) && raw.replyTo.forumTopic
+                  ? (raw.replyTo.replyToTopId ?? raw.replyTo.replyToMsgId)
+                  : undefined,
               replyToId: Api.MessageReplyHeader.is(raw.replyTo)
                 ? raw.replyTo.replyToMsgId
                 : undefined,
@@ -2965,6 +3272,10 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
               outgoing: Boolean(raw.out),
               mediaUnread: Boolean(raw.mediaUnread),
               unreadMention: Boolean(raw.mentioned && raw.mediaUnread),
+              topicId:
+                Api.MessageReplyHeader.is(raw.replyTo) && raw.replyTo.forumTopic
+                  ? (raw.replyTo.replyToTopId ?? raw.replyTo.replyToMsgId)
+                  : undefined,
               replyToId: Api.MessageReplyHeader.is(raw.replyTo)
                 ? raw.replyTo.replyToMsgId
                 : undefined,
@@ -3150,6 +3461,12 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
           ]
         : [];
     }
+    if (
+      Api.UpdateReadChannelDiscussionInbox.is(update) ||
+      Api.UpdateReadChannelDiscussionOutbox.is(update)
+    ) {
+      return [{ type: 'forum-topics-invalidated', peerId: `c:${update.channelId}`, read: true }];
+    }
     if (Api.UpdateReadChannelInbox.is(update)) {
       return [
         {
@@ -3197,6 +3514,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
               peerId,
               messageId: update.msgId,
               reactions: mapReactions(update.reactions),
+              reactionsAsTags: Boolean(update.reactions.reactionsAsTags),
               unreadReaction: Boolean(
                 update.reactions.recentReactions?.some(
                   (reaction) => reaction.unread && !reaction.my,
@@ -3205,6 +3523,14 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
             },
           ]
         : [];
+    }
+    if (Api.UpdatePendingJoinRequests.is(update)) {
+      const peerId = toPeerId(update.peer);
+      return peerId ? [{ type: 'join-requests-invalidated', peerId }] : [];
+    }
+    if (Api.UpdatePinnedForumTopic.is(update) || Api.UpdatePinnedForumTopics.is(update)) {
+      const peerId = toPeerId(update.peer);
+      return peerId ? [{ type: 'forum-topics-invalidated', peerId }] : [];
     }
     if (Api.UpdateUserTyping.is(update)) {
       return [activityUpdate(`u:${update.userId}`, `u:${update.userId}`, update.action)];
@@ -3275,6 +3601,16 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         return [{ type: 'dialog-list-invalidated' }];
       }
     }
+    if (
+      Api.UpdateDialogFilter.is(update) ||
+      Api.UpdateDialogFilters.is(update) ||
+      Api.UpdateDialogFilterOrder.is(update)
+    )
+      return [{ type: 'chat-folders-invalidated' }];
+    if (Api.UpdateDialogUnreadMark.is(update) && Api.DialogPeer.is(update.peer)) {
+      const peerId = toPeerId(update.peer.peer);
+      return peerId ? [{ type: 'dialog-unread-mark', peerId, unread: Boolean(update.unread) }] : [];
+    }
     if (Api.UpdateDialogPinned.is(update) || Api.UpdatePinnedDialogs.is(update)) {
       return [{ type: 'dialog-list-invalidated' }];
     }
@@ -3291,6 +3627,12 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         },
       ];
     }
+    if (
+      Api.UpdateSavedReactionTags.is(update) ||
+      Api.UpdateSavedDialogPinned.is(update) ||
+      Api.UpdatePinnedSavedDialogs.is(update)
+    )
+      return [{ type: 'saved-messages-invalidated' }];
     if (Api.UpdateSavedGifs.is(update)) {
       return [{ type: 'expression-index-changed', kind: 'gifs' }];
     }
@@ -3403,6 +3745,10 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         unreadReaction: Boolean(
           message.reactions?.recentReactions?.some((reaction) => reaction.unread && !reaction.my),
         ),
+        topicId:
+          Api.MessageReplyHeader.is(message.replyTo) && message.replyTo.forumTopic
+            ? (message.replyTo.replyToTopId ?? message.replyTo.replyToMsgId)
+            : undefined,
         replyToId: Api.MessageReplyHeader.is(message.replyTo)
           ? message.replyTo.replyToMsgId
           : undefined,
@@ -3470,6 +3816,17 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       editedAt: message.editDate,
       groupedId: message.groupedId?.toString(),
       forwardedFrom: mapForwardedFrom(message.fwdFrom),
+      savedPeerId:
+        toPeerId(message.savedPeerId) ??
+        (Api.User.is(peerEntity) && peerEntity.self
+          ? (toPeerId(message.fwdFrom?.savedFromPeer) ??
+            (message.fwdFrom?.fromId ? peerId : message.fwdFrom?.fromName ? 'u:2666000' : peerId))
+          : undefined),
+      reactionsAsTags: Boolean(message.reactions?.reactionsAsTags),
+      topicId:
+        Api.MessageReplyHeader.is(message.replyTo) && message.replyTo.forumTopic
+          ? (message.replyTo.replyToTopId ?? message.replyTo.replyToMsgId)
+          : undefined,
       replyToId: Api.MessageReplyHeader.is(message.replyTo)
         ? message.replyTo.replyToMsgId
         : undefined,
@@ -4608,6 +4965,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   function inputReply(reply: TelegramReplyTarget) {
     return Api.InputReplyToMessage({
       replyToMsgId: reply.messageId,
+      ...(reply.topMessageId !== undefined ? { topMsgId: reply.topMessageId } : {}),
       ...(reply.quoteText ? { quoteText: reply.quoteText } : {}),
     });
   }
@@ -4763,7 +5121,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     const peer = mapPeer(item.peer, entities);
     if (!peer) return undefined;
     const entity = entities.get(peer.id);
-    const title = entityTitle(entity) || peer.id;
+    const title =
+      Api.User.is(entity) && entity.self ? 'Saved Messages' : entityTitle(entity) || peer.id;
     const presence = Api.User.is(entity)
       ? mapUserPresence(entity.status)
       : { presence: 'offline' as const };
@@ -4776,10 +5135,16 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       color: peerColor(peer.id, entity),
       username: Api.User.is(entity) || Api.Channel.is(entity) ? entity.username : undefined,
       bot: Api.User.is(entity) && Boolean(entity.bot),
+      isContact: Api.User.is(entity) && Boolean(entity.contact),
+      broadcast: Api.Channel.is(entity) && Boolean(entity.broadcast),
+      forum: Api.Channel.is(entity) && Boolean(entity.forum),
+      protectedContent:
+        (Api.Channel.is(entity) || Api.Chat.is(entity)) && Boolean(entity.noforwards),
       archived: item.folderId === 1,
       topMessageId: item.topMessage,
       topMessage: messages.get(`${peer.id}:${item.topMessage}`),
       unreadCount: item.unreadCount,
+      unreadMark: Boolean(item.unreadMark),
       unreadMentionsCount: item.unreadMentionsCount,
       unreadReactionsCount: item.unreadReactionsCount,
       readInboxMaxId: item.readInboxMaxId,
@@ -4840,6 +5205,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         canViewMembers: false,
       };
     }
+    if (Api.Chat.is(entity) && (entity.deactivated || entity.migratedTo))
+      return { ...groupFallbackPermissions(), canLeave: false };
     const creator = Boolean(manageableEntity?.creator);
     const rights = manageableEntity?.adminRights;
     const currentBanned = Api.Channel.is(entity) ? entity.bannedRights : undefined;
@@ -4859,6 +5226,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       canDeleteForEveryone: canManageMessages,
       canLeave: !creator,
       canViewMembers: true,
+      canManageInvites: creator || Boolean(rights?.inviteUsers),
+      canManageChat: creator || Boolean(rights),
     } satisfies Omit<TelegramChatPermissions, 'canDeleteChat' | 'canDeleteChannel' | 'memberCount'>;
     if (Api.Channel.is(entity)) {
       return {
@@ -4958,6 +5327,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         ? entity.accessHash.toString()
         : '0');
     if (peer.kind === 'user') {
+      if (Api.User.is(entity) && entity.self) return Api.InputPeerSelf();
       return Api.InputPeerUser({ userId: id, accessHash: BigInt(accessHash) });
     }
     if (peer.kind === 'channel') {
@@ -4981,6 +5351,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   function inputUser(peer: TelegramPeer) {
     if (peer.kind !== 'user') throw new Error('Expected a user peer.');
     const input = toInputPeer(peer);
+    if (Api.InputPeerSelf.is(input)) return Api.InputUserSelf();
     if (!Api.InputPeerUser.is(input)) throw new Error('Expected a user peer.');
     return Api.InputUser({ userId: input.userId, accessHash: input.accessHash });
   }
@@ -5033,6 +5404,9 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
           ? {
               replyTo: Api.MessageReplyHeader({
                 replyToMsgId: reply.messageId,
+                ...(reply.topMessageId !== undefined
+                  ? { replyToTopId: reply.topMessageId, forumTopic: true as const }
+                  : {}),
                 ...(reply.quoteText ? { quoteText: reply.quoteText } : {}),
               }),
             }
@@ -5254,6 +5628,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     state.stickerDocuments.clear();
     state.wallpaperDocuments.clear();
     state.entities.clear();
+    state.migrationSources.clear();
     state.channelSenderRoles.clear();
     state.channelRolesLoaded.clear();
     state.notifyDefaults.clear();
@@ -5459,9 +5834,77 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     getReplies,
     searchPeers,
     getDialog,
+    createChat,
+    checkChatInvite,
+    getManagedParticipants: participants.getManagedParticipants,
+    addChatMember: (peer, user) =>
+      participants
+        .addChatMember(peer, user)
+        .pipe(
+          Effect.map((result) => ({
+            missingUserIds: result.missingUserIds,
+            updateBatches: toUpdateBatches(result.updates),
+          })),
+        ),
+    editChatParticipant: (peer, user, change) =>
+      participants
+        .editChatParticipant(peer, user, change)
+        .pipe(
+          Effect.map((updates) => ({ updateBatches: updates ? toUpdateBatches(updates) : [] })),
+        ),
+    upgradeChat: (peer) =>
+      management
+        .upgradeChat(peer)
+        .pipe(
+          Effect.map((result) => ({
+            peer: result.peer,
+            title: result.title,
+            updateBatches: result.updates ? toUpdateBatches(result.updates) : [],
+          })),
+        ),
+    ...savedMessages,
+    setSavedMessageTags: (messageId, reactions) =>
+      savedMessages
+        .setSavedMessageTags(messageId, reactions)
+        .pipe(Effect.map((updates) => ({ updateBatches: toUpdateBatches(updates) }))),
+    getChatManagement,
+    getAdminLog: adminLog.getAdminLog,
+    setChatSetting: (peer, change) =>
+      management
+        .setChatSetting(peer, change)
+        .pipe(
+          Effect.map((updates) => ({ updateBatches: updates ? toUpdateBatches(updates) : [] })),
+        ),
+    ...chatInviteMethods({ client: getClient, inputPeer: toInputPeer, remember: rememberEntities }),
+    getJoinRequests,
+    resolveJoinRequest,
+    resolveAllJoinRequests,
+    joinChatInvite,
     getHistory,
     getHistoryAround,
     readHistory,
+    ...forums,
+    createForumTopic: (...args) =>
+      forums
+        .createForumTopic(...args)
+        .pipe(Effect.map((result) => ({ updateBatches: toUpdateBatches(result) }))),
+    editForumTopic: (...args) =>
+      forums
+        .editForumTopic(...args)
+        .pipe(Effect.map((result) => ({ updateBatches: toUpdateBatches(result) }))),
+    pinForumTopic: (...args) =>
+      forums
+        .pinForumTopic(...args)
+        .pipe(Effect.map((result) => ({ updateBatches: toUpdateBatches(result) }))),
+    ...folders,
+    joinFolderUpdates: (id, peers) =>
+      folders
+        .joinFolderUpdates(id, peers)
+        .pipe(Effect.map((result) => ({ updateBatches: toUpdateBatches(result) }))),
+    joinFolderInvite: (slug, peers) =>
+      folders
+        .joinFolderInvite(slug, peers)
+        .pipe(Effect.map((result) => ({ updateBatches: toUpdateBatches(result) }))),
     getUnreadNotifications,
     readAllNotifications,
     readMessageContents,
@@ -5470,6 +5913,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     getSharedMedia,
     searchMessages,
     getPinnedMessages,
+    setUnreadMark,
     setMuted,
     getUserDetails,
     updateContact,

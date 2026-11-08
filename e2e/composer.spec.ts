@@ -357,3 +357,36 @@ test('searches Telegram for GIFs instead of filtering saved GIF identifiers', as
   await expect(picker.getByRole('button', { name: 'Send GIF cat result' })).toBeVisible();
   expect((await fixtureStats(page))?.searchGifs).toBe(1);
 });
+
+test('keeps the reading position when a multiline draft grows in older history', async ({
+  page,
+}) => {
+  await openReady(page);
+  await selectAlice(page);
+  const scroller = page.getByTestId('message-scroller');
+  await scroller.evaluate((element) => {
+    element.scrollTop -= 280;
+  });
+  await expect(page.getByRole('button', { name: 'Jump to present', exact: true })).toBeVisible();
+  const anchor = await scroller.evaluate((element) => {
+    const viewportTop = element.getBoundingClientRect().top;
+    const row = [...element.querySelectorAll<HTMLElement>('article[data-message-id]')].find(
+      (item) => item.getBoundingClientRect().top >= viewportTop,
+    )!;
+    return { id: row.dataset.messageId!, top: row.getBoundingClientRect().top };
+  });
+  await page
+    .getByRole('textbox', { name: 'Message', exact: true })
+    .fill('First line\nSecond line\nThird line\nFourth line\nFifth line');
+  await expect
+    .poll(() =>
+      page
+        .locator(`article[data-message-id="${anchor.id}"]`)
+        .evaluate(
+          (element, top) => Math.abs(element.getBoundingClientRect().top - top),
+          anchor.top,
+        ),
+    )
+    .toBeLessThan(1);
+  await expect(page.getByRole('button', { name: 'Jump to present', exact: true })).toBeVisible();
+});

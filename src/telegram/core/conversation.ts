@@ -1,3 +1,5 @@
+import { savedDraftKey, messageInSavedDialog } from '../savedMessages';
+import { forumDraftKey } from '../forums';
 import type { TelegramSearchFilters } from '../types';
 import type { TelegramForwardOptions } from '../types';
 import type {
@@ -115,11 +117,25 @@ export interface ConversationHost {
  * their bound peer when the UI selection changes; only operations backed by the
  * engine's current history projection require this conversation to be selected.
  */
-export function makeConversation(host: ConversationHost, peer: TelegramPeer) {
+export function makeConversation(
+  host: ConversationHost,
+  peer: TelegramPeer,
+  topicId?: number,
+  savedPeer?: TelegramPeer,
+) {
   const peerId = peer.id;
+  const draftKey = savedPeer ? savedDraftKey(peerId, savedPeer) : forumDraftKey(peerId, topicId);
+  const topicReply = (reply?: TelegramReplyTarget): TelegramReplyTarget | undefined =>
+    topicId === undefined
+      ? reply
+      : { ...reply, messageId: reply?.messageId ?? topicId, topMessageId: topicId };
   const requireSelectedView = () => {
     const snapshot = host.snapshot();
-    if (snapshot.activePeerId !== peerId) {
+    if (
+      snapshot.activePeerId !== peerId ||
+      snapshot.activeTopicId !== topicId ||
+      snapshot.activeSavedPeer?.id !== savedPeer?.id
+    ) {
       return Effect.fail(
         new MessagingError({
           message: 'This conversation is no longer selected.',
@@ -133,18 +149,21 @@ export function makeConversation(host: ConversationHost, peer: TelegramPeer) {
   return {
     peer,
     peerId,
+    topicId,
+    savedPeer,
+    draftKey,
     setDraft(text: string, details?: TelegramDraftDetails) {
-      return host.setDraft(peerId, text, details);
+      return host.setDraft(draftKey, text, details);
     },
     setTyping: (kind?: TelegramActivityKind) => host.setTyping(peer, kind),
     sendDraft: (text: string, reply?: TelegramReplyTarget, formats?: TelegramTextFormat[]) =>
-      host.sendDraft(peer, text, reply, formats),
+      host.sendDraft(peer, text, topicReply(reply), formats),
     sendAttachments: (
       attachments: Attachment[],
       caption?: string,
       reply?: TelegramReplyTarget,
       formats?: TelegramTextFormat[],
-    ) => host.sendAttachments(peer, attachments, caption, reply, formats),
+    ) => host.sendAttachments(peer, attachments, caption, topicReply(reply), formats),
     editMessage: (
       messageId: number,
       text: string,
@@ -161,13 +180,13 @@ export function makeConversation(host: ConversationHost, peer: TelegramPeer) {
     acceptUrlAuth: (messageId: number, buttonId: number, options?: TelegramUrlAuthAcceptOptions) =>
       host.acceptUrlAuth(peer, messageId, buttonId, options),
     sendSticker: (sticker: TelegramSticker, reply?: TelegramReplyTarget) =>
-      host.sendSticker(peer, sticker, reply),
+      host.sendSticker(peer, sticker, topicReply(reply)),
     toggleReaction: (messageId: number, emoji: string) =>
       host.toggleReaction(peer, messageId, emoji),
     deleteMessage: (messageId: number, revoke: boolean) =>
       host.deleteMessage(peer, messageId, revoke),
     openMessage(message: TelegramMessage) {
-      if (message.peerId !== peerId)
+      if (message.peerId !== peerId || (savedPeer && !messageInSavedDialog(message, savedPeer.id)))
         return Effect.fail(
           new MessagingError({
             message: 'The message belongs to another chat.',
@@ -200,10 +219,22 @@ export function makeConversation(host: ConversationHost, peer: TelegramPeer) {
       offset?: TelegramSearchOffset,
       filters?: TelegramSearchFilters,
     ) {
-      return host.searchConversationMessages(peer, query, global, offset, filters);
+      return host.searchConversationMessages(
+        peer,
+        query,
+        global,
+        offset,
+        !global && savedPeer
+          ? { ...filters, savedPeer }
+          : !global && topicId !== undefined
+            ? { ...filters, topicId }
+            : filters,
+      );
     },
     sharedMedia(kind: SharedMediaKind, offset?: TelegramSearchOffset) {
-      return host.getConversationSharedMedia(peer, kind, offset);
+      return savedPeer
+        ? host.searchConversationMessages(peer, '', false, offset, { kind, savedPeer })
+        : host.getConversationSharedMedia(peer, kind, offset);
     },
     forwardTo: (target: TelegramPeer, messageId: number, options?: TelegramForwardOptions) =>
       host.forwardMessage(peer, target, messageId, options),

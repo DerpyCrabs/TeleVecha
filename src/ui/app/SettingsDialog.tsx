@@ -1,3 +1,6 @@
+import { FolderSettings } from '../folders/FolderSettings';
+import type { ChatFoldersApi } from '../../telegram/chatFolders';
+import Folder from '@effectweb/lucide/icons/folder';
 import { PrivacySettings, type PrivacyApi } from './PrivacySettings';
 import Shield from '@effectweb/lucide/icons/shield';
 import type { MediaAssets } from '../media/mediaAssets';
@@ -21,6 +24,7 @@ import { AppearanceSettings } from '../theme/AppearanceSettings';
 import type { ThemePreferences, ThemePresetId } from '../theme/themePreferences';
 export const SettingsDialog = component<
   {
+    folders: ChatFoldersApi;
     sessions: SessionsApi;
     privacy: PrivacyApi;
     media: MediaAssets;
@@ -50,8 +54,8 @@ export const SettingsDialog = component<
     ) => void;
     uploadWallpaper: (file: File) => void;
   },
-  { page: 'general' | 'devices' | 'privacy' },
-  { page: 'general' | 'devices' | 'privacy' }
+  { page: 'general' | 'devices' | 'privacy' | 'folders' },
+  { page: 'general' | 'devices' | 'privacy' | 'folders' }
 >(
   {
     init: () => ({ page: 'general' }),
@@ -93,11 +97,13 @@ export const SettingsDialog = component<
                   <Settings size={18} />
                 )}
                 <strong id="settings-title">
-                  {model.page === 'devices'
-                    ? 'Devices'
-                    : model.page === 'privacy'
-                      ? 'Privacy'
-                      : 'Settings'}
+                  {model.page === 'folders'
+                    ? 'Chat Folders'
+                    : model.page === 'devices'
+                      ? 'Devices'
+                      : model.page === 'privacy'
+                        ? 'Privacy'
+                        : 'Settings'}
                 </strong>
               </span>
               <button
@@ -110,7 +116,14 @@ export const SettingsDialog = component<
               </button>
             </header>
             <div class="settings-dialog-content scroll-area min-h-0 overflow-y-auto overscroll-contain">
-              {model.page === 'devices' ? (
+              {model.page === 'folders' ? (
+                <FolderSettings
+                  api={props.folders}
+                  online={props.online}
+                  dialogs={props.dialogs}
+                  media={props.media}
+                />
+              ) : model.page === 'devices' ? (
                 <ActiveSessions api={props.sessions} online={props.online} />
               ) : model.page === 'privacy' ? (
                 <PrivacySettings
@@ -130,6 +143,11 @@ export const SettingsDialog = component<
                   <button class="settings-navigation-row" onClick={() => send({ page: 'privacy' })}>
                     <Shield size={22} />
                     <span>Privacy</span>
+                    <ChevronRight size={18} />
+                  </button>
+                  <button class="settings-navigation-row" onClick={() => send({ page: 'folders' })}>
+                    <Folder size={22} />
+                    <span>Chat Folders</span>
                     <ChevronRight size={18} />
                   </button>
                   <AppearanceSettings
