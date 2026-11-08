@@ -3533,6 +3533,33 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return peerId ? [{ type: 'forum-topics-invalidated', peerId }] : [];
     }
     if (Api.UpdateUserTyping.is(update)) {
+      const action = update.action;
+      if (
+        Api.SendMessageTextDraftAction.is(action) ||
+        Api.SendMessageRichMessageDraftAction.is(action)
+      ) {
+        const peerId = `u:${update.userId}`;
+        return [
+          {
+            type: 'live-draft',
+            draft: {
+              id: `${peerId}:${update.topMsgId ?? 0}:${action.randomId}`,
+              peerId,
+              topicId: update.topMsgId,
+              text: Api.SendMessageTextDraftAction.is(action) ? action.text.text : '',
+              formats: Api.SendMessageTextDraftAction.is(action)
+                ? mapFormats(action.text.entities)
+                : undefined,
+              links: Api.SendMessageTextDraftAction.is(action)
+                ? mapLinks(action.text.entities)
+                : undefined,
+              richMessage: Api.SendMessageRichMessageDraftAction.is(action)
+                ? mapRichMessage(action.richMessage)
+                : undefined,
+            },
+          },
+        ];
+      }
       return [activityUpdate(`u:${update.userId}`, `u:${update.userId}`, update.action)];
     }
     if (Api.UpdateChatUserTyping.is(update)) {
@@ -4346,6 +4373,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   }
   function mapFormats(entities: readonly Tl.TypeMessageEntity[] | undefined) {
     return (entities ?? []).flatMap((entity): TelegramTextFormat[] => {
+      if (Api.MessageEntityBotCommand.is(entity))
+        return [{ offset: entity.offset, length: entity.length, kind: 'botCommand' }];
       if (Api.MessageEntityMention.is(entity))
         return [{ offset: entity.offset, length: entity.length, kind: 'mention' }];
       if (Api.MessageEntityMentionName.is(entity))
@@ -4435,6 +4464,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     if (Api.TextSuperscript.is(text)) return { kind: 'superscript', child: mapRichText(text.text) };
     if (Api.TextMarked.is(text)) return { kind: 'marked', child: mapRichText(text.text) };
     if (Api.TextSpoiler.is(text)) return { kind: 'spoiler', child: mapRichText(text.text) };
+    if (Api.TextBotCommand.is(text))
+      return { kind: 'command', command: richTextValue(text.text), child: mapRichText(text.text) };
     if (Api.TextUrl.is(text)) {
       return { kind: 'link', child: mapRichText(text.text), url: text.url };
     }
@@ -4730,6 +4761,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   function inputEntities(formats: readonly TelegramTextFormat[]): Tl.TypeMessageEntity[] {
     return formats.map((format): Tl.TypeMessageEntity => {
       const base = { offset: format.offset, length: format.length };
+      if (format.kind === 'botCommand') return Api.MessageEntityBotCommand(base);
       if (format.kind === 'mention') return Api.MessageEntityMention(base);
       if (format.kind === 'mentionName' && format.userId) {
         return Api.InputMessageEntityMentionName({

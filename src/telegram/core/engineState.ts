@@ -19,6 +19,7 @@ const accountKeys = [
   'draftDetails',
   'pending',
   'activities',
+  'liveDrafts',
   'authStep',
   'qrLogin',
   'codeViaApp',
@@ -37,6 +38,7 @@ export function accountSnapshot(snapshot: AccountSnapshot): AccountSnapshot {
     draftDetails: snapshot.draftDetails,
     pending: snapshot.pending,
     activities: snapshot.activities,
+    liveDrafts: snapshot.liveDrafts,
     ...(snapshot.qrLogin === undefined ? {} : { qrLogin: snapshot.qrLogin }),
     ...(snapshot.authStep === undefined ? {} : { authStep: snapshot.authStep }),
     ...(snapshot.codeViaApp === undefined ? {} : { codeViaApp: snapshot.codeViaApp }),
@@ -133,6 +135,7 @@ const initialAccountSnapshot = (): AccountSnapshot => ({
   draftDetails: {},
   pending: [],
   activities: [],
+  liveDrafts: [],
 });
 
 export const initialEngineSnapshot = (): EngineSnapshot => ({

@@ -2620,6 +2620,25 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       event.altKey
     )
       return;
+    const command =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>('[data-bot-command]')
+        : undefined;
+    if (command?.closest('[data-testid="message-scroller"]')) {
+      event.preventDefault();
+      if (canUseLiveCommands() && !state.model().selectedMessageIds.length && !modalVisible())
+        bot.sendTextCommand(
+          command.dataset.botCommand ?? '',
+          state
+            .model()
+            .snapshot.messages.find(
+              (message) =>
+                String(message.id) ===
+                command.closest<HTMLElement>('[data-message-id]')?.dataset.messageId,
+            )?.senderId,
+        );
+      return;
+    }
     const anchor = event.target instanceof Element ? event.target.closest('a[href]') : undefined;
     const target = anchor ? parseTelegramLink(anchor.getAttribute('href') ?? '') : undefined;
     if (!target) return;
@@ -3136,6 +3155,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     messageContextMenu: state.model().messageContextMenu,
     messageContextTarget: messageContextTarget(),
     activeConversation: state.model().activeConversation,
+    replyKeyboard: replyKeyboard.snapshot(),
     visibleReplyKeyboard: visibleReplyKeyboard(),
     botStarted: botStarted(),
     canQueueMessage: canQueueMessage(),

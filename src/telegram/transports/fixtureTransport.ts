@@ -2488,7 +2488,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         yield* Deferred.await(pendingBotCallback);
         pendingBotCallback = undefined;
       }
-      return { message: 'Fixture callback complete.', alert: false };
+      return { message: 'Fixture callback complete.', alert: _data[0] === 99 };
     });
     function requestUrlAuth() {
       return Effect.sync(() => {

@@ -64,6 +64,88 @@ const withTransport = <A, E>(
   );
 
 describe('web Telegram transport', () => {
+  it('preserves streamed text entities and rich draft updates instead of converting them to typing', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        providePlatform(
+          Effect.gen(function* () {
+            const events = yield* PubSub.sliding<MtprotoClientEvent>(8);
+            const transport = yield* createWebTelegramTransport(makeMemoryCacheStore(), {
+              createClient: () =>
+                Effect.succeed(clientDouble({ events: Stream.fromPubSub(events) })),
+            });
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const received = yield* transport.updates.pipe(
+              Stream.take(2),
+              Stream.runCollect,
+              Effect.forkChild({ startImmediately: true }),
+            );
+            yield* PubSub.publish(
+              events,
+              updateEvent(
+                Api.UpdateUserTyping({
+                  userId: 606n,
+                  topMsgId: 42,
+                  action: Api.SendMessageTextDraftAction({
+                    randomId: 9223372036854775806n,
+                    text: Api.TextWithEntities({
+                      text: '/usersCount',
+                      entities: [Api.MessageEntityBotCommand({ offset: 0, length: 11 })],
+                    }),
+                  }),
+                }),
+              ),
+            );
+            yield* PubSub.publish(
+              events,
+              updateEvent(
+                Api.UpdateUserTyping({
+                  userId: 606n,
+                  topMsgId: 42,
+                  action: Api.SendMessageRichMessageDraftAction({
+                    randomId: 9223372036854775806n,
+                    richMessage: Api.RichMessage({
+                      blocks: [
+                        Api.PageBlockParagraph({
+                          text: Api.TextBotCommand({ text: Api.TextPlain({ text: '/help' }) }),
+                        }),
+                      ],
+                      photos: [],
+                      documents: [],
+                    }),
+                  }),
+                }),
+              ),
+            );
+            const batches = Array.from(yield* Fiber.join(received));
+            expect(batches[0]?.updates).toMatchObject([
+              {
+                type: 'live-draft',
+                draft: {
+                  id: 'u:606:42:9223372036854775806',
+                  peerId: 'u:606',
+                  topicId: 42,
+                  text: '/usersCount',
+                  formats: [{ kind: 'botCommand', offset: 0, length: 11 }],
+                },
+              },
+            ]);
+            expect(batches[1]?.updates).toMatchObject([
+              {
+                type: 'live-draft',
+                draft: {
+                  id: 'u:606:42:9223372036854775806',
+                  richMessage: {
+                    blocks: [{ kind: 'text', text: { kind: 'command', command: '/help' } }],
+                  },
+                },
+              },
+            ]);
+          }),
+        ),
+      ),
+    ));
+
   it('keeps migrated basic groups read-only even for their owner', () => {
     const invoke = (request: unknown) => {
       if (!Api.messages.GetPeerDialogs.is(request))

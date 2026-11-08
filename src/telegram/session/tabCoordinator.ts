@@ -701,6 +701,7 @@ const TextFormatSchema = Schema.Struct({
     'expandableBlockquote',
     'mention',
     'mentionName',
+    'botCommand',
     'textUrl',
     'customEmoji',
     'formattedDate',
@@ -946,6 +947,27 @@ const AccountSnapshotSchema = Schema.Struct({
   draftDetails: Schema.Record(Schema.String, DraftDetailsSchema),
   pending: Schema.Array(PendingSendSchema),
   activities: Schema.Array(ActivitySchema),
+  liveDrafts: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        peerId: Schema.String,
+        topicId: Schema.optional(Schema.Number),
+        text: Schema.String,
+        formats: Schema.optional(Schema.Array(TextFormatSchema)),
+        links: Schema.optional(
+          Schema.Array(
+            Schema.Struct({
+              offset: Schema.Number,
+              length: Schema.Number,
+              url: Schema.optional(Schema.String),
+            }),
+          ),
+        ),
+        richMessage: Schema.optional(RichMessageValueSchema),
+      }),
+    ),
+  ),
   authStep: Schema.optional(Schema.Literals(['phone', 'code', 'password', 'qr'])),
   qrLogin: Schema.optional(Schema.Struct({ url: Schema.String, expires: Schema.Number })),
   codeViaApp: Schema.optional(Schema.Boolean),

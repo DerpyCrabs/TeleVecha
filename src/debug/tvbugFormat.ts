@@ -2454,6 +2454,8 @@ class StateSanitizer {
           kind: 'concat',
           children: text.children.map((child) => this.sanitizeRichText(child, depth + 1)),
         };
+      case 'command':
+        return this.sanitizeRichText(text.child, depth + 1);
       case 'link':
         return {
           kind: 'link',

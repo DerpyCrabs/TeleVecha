@@ -12,7 +12,7 @@ import {
   Semaphore,
 } from 'effect';
 
-type EngineDelay = 'activity' | 'inboxRead';
+type EngineDelay = 'liveDraft' | 'activity' | 'inboxRead';
 export type EngineSerialLane =
   | 'dialogState'
   | 'draftWrite'
@@ -44,6 +44,7 @@ const makeEngineTasks = Effect.gen(function* () {
   const network = yield* FiberSet.make<unknown, unknown>();
   const background = yield* FiberSet.make<void, unknown>();
   const activityDelays = yield* FiberMap.make<string, void>();
+  const liveDraftDelays = yield* FiberMap.make<string, void>();
   const inboxReadDelays = yield* FiberMap.make<string, void>();
   const retries = yield* FiberMap.make<EngineRetrySlot, void>();
   const operations = yield* FiberMap.make<string, void, unknown>();
@@ -58,7 +59,8 @@ const makeEngineTasks = Effect.gen(function* () {
     reaction: yield* FiberSet.make<unknown, unknown>(),
     update: yield* FiberSet.make<unknown, unknown>(),
   } satisfies Record<EngineSerialLane, FiberSet.FiberSet<unknown, unknown>>;
-  const delayMap = (slot: EngineDelay) => (slot === 'activity' ? activityDelays : inboxReadDelays);
+  const delayMap = (slot: EngineDelay) =>
+    slot === 'activity' ? activityDelays : slot === 'liveDraft' ? liveDraftDelays : inboxReadDelays;
   const runTracked = <Value, Error, Requirements>(
     set: FiberSet.FiberSet<unknown, unknown>,
     effect: Effect.Effect<Value, Error, Requirements>,
@@ -128,9 +130,11 @@ const makeEngineTasks = Effect.gen(function* () {
     clearDelays: (slot?: EngineDelay) =>
       slot
         ? FiberMap.clear(delayMap(slot))
-        : Effect.all([FiberMap.clear(activityDelays), FiberMap.clear(inboxReadDelays)]).pipe(
-            Effect.asVoid,
-          ),
+        : Effect.all([
+            FiberMap.clear(activityDelays),
+            FiberMap.clear(inboxReadDelays),
+            FiberMap.clear(liveDraftDelays),
+          ]).pipe(Effect.asVoid),
     retry: (slot: EngineRetrySlot, attempt: Effect.Effect<boolean, unknown>) => {
       const [initial, maximum] = retryDelays[slot];
       return FiberMap.run(

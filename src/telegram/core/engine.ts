@@ -2581,6 +2581,7 @@ function makeMessagingEngineModule(
       draftDetails: {},
       pending: [],
       activities: [],
+      liveDrafts: [],
       authStep: undefined,
       codeViaApp: undefined,
       operationError: undefined,
@@ -5186,11 +5187,12 @@ function makeMessagingEngineModule(
         yield* engineTasks.clearDelays('inboxRead');
         messageRevisions.clear();
         yield* engineTasks.clearDelays('activity');
+        yield* engineTasks.clearDelays('liveDraft');
         currentCacheEpoch = epoch;
         const cachedDialogs = sortDialogs(
           freshDialogs.map((dialog) => ({ ...dialog, cacheEpoch: epoch })),
         );
-        yield* patch({ dialogs: cachedDialogs, activities: [] });
+        yield* patch({ dialogs: cachedDialogs, activities: [], liveDrafts: [] });
         yield* invalidateResource({ kind: 'expressions' });
         yield* invalidateResource({ kind: 'bot-commands' });
         yield* publishConversationEvent({ type: 'history-reset' });
@@ -5609,6 +5611,17 @@ function makeMessagingEngineModule(
       messageUpdate = update;
     }
     if (messageUpdate) {
+      if (messageUpdate.type === 'new-message') {
+        const message = messageUpdate.message;
+        const liveDrafts = currentSnapshot().liveDrafts ?? [];
+        const removed = liveDrafts.filter(
+          (draft) => draft.peerId === message.peerId && draft.topicId === message.topicId,
+        );
+        if (removed.length) {
+          for (const draft of removed) yield* engineTasks.cancelDelay('liveDraft', draft.id);
+          yield* patch({ liveDrafts: liveDrafts.filter((draft) => !removed.includes(draft)) });
+        }
+      }
       if (
         messageUpdate.message.service?.kind === 'topic-created' ||
         messageUpdate.message.service?.kind === 'topic-changed'
@@ -5873,6 +5886,27 @@ function makeMessagingEngineModule(
         undefined,
         update.unreadReaction,
         update.reactionsAsTags,
+      );
+      return;
+    }
+    if (update.type === 'live-draft') {
+      const draft = update.draft;
+      const drafts = currentSnapshot().liveDrafts ?? [];
+      const exists = drafts.some(({ id }) => id === draft.id);
+      yield* patch({
+        liveDrafts: exists
+          ? drafts.map((current) => (current.id === draft.id ? draft : current))
+          : [...drafts.slice(-99), draft],
+      });
+      yield* engineTasks.delay(
+        'liveDraft',
+        draft.id,
+        30_000,
+        Effect.gen(function* () {
+          yield* patch({
+            liveDrafts: (currentSnapshot().liveDrafts ?? []).filter(({ id }) => id !== draft.id),
+          });
+        }),
       );
       return;
     }

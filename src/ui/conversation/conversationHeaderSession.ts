@@ -54,6 +54,7 @@ export function createConversationHeaderSession(options: {
     if (currentActivity?.kind === 'uploading') return 'uploading…';
     if (currentActivity?.kind === 'recording') return 'recording…';
     if (currentActivity?.kind === 'choosing-sticker') return 'choosing a sticker…';
+    if (chat.bot) return 'bot';
     if (chat.kind === 'channel') return 'channel';
     if (chat.kind === 'group') return 'group';
     if (chat.presence === 'online') return 'online';

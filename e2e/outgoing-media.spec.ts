@@ -539,13 +539,20 @@ for (const width of [1280, 375]) {
     await expect(album.locator('.media-album-item .file-album-caption')).toHaveCount(0);
     const captionBelowFiles = await album.evaluate((element) => {
       const lastFile = element.querySelector('.media-album-item:last-child')!;
-      const caption = element.querySelector(':scope > .file-album-caption')!;
+      const caption = element.closest('article')!.querySelector('.message-copy > .message-body')!;
       return caption.getBoundingClientRect().top >= lastFile.getBoundingClientRect().bottom;
     });
     expect(captionBelowFiles).toBe(true);
-    await expect(album.getByText('Два исходных файла, одна отправка', { exact: true })).toHaveCount(
-      1,
-    );
+    const captionBottomSpace = await album.evaluate((element) => {
+      const article = element.closest('article')!;
+      const caption = article.querySelector('.message-copy > .message-body')!;
+      return article.getBoundingClientRect().bottom - caption.getBoundingClientRect().bottom;
+    });
+    expect(captionBottomSpace).toBeLessThanOrEqual(width === 1280 ? 18 : 34);
+    await page.screenshot({ path: `/tmp/file-caption-${width}.png`, animations: 'disabled' });
+    await expect(
+      album.locator('..').getByText('Два исходных файла, одна отправка', { exact: true }),
+    ).toHaveCount(1);
     await expect
       .poll(() =>
         page.evaluate(() => {

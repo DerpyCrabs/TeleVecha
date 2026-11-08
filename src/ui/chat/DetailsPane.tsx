@@ -48,6 +48,7 @@ export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
     return value && !value.startsWith('+') ? `+${value}` : value;
   };
   const status = () => {
+    if (props.chat.bot) return 'bot';
     if (props.chat.kind === 'channel') return 'channel';
     if (props.chat.kind === 'group') return 'group';
     if (props.chat.presence === 'online') return 'online';

@@ -548,6 +548,10 @@ const $MessageEntityBlockquote = createTlFactory<
 const $MessageEntityBold = createTlFactory<Tl.MessageEntityBold, Tl.MessageEntityBoldFields>(
   'messageEntityBold',
 );
+const $MessageEntityBotCommand = createTlFactory<
+  Tl.MessageEntityBotCommand,
+  Tl.MessageEntityBotCommandFields
+>('messageEntityBotCommand');
 const $MessageEntityCode = createTlFactory<Tl.MessageEntityCode, Tl.MessageEntityCodeFields>(
   'messageEntityCode',
 );
@@ -903,6 +907,14 @@ const $SendMessageRecordVideoAction = createTlFactory<
   Tl.SendMessageRecordVideoAction,
   Tl.SendMessageRecordVideoActionFields
 >('sendMessageRecordVideoAction');
+const $SendMessageRichMessageDraftAction = createTlFactory<
+  Tl.SendMessageRichMessageDraftAction,
+  Tl.SendMessageRichMessageDraftActionFields
+>('sendMessageRichMessageDraftAction');
+const $SendMessageTextDraftAction = createTlFactory<
+  Tl.SendMessageTextDraftAction,
+  Tl.SendMessageTextDraftActionFields
+>('sendMessageTextDraftAction');
 const $SendMessageTypingAction = createTlFactory<
   Tl.SendMessageTypingAction,
   Tl.SendMessageTypingActionFields
@@ -945,6 +957,9 @@ const $TextAutoEmail = createTlFactory<Tl.TextAutoEmail, Tl.TextAutoEmailFields>
 const $TextAutoPhone = createTlFactory<Tl.TextAutoPhone, Tl.TextAutoPhoneFields>('textAutoPhone');
 const $TextAutoUrl = createTlFactory<Tl.TextAutoUrl, Tl.TextAutoUrlFields>('textAutoUrl');
 const $TextBold = createTlFactory<Tl.TextBold, Tl.TextBoldFields>('textBold');
+const $TextBotCommand = createTlFactory<Tl.TextBotCommand, Tl.TextBotCommandFields>(
+  'textBotCommand',
+);
 const $TextConcat = createTlFactory<Tl.TextConcat, Tl.TextConcatFields>('textConcat');
 const $TextCustomEmoji = createTlFactory<Tl.TextCustomEmoji, Tl.TextCustomEmojiFields>(
   'textCustomEmoji',
@@ -2180,6 +2195,7 @@ export const Api = Object.freeze({
   MessageActionTopicEdit: $MessageActionTopicEdit,
   MessageEntityBlockquote: $MessageEntityBlockquote,
   MessageEntityBold: $MessageEntityBold,
+  MessageEntityBotCommand: $MessageEntityBotCommand,
   MessageEntityCode: $MessageEntityCode,
   MessageEntityCustomEmoji: $MessageEntityCustomEmoji,
   MessageEntityDiffDelete: $MessageEntityDiffDelete,
@@ -2304,6 +2320,8 @@ export const Api = Object.freeze({
   SendMessageRecordAudioAction: $SendMessageRecordAudioAction,
   SendMessageRecordRoundAction: $SendMessageRecordRoundAction,
   SendMessageRecordVideoAction: $SendMessageRecordVideoAction,
+  SendMessageRichMessageDraftAction: $SendMessageRichMessageDraftAction,
+  SendMessageTextDraftAction: $SendMessageTextDraftAction,
   SendMessageTypingAction: $SendMessageTypingAction,
   SendMessageUploadAudioAction: $SendMessageUploadAudioAction,
   SendMessageUploadDocumentAction: $SendMessageUploadDocumentAction,
@@ -2320,6 +2338,7 @@ export const Api = Object.freeze({
   TextAutoPhone: $TextAutoPhone,
   TextAutoUrl: $TextAutoUrl,
   TextBold: $TextBold,
+  TextBotCommand: $TextBotCommand,
   TextConcat: $TextConcat,
   TextCustomEmoji: $TextCustomEmoji,
   TextDate: $TextDate,

@@ -87,6 +87,7 @@ export function createBotSession(
     starting: boolean;
     buttonBusy: { owner: string; key: string } | undefined;
     notice: string;
+    alert: string;
     urlAuth: PendingBotUrlAuth | undefined;
     urlAuthBusy: boolean;
     inlineSwitch: PendingInlineSwitch | undefined;
@@ -100,6 +101,7 @@ export function createBotSession(
     | { type: 'Starting'; value: boolean }
     | { type: 'ButtonBusy'; value: { owner: string; key: string } | undefined }
     | { type: 'Notice'; value: string }
+    | { type: 'Alert'; value: string }
     | { type: 'UrlAuth'; value: PendingBotUrlAuth | undefined }
     | { type: 'UrlAuthBusy'; value: boolean }
     | { type: 'InlineSwitch'; value: PendingInlineSwitch | undefined };
@@ -113,6 +115,7 @@ export function createBotSession(
       starting: false,
       buttonBusy: undefined,
       notice: '',
+      alert: '',
       urlAuth: undefined,
       urlAuthBusy: false,
       inlineSwitch: undefined,
@@ -149,6 +152,8 @@ export function createBotSession(
               ? model
               : { ...model, buttonBusy: message.value },
           };
+        case 'Alert':
+          return { model: { ...model, alert: message.value } };
         case 'Notice':
           return {
             model: Object.is(model.notice, message.value)
@@ -221,6 +226,7 @@ export function createBotSession(
       state.send({ type: 'Starting', value: false });
       state.send({ type: 'ButtonBusy', value: undefined });
       state.send({ type: 'Notice', value: '' });
+      state.send({ type: 'Alert', value: '' });
       state.send({ type: 'WebAppLaunch', value: undefined });
       state.send({ type: 'WebAppLaunchBusy', value: false });
       state.send({ type: 'WebApp', value: undefined });
@@ -242,11 +248,7 @@ export function createBotSession(
     const dialog = options.activeDialog(),
       conversation = dialog && currentConversation(dialog.peer.id);
     const request =
-      conversation &&
-      (dialog?.peer.kind === 'group' ||
-        (dialog?.bot && state.model().commandsRequested === dialog.peer.id))
-        ? conversation
-        : undefined;
+      conversation && (dialog?.peer.kind === 'group' || dialog?.bot) ? conversation : undefined;
     commandsResource.select(request ? dialog?.peer : undefined);
   };
   scope.own(state.subscribe(refresh));
@@ -296,6 +298,17 @@ export function createBotSession(
     } finally {
       if (isCurrent(peerId, generation)) state.send({ type: 'Starting', value: false });
     }
+  };
+  const sendTextCommand = (text: string, senderId?: string) => {
+    if (!/^\/[A-Za-z0-9_]{1,32}(?:@[A-Za-z0-9_]{1,32})?$/.test(text)) return;
+    const target =
+      !options.activeDialog()?.bot && !text.includes('@')
+        ? commands().find((command) => command.botId === senderId)?.botUsername
+        : undefined;
+    const addressed = target ? `${text}@${target}` : text;
+    const conversation = currentConversation(options.activePeerId());
+    if (conversation)
+      void options.runEffect(conversation.sendDraft(addressed)).catch(() => undefined);
   };
   const sendCommand = (command: TelegramBotCommand) => {
     const dialog = options.activeDialog();
@@ -421,7 +434,10 @@ export function createBotSession(
           : undefined;
         if (!isCurrent(peerId, generation)) return;
         if (answer?.url) openUrl(answer.url);
-        if (answer?.message) showNotice(answer.message);
+        if (answer?.message) {
+          if (answer.alert) state.send({ type: 'Alert', value: answer.message });
+          else showNotice(answer.message);
+        }
         options.dismissSingleUseKeyboard(owner);
         return;
       }
@@ -601,11 +617,13 @@ export function createBotSession(
     cancelWebAppLaunch: () => {
       if (!state.model().webAppLaunchBusy) state.send({ type: 'WebAppLaunch', value: undefined });
     },
+    closeAlert: () => state.send({ type: 'Alert', value: '' }),
     closeWebApp: () => state.send({ type: 'WebApp', value: undefined }),
     toggleMenu,
     closeMenu: () => state.send({ type: 'MenuOpen', value: false }),
     start,
     sendCommand,
+    sendTextCommand,
     press,
     chooseInlineChat,
     acceptUrlAuth,
@@ -633,6 +651,7 @@ export function createBotSession(
       starting: state.model().starting,
       buttonBusy: state.model().buttonBusy,
       notice: state.model().notice,
+      alert: state.model().alert,
       urlAuth: state.model().urlAuth,
       urlAuthBusy: state.model().urlAuthBusy,
       inlineSwitch: state.model().inlineSwitch,

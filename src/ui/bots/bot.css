@@ -1,11 +1,14 @@
 .bot-controls {
   position: relative;
   z-index: 12;
-  display: grid;
-  gap: 0.45rem;
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-  padding: 0.45rem max(0.75rem, calc((100% - 48rem) / 2));
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.35rem;
+}
+.bot-reply-panel {
+  max-width: 48rem;
+  margin: 0.6rem auto 0;
 }
 
 .bot-start-button,
@@ -16,10 +19,10 @@
   justify-content: center;
   gap: 0.4rem;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  border-radius: 0.55rem;
-  background: var(--accent-soft);
+  border-radius: 1.2rem;
+  background: var(--accent);
   padding: 0.45rem 0.8rem;
-  color: var(--accent);
+  color: white;
 }
 
 .bot-start-button {
@@ -256,10 +259,6 @@
 }
 
 @media (max-width: 650px) {
-  .bot-controls {
-    padding-inline: 0.65rem;
-  }
-
   .bot-keyboard-inline {
     min-width: min(17rem, 76vw);
   }
@@ -327,7 +326,7 @@
   border: 0;
   border-radius: 50%;
   background: var(--panel);
-  color: var(--ink);
+  color: var(--text);
   cursor: pointer;
 }
 .mini-app-back:hover {
@@ -336,7 +335,7 @@
 .mini-app-error {
   margin: 0;
   padding: 10px 16px;
-  color: var(--ink);
+  color: var(--text);
   font-size: 13px;
 }
 .mini-app-actions {
@@ -394,4 +393,146 @@
   .mini-app-dialog-compact {
     height: min(540px, calc(100dvh - 32px));
   }
+}
+
+.message-bot-command {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.message-bot-command:hover {
+  text-decoration: underline;
+}
+
+.bot-keyboard-row button {
+  position: relative;
+  min-height: 2.3rem;
+  padding-inline: 1.25rem;
+  border: 0;
+}
+.bot-button-type,
+.bot-button-spinner {
+  position: absolute;
+  right: 0.35rem;
+  top: 0.35rem;
+}
+.bot-button-spinner {
+  animation: bot-button-spin 1s linear infinite;
+}
+@keyframes bot-button-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bot-button-spinner {
+    animation: none;
+  }
+}
+
+.bot-live-draft {
+  align-self: flex-start;
+  max-width: min(38rem, 85%);
+  margin: 0.5rem 0;
+  padding: 0.65rem 0.8rem;
+  border-radius: 1rem 1rem 1rem 0.25rem;
+  background: var(--surface-raised);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.bot-streaming-status {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-top: 0.35rem;
+}
+.bot-thinking {
+  color: var(--muted);
+}
+
+.message-flow-row:has(> .bot-keyboard-inline) {
+  display: grid;
+  grid-template-columns: minmax(0, min(78%, 26.875rem));
+  gap: 0.25rem;
+}
+.message-flow-row:has(> .bot-keyboard-inline) > .message {
+  width: 100%;
+  max-width: 100%;
+  border-bottom-left-radius: 0.35rem;
+  border-bottom-right-radius: 0.35rem;
+}
+.message-flow-row:has(> .bot-keyboard-inline) > .bot-keyboard-inline {
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+}
+.message-flow-row:has(> .bot-keyboard-inline):has(> .outgoing) {
+  justify-content: end;
+}
+.message-flow-row:has(> .bot-keyboard-inline)::after {
+  display: none;
+}
+.bot-keyboard-inline .bot-keyboard-row button {
+  background: color-mix(in srgb, var(--bubble-incoming) 88%, transparent);
+}
+.bot-keyboard-reply .bot-keyboard-row button {
+  background: var(--surface-raised);
+}
+
+.rich-formula-block {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.rich-formula .katex {
+  font-size: 1.1em;
+}
+
+.bot-keyboard-inline .bot-keyboard-row button {
+  padding: 0.55rem 0.3rem;
+  overflow: hidden;
+}
+.bot-keyboard-inline .bot-keyboard-row button > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 650px) {
+  .message-flow-row:has(> .bot-keyboard-inline) {
+    grid-template-columns: minmax(0, 88%);
+  }
+  .chat-composer .composer-icon-button {
+    width: 1.75rem;
+    min-width: 1.75rem;
+  }
+  .chat-composer textarea::placeholder {
+    white-space: nowrap;
+  }
+}
+
+.bot-command-menu .bot-open-app {
+  width: 100%;
+  background: none;
+  color: var(--text);
+  font-weight: 400;
+}
+.bot-command-menu .bot-open-app:hover {
+  background: var(--surface-hover);
+}
+
+.bot-alert-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 1rem 1.25rem;
+}
+.bot-alert-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.75rem 1.25rem;
 }

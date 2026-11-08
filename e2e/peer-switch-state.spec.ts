@@ -42,7 +42,7 @@ test('derives bot start state from the selected bot conversation', async ({ page
   await expect(page.getByRole('button', { name: 'Start bot' })).toBeVisible();
   await expect(page.getByTestId('conversation-header')).toContainText('Fixture Helper Bot');
   await expect(page.getByRole('button', { name: 'Start bot' })).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'Commands' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Menu', exact: true })).toHaveCount(0);
 });
 
 test('does not show an old history error under the newly selected peer', async ({ page }) => {

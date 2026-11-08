@@ -243,7 +243,7 @@ test('restores group members and bot commands from cache before Telegram reconne
   await page.goto(`/?scenario=${scenario}&chat=g%3A303`);
   await releaseConnectionAndWaitUntilReady(page, scenario);
   const members = page.locator('.group-members');
-  const commands = page.getByRole('button', { name: 'Commands' });
+  const commands = page.getByRole('button', { name: 'Menu', exact: true });
   await expect(members).toContainText('Fixture Author');
   await expect(members).toContainText('Another Member');
   await expect.poll(() => fixtureStats(page).then((stats) => stats?.getBotCommands)).toBe(1);

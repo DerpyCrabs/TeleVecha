@@ -1,3 +1,5 @@
+import LoaderCircle from '@effectweb/lucide/icons/loader-circle';
+import ArrowUpRight from '@effectweb/lucide/icons/arrow-up-right';
 import { list } from 'effectweb';
 import type { TelegramBotButton, TelegramBotKeyboard } from '../../telegram/types';
 import { sequence, view } from 'effectweb';
@@ -30,11 +32,16 @@ export const BotKeyboard = view<BotKeyboardProps, never>((props, _send) => {
                 title={
                   button.kind === 'unsupported'
                     ? 'This Telegram button type is not supported.'
-                    : undefined
+                    : button.text
                 }
                 onClick={() => props.onPress(button, key())}
               >
-                {props.busyButton === key() ? 'Working…' : button.text}
+                <span>{button.text}</span>
+                {props.busyButton === key() ? (
+                  <LoaderCircle size={14} class="bot-button-spinner" aria-hidden="true" />
+                ) : ['url', 'url-auth', 'web-app'].includes(button.kind) ? (
+                  <ArrowUpRight size={12} class="bot-button-type" aria-hidden="true" />
+                ) : null}
               </button>
             );
           })}

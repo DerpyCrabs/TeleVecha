@@ -200,3 +200,40 @@ button {
 .chat-unread-badge {
   user-select: none;
 }
+
+.chat-unread-badge {
+  background: var(--accent);
+}
+.chat-unread-badge.muted {
+  background: var(--muted);
+}
+
+.chat-attention-badges {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+.chat-attention-badges:empty {
+  display: none;
+}
+.chat-attention-badge {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+}
+.chat-attention-badges-compact {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 3;
+  gap: 2px;
+}
+.chat-attention-badges-compact .chat-attention-badge {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--panel);
+}

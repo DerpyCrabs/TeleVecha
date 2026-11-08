@@ -1,3 +1,5 @@
+import AtSign from '@effectweb/lucide/icons/at-sign';
+import Heart from '@effectweb/lucide/icons/heart';
 import Menu from '@effectweb/lucide/icons/menu';
 import Bookmark from '@effectweb/lucide/icons/bookmark';
 import { CreateChatDialog } from '../groups/CreateChatDialog';
@@ -55,14 +57,13 @@ const UnreadBadge = view<UnreadBadgeProps, never>((props, _send) => {
   const count = () => normalizeUnreadCount(props.count);
   return count() > 0 || props.marked ? (
     <span
-      class="chat-unread-badge grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-accent px-1.5 text-[10px] leading-none font-bold text-white"
+      class="chat-unread-badge grid h-5 min-w-5 shrink-0 place-items-center rounded-full px-1.5 text-[10px] leading-none font-bold text-white"
       classList={{
         'chat-unread-badge-compact': Boolean(props.compact),
         'chat-unread-badge-trailing': !props.compact,
         muted: Boolean(props.muted),
         'absolute top-[0.2rem] right-[0.2rem] z-[2] h-6 min-w-6 border-2 border-panel px-[0.3rem] text-xs':
           Boolean(props.compact),
-        'bg-[#626873]': Boolean(props.muted),
       }}
       aria-hidden="true"
       title={count() > 0 ? describeUnreadCount(count()) : 'Marked as unread'}
@@ -71,6 +72,34 @@ const UnreadBadge = view<UnreadBadgeProps, never>((props, _send) => {
     </span>
   ) : null;
 });
+const AttentionBadges = view<
+  { mentions?: number | undefined; reactions?: number | undefined; compact?: boolean },
+  never
+>((props) => (
+  <span
+    class="chat-attention-badges"
+    classList={{ 'chat-attention-badges-compact': Boolean(props.compact) }}
+  >
+    {(props.mentions ?? 0) > 0 ? (
+      <span
+        class="chat-attention-badge"
+        title={`${props.mentions} unread replies and mentions`}
+        aria-label={`${props.mentions} unread replies and mentions`}
+      >
+        <AtSign size={14} aria-hidden="true" />
+      </span>
+    ) : null}
+    {(props.reactions ?? 0) > 0 ? (
+      <span
+        class="chat-attention-badge"
+        title={`${props.reactions} unread reactions`}
+        aria-label={`${props.reactions} unread reactions`}
+      >
+        <Heart size={13} fill="currentColor" aria-hidden="true" />
+      </span>
+    ) : null}
+  </span>
+));
 const MutedIcon = view<Record<string, never>, never>((_props, _send) => {
   return <BellOff size={12} class="chat-muted-icon size-3 shrink-0" aria-label="Muted" />;
 });
@@ -611,12 +640,19 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
                 load={props.online ? () => props.media.loadAvatar(chat.id) : undefined}
               />
               {compact() ? (
-                <UnreadBadge
-                  count={chat.unread}
-                  marked={chat.unreadMark}
-                  muted={chat.muted}
-                  compact
-                />
+                <>
+                  <UnreadBadge
+                    count={chat.unread}
+                    marked={chat.unreadMark}
+                    muted={chat.muted}
+                    compact
+                  />
+                  <AttentionBadges
+                    mentions={chat.unreadMentions}
+                    reactions={chat.unreadReactions}
+                    compact
+                  />
+                </>
               ) : null}
               <span class="min-w-0 flex-1 text-left" classList={{ hidden: compact() }}>
                 <span class="flex items-baseline justify-between gap-3">
@@ -640,24 +676,10 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
                   ) : null}
                   <span class="min-w-0 flex-1 truncate text-[13px]">{chat.preview}</span>
                   <span class="ml-auto flex shrink-0 items-center gap-1.5">
-                    {(chat.unreadMentions ?? 0) > 0 ? (
-                      <span
-                        class="text-xs font-bold text-accent"
-                        title={`${chat.unreadMentions} unread replies and mentions`}
-                        aria-label={`${chat.unreadMentions} unread replies and mentions`}
-                      >
-                        @{chat.unreadMentions}
-                      </span>
-                    ) : null}
-                    {(chat.unreadReactions ?? 0) > 0 ? (
-                      <span
-                        class="text-xs font-bold text-accent"
-                        title={`${chat.unreadReactions} unread reactions`}
-                        aria-label={`${chat.unreadReactions} unread reactions`}
-                      >
-                        ♡{chat.unreadReactions}
-                      </span>
-                    ) : null}
+                    <AttentionBadges
+                      mentions={chat.unreadMentions}
+                      reactions={chat.unreadReactions}
+                    />
                     {chat.muted ? <MutedIcon /> : null}
                     <UnreadBadge count={chat.unread} marked={chat.unreadMark} muted={chat.muted} />
                   </span>

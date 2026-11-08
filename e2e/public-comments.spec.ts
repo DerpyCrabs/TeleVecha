@@ -14,7 +14,32 @@ test('opens a public post internally from text, shows paginated comments and ret
   await expect(page.getByTestId('conversation-header')).toContainText('Public Fixture News');
   const post = page.locator('article.message[data-message-id="965"]');
   await expect(post).toContainText('Public post 965');
-  await post.getByRole('button', { name: '75 comments' }).click();
+  await page.evaluate(() => {
+    const snapshot = [...window.__televechaRuntimes!.values()][0]!.engine.snapshot();
+    window.__televechaFixture!.emit({
+      type: 'reaction-changed',
+      peerId: snapshot.activePeerId!,
+      messageId: 965,
+      reactions: [{ emoji: '😁', count: 1, chosen: false }],
+    });
+  });
+  await expect(post.locator('.reaction')).toHaveCount(1);
+  const comments = post.getByRole('button', { name: '75 comments' });
+  const commentsLayout = await post.evaluate((element) => {
+    const strip = element.querySelector('.message-comments')!.getBoundingClientRect();
+    const copy = element.querySelector('.message-copy')!.getBoundingClientRect();
+    const bubble = element.getBoundingClientRect();
+    return {
+      below: strip.top >= copy.bottom,
+      widthGap: Math.abs(strip.width - bubble.width),
+      bottomGap: bubble.bottom - strip.bottom,
+    };
+  });
+  expect(commentsLayout.below).toBe(true);
+  expect(commentsLayout.widthGap).toBeLessThanOrEqual(2);
+  expect(commentsLayout.bottomGap).toBeLessThanOrEqual(2);
+  await page.screenshot({ path: '/tmp/comments-strip.png', animations: 'disabled' });
+  await comments.click();
   const panel = page.getByRole('dialog', { name: 'Comments', exact: true });
   await expect(panel.getByText('Fixture comment 75', { exact: true })).toBeVisible();
   await expect(panel.getByText('Public post 965', { exact: true })).toHaveCount(0);

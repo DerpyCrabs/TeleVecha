@@ -1,3 +1,4 @@
+import { MathFormula } from './MathFormula';
 import { list } from 'effectweb';
 import type { RichBlock, RichCaption, RichText } from '../../domain/richMessage';
 import { component, sequence, view } from 'effectweb';
@@ -24,9 +25,15 @@ const SpoilerText = component<{ child: RichText }, SpoilerTextState, SpoilerText
         tabIndex={0}
         aria-label={model.revealed ? 'Revealed spoiler' : 'Hidden spoiler. Activate to reveal.'}
         aria-expanded={model.revealed}
-        onClick={() => send({ type: 'Revealed', value: true })}
+        onClick={(event) => {
+          if (!model.revealed) {
+            event.preventDefault();
+            event.stopPropagation();
+            send({ type: 'Revealed', value: true });
+          }
+        }}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
+          if (!model.revealed && (event.key === 'Enter' || event.key === ' ')) {
             event.preventDefault();
             send({ type: 'Revealed', value: true });
           }
@@ -81,6 +88,15 @@ const RichInline = view<{ value: RichText }, never>((props, _send) => {
     </mark>
   ) : value().kind === 'spoiler' ? (
     <SpoilerText child={(value() as Extract<RichText, { kind: 'spoiler' }>).child} />
+  ) : value().kind === 'command' ? (
+    <button
+      type="button"
+      class="message-bot-command"
+      data-bot-command={(value() as Extract<RichText, { kind: 'command' }>).command}
+      title={`Send ${(value() as Extract<RichText, { kind: 'command' }>).command}`}
+    >
+      <RichInline value={(value() as Extract<RichText, { kind: 'command' }>).child} />
+    </button>
   ) : value().kind === 'link' ? (
     <>
       {(() => {
@@ -107,7 +123,7 @@ const RichInline = view<{ value: RichText }, never>((props, _send) => {
       {(value() as Extract<RichText, { kind: 'customEmoji' }>).alt}
     </span>
   ) : value().kind === 'math' ? (
-    <code class="rich-inline-math">{(value() as Extract<RichText, { kind: 'math' }>).source}</code>
+    <MathFormula source={(value() as Extract<RichText, { kind: 'math' }>).source} />
   ) : value().kind === 'date' ? (
     <time
       dateTime={new Date(
@@ -313,9 +329,7 @@ const RichBlockView = view<{ block: RichBlock }, never>((props, _send) => {
       })()}
     </>
   ) : block().kind === 'math' ? (
-    <pre class="rich-math" aria-label="Mathematical expression">
-      {(block() as Extract<RichBlock, { kind: 'math' }>).source}
-    </pre>
+    <MathFormula block source={(block() as Extract<RichBlock, { kind: 'math' }>).source} />
   ) : block().kind === 'media' ? (
     <>
       {(() => {

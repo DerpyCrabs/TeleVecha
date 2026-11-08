@@ -1,3 +1,7 @@
+import { BotControls, type BotControlsProps } from '../bots/BotControls';
+import { BotKeyboard } from '../bots/BotKeyboard';
+import Keyboard from '@effectweb/lucide/icons/keyboard';
+import type { TelegramBotKeyboard, TelegramBotButton } from '../../telegram/types';
 import { ForwardDraft, type ForwardDraftProps } from './ForwardDraft';
 import { modalVisible } from '../shared/focusScope';
 import Image from '@effectweb/lucide/icons/image';
@@ -37,6 +41,12 @@ const commandFormat = 'format';
 const commandInsert = 'insert';
 
 interface ChatComposerProps {
+  botControls?: BotControlsProps | undefined;
+  replyKeyboard?: TelegramBotKeyboard | undefined;
+  replyKeyboardAvailable?: boolean;
+  toggleReplyKeyboard?: () => void;
+  replyKeyboardBusy?: string | undefined;
+  onReplyButton?: (button: TelegramBotButton, key: string) => void;
   forwardDraft?: (ForwardDraftProps & { send: () => void }) | undefined;
   conversationId: string;
   enabled: boolean;
@@ -65,6 +75,7 @@ type ChatComposerState = {
   expressionPointerType: string;
   mention: ReturnType<typeof findMention>;
   mentionIndex: number;
+  dismissedCommandDraft: string | undefined;
 };
 type ChatComposerModel = ChatComposerState & { readonly props: ChatComposerProps };
 type ChatComposerMessage =
@@ -87,6 +98,7 @@ type ChatComposerMessage =
           | 'formatMenu'
           | 'expressionPointerType'
           | 'mention'
+          | 'dismissedCommandDraft'
           | 'mentionIndex'
         >
       >;
@@ -224,6 +236,7 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
       expressionPointerType: '',
       mention: undefined,
       mentionIndex: 0,
+      dismissedCommandDraft: undefined,
     }),
     receive: (model, previous) => {
       const reset = model.props.conversationId !== previous.conversationId;
@@ -389,6 +402,32 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
   },
   view((model, send) => {
     const props = model.props;
+    const commandQuery = () =>
+      props.botControls &&
+      !props.composer.editing &&
+      !props.composer.attachments.length &&
+      /^\/[A-Za-z0-9_@]*$/.test(props.composer.draft) &&
+      model.dismissedCommandDraft !== props.composer.draft
+        ? props.composer.draft
+        : undefined;
+    const closeCommands = () => {
+      props.botControls?.onCloseMenu();
+      send({ type: 'Fields', fields: { dismissedCommandDraft: props.composer.draft } });
+    };
+    const commandControls = () =>
+      props.botControls
+        ? {
+            ...props.botControls,
+            query: commandQuery(),
+            menuOpen: props.botControls.menuOpen || Boolean(commandQuery()),
+            onCloseMenu: closeCommands,
+            onCommand: (command: import('../../telegram/types').TelegramBotCommand) => {
+              if (commandQuery()) props.composer.changeDraft('');
+              props.botControls?.onCommand(command);
+            },
+          }
+        : undefined;
+
     const mentionMembers = () =>
       model.mention ? filterMentionMembers(props.composer.mentionMembers, model.mention.query) : [];
     const updateMention = (input: HTMLTextAreaElement) => {
@@ -514,319 +553,378 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
             canSendMedia={props.canSendMedia}
           />
         ) : null}
-        <div class="mx-auto flex w-full min-w-0 max-w-3xl items-center gap-2">
-          <input
-            class="sr-only"
-            type="file"
-            multiple={!props.composer.editing}
-            disabled={!props.canSendMedia}
-            onChange={(event) => {
-              const files = event.currentTarget.files;
-              if (props.canSendMedia && files?.length)
-                props.composer.attach(
-                  [...files],
-                  event.currentTarget.dataset.sendAs === 'file' ? 'file' : undefined,
-                );
-              clearFileControl(event.currentTarget);
-            }}
-          />
-          <div
-            class="composer"
-            onDragOver={(event) => {
-              const transfer = event.dataTransfer;
-              if (transfer?.types.includes('Files')) event.preventDefault();
-            }}
-            onDrop={(event) => {
-              if (!props.canSendMedia) return;
-              const transfer = event.dataTransfer;
-              if (!transfer?.files.length) return;
-              event.preventDefault();
-              attachTransferredFiles(transfer.files, transferName('dropped-file'));
-            }}
-          >
-            {model.mention && mentionMembers().length > 0 ? (
-              <div
-                class="composer-mentions"
-                id="composer-mentions"
-                role="listbox"
-                aria-label="Mention a member"
-              >
-                {list(
-                  idRows(mentionMembers().map((member) => ({ ...member, id: member.peer.id }))),
-                  (member) => (
-                    <button
-                      type="button"
-                      role="option"
-                      id={`mention-${member.peer.id}`}
-                      aria-selected={
-                        mentionMembers()[model.mentionIndex]?.peer.id === member.peer.id
-                      }
-                      onPointerDown={(event) => event.preventDefault()}
-                      onClick={() => send({ type: 'SelectMention', member })}
-                    >
-                      <span class="composer-mention-avatar" style={{ background: member.color }}>
-                        {member.initials}
-                      </span>
-                      <span class="composer-mention-name">
-                        <strong>{member.title}</strong>
-                        {member.username ? <small>@{member.username}</small> : null}
-                      </span>
-                    </button>
-                  ),
-                )}
-              </div>
-            ) : null}
-            <button
-              class="composer-icon-button"
-              onPointerDown={(event) => {
-                send({ type: 'Fields', fields: { expressionPointerType: event.pointerType } });
+        {props.botControls?.isBot && !props.botControls.started ? (
+          <BotControls {...commandControls()!} />
+        ) : (
+          <div class="mx-auto flex w-full min-w-0 max-w-3xl items-center gap-2">
+            {props.botControls ? <BotControls {...commandControls()!} /> : null}
+            <input
+              class="sr-only"
+              type="file"
+              multiple={!props.composer.editing}
+              disabled={!props.canSendMedia}
+              onChange={(event) => {
+                const files = event.currentTarget.files;
+                if (props.canSendMedia && files?.length)
+                  props.composer.attach(
+                    [...files],
+                    event.currentTarget.dataset.sendAs === 'file' ? 'file' : undefined,
+                  );
+                clearFileControl(event.currentTarget);
               }}
-              onClick={(event) => {
-                const open = !model.expressionOpen;
-                setExpressionOpen(open);
-                if (open && (event.detail === 0 || model.expressionPointerType === 'mouse'))
-                  send({ type: 'FocusExpressions' });
-                send({ type: 'Fields', fields: { expressionPointerType: '' } });
-              }}
-              disabled={!props.enabled}
-              aria-label="Choose emoji, GIF, or sticker"
-              aria-expanded={model.expressionOpen}
-            >
-              <Smile size={20} />
-            </button>
-            {model.formatMenu
-              ? ((position) => (
-                  <div
-                    class="composer-format-menu"
-                    role="menu"
-                    aria-label="Message formatting"
-                    style={{ left: `${position.x}px`, top: `${position.y}px` }}
-                  >
-                    {list(
-                      sequence([
-                        ['bold', 'Bold'],
-                        ['italic', 'Italic'],
-                        ['underline', 'Underline'],
-                        ['strike', 'Strikethrough'],
-                        ['code', 'Monospace'],
-                        ['spoiler', 'Spoiler'],
-                        ['blockquote', 'Quote'],
-                        ['textUrl', 'Create link'],
-                      ] as const),
-                      (_item) => {
-                        const [kind, label] = _item;
-                        return (
-                          <button
-                            role="menuitem"
-                            onClick={() => {
-                              applyFormat(kind);
-                              send({ type: 'Fields', fields: { formatMenu: undefined } });
-                            }}
-                          >
-                            <FormattingIcon kind={kind} /> {label}
-                          </button>
-                        );
-                      },
-                    )}
-                  </div>
-                ))(model.formatMenu!)
-              : null}
-            <textarea
-              rows="1"
-              value={props.composer.attachments.length ? '' : props.composer.draft}
-              onInput={(event) => {
-                props.composer.changeDraft(event.currentTarget.value);
-                updateMention(event.currentTarget);
-                void event.currentTarget.offsetHeight;
-                props.onGeometryChange?.();
-              }}
-              aria-autocomplete="list"
-              aria-expanded={Boolean(model.mention && mentionMembers().length)}
-              aria-controls="composer-mentions"
-              aria-activedescendant={
-                model.mention && mentionMembers()[model.mentionIndex]
-                  ? `mention-${mentionMembers()[model.mentionIndex]!.peer.id}`
-                  : undefined
-              }
-              onSelect={(event) => updateMention(event.currentTarget)}
-              onClick={(event) => updateMention(event.currentTarget)}
-              onKeyUp={(event) => {
-                if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
-                  updateMention(event.currentTarget);
-              }}
-              onBlur={() => send({ type: 'Fields', fields: { mention: undefined } })}
-              onKeyDown={(event) => {
-                if (event.isComposing || event.keyCode === 229) return;
-                const members = mentionMembers();
-                if (
-                  model.mention &&
-                  members.length > 0 &&
-                  !event.shiftKey &&
-                  !event.ctrlKey &&
-                  !event.metaKey &&
-                  !event.altKey
-                ) {
-                  if (['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (event.key === 'Escape')
-                      send({ type: 'Fields', fields: { mention: undefined } });
-                    else if (event.key === 'Enter' || event.key === 'Tab')
-                      send({
-                        type: 'SelectMention',
-                        member: members[model.mentionIndex] ?? members[0]!,
-                      });
-                    else {
-                      const index =
-                        (model.mentionIndex + (event.key === 'ArrowUp' ? -1 : 1) + members.length) %
-                        members.length;
-                      send({ type: 'Fields', fields: { mentionIndex: index } });
-                      model.element
-                        ?.querySelectorAll('.composer-mentions button')
-                        [index]?.scrollIntoView({ block: 'nearest' });
-                    }
-                    return;
-                  }
-                }
-                if (!props.enabled) {
-                  event.preventDefault();
-                  return;
-                }
-                if (event.key === 'Escape' && props.composer.editing) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  props.composer.cancelEdit();
-                  return;
-                }
-                if (event.key === 'Escape' && props.composer.reply) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  props.composer.clearReply();
-                  props.composer.focus();
-                  return;
-                }
-                if (
-                  event.key === 'ArrowUp' &&
-                  !event.altKey &&
-                  !event.ctrlKey &&
-                  !event.metaKey &&
-                  !event.shiftKey &&
-                  !event.isComposing &&
-                  event.keyCode !== 229 &&
-                  props.composer.draft.length === 0 &&
-                  props.composer.attachments.length === 0 &&
-                  !props.composer.reply &&
-                  !props.composer.editing &&
-                  props.editLastMessage?.()
-                ) {
-                  event.preventDefault();
-                  return;
-                }
-                if (
-                  event.key === 'Enter' &&
-                  !event.shiftKey &&
-                  !event.isComposing &&
-                  event.keyCode !== 229
-                ) {
-                  event.preventDefault();
-                  if (props.forwardDraft) props.forwardDraft.send();
-                  else props.composer.send();
-                }
-              }}
-              onPaste={(event) => {
-                if (!props.canSendMedia) return;
-                const clipboard = event.clipboardData;
-                if (!clipboard?.files.length) return;
-                event.preventDefault();
-                attachTransferredFiles(clipboard.files, `${transferName('pasted-image')}.png`);
-              }}
-              onContextMenu={(event) => {
-                if (!props.enabled) return;
-                if (event.currentTarget.selectionStart === event.currentTarget.selectionEnd) return;
-                event.preventDefault();
-                setExpressionOpen(false);
-                send({
-                  type: 'Fields',
-                  fields: { formatMenu: { ...formatMenuPosition(event.clientX, event.clientY) } },
-                });
-              }}
-              placeholder={props.placeholder || 'Write a message'}
-              aria-label="Message"
-              readOnly={!props.enabled}
             />
-            <div class="composer-attach-area">
-              {model.attachmentMenuOpen ? (
-                <div class="composer-attach-menu" role="group" aria-label="Attach">
-                  <button
-                    type="button"
-                    disabled={!props.canSendMedia}
-                    onClick={(event) => {
-                      pickFiles(event, 'media');
-                      send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
-                    }}
-                  >
-                    <Image size={20} /> Photo or video
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!props.canSendMedia}
-                    onClick={(event) => {
-                      pickFiles(event, 'file');
-                      send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
-                    }}
-                  >
-                    <FileText size={20} />
-                    File
-                  </button>
-                  {props.sendPoll && !props.composer.editing ? (
-                    <button
-                      type="button"
-                      disabled={!props.canSendPolls}
-                      onClick={() =>
-                        send({
-                          type: 'Fields',
-                          fields: { attachmentMenuOpen: false, pollOpen: true },
-                        })
-                      }
-                    >
-                      <ChartNoAxesColumn size={20} /> Poll
-                    </button>
-                  ) : null}
+            <div
+              class="composer"
+              onDragOver={(event) => {
+                const transfer = event.dataTransfer;
+                if (transfer?.types.includes('Files')) event.preventDefault();
+              }}
+              onDrop={(event) => {
+                if (!props.canSendMedia) return;
+                const transfer = event.dataTransfer;
+                if (!transfer?.files.length) return;
+                event.preventDefault();
+                attachTransferredFiles(transfer.files, transferName('dropped-file'));
+              }}
+            >
+              {model.mention && mentionMembers().length > 0 ? (
+                <div
+                  class="composer-mentions"
+                  id="composer-mentions"
+                  role="listbox"
+                  aria-label="Mention a member"
+                >
+                  {list(
+                    idRows(mentionMembers().map((member) => ({ ...member, id: member.peer.id }))),
+                    (member) => (
+                      <button
+                        type="button"
+                        role="option"
+                        id={`mention-${member.peer.id}`}
+                        aria-selected={
+                          mentionMembers()[model.mentionIndex]?.peer.id === member.peer.id
+                        }
+                        onPointerDown={(event) => event.preventDefault()}
+                        onClick={() => send({ type: 'SelectMention', member })}
+                      >
+                        <span class="composer-mention-avatar" style={{ background: member.color }}>
+                          {member.initials}
+                        </span>
+                        <span class="composer-mention-name">
+                          <strong>{member.title}</strong>
+                          {member.username ? <small>@{member.username}</small> : null}
+                        </span>
+                      </button>
+                    ),
+                  )}
                 </div>
               ) : null}
               <button
                 class="composer-icon-button"
-                title="Attach files or create a poll"
-                aria-expanded={model.attachmentMenuOpen}
-                onClick={() =>
+                onPointerDown={(event) => {
+                  send({ type: 'Fields', fields: { expressionPointerType: event.pointerType } });
+                }}
+                onClick={(event) => {
+                  const open = !model.expressionOpen;
+                  setExpressionOpen(open);
+                  if (open && (event.detail === 0 || model.expressionPointerType === 'mouse'))
+                    send({ type: 'FocusExpressions' });
+                  send({ type: 'Fields', fields: { expressionPointerType: '' } });
+                }}
+                disabled={!props.enabled}
+                aria-label="Choose emoji, GIF, or sticker"
+                aria-expanded={model.expressionOpen}
+              >
+                <Smile size={20} />
+              </button>
+              {model.formatMenu
+                ? ((position) => (
+                    <div
+                      class="composer-format-menu"
+                      role="menu"
+                      aria-label="Message formatting"
+                      style={{ left: `${position.x}px`, top: `${position.y}px` }}
+                    >
+                      {list(
+                        sequence([
+                          ['bold', 'Bold'],
+                          ['italic', 'Italic'],
+                          ['underline', 'Underline'],
+                          ['strike', 'Strikethrough'],
+                          ['code', 'Monospace'],
+                          ['spoiler', 'Spoiler'],
+                          ['blockquote', 'Quote'],
+                          ['textUrl', 'Create link'],
+                        ] as const),
+                        (_item) => {
+                          const [kind, label] = _item;
+                          return (
+                            <button
+                              role="menuitem"
+                              onClick={() => {
+                                applyFormat(kind);
+                                send({ type: 'Fields', fields: { formatMenu: undefined } });
+                              }}
+                            >
+                              <FormattingIcon kind={kind} /> {label}
+                            </button>
+                          );
+                        },
+                      )}
+                    </div>
+                  ))(model.formatMenu!)
+                : null}
+              {props.replyKeyboardAvailable ? (
+                <button
+                  class="composer-icon-button"
+                  title={props.replyKeyboard ? 'Hide bot keyboard' : 'Show bot keyboard'}
+                  aria-label={props.replyKeyboard ? 'Hide bot keyboard' : 'Show bot keyboard'}
+                  aria-expanded={Boolean(props.replyKeyboard)}
+                  onClick={props.toggleReplyKeyboard}
+                >
+                  <Keyboard size={20} />
+                </button>
+              ) : null}
+              <textarea
+                rows="1"
+                value={props.composer.attachments.length ? '' : props.composer.draft}
+                onInput={(event) => {
+                  props.composer.changeDraft(event.currentTarget.value);
+                  updateMention(event.currentTarget);
+                  void event.currentTarget.offsetHeight;
+                  props.onGeometryChange?.();
+                }}
+                aria-autocomplete="list"
+                aria-expanded={Boolean(model.mention && mentionMembers().length)}
+                aria-controls="composer-mentions"
+                aria-activedescendant={
+                  model.mention && mentionMembers()[model.mentionIndex]
+                    ? `mention-${mentionMembers()[model.mentionIndex]!.peer.id}`
+                    : undefined
+                }
+                onSelect={(event) => updateMention(event.currentTarget)}
+                onClick={(event) => updateMention(event.currentTarget)}
+                onKeyUp={(event) => {
+                  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
+                    updateMention(event.currentTarget);
+                }}
+                onBlur={() => send({ type: 'Fields', fields: { mention: undefined } })}
+                onKeyDown={(event) => {
+                  if (event.isComposing || event.keyCode === 229) return;
+                  if (
+                    commandQuery() &&
+                    !event.shiftKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.altKey
+                  ) {
+                    const items = [
+                      ...(model.element?.querySelectorAll<HTMLButtonElement>(
+                        '.bot-command-menu [role="menuitem"]:not(:disabled)',
+                      ) ?? []),
+                    ];
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      closeCommands();
+                      return;
+                    }
+                    if (
+                      items.length &&
+                      ['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)
+                    ) {
+                      event.preventDefault();
+                      if (event.key === 'Enter' || event.key === 'Tab') items[0]?.click();
+                      else (event.key === 'ArrowUp' ? items.at(-1) : items[0])?.focus();
+                      return;
+                    }
+                  }
+                  const members = mentionMembers();
+                  if (
+                    model.mention &&
+                    members.length > 0 &&
+                    !event.shiftKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.altKey
+                  ) {
+                    if (['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (event.key === 'Escape')
+                        send({ type: 'Fields', fields: { mention: undefined } });
+                      else if (event.key === 'Enter' || event.key === 'Tab')
+                        send({
+                          type: 'SelectMention',
+                          member: members[model.mentionIndex] ?? members[0]!,
+                        });
+                      else {
+                        const index =
+                          (model.mentionIndex +
+                            (event.key === 'ArrowUp' ? -1 : 1) +
+                            members.length) %
+                          members.length;
+                        send({ type: 'Fields', fields: { mentionIndex: index } });
+                        model.element
+                          ?.querySelectorAll('.composer-mentions button')
+                          [index]?.scrollIntoView({ block: 'nearest' });
+                      }
+                      return;
+                    }
+                  }
+                  if (!props.enabled) {
+                    event.preventDefault();
+                    return;
+                  }
+                  if (event.key === 'Escape' && props.composer.editing) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    props.composer.cancelEdit();
+                    return;
+                  }
+                  if (event.key === 'Escape' && props.composer.reply) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    props.composer.clearReply();
+                    props.composer.focus();
+                    return;
+                  }
+                  if (
+                    event.key === 'ArrowUp' &&
+                    !event.altKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.shiftKey &&
+                    !event.isComposing &&
+                    event.keyCode !== 229 &&
+                    props.composer.draft.length === 0 &&
+                    props.composer.attachments.length === 0 &&
+                    !props.composer.reply &&
+                    !props.composer.editing &&
+                    props.editLastMessage?.()
+                  ) {
+                    event.preventDefault();
+                    return;
+                  }
+                  if (
+                    event.key === 'Enter' &&
+                    !event.shiftKey &&
+                    !event.isComposing &&
+                    event.keyCode !== 229
+                  ) {
+                    event.preventDefault();
+                    if (props.forwardDraft) props.forwardDraft.send();
+                    else props.composer.send();
+                  }
+                }}
+                onPaste={(event) => {
+                  if (!props.canSendMedia) return;
+                  const clipboard = event.clipboardData;
+                  if (!clipboard?.files.length) return;
+                  event.preventDefault();
+                  attachTransferredFiles(clipboard.files, `${transferName('pasted-image')}.png`);
+                }}
+                onContextMenu={(event) => {
+                  if (!props.enabled) return;
+                  if (event.currentTarget.selectionStart === event.currentTarget.selectionEnd)
+                    return;
+                  event.preventDefault();
+                  setExpressionOpen(false);
                   send({
                     type: 'Fields',
-                    fields: { attachmentMenuOpen: !model.attachmentMenuOpen },
-                  })
-                }
-                disabled={!props.canSendMedia && !props.canSendPolls}
-                aria-label={props.composer.editing ? 'Replace media' : 'Attach files'}
-              >
-                <Paperclip size={20} />
-              </button>
+                    fields: { formatMenu: { ...formatMenuPosition(event.clientX, event.clientY) } },
+                  });
+                }}
+                placeholder={props.placeholder || 'Write a message'}
+                aria-label="Message"
+                readOnly={!props.enabled}
+              />
+              <div class="composer-attach-area">
+                {model.attachmentMenuOpen ? (
+                  <div class="composer-attach-menu" role="group" aria-label="Attach">
+                    <button
+                      type="button"
+                      disabled={!props.canSendMedia}
+                      onClick={(event) => {
+                        pickFiles(event, 'media');
+                        send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
+                      }}
+                    >
+                      <Image size={20} /> Photo or video
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!props.canSendMedia}
+                      onClick={(event) => {
+                        pickFiles(event, 'file');
+                        send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
+                      }}
+                    >
+                      <FileText size={20} />
+                      File
+                    </button>
+                    {props.sendPoll && !props.composer.editing ? (
+                      <button
+                        type="button"
+                        disabled={!props.canSendPolls}
+                        onClick={() =>
+                          send({
+                            type: 'Fields',
+                            fields: { attachmentMenuOpen: false, pollOpen: true },
+                          })
+                        }
+                      >
+                        <ChartNoAxesColumn size={20} /> Poll
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                <button
+                  class="composer-icon-button"
+                  title="Attach files or create a poll"
+                  aria-expanded={model.attachmentMenuOpen}
+                  onClick={() =>
+                    send({
+                      type: 'Fields',
+                      fields: { attachmentMenuOpen: !model.attachmentMenuOpen },
+                    })
+                  }
+                  disabled={!props.canSendMedia && !props.canSendPolls}
+                  aria-label={props.composer.editing ? 'Replace media' : 'Attach files'}
+                >
+                  <Paperclip size={20} />
+                </button>
+              </div>
             </div>
+            <button
+              class="send-button"
+              onClick={() =>
+                props.forwardDraft ? props.forwardDraft.send() : props.composer.send()
+              }
+              disabled={
+                props.forwardDraft?.busy ||
+                (!props.forwardDraft &&
+                  !props.composer.draft.trim() &&
+                  props.composer.attachments.length === 0 &&
+                  !props.composer.editing?.media) ||
+                !props.enabled
+              }
+              aria-label="Send message"
+            >
+              <SendHorizontal size={18} />
+            </button>
           </div>
-          <button
-            class="send-button"
-            onClick={() => (props.forwardDraft ? props.forwardDraft.send() : props.composer.send())}
-            disabled={
-              props.forwardDraft?.busy ||
-              (!props.forwardDraft &&
-                !props.composer.draft.trim() &&
-                props.composer.attachments.length === 0 &&
-                !props.composer.editing?.media) ||
-              !props.enabled
-            }
-            aria-label="Send message"
-          >
-            <SendHorizontal size={18} />
-          </button>
-        </div>
+        )}
+        {props.replyKeyboard && props.onReplyButton ? (
+          <div class="bot-reply-panel">
+            <BotKeyboard
+              keyboard={props.replyKeyboard}
+              disabled={!props.enabled}
+              busyButton={props.replyKeyboardBusy}
+              label="Bot reply keyboard"
+              onPress={props.onReplyButton}
+            />
+          </div>
+        ) : null}
         {model.pollOpen && props.sendPoll ? (
           <PollCreateDialog
             close={() => send({ type: 'Fields', fields: { pollOpen: false } })}

@@ -8,7 +8,7 @@ import { LinkPreview } from './LinkPreview';
 import { RichMessageBody } from './RichMessageBody';
 interface TextPart {
   text: string;
-  kind: 'text' | 'mention' | 'link';
+  kind: 'text' | 'mention' | 'link' | 'command';
   url?: string;
   formats: Set<string>;
   formatData: Map<
@@ -20,34 +20,38 @@ interface TextPart {
     }
   >;
 }
-function textParts(message: ChatMessage): TextPart[] {
-  const ranges: Array<{ offset: number; length: number; kind: 'mention' | 'link'; url?: string }> =
-    [
-      ...(message.mentions ?? []).map(({ offset, length, userId }) => ({
-        offset,
-        length,
-        kind: 'mention' as const,
-        ...(userId ? { url: `tg://user?id=${userId.slice(2)}` } : {}),
-      })),
-      ...(message.formats ?? []).flatMap((format) =>
-        format.kind === 'mention' || format.kind === 'mentionName'
-          ? [
-              {
-                offset: format.offset,
-                length: format.length,
-                kind: 'mention' as const,
-                ...(format.userId ? { url: `tg://user?id=${format.userId.slice(2)}` } : {}),
-              },
-            ]
-          : [],
-      ),
-      ...(message.links ?? []).map(({ offset, length, url }) => ({
-        offset,
-        length,
-        kind: 'link' as const,
-        ...(url ? { url } : {}),
-      })),
-    ];
+function textParts(message: ChatMessage, botCommands = false): TextPart[] {
+  const ranges: Array<{
+    offset: number;
+    length: number;
+    kind: 'mention' | 'link' | 'command';
+    url?: string;
+  }> = [
+    ...(message.mentions ?? []).map(({ offset, length, userId }) => ({
+      offset,
+      length,
+      kind: 'mention' as const,
+      ...(userId ? { url: `tg://user?id=${userId.slice(2)}` } : {}),
+    })),
+    ...(message.formats ?? []).flatMap((format) =>
+      format.kind === 'mention' || format.kind === 'mentionName'
+        ? [
+            {
+              offset: format.offset,
+              length: format.length,
+              kind: 'mention' as const,
+              ...(format.userId ? { url: `tg://user?id=${format.userId.slice(2)}` } : {}),
+            },
+          ]
+        : [],
+    ),
+    ...(message.links ?? []).map(({ offset, length, url }) => ({
+      offset,
+      length,
+      kind: 'link' as const,
+      ...(url ? { url } : {}),
+    })),
+  ];
   for (const match of message.body.matchAll(
     /(?:https?:\/\/|tg:\/\/|(?:t\.me|telegram\.me|telegram\.dog)\/)[^\s]+/giu,
   )) {
@@ -57,6 +61,29 @@ function textParts(message: ChatMessage): TextPart[] {
       (range) => offset < range.offset + range.length && offset + text.length > range.offset,
     );
     if (!overlaps) ranges.push({ offset, length: text.length, kind: 'link', url: text });
+  }
+  for (const match of message.body.matchAll(
+    /(?<![\p{L}\p{N}_/])\/[A-Za-z0-9_]{1,32}(?:@[A-Za-z0-9_]{1,32})?(?![A-Za-z0-9_@/])/gu,
+  )) {
+    const offset = match.index,
+      length = match[0].length;
+    const formats = message.formats ?? [];
+    if (
+      !botCommands &&
+      !formats.some(
+        (format) =>
+          format.kind === 'botCommand' && format.offset === offset && format.length === length,
+      )
+    )
+      continue;
+    if (
+      [
+        ...ranges,
+        ...formats.filter((format) => ['code', 'pre', 'textUrl'].includes(format.kind)),
+      ].some((range) => offset < range.offset + range.length && offset + length > range.offset)
+    )
+      continue;
+    ranges.push({ offset, length, kind: 'command', url: match[0] });
   }
   const boundaries = new Set([0, message.body.length]);
   for (const range of [...ranges, ...(message.formats ?? [])]) {
@@ -194,7 +221,17 @@ const Part = component<{ part: TextPart }, PartState, PartMessage>(
             ? `https://t.me/${props.part.text.slice(1)}`
             : undefined),
       );
-    return (props.part.kind === 'link' || props.part.kind === 'mention') && href() ? (
+    return props.part.kind === 'command' ? (
+      <button
+        type="button"
+        class="message-bot-command"
+        data-bot-command={props.part.url}
+        title={`Send ${props.part.url}`}
+        onClick={activateHidden}
+      >
+        {content(false)}
+      </button>
+    ) : (props.part.kind === 'link' || props.part.kind === 'mention') && href() ? (
       <a
         href={href()}
         target="_blank"
@@ -219,6 +256,7 @@ const Part = component<{ part: TextPart }, PartState, PartMessage>(
 export const MessageBody = view<
   {
     message: ChatMessage;
+    botCommands?: boolean;
     previewPhoto?: Source<AsyncResult.AsyncResult<string | undefined, never>> | undefined;
     loadPreviewMedia?: (() => Effect.Effect<string, unknown>) | undefined;
   },
@@ -232,7 +270,7 @@ export const MessageBody = view<
         )
       ) : (
         <p class="message-body">
-          {list(sequence(textParts(props.message)), (part) => (
+          {list(sequence(textParts(props.message, props.botCommands)), (part) => (
             <Part part={part} />
           ))}
         </p>

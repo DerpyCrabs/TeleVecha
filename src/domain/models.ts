@@ -153,6 +153,7 @@ export interface ChatMessage {
           | 'blockquote'
           | 'expandableBlockquote'
           | 'mention'
+          | 'botCommand'
           | 'mentionName'
           | 'textUrl'
           | 'customEmoji'

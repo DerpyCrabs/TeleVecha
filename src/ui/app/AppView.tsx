@@ -1,3 +1,5 @@
+import ChevronRight from '@effectweb/lucide/icons/chevron-right';
+import { LiveDrafts } from '../bots/LiveDrafts';
 import { EarlierGroupHistory } from '../groups/EarlierGroupHistory';
 import { SavedTagPicker } from '../saved/SavedTagPicker';
 import { SavedDialogs } from '../saved/SavedDialogs';
@@ -27,7 +29,6 @@ import { telegramPeerColor } from '../../domain/peerColor';
 import type { TelegramMessageCapabilities } from '../../telegram/core/chatPermissions';
 import { messageCapabilities } from '../../telegram/core/chatPermissions';
 import type { TelegramMessage, TelegramPeer } from '../../telegram/types';
-import { BotControls } from '../bots/BotControls';
 import { BotKeyboard } from '../bots/BotKeyboard';
 import { BotUrlAuthDialog } from '../bots/BotUrlAuthDialog';
 import { ChatSidebar } from '../chat/ChatSidebar';
@@ -1141,9 +1142,11 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                               ))(layout.media!)
                             : null}
                           <div class="message-copy">
-                            {!layout.fileAlbum ? (
+                            {!layout.fileAlbum ||
+                            layout.album.filter((item) => item.body.trim()).length === 1 ? (
                               <MessageBody
                                 message={caption}
+                                botCommands={Boolean(activeChat.bot)}
                                 previewPhoto={
                                   message.linkPreview?.hasPhoto
                                     ? model.queries.previewPhoto(
@@ -1166,29 +1169,6 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 }
                               />
                             ) : null}
-                            {(
-                              message.comments
-                                ? message
-                                : layout.album.find((item) => item.comments)
-                            )
-                              ? ((source) => (
-                                  <button
-                                    class="message-comments"
-                                    onClick={() =>
-                                      model.openComments(activeChatId, Number(source.id))
-                                    }
-                                  >
-                                    <MessageSquareText size={16} />{' '}
-                                    {source.comments!.count
-                                      ? `${source.comments!.count} comments`
-                                      : 'View comments'}
-                                  </button>
-                                ))(
-                                  (message.comments
-                                    ? message
-                                    : layout.album.find((item) => item.comments))!,
-                                )
-                              : null}
                             {!message.service && Number.isSafeInteger(Number(message.id)) ? (
                               <>
                                 {model.savedInfo?.peer.id === activeChatId &&
@@ -1269,33 +1249,29 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                               ) : null}
                             </footer>
                           </div>
-                          {(
-                            !message.service && message.botKeyboard?.kind === 'inline'
-                              ? message.botKeyboard
-                              : undefined
-                          )
-                            ? ((keyboard) => (
-                                <BotKeyboard
-                                  keyboard={keyboard}
-                                  disabled={!canUseLiveCommands}
-                                  busyButton={
-                                    bot.buttonBusy?.owner === message.id
-                                      ? bot.buttonBusy?.key
-                                      : undefined
+                          {(message.comments ? message : layout.album.find((item) => item.comments))
+                            ? ((source) => (
+                                <button
+                                  class="message-comments"
+                                  onClick={() =>
+                                    model.openComments(activeChatId, Number(source.id))
                                   }
-                                  label={`Actions for message ${message.id}`}
-                                  onPress={(button, key) =>
-                                    runInBackground(
-                                      bot.press(button, message.id, key, Number(message.id)),
-                                    )
-                                  }
-                                />
+                                >
+                                  <MessageSquareText size={18} aria-hidden="true" />
+                                  <span>
+                                    {source.comments!.count
+                                      ? `${source.comments!.count} comments`
+                                      : 'View comments'}
+                                  </span>
+                                  <ChevronRight size={18} aria-hidden="true" />
+                                </button>
                               ))(
-                                (!message.service && message.botKeyboard?.kind === 'inline'
-                                  ? message.botKeyboard
-                                  : undefined)!,
+                                (message.comments
+                                  ? message
+                                  : layout.album.find((item) => item.comments))!,
                               )
                             : null}
+
                           {message.status === 'failed' && pendingSendForMessage(message.id)
                             ? ((pending) => (
                                 <div
@@ -1319,6 +1295,33 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                               ))(pendingSendForMessage(message.id)!)
                             : null}
                         </article>
+                        {(
+                          !message.service && message.botKeyboard?.kind === 'inline'
+                            ? message.botKeyboard
+                            : undefined
+                        )
+                          ? ((keyboard) => (
+                              <BotKeyboard
+                                keyboard={keyboard}
+                                disabled={!canUseLiveCommands}
+                                busyButton={
+                                  bot.buttonBusy?.owner === message.id
+                                    ? bot.buttonBusy?.key
+                                    : undefined
+                                }
+                                label={`Actions for message ${message.id}`}
+                                onPress={(button, key) =>
+                                  runInBackground(
+                                    bot.press(button, message.id, key, Number(message.id)),
+                                  )
+                                }
+                              />
+                            ))(
+                              (!message.service && message.botKeyboard?.kind === 'inline'
+                                ? message.botKeyboard
+                                : undefined)!,
+                            )
+                          : null}
                       </div>
                     );
                   })
@@ -1554,6 +1557,12 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                           ))(messageContextTarget!)
                         : null)(messageContextMenu!)
                   : null}
+                <LiveDrafts
+                  drafts={(snapshot.liveDrafts ?? []).filter(
+                    (draft) =>
+                      draft.peerId === activeChatId && draft.topicId === model.activeTopic?.id,
+                  )}
+                />
                 <div class="present-scroll-anchor" aria-hidden="true" />
               </div>
             </div>
@@ -1612,35 +1621,6 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                 </div>
               ))(bot.notice!)
             : null}
-          {activeChatId !== 'empty' &&
-          (activeChat.bot ||
-            bot.commands.length > 0 ||
-            Boolean(visibleReplyKeyboard?.keyboard.rows.some((row) => row.length > 0))) ? (
-            <BotControls
-              isBot={Boolean(activeChat.bot)}
-              appTitle={
-                activeDialog?.userDetails?.botMenu?.text ??
-                (activeDialog?.userDetails?.botHasMainApp ? 'Open App' : undefined)
-              }
-              appBusy={bot.buttonBusy?.owner === 'menu'}
-              onOpenApp={() => runInBackground(bot.openMenuApp())}
-              showCommands={Boolean(activeChat.bot || bot.commands.length > 0)}
-              started={botStarted}
-              enabled={canUseLiveCommands}
-              starting={bot.starting}
-              menuOpen={bot.menuOpen}
-              loadingCommands={bot.commandsLoading}
-              commands={bot.commands}
-              replyKeyboard={visibleReplyKeyboard?.keyboard}
-              busyButton={bot.buttonBusy?.owner === 'reply' ? bot.buttonBusy?.key : undefined}
-              onToggleMenu={bot.toggleMenu}
-              onStart={() => runInBackground(bot.start())}
-              onCommand={bot.sendCommand}
-              onReplyButton={(button, key) =>
-                runInBackground(bot.press(button, 'reply', key, visibleReplyKeyboard?.messageId))
-              }
-            />
-          ) : null}
           {model.activeSaved && model.activeSaved.peer.id !== activeChatId ? (
             <div class="saved-source-footer">
               <span>Saved from {model.activeSaved.title}</span>
@@ -1650,6 +1630,36 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             </div>
           ) : (
             <ChatComposer
+              botControls={
+                activeChatId !== 'empty' && (activeChat.bot || bot.commands.length > 0)
+                  ? {
+                      isBot: Boolean(activeChat.bot),
+                      appTitle:
+                        activeDialog?.userDetails?.botMenu?.text ??
+                        (activeDialog?.userDetails?.botHasMainApp ? 'Open App' : undefined),
+                      appBusy: bot.buttonBusy?.owner === 'menu',
+                      onOpenApp: () => runInBackground(bot.openMenuApp()),
+                      showCommands: Boolean(activeChat.bot || bot.commands.length),
+                      started: botStarted,
+                      enabled: canUseLiveCommands,
+                      starting: bot.starting,
+                      menuOpen: bot.menuOpen,
+                      loadingCommands: bot.commandsLoading,
+                      commands: bot.commands,
+                      onToggleMenu: bot.toggleMenu,
+                      onCloseMenu: bot.closeMenu,
+                      onStart: () => runInBackground(bot.start()),
+                      onCommand: bot.sendCommand,
+                    }
+                  : undefined
+              }
+              replyKeyboard={visibleReplyKeyboard?.keyboard}
+              replyKeyboardAvailable={model.replyKeyboard.available}
+              toggleReplyKeyboard={model.replyKeyboard.toggle}
+              replyKeyboardBusy={bot.buttonBusy?.owner === 'reply' ? bot.buttonBusy.key : undefined}
+              onReplyButton={(button, key) =>
+                runInBackground(bot.press(button, 'reply', key, visibleReplyKeyboard?.messageId))
+              }
               forwardDraft={
                 model.forwardDraft
                   ? {
@@ -2002,6 +2012,22 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
             ))(deleteChatTarget!)
           : null}
 
+        {bot.alert ? (
+          <Dialog
+            title={activeChat.title}
+            label="Bot message"
+            onClose={bot.closeAlert}
+            footer={
+              <div class="bot-alert-actions">
+                <button class="primary-button" onClick={bot.closeAlert}>
+                  OK
+                </button>
+              </div>
+            }
+          >
+            <p class="bot-alert-text">{bot.alert}</p>
+          </Dialog>
+        ) : null}
         {bot.webAppLaunch ? (
           <WebAppLaunchDialog
             pending={bot.webAppLaunch}

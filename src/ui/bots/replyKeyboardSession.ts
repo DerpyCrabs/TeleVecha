@@ -47,7 +47,7 @@ export function createReplyKeyboardSession(options: {
     const snapshot = options.snapshot();
     if (snapshot.activePeerId !== options.activePeerId()) return false;
     return (
-      snapshot.messages.some(({ outgoing }) => outgoing) ||
+      snapshot.messages.length > 0 ||
       snapshot.pending.some(
         ({ peer, botStart }) => peer.id === options.activePeerId() && Boolean(botStart),
       )
@@ -74,7 +74,16 @@ export function createReplyKeyboardSession(options: {
       current.message.text || current.message.media?.name || 'The bot requested a reply',
     );
   };
-  const actions = { refresh, dismissSingleUse };
+  const toggle = () => {
+    const current = active();
+    if (!current || current.keyboard.hidden) return;
+    const key = `${options.activePeerId()}:${current.messageId}`;
+    const dismissed = new Set(state.model().dismissed);
+    if (dismissed.has(key)) dismissed.delete(key);
+    else dismissed.add(key);
+    state.send({ type: 'Dismissed', value: dismissed });
+  };
+  const actions = { refresh, dismissSingleUse, toggle };
   return {
     ...actions,
     model: state.model,
@@ -83,6 +92,11 @@ export function createReplyKeyboardSession(options: {
       scope.dispose();
       state.dispose();
     },
-    snapshot: () => ({ ...actions, visible: visible(), botStarted: botStarted() }),
+    snapshot: () => ({
+      ...actions,
+      available: Boolean(active()?.keyboard.rows.length && !active()?.keyboard.hidden),
+      visible: visible(),
+      botStarted: botStarted(),
+    }),
   };
 }

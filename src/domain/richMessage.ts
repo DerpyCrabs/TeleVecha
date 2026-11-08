@@ -19,6 +19,7 @@ export type RichText =
   | { kind: 'concat'; children: readonly RichText[] }
   | RichStyledText
   | { kind: 'link'; child: RichText; url: string }
+  | { kind: 'command'; child: RichText; command: string }
   | { kind: 'anchor'; child: RichText; name: string }
   | { kind: 'customEmoji'; alt: string; documentId: string }
   | { kind: 'math'; source: string }

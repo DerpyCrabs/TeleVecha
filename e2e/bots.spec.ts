@@ -14,7 +14,7 @@ test('shows no bot commands in channels or in groups without published commands'
       .getByRole('button', { name: /Release Channel/ })
       .click();
 
-    await expect(page.getByRole('button', { name: 'Commands' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Menu', exact: true })).toHaveCount(0);
     await expect(page.locator('.bot-command-bar')).toHaveCount(0);
     await expect(page.locator('.message-sender-avatar')).toHaveCount(1);
     await expect(page.locator('.message-sender-avatar img')).toBeVisible();
@@ -45,7 +45,7 @@ test('shows no bot commands in channels or in groups without published commands'
       .click();
 
     await expect.poll(async () => (await fixtureStats(page))?.getBotCommands).toBe(1);
-    await expect(page.getByRole('button', { name: 'Commands' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Menu', exact: true })).toHaveCount(0);
     await expect(page.locator('.bot-command-bar')).toHaveCount(0);
   });
 });
@@ -180,7 +180,7 @@ test('starts and restarts bots, sends commands, and handles bot keyboards', asyn
   await expect(page.getByTestId('reply-bot-keyboard')).toBeVisible();
   await expect(page.getByTestId('inline-bot-keyboard')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Commands' }).click();
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await page.getByRole('menuitem', { name: /\/help.*Show available commands/ }).click();
   await expect(page.getByTestId('message-scroller')).toContainText('/help');
 
@@ -190,7 +190,7 @@ test('starts and restarts bots, sends commands, and handles bot keyboards', asyn
   await page.getByTestId('inline-bot-keyboard').getByRole('button', { name: 'Refresh' }).click();
   await expect(page.locator('.bot-callback-notice')).toContainText('Fixture callback complete.');
 
-  await page.getByRole('button', { name: 'Commands' }).click();
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Restart bot' }).click();
 
   await expect
@@ -211,7 +211,7 @@ test('reloads commands when Telegram invalidates the active bot command list', a
   await page.getByRole('textbox', { name: 'Search chats' }).fill('helper');
   await page.getByTestId('peer-search-result').filter({ hasText: 'Fixture Helper Bot' }).click();
   await page.getByRole('button', { name: 'Start bot' }).click();
-  await page.getByRole('button', { name: 'Commands' }).click();
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await expect.poll(async () => (await fixtureStats(page))?.getBotCommands).toBe(1);
 
   await page.evaluate(() => {
@@ -291,7 +291,7 @@ test('loads chat-scoped bot commands and addresses the selected bot in a group',
     .getByRole('button', { name: /Fixture Group/ })
     .click();
 
-  await page.getByRole('button', { name: 'Commands' }).click();
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await page.getByRole('menuitem', { name: /\/status@fixture_helper_bot/ }).click();
 
   await expect(page.getByTestId('message-scroller')).toContainText('/status@fixture_helper_bot');
@@ -463,4 +463,190 @@ test('asks for explicit consent before opening a URL-auth button', async ({ page
     writeAllowed: true,
     matchCode: 'L9M4',
   });
+});
+
+test('repeats message commands without replacing the draft and keeps bot controls in the composer', async ({
+  page,
+}) => {
+  await openReady(page);
+  await page.getByRole('textbox', { name: 'Search chats' }).fill('helper');
+  await page.getByTestId('peer-search-result').filter({ hasText: 'Fixture Helper Bot' }).click();
+  await page.getByRole('button', { name: 'Start bot' }).click();
+  const input = page.getByRole('textbox', { name: 'Message', exact: true });
+  await input.fill('Keep my unfinished message');
+  const count = (await fixtureStats(page))?.sendText ?? 0;
+  await page
+    .getByTestId('message-scroller')
+    .getByRole('button', { name: '/start', exact: true })
+    .click();
+  await expect.poll(async () => (await fixtureStats(page))?.sendText).toBe(count + 1);
+  await expect(input).toHaveValue('Keep my unfinished message');
+  await expect(
+    page.locator('.chat-composer').getByRole('button', { name: 'Menu', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Hide bot keyboard' }).click();
+  await expect(page.getByTestId('reply-bot-keyboard')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show bot keyboard' }).click();
+  await expect(page.getByTestId('reply-bot-keyboard')).toBeVisible();
+  await input.fill('/he');
+  await expect(page.getByRole('menuitem', { name: /\/help/ })).toBeVisible();
+  await input.press('Enter');
+  await expect(input).toHaveValue('');
+  await expect.poll(async () => (await fixtureStats(page))?.sendText).toBe(count + 2);
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  await page.screenshot({ path: '/tmp/televecha-bot-desktop.png' });
+  await input.click();
+  await expect(page.getByRole('menu', { name: 'Bot commands' })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.chat-sidebar')).toBeHidden();
+  await page.screenshot({ path: '/tmp/televecha-bot-mobile.png', animations: 'disabled' });
+  expect(
+    await page.locator('.chat-composer').evaluate((el) => el.scrollWidth <= el.clientWidth),
+  ).toBe(true);
+});
+
+test('renders live rich drafts in place and clears them on final delivery or expiry', async ({
+  page,
+}) => {
+  await openReady(page);
+  await page.getByRole('textbox', { name: 'Search chats' }).fill('helper');
+  await page.getByTestId('peer-search-result').filter({ hasText: 'Fixture Helper Bot' }).click();
+  await page.getByRole('button', { name: 'Start bot' }).click();
+  await expect(page.getByTestId('inline-bot-keyboard')).toBeVisible();
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'live-draft',
+      draft: { id: 'u:606:0:1', peerId: 'u:606', text: '' },
+    }),
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => [...(window.__televechaRuntimes?.values() ?? [])][0]?.engine.snapshot().liveDrafts,
+      ),
+    )
+    .toMatchObject([{ id: 'u:606:0:1' }]);
+  const draft = page.getByTestId('bot-live-draft');
+  await expect(draft).toContainText('Thinking…');
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'live-draft',
+      draft: {
+        id: 'u:606:0:1',
+        peerId: 'u:606',
+        text: '',
+        richMessage: {
+          blocks: [
+            { kind: 'heading', level: 2, text: { kind: 'text', text: 'Streaming answer' } },
+            { kind: 'math', source: String.raw`x^2 + \frac{1}{2}` },
+          ],
+        },
+      },
+    }),
+  );
+  await expect(draft).toHaveCount(1);
+  await expect(draft.getByRole('heading', { name: 'Streaming answer' })).toBeVisible();
+  await expect(draft.locator('.katex')).toBeVisible();
+  await page.screenshot({ path: '/tmp/televecha-bot-stream.png' });
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 13,
+      ptsCount: 1,
+      message: {
+        id: 900,
+        peerId: 'u:606',
+        senderId: 'u:606',
+        text: 'Final answer',
+        date: Math.floor(Date.now() / 1000),
+        outgoing: false,
+      },
+    }),
+  );
+  await expect(draft).toHaveCount(0);
+  await page.clock.install();
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'live-draft',
+      draft: { id: 'u:606:0:2', peerId: 'u:606', text: 'Partial answer' },
+    }),
+  );
+  await expect(draft).toContainText('Partial answer');
+  await page.clock.fastForward(31_000);
+  await expect(draft).toHaveCount(0);
+});
+
+test('recognizes CamelCase and addressed bot commands but leaves code and links alone', async ({
+  page,
+}) => {
+  await openReady(page);
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Fixture Group/ })
+    .click();
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 91,
+        peerId: 'g:303',
+        senderId: 'u:606',
+        text: '/usersCount@fixture_helper_bot /code https://example.com/menu',
+        date: Math.floor(Date.now() / 1000),
+        outgoing: false,
+        formats: [
+          { kind: 'botCommand', offset: 0, length: '/usersCount@fixture_helper_bot'.length },
+          { kind: 'code', offset: '/usersCount@fixture_helper_bot '.length, length: 5 },
+        ],
+      },
+    }),
+  );
+  const message = page.locator('article[data-message-id="91"]');
+  await expect(message.locator('.message-bot-command')).toHaveCount(1);
+  await expect(message.locator('.code')).toHaveText('/code');
+  const input = page.getByRole('textbox', { name: 'Message', exact: true });
+  await input.fill('Unfinished group message');
+  await message
+    .getByRole('button', { name: '/usersCount@fixture_helper_bot', exact: true })
+    .click();
+  await expect.poll(async () => (await fixtureStats(page))?.sendText).toBe(1);
+  await expect(input).toHaveValue('Unfinished group message');
+  await expect(page.locator('.message.outgoing .message-body')).toContainText(
+    '/usersCount@fixture_helper_bot',
+  );
+});
+
+test('keeps callback alerts visible until dismissed', async ({ page }) => {
+  await openReady(page);
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Fixture Group/ })
+    .click();
+  await page.evaluate(() =>
+    window.__televechaFixture?.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 92,
+        peerId: 'g:303',
+        senderId: 'u:606',
+        text: 'Show an alert',
+        date: Math.floor(Date.now() / 1000),
+        outgoing: false,
+        botKeyboard: {
+          kind: 'inline',
+          rows: [[{ kind: 'callback', text: 'Show alert', data: [99] }]],
+        },
+      },
+    }),
+  );
+  await page.getByRole('button', { name: 'Show alert', exact: true }).click();
+  const alert = page.getByRole('dialog', { name: 'Bot message' });
+  await expect(alert).toContainText('Fixture callback complete.');
+  await expect(page.locator('.bot-callback-notice')).toHaveCount(0);
+  await alert.getByRole('button', { name: 'OK', exact: true }).click();
+  await expect(alert).toHaveCount(0);
 });

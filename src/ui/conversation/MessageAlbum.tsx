@@ -206,11 +206,6 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
             ))}
           </div>
         ))}
-        {sharedCaption ? (
-          <div class="file-album-caption">
-            <MessageBody message={sharedCaption} />
-          </div>
-        ) : null}
         {model.viewer
           ? ((current) => (
               <MediaViewer

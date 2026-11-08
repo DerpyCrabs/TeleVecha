@@ -422,6 +422,7 @@ export interface TelegramTextFormat {
     | 'expandableBlockquote'
     | 'mention'
     | 'mentionName'
+    | 'botCommand'
     | 'textUrl'
     | 'customEmoji'
     | 'formattedDate'
@@ -664,7 +665,18 @@ export interface TelegramDownloadOptions {
   range?: { start: number; end: number } | undefined;
 }
 
+export interface TelegramLiveDraft {
+  id: string;
+  peerId: string;
+  topicId?: number | undefined;
+  text: string;
+  formats?: readonly TelegramTextFormat[] | undefined;
+  links?: TelegramMessage['links'];
+  richMessage?: TelegramMessage['richMessage'];
+}
+
 export type TransportUpdate =
+  | { type: 'live-draft'; draft: TelegramLiveDraft }
   | {
       type: 'read-message-contents';
       expectedReactionVersion?: number | undefined;
@@ -1359,6 +1371,7 @@ export type AccountSnapshot = {
   draftDetails: Record<string, TelegramDraftDetails>;
   pending: PendingSend[];
   activities: TelegramActivity[];
+  liveDrafts?: TelegramLiveDraft[] | undefined;
   authStep?: 'phone' | 'code' | 'password' | 'qr' | undefined;
   qrLogin?: { url: string; expires: number } | undefined;
   codeViaApp?: boolean | undefined;

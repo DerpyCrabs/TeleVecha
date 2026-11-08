@@ -133,9 +133,10 @@ export function layoutMessages(
     );
     const inlineTime = Boolean(
       !message.service &&
-      album.length === 0 &&
-      (!message.media || isImageDocument(message)) &&
-      message.body.trim() &&
+      (album.length === 0 ||
+        (fileAlbum && album.filter((item) => item.body.trim()).length === 1)) &&
+      (!message.media || isImageDocument(message) || fileAlbum) &&
+      caption.body.trim() &&
       !message.linkPreview &&
       message.botKeyboard?.kind !== 'inline',
     );
