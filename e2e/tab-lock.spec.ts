@@ -47,6 +47,7 @@ test('marks a chat read when any live tab is visible and forgets a closed follow
   await openReady(page, '/?chat=u%3A101');
   const second = await context.newPage();
   await openReady(second, '/?chat=u%3A101');
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.evaluate(async () => {
     const runtime = window.__televechaRuntimes?.get('fixture:default');
@@ -142,6 +143,8 @@ test('propagates a follower-initiated sign-out to every tab', async ({ context, 
   await openReady(page, '/?chat=u%3A101');
   const second = await context.newPage();
   await openReady(second, '/?chat=c%3A202');
+
+  await second.getByRole('button', { name: 'Open main menu' }).click();
 
   await second.getByRole('button', { name: 'Open settings' }).click();
   await second

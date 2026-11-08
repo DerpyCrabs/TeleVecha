@@ -9,6 +9,7 @@ for (const width of [1280, 375]) {
     const open = async () => {
       if (width <= 650)
         await page.getByRole('button', { name: 'Open chat list', exact: true }).click();
+      await page.getByRole('button', { name: 'Open main menu' }).click();
       await page.getByRole('button', { name: 'New message', exact: true }).click();
     };
     await open();
@@ -54,6 +55,7 @@ test('keeps a successfully created group when Telegram cannot invite a person', 
   page,
 }) => {
   await openReady(page, '/?scenario=create-partial');
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'New message', exact: true }).click();
   await page.getByRole('button', { name: 'New group', exact: true }).click();
   await page.getByRole('textbox', { name: 'Group name', exact: true }).fill('Private invitations');

@@ -5,6 +5,7 @@ import { fixtureStats, openReady, selectAlice } from './helpers';
 
 test('changes themes, accents, wallpapers and font size from settings', async ({ page }) => {
   await openReady(page);
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await test.step('does not show the removed saved Telegram themes catalog', async () => {
     const settings = page.getByRole('dialog', { name: 'Settings' });
@@ -81,6 +82,7 @@ test('changes themes, accents, wallpapers and font size from settings', async ({
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'day');
     await expect(page.locator('html')).toHaveAttribute('data-wallpaper', 'aurora');
   });
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await test.step('changes and persists message font size without resizing interface text', async () => {
     const settings = page.getByRole('dialog', { name: 'Settings' });
@@ -127,6 +129,7 @@ test('changes themes, accents, wallpapers and font size from settings', async ({
 
 test('uses the background explicitly assigned to a chat', async ({ page }) => {
   await openReady(page);
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Close settings' }).click();
   await page.evaluate(() => {

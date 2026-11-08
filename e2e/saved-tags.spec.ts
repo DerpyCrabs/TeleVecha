@@ -7,6 +7,7 @@ for (const width of [1280, 375]) {
     await page.setViewportSize({ width, height: 800 });
     if (width <= 650)
       await page.getByRole('button', { name: 'Open chat list', exact: true }).click();
+    await page.getByRole('button', { name: 'Open main menu' }).click();
     await page.getByRole('button', { name: 'Saved Messages', exact: true }).click();
     await page.getByRole('button', { name: /All messages Everything/ }).click();
     const history = page.getByTestId('message-scroller');
@@ -62,6 +63,7 @@ for (const width of [1280, 375]) {
 
 test('explains Premium requirement without offering a fake tag save', async ({ page }) => {
   await openReady(page, '/?scenario=saved-free');
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Saved Messages', exact: true }).click();
   await page.getByRole('button', { name: /All messages Everything/ }).click();
   await page.getByRole('button', { name: 'Edit tags for message 6001', exact: true }).click();

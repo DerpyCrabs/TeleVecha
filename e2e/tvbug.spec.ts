@@ -34,6 +34,7 @@ test('exports a compact account-free snapshot and inspects it without Telegram',
 
   const capturedPhoto = await page.locator('article[data-message-id="78"]').boundingBox();
   expect(capturedPhoto).not.toBeNull();
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   const downloadPromise = page.waitForEvent('download');
   await page

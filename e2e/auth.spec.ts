@@ -75,6 +75,7 @@ test('signs out, clears local account data, and returns to phone authentication'
   page,
 }) => {
   await openReady(page);
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await expect(settings).toBeVisible();
@@ -110,6 +111,7 @@ test('signs out, clears local account data, and returns to phone authentication'
 test('clears local cache and reconnects without signing out', async ({ page }) => {
   await openReady(page);
   const connectsBefore = (await fixtureStats(page))?.connect ?? 0;
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page
     .getByRole('dialog', { name: 'Settings' })

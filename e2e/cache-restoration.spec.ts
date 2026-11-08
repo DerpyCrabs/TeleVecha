@@ -199,6 +199,7 @@ test('restores a selected Telegram background from cache before Telegram reconne
   const scenario = 'held-connect';
   await page.goto(`/?scenario=${scenario}`);
   await releaseConnectionAndWaitUntilReady(page, scenario);
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   const telegramBackground = page.getByRole('button', {
     name: 'Telegram background fixture-lagoon',
@@ -309,6 +310,7 @@ test('restores the Telegram wallpaper catalog from cache before reconnecting', a
   const scenario = 'held-connect';
   await page.goto(`/?scenario=${scenario}`);
   await releaseConnectionAndWaitUntilReady(page, scenario);
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   const wallpaper = page.getByRole('button', { name: 'Telegram background fixture-lagoon' });
   await expect(wallpaper).toBeVisible();
@@ -317,6 +319,7 @@ test('restores the Telegram wallpaper catalog from cache before reconnecting', a
 
   await page.reload();
   await waitForCachedWorkspace(page, scenario);
+  await page.getByRole('button', { name: 'Open main menu' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
 
   await expect(wallpaper).toBeVisible();

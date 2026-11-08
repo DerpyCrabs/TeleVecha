@@ -1,6 +1,5 @@
 import { component, domBinding, list, view } from 'effectweb';
 import CheckCheck from '@effectweb/lucide/icons/check-check';
-import MoreHorizontal from '@effectweb/lucide/icons/ellipsis';
 import { activateFocusScope } from '../shared/focusScope';
 import { Effect } from 'effect';
 import type { TelegramMessage } from '../../telegram/types';
@@ -38,6 +37,51 @@ const notificationMenu = (close: () => void) =>
       document.removeEventListener('pointerdown', dismiss);
     };
   });
+
+function acquireNotificationPress(root: HTMLButtonElement, input: () => () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let pressed = false;
+  let origin: { x: number; y: number } | undefined;
+  const cancel = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    origin = undefined;
+  };
+  const down = (event: PointerEvent) => {
+    cancel();
+    pressed = false;
+    if (event.pointerType !== 'touch' || root.disabled) return;
+    origin = { x: event.clientX, y: event.clientY };
+    timer = setTimeout(() => {
+      pressed = true;
+      input()();
+    }, 500);
+  };
+  const move = (event: PointerEvent) => {
+    if (origin && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 10) cancel();
+  };
+  const click = (event: MouseEvent) => {
+    if (pressed) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      pressed = false;
+    }
+  };
+  root.addEventListener('pointerdown', down);
+  root.addEventListener('pointermove', move);
+  root.addEventListener('pointerup', cancel);
+  root.addEventListener('pointercancel', cancel);
+  root.addEventListener('click', click, true);
+  return () => {
+    cancel();
+    root.removeEventListener('pointerdown', down);
+    root.removeEventListener('pointermove', move);
+    root.removeEventListener('pointerup', cancel);
+    root.removeEventListener('pointercancel', cancel);
+    root.removeEventListener('click', click, true);
+  };
+}
+const notificationPress = (open: () => void) => domBinding(open, acquireNotificationPress);
 
 export const UnreadNotifications = component<Props, State, Message>(
   {
@@ -110,20 +154,6 @@ export const UnreadNotifications = component<Props, State, Message>(
           {model.error}
         </p>
       ) : null}
-      {model.props.mentions + model.props.reactions > 0 ? (
-        <button
-          type="button"
-          class="unread-notification-button notification-options"
-          aria-label="Notification options"
-          title="Notification options"
-          aria-haspopup="menu"
-          aria-expanded={model.menu}
-          disabled={!model.props.online || Boolean(model.busy)}
-          onClick={() => send({ type: 'Menu', open: !model.menu })}
-        >
-          <MoreHorizontal size={18} />
-        </button>
-      ) : null}
       {model.menu ? (
         <div
           class="notification-menu"
@@ -148,6 +178,15 @@ export const UnreadNotifications = component<Props, State, Message>(
             aria-label={`${label}: ${count}. Go to message`}
             disabled={!model.props.online || Boolean(model.busy)}
             aria-busy={model.busy === kind}
+            aria-haspopup="menu"
+            aria-expanded={model.menu}
+            use={notificationPress(() => send({ type: 'Menu', open: true }))}
+            onKeyDown={(event) => {
+              if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                event.preventDefault();
+                send({ type: 'Menu', open: true });
+              }
+            }}
             onContextMenu={(event) => {
               event.preventDefault();
               send({ type: 'Menu', open: true });

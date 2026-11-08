@@ -110,11 +110,11 @@
   box-shadow: 0 5px 18px var(--shadow);
 }
 .unread-notification-button:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--surface-raised) 92%, var(--text));
 }
 .unread-notification-button:disabled {
   cursor: progress;
-  opacity: 0.65;
+  color: var(--muted);
 }
 
 .settings-navigation-row {
@@ -438,14 +438,9 @@
   min-height: 0;
 }
 
-.notification-options {
-  min-width: 2.75rem;
-  min-height: 2rem;
-  padding: 0.2rem 0.5rem;
-}
 .notification-menu {
   position: absolute;
-  right: 3.4rem;
+  right: calc(100% + 0.5rem);
   top: 0;
   width: max-content;
   max-width: calc(100vw - 6rem);
@@ -1377,4 +1372,30 @@
 .group-history-link small {
   color: var(--muted);
   font-size: 12px;
+}
+
+.sidebar-main-menu {
+  inset: auto auto 4.3rem 0.5rem;
+  width: min(15rem, calc(100vw - 1rem));
+  margin: 0;
+  padding: 0.35rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.75rem;
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: 0 5px 18px var(--shadow);
+}
+.sidebar-main-menu button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 0.5rem;
+  text-align: left;
+}
+.sidebar-main-menu button:hover,
+.sidebar-main-menu button:focus-visible {
+  background: var(--surface-hover);
 }

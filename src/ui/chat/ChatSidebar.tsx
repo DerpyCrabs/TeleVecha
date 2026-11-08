@@ -1,3 +1,4 @@
+import Menu from '@effectweb/lucide/icons/menu';
 import Bookmark from '@effectweb/lucide/icons/bookmark';
 import { CreateChatDialog } from '../groups/CreateChatDialog';
 import type { ChatCreationApi } from '../../telegram/chatManagement';
@@ -882,59 +883,52 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
             </div>
           </Dialog>
         ) : null}
-        {compact() ? (
-          <div class="sidebar-quick-actions flex shrink-0 flex-col py-2">
-            <button
-              class="icon-button shrink-0 self-center"
-              aria-label="Saved Messages"
-              title="Saved Messages"
-              onClick={props.openSaved}
-            >
-              <Bookmark size={20} />
-            </button>
-            <button
-              class="icon-button shrink-0 self-center"
-              aria-label="New message"
-              title="New message"
-              onClick={() => send({ type: 'CreateOpen', open: true })}
-            >
-              <SquarePen size={20} />
-            </button>
-          </div>
-        ) : null}
         <footer
           class="sidebar-settings-footer flex shrink-0 border-t border-line px-3 py-[0.55rem]"
           classList={{ '!px-0': compact() }}
         >
-          {!compact() ? (
-            <>
-              <button
-                class="icon-button shrink-0 self-center"
-                aria-label="Saved Messages"
-                title="Saved Messages"
-                onClick={props.openSaved}
-              >
-                <Bookmark size={20} />
-              </button>
-              <button
-                class="icon-button shrink-0 self-center"
-                aria-label="New message"
-                title="New message"
-                onClick={() => send({ type: 'CreateOpen', open: true })}
-              >
-                <SquarePen size={20} />
-              </button>
-            </>
-          ) : null}
           <button
             class="flex min-h-11 w-full items-center gap-[0.65rem] rounded-[0.55rem] border-0 bg-transparent px-[0.7rem] py-[0.6rem] text-left text-muted hover:bg-[var(--surface-hover)] hover:text-ink"
             classList={{ '!justify-center !rounded-none !px-0': compact() }}
-            onClick={props.openSettings}
-            aria-label="Open settings"
+            popovertarget="sidebar-main-menu"
+            aria-label="Open main menu"
+            title="Menu"
           >
-            <Settings size={18} />
-            <span classList={{ hidden: compact() }}>Settings</span>
+            <Menu size={20} />
+            <span classList={{ hidden: compact() }}>Menu</span>
           </button>
+          <nav
+            id="sidebar-main-menu"
+            popover="auto"
+            class="sidebar-main-menu"
+            aria-label="Main menu"
+          >
+            <button
+              popovertarget="sidebar-main-menu"
+              popovertargetaction="hide"
+              onClick={props.openSaved}
+            >
+              <Bookmark size={20} />
+              Saved Messages
+            </button>
+            <button
+              popovertarget="sidebar-main-menu"
+              popovertargetaction="hide"
+              onClick={() => send({ type: 'CreateOpen', open: true })}
+            >
+              <SquarePen size={20} />
+              New message
+            </button>
+            <button
+              popovertarget="sidebar-main-menu"
+              popovertargetaction="hide"
+              onClick={props.openSettings}
+              aria-label="Open settings"
+            >
+              <Settings size={20} />
+              Settings
+            </button>
+          </nav>
         </footer>
         <div
           class="left-sidebar-resizer"

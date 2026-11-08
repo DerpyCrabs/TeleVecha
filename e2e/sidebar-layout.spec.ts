@@ -261,6 +261,20 @@ test('collapses an excessively narrow chat sidebar to avatar-only rows', async (
     animations: 'disabled',
   });
 
+  await expect(page.locator('.sidebar-quick-actions')).toHaveCount(0);
+  await expect(
+    sidebar.getByRole('button', { name: 'Saved Messages', exact: true }),
+  ).not.toBeVisible();
+  await page.getByRole('button', { name: 'Open main menu' }).click();
+  await expect(page.getByRole('navigation', { name: 'Main menu' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Saved Messages', exact: true })).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('compact-sidebar-menu.png'),
+    animations: 'disabled',
+  });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('navigation', { name: 'Main menu' })).not.toBeVisible();
+  await separator.focus();
   await separator.press('End');
   await expect(sidebar).toHaveAttribute('data-compact', 'false');
   await expect(page.getByRole('textbox', { name: 'Search chats' })).toBeVisible();

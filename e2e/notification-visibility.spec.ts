@@ -167,11 +167,38 @@ for (const width of [1280, 375]) {
         dialog: { ...dialog, unreadReactionsCount: 150, unreadMentionsCount: 150 },
       });
     });
+    await expect(
+      page.getByRole('button', { name: 'Notification options', exact: true }),
+    ).toHaveCount(0);
+    const reactionIndicator = page.getByRole('button', {
+      name: 'Unread reactions: 150. Go to message',
+    });
+    await reactionIndicator.hover();
+    expect(
+      await reactionIndicator.evaluate((element) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext('2d')!;
+        context.fillStyle = getComputedStyle(element).backgroundColor;
+        context.fillRect(0, 0, 1, 1);
+        return context.getImageData(0, 0, 1, 1).data[3];
+      }),
+    ).toBe(255);
     if (width > 650)
       await page
         .getByRole('button', { name: 'Unread reactions: 150. Go to message' })
         .click({ button: 'right' });
-    else await page.getByRole('button', { name: 'Notification options', exact: true }).click();
+    else {
+      const indicator = page.getByRole('button', { name: 'Unread reactions: 150. Go to message' });
+      await indicator.dispatchEvent('pointerdown', {
+        pointerType: 'touch',
+        clientX: 10,
+        clientY: 10,
+      });
+      await expect(page.getByRole('menuitem', { name: 'Mark all as read' })).toBeVisible();
+      await indicator.dispatchEvent('pointerup', { pointerType: 'touch' });
+      await indicator.dispatchEvent('click');
+    }
     await expect(page.getByRole('menuitem', { name: 'Mark all as read' })).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath(`notifications-${width}.png`),

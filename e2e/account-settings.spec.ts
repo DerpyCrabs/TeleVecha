@@ -5,6 +5,7 @@ import { openReady } from './helpers';
 for (const width of [375, 768, 1280]) {
   test(`privacy changes remain drafts until saved at ${width}px`, async ({ page }, testInfo) => {
     await openReady(page);
+    await page.getByRole('button', { name: 'Open main menu' }).click();
     await page.getByRole('button', { name: 'Open settings' }).click();
     await page.setViewportSize({ width, height: 800 });
     await page.getByRole('button', { name: 'Privacy', exact: true }).click();
@@ -57,6 +58,7 @@ for (const width of [375, 768, 1280]) {
 
   test(`device management preserves this session at ${width}px`, async ({ page }, testInfo) => {
     await openReady(page);
+    await page.getByRole('button', { name: 'Open main menu' }).click();
     await page.getByRole('button', { name: 'Open settings' }).click();
     await page.setViewportSize({ width, height: 800 });
     await page.getByRole('button', { name: 'Devices', exact: true }).click();

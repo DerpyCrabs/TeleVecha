@@ -7,6 +7,7 @@ for (const width of [1280, 375]) {
     await page.setViewportSize({ width, height: 800 });
     if (width <= 650)
       await page.getByRole('button', { name: 'Open chat list', exact: true }).click();
+    await page.getByRole('button', { name: 'Open main menu' }).click();
     await page.getByRole('button', { name: 'Saved Messages', exact: true }).click();
     const sources = page.getByRole('complementary', { name: 'Saved chats' });
     await expect(
