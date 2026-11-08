@@ -30,6 +30,9 @@
   --line: #252930;
   --text: #f0f2f5;
   --muted: #969ca7;
+  --unread-muted-bg: #495159;
+  --unread-muted-hover-bg: #555e67;
+  --unread-muted-fg: #ffffff;
   --accent: #6da9f7;
   --accent-soft: rgb(109 169 247 / 0.14);
   --dialog-selected: #1966b3;
@@ -59,6 +62,8 @@
   --line-strong: #c7cdd5;
   --text: #18212b;
   --muted: #707b87;
+  --unread-muted-bg: #737373;
+  --unread-muted-hover-bg: #686868;
   --accent: #3390ec;
   --accent-soft: rgb(51 144 236 / 0.14);
   --dialog-selected: #3390ec;
@@ -85,6 +90,8 @@
   --line-strong: #c7cdd5;
   --text: #18212b;
   --muted: #707b87;
+  --unread-muted-bg: #737373;
+  --unread-muted-hover-bg: #686868;
   --accent: #3390ec;
   --accent-soft: rgb(51 144 236 / 0.14);
   --dialog-selected: #3390ec;
@@ -111,6 +118,8 @@
   --line-strong: #40505f;
   --text: #f5f5f5;
   --muted: #9eabb7;
+  --unread-muted-bg: #3e546a;
+  --unread-muted-hover-bg: #4d5762;
   --accent: #64a9e8;
   --accent-soft: rgb(100 169 232 / 0.15);
   --dialog-selected: #2b5278;
@@ -205,7 +214,8 @@ button {
   background: var(--accent);
 }
 .chat-unread-badge.muted {
-  background: var(--muted);
+  background: var(--unread-muted-bg);
+  color: var(--unread-muted-fg);
 }
 
 .chat-attention-badges {
@@ -236,4 +246,12 @@ button {
   width: 22px;
   height: 22px;
   border: 2px solid var(--panel);
+}
+
+[aria-current='true'] .chat-unread-badge.muted {
+  background: #ffffff;
+  color: #2a5378;
+}
+a:hover:not([aria-current='true']) .chat-unread-badge.muted {
+  background: var(--unread-muted-hover-bg);
 }

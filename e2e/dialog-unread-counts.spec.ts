@@ -23,7 +23,7 @@ test('keeps unread counts visible and accessible across dialog views', async ({ 
   await page.getByRole('menuitem', { name: 'Mute' }).click();
   await expect(alice.locator('.chat-unread-badge-trailing')).toHaveClass(/muted/);
   const mutedColor = await alice.evaluate((element) =>
-    getComputedStyle(element).getPropertyValue('--muted').trim(),
+    getComputedStyle(element).getPropertyValue('--unread-muted-bg').trim(),
   );
   await expect(alice.locator('.chat-unread-badge-trailing')).toHaveCSS(
     'background-color',
@@ -133,3 +133,40 @@ test('shows mention and reaction badges beside unread counts in wide and compact
   });
   await expect(alice.locator('.chat-attention-badge')).toHaveCount(0);
 });
+
+for (const theme of ['night', 'tinted', 'day', 'classic']) {
+  test(`muted unread digits remain readable in ${theme} theme`, async ({ page }) => {
+    await page.evaluate((value) => {
+      document.documentElement.dataset.theme = value;
+      window.__televechaFixture!.emit({ type: 'mute-changed', peerId: 'u:101', muted: true });
+    }, theme);
+    const row = chatButton(page, /Alice Fixture/);
+    const badge = row.locator('.chat-unread-badge-trailing');
+    const contrast = () =>
+      badge.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const luminance = (color: string) => {
+          const rgb = color
+            .match(/[\d.]+/g)!
+            .slice(0, 3)
+            .map(Number)
+            .map((v) => {
+              const s = v / 255;
+              return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+            });
+          return rgb[0]! * 0.2126 + rgb[1]! * 0.7152 + rgb[2]! * 0.0722;
+        };
+        const a = luminance(style.color),
+          b = luminance(style.backgroundColor);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      });
+    await expect(badge).toHaveClass(/muted/);
+    expect(await contrast()).toBeGreaterThanOrEqual(4.5);
+    await row.hover();
+    expect(await contrast()).toBeGreaterThanOrEqual(4.5);
+    await row.evaluate((element) => element.setAttribute('aria-current', 'true'));
+    expect(await contrast()).toBeGreaterThanOrEqual(4.5);
+    await row.evaluate((element) => element.removeAttribute('aria-current'));
+    await page.screenshot({ path: `/tmp/muted-badge-${theme}.png`, animations: 'disabled' });
+  });
+}

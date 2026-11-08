@@ -457,6 +457,7 @@ export const MediaAttachment = component<
     return (
       <div
         use={visibilityMount(send)}
+        classList={{ 'media-file-preview': props.media.kind === 'file' && Boolean(previewKind) }}
         class={`media-attachment media-${props.media.kind}${props.compact ? ' media-compact' : ''}${displayUrl ? ' media-loaded' : ''}`}
       >
         {isImage ? (

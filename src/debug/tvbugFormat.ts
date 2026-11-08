@@ -1,3 +1,7 @@
+import {
+  sanitizeMessageContentDiagnostic,
+  type MessageContentDiagnostic,
+} from '../telegram/core/messageContentDiagnostic';
 import { Data } from 'effect';
 import { Inflate, strToU8, zipSync } from 'fflate';
 
@@ -371,6 +375,7 @@ export interface TvBugMessageV2 {
   linkPreview?: TvBugLinkPreviewV2 | undefined;
   formats?: TvBugTextFormatV2[] | undefined;
   richMessage?: TvBugRichMessageV2 | undefined;
+  contentDiagnostic?: MessageContentDiagnostic | undefined;
   pinned?: boolean | undefined;
   cacheEpoch?: number | undefined;
 }
@@ -1406,6 +1411,9 @@ function hydrateMessage(message: TvBugMessageV2, epoch: number): CachedMessage {
           },
         }
       : {}),
+    ...(message.contentDiagnostic
+      ? { contentDiagnostic: sanitizeMessageContentDiagnostic(message.contentDiagnostic) }
+      : {}),
     ...(message.formats ? { formats: message.formats.map(hydrateFormat) } : {}),
     ...(message.richMessage ? { richMessage: hydrateRichMessage(message.richMessage) } : {}),
     ...(message.pinned !== undefined ? { pinned: message.pinned } : {}),
@@ -1980,6 +1988,9 @@ class StateSanitizer {
       ...(message.links ? { links: message.links.map((link) => this.sanitizeLink(link)) } : {}),
       ...(message.linkPreview
         ? { linkPreview: this.sanitizeLinkPreview(message.linkPreview) }
+        : {}),
+      ...(message.contentDiagnostic
+        ? { contentDiagnostic: sanitizeMessageContentDiagnostic(message.contentDiagnostic) }
         : {}),
       ...(message.formats ? { formats: this.sanitizeFormats(message.formats) } : {}),
       ...(message.richMessage

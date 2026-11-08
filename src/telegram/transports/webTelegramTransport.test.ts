@@ -64,6 +64,85 @@ const withTransport = <A, E>(
   );
 
 describe('web Telegram transport', () => {
+  it('retains source content evidence for unsupported messages and grouped TXT files', () => {
+    const messages = [
+      Api.Message({
+        id: 1,
+        peerId: Api.PeerUser({ userId: 101n }),
+        date: 1,
+        message: '',
+        media: createTl('messageMediaUnsupported', {}),
+      }),
+      ...['AAA', 'БББ'].map((caption, index) =>
+        Api.Message({
+          id: index + 2,
+          peerId: Api.PeerUser({ userId: 101n }),
+          date: 1,
+          message: caption,
+          groupedId: 123n,
+          media: Api.MessageMediaDocument({
+            document: Api.Document({
+              id: BigInt(index + 1),
+              accessHash: 123456n,
+              fileReference: new Uint8Array([1, 2]),
+              date: 1,
+              mimeType: 'text/plain',
+              size: 3n,
+              dcId: 2,
+              attributes: [Api.DocumentAttributeFilename({ fileName: `private-${index}.txt` })],
+            }),
+          }),
+        }),
+      ),
+      Api.Message({ id: 4, peerId: Api.PeerUser({ userId: 101n }), date: 1, message: '' }),
+    ];
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const result = yield* transport.getHistory(
+              { id: 'u:101', kind: 'user', accessHash: '1' },
+              10,
+            );
+            const unsupported = result.messages.find((message) => message.id === 1)!;
+            expect(unsupported.contentDiagnostic).toMatchObject({
+              outcome: 'server-unsupported',
+              textLength: 0,
+              mappedMedia: false,
+            });
+            expect(unsupported.contentDiagnostic?.mediaConstructor).toBeDefined();
+            for (const id of [2, 3]) {
+              const file = result.messages.find((message) => message.id === id)!;
+              expect(file.media).toMatchObject({ kind: 'file', mimeType: 'text/plain', size: 3 });
+              expect(file.contentDiagnostic).toMatchObject({
+                outcome: 'mapped',
+                grouped: true,
+                textLength: 3,
+                mappedMedia: true,
+              });
+              expect(file.contentDiagnostic?.documentAttributes).toHaveLength(1);
+              expect(JSON.stringify(file.contentDiagnostic)).not.toMatch(
+                /private|123456|fileReference/,
+              );
+            }
+            expect(
+              result.messages.find((message) => message.id === 4)?.contentDiagnostic?.outcome,
+            ).toBe('empty-source');
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({
+              invoke: (() =>
+                Effect.succeed(
+                  Api.messages.Messages({ messages, users: [], chats: [], topics: [] }),
+                )) as MtprotoClient['invoke'],
+            }),
+          ),
+      ),
+    );
+  });
+
   it('preserves streamed text entities and rich draft updates instead of converting them to typing', () =>
     Effect.runPromise(
       Effect.scoped(

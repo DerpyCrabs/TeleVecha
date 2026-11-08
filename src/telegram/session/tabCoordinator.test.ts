@@ -429,6 +429,20 @@ describe('tab coordinator request and hydration regressions', () => {
             text: '',
             date: 1,
             outgoing: false,
+            contentDiagnostic: {
+              layer: 228,
+              messageConstructor: 1979750867,
+              documentAttributes: [],
+              textLength: 0,
+              grouped: false,
+              richBlockCount: 2,
+              richBlockConstructors: [],
+              richDocumentCount: 0,
+              richPhotoCount: 0,
+              mappedMedia: false,
+              mappedRichBlocks: 2,
+              outcome: 'mapped',
+            },
             richMessage: {
               rtl: undefined,
               partial: false,
@@ -481,6 +495,15 @@ describe('tab coordinator request and hydration regressions', () => {
           expect(coordinator.client.snapshot().phase).toBe('ready');
           expect(coordinator.client.snapshot().dialogs[0]?.topMessage?.richMessage).toEqual(
             message.richMessage,
+          );
+          expect(coordinator.client.snapshot().messages[0]?.contentDiagnostic).toEqual(
+            message.contentDiagnostic,
+          );
+          expect(coordinator.client.snapshot().dialogs[0]?.topMessage?.contentDiagnostic).toEqual(
+            message.contentDiagnostic,
+          );
+          expect(coordinator.client.snapshot().pinnedMessages[0]?.contentDiagnostic).toEqual(
+            message.contentDiagnostic,
           );
           expect(coordinator.client.snapshot().messages[0]?.richMessage).toEqual(
             message.richMessage,

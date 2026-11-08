@@ -30,3 +30,26 @@ unzip -p /absolute/path/report.tvbug trace.v2.ndjson | tail -100
 ```
 
 State what the report directly shows, then label any inferred cause. Remember that identifiers and text are synthetic, timestamps are shifted, and media contains metadata rather than original bytes.
+
+## Empty / unsupported message content
+
+New captures retain `messages[].contentDiagnostic` alongside the cached message. It records
+only the negotiated layer, public TL constructor IDs, text length, grouping presence,
+document attribute constructor IDs, rich block constructors/counts, and mapping outcome.
+It deliberately excludes source text, filenames, document IDs, access hashes and bytes.
+
+- `server-unsupported`: Telegram sent `messageMediaUnsupported` for the negotiated layer;
+  the original attachment type cannot be recovered from that response.
+- `unmapped-media`: the source contained media without a mapped media/contact/poll/preview.
+- `unmapped-rich-content`: rich blocks/documents were present but not fully mapped.
+- `empty-source`: the decoded source had no supported content.
+- `mapped`: compare the mapping evidence with the current snapshot/rendered result to
+  investigate later cache, synchronization or presentation losses.
+
+Constructor numbers are unsigned TL constructor IDs, not attachment identifiers. Resolve
+with `constructorDescriptorFor(id)` in `src/telegram/mtproto/tl/registry.ts` or convert to hex
+and look up the pinned `src/telegram/mtproto/schema/api-layer-*.tl` schema.
+Missing `contentDiagnostic` means unknown provenance (older cache, older app, fixture,
+or a message that did not pass through the full-message mapper), not an empty Telegram
+response. Old reports cannot be retroactively enriched. A fresh capture needs the affected
+message to have been received from Telegram by the updated client.

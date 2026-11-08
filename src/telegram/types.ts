@@ -1,3 +1,4 @@
+import type { MessageContentDiagnostic } from './core/messageContentDiagnostic';
 import type {
   SavedMessagesInfo,
   SavedDialogsOffset,
@@ -250,6 +251,7 @@ export interface TelegramMessage {
   linkPreview?: TelegramLinkPreview | undefined;
   formats?: readonly TelegramTextFormat[] | undefined;
   richMessage?: RichMessage | undefined;
+  contentDiagnostic?: MessageContentDiagnostic | undefined;
   pinned?: boolean | undefined;
 }
 

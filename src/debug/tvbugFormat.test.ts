@@ -166,6 +166,42 @@ function manifest() {
 }
 
 describe('.tvbug snapshot format', () => {
+  it('round-trips source content diagnostics and strips unexpected private fields', () => {
+    const diagnostic = {
+      layer: 228,
+      messageConstructor: 1979750867,
+      mediaConstructor: 2676290718,
+      documentAttributes: [],
+      textLength: 0,
+      grouped: false,
+      richBlockCount: 0,
+      richBlockConstructors: [],
+      richDocumentCount: 0,
+      richPhotoCount: 0,
+      mappedMedia: false,
+      mappedRichBlocks: 0,
+      outcome: 'server-unsupported' as const,
+    };
+    const message = {
+      ...sourceMessage(),
+      contentDiagnostic: {
+        ...diagnostic,
+        fileName: 'PRIVATE-DOCUMENT',
+        accessHash: 'PRIVATE-HASH',
+      },
+    };
+    const state = sanitizeTvBugState({ messages: [message] });
+    expect(state.messages[0]?.contentDiagnostic).toEqual(diagnostic);
+    const bundle = parseTvBugBundle(
+      createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] }),
+    );
+    const restored = hydrateTvBugState(bundle.snapshot);
+    expect(restored.messages[0]?.contentDiagnostic).toEqual(diagnostic);
+    expect(JSON.stringify(bundle)).not.toMatch(/PRIVATE-DOCUMENT|PRIVATE-HASH/);
+    const oldState = sanitizeTvBugState({ messages: [sourceMessage()] });
+    expect(hydrateTvBugState(oldState).messages[0]?.contentDiagnostic).toBeUndefined();
+  });
+
   it('preserves appearance decisions and request failures without exporting wallpaper identity', () => {
     const state = sanitizeTvBugState({
       dialogs: [sourceDialog(sourceMessage())],

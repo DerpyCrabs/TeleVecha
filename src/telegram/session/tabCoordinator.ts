@@ -1,3 +1,4 @@
+import { MessageContentDiagnosticSchema } from '../core/messageContentDiagnostic';
 import type { TelegramPeer } from '../types';
 import { messageInSavedDialog } from '../savedMessages';
 import { messageInTopic } from '../forums';
@@ -825,6 +826,7 @@ const MessageSchema = Schema.Struct({
   links: Schema.optional(Schema.Array(LinkSchema)),
   linkPreview: Schema.optional(LinkPreviewSchema),
   formats: Schema.optional(Schema.Array(TextFormatSchema)),
+  contentDiagnostic: Schema.optional(MessageContentDiagnosticSchema),
   richMessage: Schema.optional(RichMessageValueSchema),
   pinned: Schema.optional(Schema.Boolean),
 });

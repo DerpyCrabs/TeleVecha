@@ -1,3 +1,4 @@
+import { describeMessageContent } from './messageContentDiagnostic';
 import { migratedSearchPage } from '../migratedSearch';
 import { savedMessagesMethods, savedReaction } from './savedMessagesMethods';
 import { adminLogMethods } from './adminLogMethods';
@@ -3818,7 +3819,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     );
     const botUsername =
       Api.User.is(keyboardBot) && keyboardBot.bot ? keyboardBot.username : undefined;
-    return {
+    const mapped: TelegramMessage = {
       id: message.id,
       peerId,
       ...(peer ? { peer } : {}),
@@ -3884,6 +3885,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       richMessage: mapRichMessage(message.richMessage),
       pinned: message.pinned,
     };
+    return { ...mapped, contentDiagnostic: describeMessageContent(message, mapped) };
   }
   function mapForwardedFrom(
     header: Tl.TypeMessageFwdHeader | undefined,

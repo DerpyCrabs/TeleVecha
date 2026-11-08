@@ -1761,7 +1761,7 @@
 .message.outgoing .media-file-download {
   color: var(--message-foreground);
 }
-.media-attachment.media-file:has(> .media-file-download) {
+.media-attachment.media-file.media-file-preview {
   display: grid;
   width: 100%;
   min-width: min(16.75rem, 100%);
@@ -2564,4 +2564,21 @@ article.message[data-selection-active] .message-sender-avatar {
 }
 .message-media-surface:has(> .message-comments) > .message-copy > footer {
   bottom: 0.35rem;
+}
+
+.media-file:not(.media-file-preview) > .media-file-download {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 4rem;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  justify-content: center;
+  border-radius: 0.7rem;
+  color: var(--accent);
+}
+.media-file:not(.media-file-preview):has(> .media-file-download)
+  > button.media-file
+  .media-file-thumbnail {
+  visibility: hidden;
 }
