@@ -1265,7 +1265,7 @@ export interface SendFileOptions {
 export interface SendAlbumAttachment {
   file: File;
   randomId: string;
-  sendAs: 'media';
+  sendAs: OutgoingAttachmentMode;
 }
 
 export interface SendAlbumOptions {
@@ -1299,7 +1299,7 @@ export interface PendingAttachment extends LocalMediaMetadata {
 
 export interface PendingAlbumAttachment extends PendingAttachment {
   randomId: string;
-  sendAs: 'media';
+  sendAs: OutgoingAttachmentMode;
 }
 
 export interface TelegramForwardOptions {

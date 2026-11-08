@@ -6,6 +6,7 @@ import type { TelegramTransferProgress } from '../../telegram/types';
 import { idRows } from '../collections';
 import type { MediaPreview } from '../media/MediaAttachment';
 import { MediaAttachment } from '../media/MediaAttachment';
+import { MessageBody } from './MessageBody';
 import { MediaViewer } from '../media/MediaViewer';
 import { mediaPresentation } from '../media/mediaPresentation';
 const commandPreview = 'preview';
@@ -120,10 +121,12 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
     };
     const navigatePreview = (index: number) => send({ type: 'Navigate', index });
     const closeViewer = () => send({ type: 'CloseViewer' });
-    const rows = albumRows(props.messages);
+    const files = props.messages.every((message) => message.media?.kind === 'file');
+    const rows = files ? [props.messages] : albumRows(props.messages);
     return (
       <div
         class="media-album"
+        classList={{ 'file-album': files }}
         role="group"
         aria-label={`${props.messages.length} grouped media attachments`}
         data-album-size={props.messages.length}
@@ -135,8 +138,8 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
                 class="media-album-item"
                 data-message-id={message.id}
                 style={{
-                  'aspect-ratio': String(aspectRatio(message)),
-                  'flex-grow': String(aspectRatio(message)),
+                  'aspect-ratio': files ? undefined : String(aspectRatio(message)),
+                  'flex-grow': files ? undefined : String(aspectRatio(message)),
                 }}
                 tabIndex={0}
                 aria-label={`Album item ${message.media?.name ?? message.id}. Press Shift+F10 for actions.`}
@@ -180,7 +183,9 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
                     load={(progress) => props.load(message, progress)}
                     loadPreview={
                       props.loadPreview &&
-                      (message.media?.kind === 'photo' || message.media?.kind === 'video')
+                      (message.media?.kind === 'photo' ||
+                        message.media?.kind === 'video' ||
+                        message.media?.kind === 'file')
                         ? () => props.loadPreview!(message)
                         : undefined
                     }
@@ -189,6 +194,11 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
                     protected={message.protected}
                     onOpenPreview={(preview) => openPreview(message, preview)}
                   />
+                ) : null}
+                {files && message.body ? (
+                  <div class="file-album-caption">
+                    <MessageBody message={message} />
+                  </div>
                 ) : null}
               </div>
             ))}

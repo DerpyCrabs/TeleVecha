@@ -2708,3 +2708,93 @@ it('searches migrated groups through the old peer while retaining filters and or
     ),
   );
 });
+
+it('uploads files as documents and sends them in one server media group', async () => {
+  const documents = [1n, 2n].map((id) =>
+    Api.Document({
+      id,
+      accessHash: id,
+      fileReference: new Uint8Array(),
+      date: 1,
+      mimeType: 'image/png',
+      size: 100n,
+      dcId: 1,
+      attributes: [Api.DocumentAttributeFilename({ fileName: `image-${id}.png` })],
+    }),
+  );
+  let uploadIndex = 0;
+  const invoke = vi.fn((request: unknown) => {
+    if (Api.messages.UploadMedia.is(request)) {
+      expect(Api.InputMediaUploadedDocument.is(request.media)).toBe(true);
+      if (Api.InputMediaUploadedDocument.is(request.media))
+        expect(request.media.forceFile).toBe(true);
+      return Effect.succeed(Api.MessageMediaDocument({ document: documents[uploadIndex++]! }));
+    }
+    if (Api.messages.SendMultiMedia.is(request)) {
+      expect(request.multiMedia.map((item) => item.message)).toEqual(['Caption', '']);
+      expect(request.multiMedia.map((item) => item.randomId)).toEqual([101n, 102n]);
+      expect(request.multiMedia.every((item) => Api.InputMediaDocument.is(item.media))).toBe(true);
+      return Effect.succeed(
+        Api.Updates({
+          users: [],
+          chats: [],
+          date: 1,
+          seq: 1,
+          updates: documents.map((document, index) =>
+            Api.UpdateNewMessage({
+              pts: index + 1,
+              ptsCount: 1,
+              message: Api.Message({
+                id: index + 42,
+                peerId: Api.PeerChat({ chatId: 303n }),
+                out: true,
+                date: 1,
+                message: index === 0 ? 'Caption' : '',
+                groupedId: 99n,
+                media: Api.MessageMediaDocument({ document }),
+              }),
+            }),
+          ),
+        }),
+      );
+    }
+    return Effect.fail(createMtprotoError('protocol', 'Unexpected RPC'));
+  });
+  await Effect.runPromise(
+    withTransport(
+      (target) =>
+        Effect.gen(function* () {
+          yield* target.connect({ apiId: 1, apiHash: 'hash' });
+          const result = yield* target.sendAlbum(
+            { id: 'g:303', kind: 'group' },
+            [101, 102].map((id) => ({
+              file: new File(['original'], `image-${id}.png`, { type: 'image/png' }),
+              randomId: String(id),
+              sendAs: 'file' as const,
+            })),
+            { caption: 'Caption' },
+          );
+          expect(result.messages).toHaveLength(2);
+          expect(
+            result.messages.every(
+              (message) => message.groupedId === '99' && message.media?.kind === 'file',
+            ),
+          ).toBe(true);
+        }),
+      () =>
+        Effect.succeed(
+          clientDouble({
+            uploadFile: ({ file }) =>
+              Effect.succeed(
+                Api.InputFile({ id: 1n, parts: 1, name: file.name ?? 'upload', md5Checksum: '' }),
+              ),
+            invoke: invoke as unknown as MtprotoClient['invoke'],
+          }),
+        ),
+    ),
+  );
+  expect(uploadIndex).toBe(2);
+  expect(
+    invoke.mock.calls.filter(([request]) => Api.messages.SendMultiMedia.is(request)),
+  ).toHaveLength(1);
+});

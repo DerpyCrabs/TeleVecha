@@ -168,16 +168,15 @@
 .message-flow-row-compact > .message.outgoing {
   border-bottom-right-radius: 0.25rem;
 }
-.message-flow-row:not(.message-flow-row-compact)
-  > .message:not(.message-media-surface):not(.message-captioned-media):not(
-    .message-service
-  )::before {
+.message-flow-row:not(.message-flow-row-compact):has(
+    > .message:not(.message-media-surface):not(.message-captioned-media):not(.message-service)
+  )::after {
   content: '';
   position: absolute;
-  bottom: 0;
+  bottom: 0.5rem;
   width: 0.5rem;
   height: 0.75rem;
-  background: inherit;
+  background: var(--message-tail-background, var(--bubble-incoming));
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M8 0C8 6 5 10 0 12H8Z'/%3E%3C/svg%3E")
     center / 100% 100% no-repeat;
   pointer-events: none;
@@ -194,15 +193,17 @@
   ) {
   border-bottom-right-radius: 0;
 }
-.message.incoming::before {
+.message-flow-row:has(> .message.incoming)::after {
   left: -0.5rem;
 }
-.message.outgoing::before {
+.message-flow-row:has(> .message.outgoing)::after {
+  --message-tail-background: var(--bubble-outgoing);
   right: -0.5rem;
   transform: scaleX(-1);
 }
-.message-scroll-shell[data-chat-theme='telegram'] .message.outgoing::before {
-  background: var(--chat-message-2);
+.message-scroll-shell[data-chat-theme='telegram']
+  .message-flow-row:has(> .message.outgoing)::after {
+  --message-tail-background: var(--chat-message-2);
 }
 .message.message-service {
   max-width: min(86%, 34rem);
@@ -853,6 +854,7 @@
   overflow-anchor: none;
 }
 .message-flow-row {
+  position: relative;
   display: flex;
   width: 100%;
   flex: 0 0 auto;
@@ -2505,4 +2507,30 @@ article.message[data-selection-active] .message-sender-avatar {
   .earlier-message-actions {
     opacity: 1;
   }
+}
+
+.media-album.file-album {
+  background: transparent;
+  gap: 0;
+  margin: 0;
+  border-radius: inherit;
+}
+.media-album.file-album .media-album-row {
+  flex-direction: column;
+  height: auto;
+  gap: 0;
+}
+.media-album.file-album .media-album-item {
+  flex: 0 0 auto !important;
+  height: auto;
+  aspect-ratio: auto !important;
+}
+.media-album.file-album .media-album-item + .media-album-item {
+  border-top: 1px solid var(--line);
+}
+.media-album.file-album .media-attachment {
+  height: auto;
+}
+.file-album-caption {
+  padding: 0 0.6875rem 0.5rem;
 }

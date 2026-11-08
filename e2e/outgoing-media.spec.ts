@@ -509,3 +509,60 @@ for (const width of [1280, 375]) {
     });
   });
 }
+
+for (const width of [1280, 375]) {
+  test(`keeps file mode and sends a document group without mirroring its caption at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.locator('.chat-composer input[type="file"]').setInputFiles(imagePath);
+    const dialog = page.locator('.attachment-send-dialog');
+    const files = dialog.getByRole('checkbox', { name: 'Send as files' });
+    await files.check();
+    await dialog.getByLabel('Add attachments').setInputFiles(imagePath);
+    await expect(files).toBeChecked();
+    await expect(dialog.locator('.attachment-send-item.is-file')).toHaveCount(2);
+    await dialog
+      .getByRole('textbox', { name: 'Attachment caption' })
+      .fill('Два исходных файла, одна отправка');
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue('');
+    await page.screenshot({
+      path: testInfo.outputPath(`file-send-${width}.png`),
+      animations: 'disabled',
+    });
+    await dialog.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.poll(async () => (await fixtureStats(page))?.sendAlbum).toBe(1);
+    expect((await fixtureStats(page))?.sendFile).toBe(0);
+    const album = page.locator('.file-album');
+    await expect(album).toHaveCount(1);
+    await expect(album.locator('.media-album-item')).toHaveCount(2);
+    await expect(album.getByText('Два исходных файла, одна отправка', { exact: true })).toHaveCount(
+      1,
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const messages = [...window.__televechaRuntimes!.values()][0]!.engine
+            .snapshot()
+            .messages.filter((m) => m.id > 80);
+          return (
+            messages.length === 2 &&
+            messages.every(
+              (m) =>
+                m.media?.kind === 'file' && m.groupedId && m.groupedId === messages[0]?.groupedId,
+            )
+          );
+        }),
+      )
+      .toBe(true);
+    await page.getByTestId('message-scroller').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await page.screenshot({
+      path: testInfo.outputPath(`file-group-${width}.png`),
+      animations: 'disabled',
+    });
+    await page.reload();
+    await expect(page.locator('.file-album .media-album-item')).toHaveCount(2);
+  });
+}

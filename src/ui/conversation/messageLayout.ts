@@ -3,6 +3,7 @@ import type { TelegramDialog } from '../../telegram/types';
 
 export interface MessageLayout {
   album: readonly ChatMessage[];
+  fileAlbum: boolean;
   author: string;
   caption: ChatMessage;
   className: string;
@@ -18,6 +19,7 @@ export interface MessageLayout {
 function sameLayout(previous: MessageLayout | undefined, next: MessageLayout) {
   return Boolean(
     previous &&
+    previous.fileAlbum === next.fileAlbum &&
     previous.author === next.author &&
     previous.caption === next.caption &&
     previous.className === next.className &&
@@ -111,6 +113,7 @@ export function layoutMessages(
 
   const next = messages.map((message, index) => {
     const album = albums[index] ?? [];
+    const fileAlbum = album.length > 1 && album.every((item) => item.media?.kind === 'file');
     const caption = album.find(({ body }) => Boolean(body)) ?? message;
     const forwardedFrom =
       message.forwardedFrom ??
@@ -118,7 +121,7 @@ export function layoutMessages(
       album.find((albumMessage) => albumMessage.forwardedFrom)?.forwardedFrom;
     const messageAuthor = sameSender(previousVisible(index), message) ? '' : author(message);
     const mediaOnly = Boolean(
-      (album.length > 1 || isVisualMedia(message)) &&
+      ((album.length > 1 && !fileAlbum) || isVisualMedia(message)) &&
       !caption.body.trim() &&
       !messageAuthor &&
       !forwardedFrom &&
@@ -138,7 +141,7 @@ export function layoutMessages(
     );
     const captionedMedia = Boolean(
       !message.service &&
-      (album.length > 1 || isVisualMedia(message)) &&
+      ((album.length > 1 && !fileAlbum) || isVisualMedia(message)) &&
       (caption.body.trim() ||
         messageAuthor ||
         forwardedFrom ||
@@ -191,6 +194,7 @@ export function layoutMessages(
     const className = `message ${message.outgoing ? 'outgoing' : 'incoming'}${message.service ? ' message-service' : ''}${sameSender(previousVisible(index), message) ? ' message-same-sender' : ''}${album.length > 1 ? ' message-has-album' : ''}${isImageDocument(message) ? ' message-image-document' : ''}${mediaOnly ? ' message-media-surface' : ''}${inlineTime ? ' message-inline-time' : ''}${captionedMedia ? ' message-captioned-media' : ''}${cropped ? ' message-media-cropped' : ''}`;
     const layout = {
       album,
+      fileAlbum,
       author: messageAuthor,
       caption,
       className,

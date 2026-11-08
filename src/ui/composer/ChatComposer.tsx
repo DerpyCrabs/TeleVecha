@@ -633,7 +633,7 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
               : null}
             <textarea
               rows="1"
-              value={props.composer.draft}
+              value={props.composer.attachments.length ? '' : props.composer.draft}
               onInput={(event) => {
                 props.composer.changeDraft(event.currentTarget.value);
                 updateMention(event.currentTarget);

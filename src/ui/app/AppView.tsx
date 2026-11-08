@@ -1141,29 +1141,31 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                               ))(layout.media!)
                             : null}
                           <div class="message-copy">
-                            <MessageBody
-                              message={caption}
-                              previewPhoto={
-                                message.linkPreview?.hasPhoto
-                                  ? model.queries.previewPhoto(
-                                      message.peerId ?? activeChatId,
-                                      message.id,
-                                    )
-                                  : undefined
-                              }
-                              loadPreviewMedia={
-                                message.linkPreview?.media
-                                  ? () => {
-                                      const source = snapshot.messages.find(
-                                        (candidate) => String(candidate.id) === message.id,
-                                      );
-                                      return source
-                                        ? mediaAssets.loadMedia(source)
-                                        : Effect.fail(new Error('Preview video is unavailable.'));
-                                    }
-                                  : undefined
-                              }
-                            />
+                            {!layout.fileAlbum ? (
+                              <MessageBody
+                                message={caption}
+                                previewPhoto={
+                                  message.linkPreview?.hasPhoto
+                                    ? model.queries.previewPhoto(
+                                        message.peerId ?? activeChatId,
+                                        message.id,
+                                      )
+                                    : undefined
+                                }
+                                loadPreviewMedia={
+                                  message.linkPreview?.media
+                                    ? () => {
+                                        const source = snapshot.messages.find(
+                                          (candidate) => String(candidate.id) === message.id,
+                                        );
+                                        return source
+                                          ? mediaAssets.loadMedia(source)
+                                          : Effect.fail(new Error('Preview video is unavailable.'));
+                                      }
+                                    : undefined
+                                }
+                              />
+                            ) : null}
                             {(
                               message.comments
                                 ? message

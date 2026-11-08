@@ -78,6 +78,7 @@ describe('MessagingEngine lifecycle regressions', () => {
     { count: 1, mimeType: 'image/png', sendAs: 'media' as const },
     { count: 2, mimeType: 'image/png', sendAs: 'media' as const },
     { count: 1, mimeType: 'image/png', sendAs: 'file' as const },
+    { count: 2, mimeType: 'image/png', sendAs: 'file' as const },
     { count: 1, mimeType: 'video/webm', sendAs: 'media' as const },
     { count: 2, mimeType: 'video/webm', sendAs: 'media' as const },
   ])(
@@ -141,6 +142,14 @@ describe('MessagingEngine lifecycle regressions', () => {
             (message) => message.media?.name.startsWith(namePrefix),
           );
           expect(uploaded).toHaveLength(count);
+          if (count > 1) {
+            expect(uploaded[0]!.groupedId).toBeTruthy();
+            expect(uploaded.every((message) => message.groupedId === uploaded[0]!.groupedId)).toBe(
+              true,
+            );
+          }
+          if (sendAs === 'file')
+            expect(uploaded.every((message) => message.media?.kind === 'file')).toBe(true);
           for (const [index, message] of uploaded.entries()) {
             const blob = yield* engine.downloadMedia(message);
             expect(yield* Effect.promise(() => blob.text())).toBe(`original media ${index}`);

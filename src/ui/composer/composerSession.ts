@@ -385,9 +385,17 @@ export function createComposerSession(options: ComposerSessionOptions) {
   const attach = (files: File[], sendAs?: StagedAttachment['sendAs']) => {
     if (files.length === 0) return;
     editVersion += 1;
+    const existingVisual = owner
+      .read()
+      .attachments.filter(({ file }) => /^(image|video)\//.test(file.type));
+    const inheritedMode =
+      sendAs ??
+      (existingVisual.length && existingVisual.every((item) => item.sendAs === 'file')
+        ? 'file'
+        : undefined);
     const staged = files.map((file) => {
       const attachment = stageAttachment(file);
-      return sendAs ? { ...attachment, sendAs } : attachment;
+      return inheritedMode ? { ...attachment, sendAs: inheritedMode } : attachment;
     });
     changeAttachments(
       owner.read().editing ? staged.slice(0, 1) : [...owner.read().attachments, ...staged],

@@ -20,7 +20,7 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
     const formats = pending.formats?.map((format) => Object.freeze({ ...format }));
     if (formats) Object.freeze(formats);
     const albumAttachments = pending.album?.attachments.map((attachment) =>
-      Object.freeze({ ...attachment, sendAs: 'media' as const }),
+      Object.freeze({ ...attachment }),
     );
     if (albumAttachments) Object.freeze(albumAttachments);
     return Object.freeze({

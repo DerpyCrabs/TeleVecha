@@ -2760,14 +2760,14 @@ function makeMessagingEngineModule(
         const id = yield* randomUuid();
         const albumAttachments = yield* Effect.forEach(
           items,
-          ({ file, width, height, duration, preview }) =>
+          ({ file, sendAs, width, height, duration, preview }) =>
             randomId().pipe(
               Effect.map((generatedRandomId) => ({
                 blob: file,
                 name: file.name,
                 mimeType: file.type || 'application/octet-stream',
                 asSticker: false,
-                sendAs: 'media' as const,
+                sendAs,
                 randomId: generatedRandomId,
                 width,
                 height,
@@ -2798,13 +2798,8 @@ function makeMessagingEngineModule(
 
     for (let index = 0; index < attachments.length;) {
       const attachment = attachments[index]!;
-      if (attachment.sendAs === 'file') {
-        yield* appendSingle(attachment);
-        index += 1;
-        continue;
-      }
       let end = index + 1;
-      while (end < attachments.length && attachments[end]!.sendAs === 'media') end += 1;
+      while (end < attachments.length && attachments[end]!.sendAs === attachment.sendAs) end += 1;
       while (index < end) {
         const count = Math.min(MAX_ALBUM_ATTACHMENTS, end - index);
         const items = attachments.slice(index, index + count);
@@ -6600,7 +6595,7 @@ function makeMessagingEngineModule(
                 attempting.album.attachments.map((attachment) => ({
                   file: new File([attachment.blob], attachment.name, { type: attachment.mimeType }),
                   randomId: attachment.randomId,
-                  sendAs: 'media',
+                  sendAs: attachment.sendAs,
                 })),
                 {
                   caption: attempting.text,
