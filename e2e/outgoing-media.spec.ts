@@ -451,3 +451,61 @@ test('keeps image-only corners free of the Telegram outgoing bubble background',
     'none',
   );
 });
+
+for (const width of [1280, 375]) {
+  test(`caption grows from one line and shrinks again at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.locator('.chat-composer input[type="file"]').setInputFiles(imagePath);
+    const caption = page.getByRole('textbox', { name: 'Attachment caption' });
+    await caption.fill('пора');
+    const oneLine = (await caption.boundingBox())!.height;
+    expect(oneLine).toBeLessThan(45);
+    await page.screenshot({
+      path: testInfo.outputPath(`caption-${width}.png`),
+      animations: 'disabled',
+    });
+    await caption.fill('Первая строка\nВторая строка\nТретья строка');
+    await expect
+      .poll(async () => (await caption.boundingBox())!.height)
+      .toBeGreaterThan(oneLine + 30);
+    await caption.fill('пора');
+    await expect.poll(async () => (await caption.boundingBox())!.height).toBe(oneLine);
+    await page
+      .locator('.attachment-send-dialog')
+      .getByRole('button', { name: 'Cancel', exact: true })
+      .click();
+    await page.evaluate(() => {
+      ['Первое сообщение', 'Продолжение', 'Последнее в серии'].forEach((text, index) => {
+        window.__televechaFixture!.emit({
+          type: 'new-message',
+          pts: 11 + index,
+          ptsCount: 1,
+          message: {
+            id: 81 + index,
+            peerId: 'u:101',
+            senderId: 'self',
+            outgoing: true,
+            text,
+            date: 1700002000 + index,
+          },
+        });
+      });
+    });
+    const bubbles = page
+      .locator('article.message.outgoing')
+      .filter({ hasText: /Первое сообщение|Продолжение|Последнее в серии/ });
+    await expect(bubbles).toHaveCount(3);
+    await expect(bubbles.nth(0)).toHaveCSS('border-bottom-right-radius', '4px');
+    await expect(bubbles.nth(1)).toHaveCSS('border-top-right-radius', '4px');
+    await expect(bubbles.nth(2)).toHaveCSS('border-bottom-right-radius', '0px');
+    await page.getByTestId('message-scroller').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await page.screenshot({
+      path: testInfo.outputPath(`bubbles-${width}.png`),
+      animations: 'disabled',
+    });
+  });
+}

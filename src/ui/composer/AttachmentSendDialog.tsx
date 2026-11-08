@@ -162,7 +162,7 @@ export const AttachmentSendDialog = component(
               <textarea
                 class="attachment-send-caption"
                 autofocus
-                rows={2}
+                rows={1}
                 aria-label="Attachment caption"
                 placeholder="Add a caption…"
                 value={composer.draft}

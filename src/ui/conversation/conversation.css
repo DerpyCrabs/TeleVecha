@@ -121,16 +121,15 @@
   display: flow-root;
   width: fit-content;
   max-width: min(78%, 26.875rem);
-  border: 1px solid rgb(255 255 255 / 0.045);
-  border-radius: 0.78rem;
-  padding: 0.48rem 0.65rem 0.32rem;
+  border: 0;
+  border-radius: 1rem;
+  padding: 0.5rem 0.6875rem 0.375rem;
   font-size: var(--chat-font-size, 0.9375rem);
   line-height: 1.408;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
 }
 .message.incoming {
   align-self: flex-start;
-  border-bottom-left-radius: 0.35rem;
   background: var(--bubble-incoming);
 }
 .message-sender-avatar {
@@ -152,9 +151,58 @@
     var(--chat-outbox-accent, var(--telegram-outbox, var(--accent)))
   );
   align-self: flex-end;
-  border-bottom-right-radius: 0.35rem;
   background: var(--bubble-outgoing);
   color: var(--bubble-outgoing-text);
+}
+/* Join adjacent bubbles only on the sender's side. The last text bubble
+   gets the tail; standalone media keeps its own clipped outline. */
+.message.incoming.message-same-sender {
+  border-top-left-radius: 0.25rem;
+}
+.message.outgoing.message-same-sender {
+  border-top-right-radius: 0.25rem;
+}
+.message-flow-row-compact > .message.incoming {
+  border-bottom-left-radius: 0.25rem;
+}
+.message-flow-row-compact > .message.outgoing {
+  border-bottom-right-radius: 0.25rem;
+}
+.message-flow-row:not(.message-flow-row-compact)
+  > .message:not(.message-media-surface):not(.message-captioned-media):not(
+    .message-service
+  )::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 0.5rem;
+  height: 0.75rem;
+  background: inherit;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M8 0C8 6 5 10 0 12H8Z'/%3E%3C/svg%3E")
+    center / 100% 100% no-repeat;
+  pointer-events: none;
+}
+.message-flow-row:not(.message-flow-row-compact)
+  > .message.incoming:not(.message-media-surface):not(.message-captioned-media):not(
+    .message-service
+  ) {
+  border-bottom-left-radius: 0;
+}
+.message-flow-row:not(.message-flow-row-compact)
+  > .message.outgoing:not(.message-media-surface):not(.message-captioned-media):not(
+    .message-service
+  ) {
+  border-bottom-right-radius: 0;
+}
+.message.incoming::before {
+  left: -0.5rem;
+}
+.message.outgoing::before {
+  right: -0.5rem;
+  transform: scaleX(-1);
+}
+.message-scroll-shell[data-chat-theme='telegram'] .message.outgoing::before {
+  background: var(--chat-message-2);
 }
 .message.message-service {
   max-width: min(86%, 34rem);
