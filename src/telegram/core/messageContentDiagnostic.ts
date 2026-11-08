@@ -28,6 +28,15 @@ export const MessageContentDiagnosticSchema = Schema.Struct({
 export type MessageContentDiagnostic = typeof MessageContentDiagnosticSchema.Type;
 
 // Decode also strips unknown fields, including when reading older/untrusted caches.
-export const sanitizeMessageContentDiagnostic = Schema.decodeUnknownSync(
-  MessageContentDiagnosticSchema,
-);
+const decodeDiagnostic = Schema.decodeUnknownSync(MessageContentDiagnosticSchema);
+
+export function sanitizeMessageContentDiagnostic(value: unknown): MessageContentDiagnostic {
+  const { mediaConstructor, documentConstructor, ...required } = decodeDiagnostic(value);
+  // Schema.optional accepts explicit undefined from the mapper and persisted caches.
+  // Omit those keys before the bundle's strict JSON audit, not just during JSON.stringify.
+  return {
+    ...required,
+    ...(mediaConstructor !== undefined ? { mediaConstructor } : {}),
+    ...(documentConstructor !== undefined ? { documentConstructor } : {}),
+  };
+}

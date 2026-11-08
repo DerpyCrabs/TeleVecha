@@ -1,3 +1,5 @@
+import { Api, createTl } from '../telegram/mtproto/tl';
+import { describeMessageContent } from '../telegram/transports/messageContentDiagnostic';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 
@@ -166,6 +168,45 @@ function manifest() {
 }
 
 describe('.tvbug snapshot format', () => {
+  it.each(['text', 'unsupported', 'document'] as const)(
+    'exports actual mapper diagnostics for %s messages, including dialog previews',
+    (kind) => {
+      const source = Api.Message({
+        id: 42,
+        peerId: Api.PeerUser({ userId: 101n }),
+        date: sourceEpochSeconds,
+        message: kind === 'text' ? 'Private text' : '',
+        ...(kind === 'unsupported' ? { media: createTl('messageMediaUnsupported', {}) } : {}),
+        ...(kind === 'document'
+          ? {
+              media: Api.MessageMediaDocument({
+                document: Api.Document({
+                  id: 91n,
+                  accessHash: 123n,
+                  fileReference: new Uint8Array([1, 2]),
+                  date: sourceEpochSeconds,
+                  mimeType: 'text/plain',
+                  size: 3n,
+                  dcId: 2,
+                  attributes: [Api.DocumentAttributeFilename({ fileName: 'private.txt' })],
+                }),
+              }),
+            }
+          : {}),
+      });
+      const message = sourceMessage();
+      message.contentDiagnostic = describeMessageContent(source, message);
+      const state = sanitizeTvBugState({ messages: [message], dialogs: [sourceDialog(message)] });
+      const bytes = createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] });
+      const bundle = parseTvBugBundle(bytes);
+      const restored = hydrateTvBugState(bundle.snapshot);
+      const expected: unknown = JSON.parse(JSON.stringify(message.contentDiagnostic));
+      expect(restored.messages[0]?.contentDiagnostic).toEqual(expected);
+      expect(restored.dialogs[0]?.topMessage?.contentDiagnostic).toEqual(expected);
+      expect(Object.values(state.messages[0]!.contentDiagnostic!)).not.toContain(undefined);
+    },
+  );
+
   it('round-trips source content diagnostics and strips unexpected private fields', () => {
     const diagnostic = {
       layer: 228,

@@ -1,3 +1,5 @@
+import { Api, createTl } from '../telegram/mtproto/tl';
+import { describeMessageContent } from '../telegram/transports/messageContentDiagnostic';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Effect } from 'effect';
 
@@ -8,6 +10,9 @@ import { initialEngineSnapshot } from '../telegram/core/engineState';
 import type { IndexedDbCacheStore } from '../telegram/persistence/store';
 
 const checkpoint = {
+  cursor: undefined,
+  draftDetails: {},
+  lastPeerId: undefined,
   dialogs: [],
   draftRevisions: {},
   drafts: {},
@@ -48,6 +53,46 @@ describe('browser debug report recorder', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('prepares a downloadable report from cached unsupported-message diagnostics', async () => {
+    const message = {
+      id: 42,
+      peerId: 'u:101',
+      senderId: 'u:101',
+      text: '',
+      date: 1,
+      outgoing: false,
+      cacheEpoch: 0,
+    };
+    const diagnostic = describeMessageContent(
+      Api.Message({
+        id: 42,
+        peerId: Api.PeerUser({ userId: 101n }),
+        date: 1,
+        message: '',
+        media: createTl('messageMediaUnsupported', {}),
+      }),
+      message,
+    );
+    expect(Object.hasOwn(diagnostic, 'documentConstructor')).toBe(true);
+    const cache = store();
+    vi.mocked(cache.captureCheckpoint).mockReturnValue(
+      Effect.succeed({ ...checkpoint, messages: [{ ...message, contentDiagnostic: diagnostic }] }),
+    );
+    const recorder = createBrowserDebugReportRecorder(cache);
+    try {
+      const report = await Effect.runPromise(recorder.prepare());
+      const bundle = parseTvBugBundle(new Uint8Array(await report.file.arrayBuffer()));
+      expect(bundle.snapshot.messages[0]?.contentDiagnostic).toMatchObject({
+        outcome: 'server-unsupported',
+      });
+      expect(
+        Object.hasOwn(bundle.snapshot.messages[0]!.contentDiagnostic!, 'documentConstructor'),
+      ).toBe(false);
+    } finally {
+      recorder.dispose();
+    }
   });
 
   it('bounds the exported trace and marks it truncated', async () => {
