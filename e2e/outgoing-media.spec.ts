@@ -536,6 +536,13 @@ for (const width of [1280, 375]) {
     const album = page.locator('.file-album');
     await expect(album).toHaveCount(1);
     await expect(album.locator('.media-album-item')).toHaveCount(2);
+    await expect(album.locator('.media-album-item .file-album-caption')).toHaveCount(0);
+    const captionBelowFiles = await album.evaluate((element) => {
+      const lastFile = element.querySelector('.media-album-item:last-child')!;
+      const caption = element.querySelector(':scope > .file-album-caption')!;
+      return caption.getBoundingClientRect().top >= lastFile.getBoundingClientRect().bottom;
+    });
+    expect(captionBelowFiles).toBe(true);
     await expect(album.getByText('Два исходных файла, одна отправка', { exact: true })).toHaveCount(
       1,
     );

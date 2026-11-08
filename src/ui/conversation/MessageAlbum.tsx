@@ -122,6 +122,8 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
     const navigatePreview = (index: number) => send({ type: 'Navigate', index });
     const closeViewer = () => send({ type: 'CloseViewer' });
     const files = props.messages.every((message) => message.media?.kind === 'file');
+    const captions = files ? props.messages.filter((message) => message.body.trim()) : [];
+    const sharedCaption = captions.length === 1 ? captions[0] : undefined;
     const rows = files ? [props.messages] : albumRows(props.messages);
     return (
       <div
@@ -195,7 +197,7 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
                     onOpenPreview={(preview) => openPreview(message, preview)}
                   />
                 ) : null}
-                {files && message.body ? (
+                {files && !sharedCaption && message.body ? (
                   <div class="file-album-caption">
                     <MessageBody message={message} />
                   </div>
@@ -204,6 +206,11 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
             ))}
           </div>
         ))}
+        {sharedCaption ? (
+          <div class="file-album-caption">
+            <MessageBody message={sharedCaption} />
+          </div>
+        ) : null}
         {model.viewer
           ? ((current) => (
               <MediaViewer
