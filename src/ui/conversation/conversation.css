@@ -2582,3 +2582,58 @@ article.message[data-selection-active] .message-sender-avatar {
   .media-file-thumbnail {
   visibility: hidden;
 }
+
+.rich-media:has(.media-file) > figcaption {
+  margin-top: 0.4rem;
+  color: inherit;
+  font-size: inherit;
+}
+.rich-message table.compact :where(th, td) {
+  padding: 0.15rem 0.3rem;
+}
+.rich-inline-button,
+.bot-stop-draft {
+  border: 0;
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  padding: 0.25rem 0.55rem;
+  color: var(--accent);
+  cursor: pointer;
+}
+.rich-inline-button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.rich-button-row {
+  display: flex;
+}
+.rich-button-row[data-align='center'] {
+  justify-content: center;
+}
+.rich-button-row[data-align='right'] {
+  justify-content: flex-end;
+}
+.rich-button-row > .bot-keyboard {
+  flex: 1;
+}
+
+.message-widget {
+  display: block;
+  width: 100%;
+  min-width: 220px;
+  padding: 14px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.message-widget:hover {
+  background: var(--surface-hover);
+}
+.message-widget:disabled {
+  color: var(--muted);
+  cursor: default;
+}

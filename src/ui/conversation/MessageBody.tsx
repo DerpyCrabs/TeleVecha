@@ -1,3 +1,4 @@
+import { WidgetAttachment } from '../bots/WidgetAttachment';
 import { list } from 'effectweb';
 import type { Effect } from 'effect';
 import type { ChatMessage } from '../../domain/models';
@@ -5,7 +6,7 @@ import { component, sequence, view, type Source } from 'effectweb';
 import type * as AsyncResult from 'effect/reactivity/AsyncResult';
 import { safeExternalUrl } from '../shared/safeUrl';
 import { LinkPreview } from './LinkPreview';
-import { RichMessageBody } from './RichMessageBody';
+import { RichMessageBody, type RichMediaContext } from './RichMessageBody';
 interface TextPart {
   text: string;
   kind: 'text' | 'mention' | 'link' | 'command';
@@ -257,6 +258,8 @@ export const MessageBody = view<
   {
     message: ChatMessage;
     botCommands?: boolean;
+    queryWidget?: ((data: string) => Promise<string | undefined>) | undefined;
+    richMedia?: RichMediaContext | undefined;
     previewPhoto?: Source<AsyncResult.AsyncResult<string | undefined, never>> | undefined;
     loadPreviewMedia?: (() => Effect.Effect<string, unknown>) | undefined;
   },
@@ -264,8 +267,11 @@ export const MessageBody = view<
 >((props, _send) => {
   return (
     <>
+      {props.message.widget ? (
+        <WidgetAttachment widget={props.message.widget} query={props.queryWidget} />
+      ) : null}
       {props.message.richMessage ? (
-        ((rich) => <RichMessageBody blocks={rich.blocks} rtl={rich.rtl} />)(
+        ((rich) => <RichMessageBody blocks={rich.blocks} rtl={rich.rtl} media={props.richMedia} />)(
           props.message.richMessage!,
         )
       ) : (

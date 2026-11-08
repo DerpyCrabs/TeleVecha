@@ -8,13 +8,13 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDirectory, '..');
 const schemaDirectory = path.join(root, 'src/telegram/mtproto/schema');
 
-const API_LAYER = 228;
-const TDLIB_COMMIT = 'b768eb2911f494c0678f4a4ff2c4a0529cb3cc6e';
+const API_LAYER = 233;
+const TDLIB_COMMIT = '562a82abf952fdaf808aca67a1dc5e2698aa0dd3';
 const TDLIB_RAW_ROOT = `https://raw.githubusercontent.com/tdlib/td/${TDLIB_COMMIT}/td/generate/scheme`;
 const API_SCHEMA_URL = `${TDLIB_RAW_ROOT}/telegram_api.tl`;
 const MTPROTO_SCHEMA_URL = `${TDLIB_RAW_ROOT}/mtproto_api.tl`;
 const EXPECTED_API_SOURCE_SHA256 =
-  '921a58e71f2baebb840609366c506fb92ffac8db3c5bb832423aacd7cd6817cf';
+  '89bf71464239646c233f0a2a3d77512c9be08e4a63eab362afba0b721f69a26d';
 const EXPECTED_MTPROTO_SOURCE_SHA256 =
   'bde4942be06dc112dfc655e2a8aa5163a4e3aa0d859d7840cfc76ec3a00654c4';
 

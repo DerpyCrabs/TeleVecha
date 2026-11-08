@@ -177,7 +177,7 @@ export function chatManagementMethods(context: {
     }
     if (change.kind === 'forum')
       return yield* client.invoke(
-        Api.channels.ToggleForum({ channel, enabled: change.value, tabs: false }),
+        Api.channels.ToggleForum({ channel, enabled: change.value, tabs: false, sidebar: false }),
       );
     if (change.kind === 'hiddenHistory')
       return yield* client.invoke(

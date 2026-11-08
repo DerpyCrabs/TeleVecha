@@ -130,6 +130,11 @@ export const CommentsPanel = view<
             ) : null}
             <MessageBody
               message={presentMessage(message, 0)}
+              richMedia={{
+                protected: message.protected,
+                load: (media, progress) =>
+                  props.mediaAssets.loadMedia({ ...message, media }, progress),
+              }}
               previewPhoto={
                 message.linkPreview?.hasPhoto
                   ? props.previewPhoto(message.peerId, String(message.id))

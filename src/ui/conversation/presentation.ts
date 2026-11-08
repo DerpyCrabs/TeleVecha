@@ -168,6 +168,7 @@ export function presentMessage(
 ): ChatMessage {
   const senderName = (message as TelegramMessage & { senderName?: string }).senderName;
   return {
+    widget: message.widget,
     id: String(message.id),
     peerId: message.peerId,
     author: message.outgoing ? 'You' : senderName || message.senderId,
@@ -180,7 +181,7 @@ export function presentMessage(
     senderRoleKind: message.senderRoleKind,
     body:
       message.text ||
-      (message.media || message.contact || message.poll || message.richMessage
+      (message.widget || message.media || message.contact || message.poll || message.richMessage
         ? ''
         : 'Unsupported message'),
     time: formatMessageTime(message.date),

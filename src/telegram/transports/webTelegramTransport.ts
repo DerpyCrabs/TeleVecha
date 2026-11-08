@@ -1,3 +1,4 @@
+import { decodeWidgetPayload } from './widgetPayload';
 import { describeMessageContent } from './messageContentDiagnostic';
 import { migratedSearchPage } from '../migratedSearch';
 import { savedMessagesMethods, savedReaction } from './savedMessagesMethods';
@@ -150,6 +151,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     phoneNumber: '',
     phoneCodeHash: '',
     messageMedia: new Map<string, Tl.TypeMessageMedia>(),
+    richMessageMedia: new Map<string, Map<string, Tl.TypeMessageMedia>>(),
     linkPreviewPhotos: new Map<string, Tl.Photo>(),
     stickerDocuments: new Map<string, Tl.Document>(),
     wallpaperDocuments: new Map<string, Tl.Document>(),
@@ -1634,6 +1636,34 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     );
     return { updateBatches: toUpdateBatches(result) };
   });
+  const queryWidget = Effect.fn('WebTelegramTransport.queryWidget')(function* (
+    peer: TelegramPeer,
+    messageId: number,
+    data: string,
+  ) {
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.GetBotWidgetQueryAnswer({
+        peer: toInputPeer(peer),
+        msgId: messageId,
+        queryType: Api.WidgetQueryTypeData({}),
+        data: new TextEncoder().encode(data),
+      }),
+    );
+    return result.result;
+  });
+  const stopLiveDraft = Effect.fn('WebTelegramTransport.stopLiveDraft')(function* (
+    peer: TelegramPeer,
+    randomId: string,
+    topicId?: number,
+  ) {
+    yield* (yield* getClient).invoke(
+      Api.messages.SetTyping({
+        peer: toInputPeer(peer),
+        ...(topicId !== undefined ? { topMsgId: topicId } : {}),
+        action: Api.SendMessageStopDraftAction({ randomId: BigInt(randomId) }),
+      }),
+    );
+  });
   const setTyping = Effect.fn('WebTelegramTransport.setTyping')(function* (
     peer: TelegramPeer,
     kind?: TelegramActivityKind,
@@ -1908,9 +1938,14 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     options?: TelegramDownloadOptions,
   ) {
     const key = `${message.peerId}:${message.id}`;
-    const media = options?.preview
-      ? (state.linkPreviewPhotos.get(key) ?? state.messageMedia.get(key))
-      : (state.messageMedia.get(key) ?? state.linkPreviewPhotos.get(key));
+    const richMedia = message.media?.cacheKey
+      ? state.richMessageMedia.get(key)?.get(message.media.cacheKey)
+      : undefined;
+    const media =
+      richMedia ??
+      (options?.preview
+        ? (state.linkPreviewPhotos.get(key) ?? state.messageMedia.get(key))
+        : (state.messageMedia.get(key) ?? state.linkPreviewPhotos.get(key)));
     if (!media)
       return yield* Effect.fail(
         createMtprotoError(
@@ -3525,16 +3560,44 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
           ]
         : [];
     }
+    if (Api.UpdateMessageWidgetData.is(update)) {
+      const peerId = toPeerId(update.peer);
+      return peerId
+        ? [
+            {
+              type: 'widget-data',
+              peerId,
+              messageId: update.msgId,
+              publicData: update.publicData,
+              chatData: update.chatData,
+              pts: update.pts,
+              ptsCount: update.ptsCount,
+            },
+          ]
+        : [];
+    }
     if (Api.UpdatePendingJoinRequests.is(update)) {
       const peerId = toPeerId(update.peer);
       return peerId ? [{ type: 'join-requests-invalidated', peerId }] : [];
     }
-    if (Api.UpdatePinnedForumTopic.is(update) || Api.UpdatePinnedForumTopics.is(update)) {
+    if (
+      Api.UpdatePinnedForumTopic.is(update) ||
+      Api.UpdatePinnedForumTopics.is(update) ||
+      Api.UpdateEditForumTopic.is(update)
+    ) {
       const peerId = toPeerId(update.peer);
       return peerId ? [{ type: 'forum-topics-invalidated', peerId }] : [];
     }
     if (Api.UpdateUserTyping.is(update)) {
       const action = update.action;
+      if (Api.SendMessageStopDraftAction.is(action)) {
+        return [
+          {
+            type: 'live-draft-stopped',
+            id: `u:${update.userId}:${update.topMsgId ?? 0}:${action.randomId}`,
+          },
+        ];
+      }
       if (
         Api.SendMessageTextDraftAction.is(action) ||
         Api.SendMessageRichMessageDraftAction.is(action)
@@ -3547,6 +3610,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
               id: `${peerId}:${update.topMsgId ?? 0}:${action.randomId}`,
               peerId,
               topicId: update.topMsgId,
+              canStop: Boolean(action.canStop),
+              keepOnStop: Boolean(action.keepOnStop),
               text: Api.SendMessageTextDraftAction.is(action) ? action.text.text : '',
               formats: Api.SendMessageTextDraftAction.is(action)
                 ? mapFormats(action.text.entities)
@@ -3789,6 +3854,17 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     if (!peerId) return undefined;
     const peer = peerFromId(peerId, state.entities);
     const mediaKey = `${peerId}:${message.id}`;
+    if (message.richMessage) {
+      const documents = new Map<string, Tl.TypeMessageMedia>();
+      for (const document of message.richMessage.documents) {
+        if (Api.Document.is(document))
+          documents.set(`document:${document.id}`, Api.MessageMediaDocument({ document }));
+      }
+      rememberBounded(state.richMessageMedia, mediaKey, documents, MAX_MESSAGE_MEDIA_ENTRIES);
+    } else {
+      state.richMessageMedia.delete(mediaKey);
+    }
+
     if (message.media) {
       rememberBounded(state.messageMedia, mediaKey, message.media, MAX_MESSAGE_MEDIA_ENTRIES);
     } else {
@@ -3859,7 +3935,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         ? message.replyTo.replyToMsgId
         : undefined,
       replyQuote: Api.MessageReplyHeader.is(message.replyTo)
-        ? message.replyTo.quoteText
+        ? (message.replyTo.quoteText ?? message.replyTo.quoteRich?.map(richTextValue).join(''))
         : undefined,
       comments:
         message.replies?.comments && message.replies.channelId !== undefined
@@ -3872,6 +3948,26 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
           ? peerFromId(`u:${keyboardBot.id}`, state.entities)
           : undefined,
       ),
+      widget: Api.MessageMediaWidget.is(message.media)
+        ? {
+            html: (() => {
+              try {
+                return decodeWidgetPayload(message.media.payload);
+              } catch {
+                return '';
+              }
+            })(),
+            width: message.media.width,
+            height: message.media.height,
+            canQuery: Boolean(message.media.canQuery),
+            isCopy: Boolean(message.media.isCopy),
+            backgroundQuery: Boolean(message.media.backgroundQuery),
+            ...(message.media.chatData !== undefined ? { chatData: message.media.chatData } : {}),
+            ...(message.media.publicData !== undefined
+              ? { publicData: message.media.publicData }
+              : {}),
+          }
+        : undefined,
       media: mapMedia(message.media),
       contact: mapContact(message.media),
       poll: Api.MessageMediaPoll.is(message.media)
@@ -4180,6 +4276,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     if (Api.ReplyKeyboardMarkup.is(markup)) {
       return {
         kind: 'reply',
+        forceReply: Boolean(markup.forceReply),
         rows: markup.rows.map((row) =>
           row.buttons.map((button) => mapBotButton(button, botUsername, bot)),
         ),
@@ -4191,6 +4288,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     if (Api.ReplyInlineMarkup.is(markup)) {
       return {
         kind: 'inline',
+        forceReply: Boolean(markup.forceReply),
         rows: markup.rows.map((row) =>
           row.buttons.map((button) => mapBotButton(button, botUsername, bot)),
         ),
@@ -4199,43 +4297,45 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     return undefined;
   }
   function mapBotButton(
-    button: Tl.TypeKeyboardButton,
+    button: Tl.TypeKeyboardButton | Tl.TypeKeyboardInlineButton,
     botUsername?: string,
     bot?: TelegramPeer,
   ): TelegramBotButton {
-    if (Api.KeyboardButtonWebView.is(button) || Api.KeyboardButtonSimpleWebView.is(button)) {
+    const type = button.type;
+    if (Api.InlineButtonTypeDisabled.is(type)) return { kind: 'disabled', text: button.text };
+    if (Api.InlineButtonTypeWebView.is(type) || Api.ButtonTypeSimpleWebView.is(type)) {
       return {
-        kind: Api.KeyboardButtonSimpleWebView.is(button) ? 'simple-web-app' : 'web-app',
+        kind: Api.ButtonTypeSimpleWebView.is(type) ? 'simple-web-app' : 'web-app',
         text: button.text,
-        url: button.url,
+        url: type.url,
         ...(bot ? { bot } : {}),
         ...(botUsername ? { botUsername } : {}),
       };
     }
-    if (Api.KeyboardButton.is(button)) return { kind: 'text', text: button.text };
-    if (Api.KeyboardButtonUrl.is(button)) {
-      return { kind: 'url', text: button.text, url: button.url };
+    if (Api.ButtonTypeDefault.is(type)) return { kind: 'text', text: button.text };
+    if (Api.InlineButtonTypeUrl.is(type)) {
+      return { kind: 'url', text: button.text, url: type.url };
     }
-    if (Api.KeyboardButtonUrlAuth.is(button)) {
-      return { kind: 'url-auth', text: button.text, url: button.url, buttonId: button.buttonId };
+    if (Api.InlineButtonTypeUrlAuth.is(type)) {
+      return { kind: 'url-auth', text: button.text, url: type.url, buttonId: type.buttonId };
     }
-    if (Api.KeyboardButtonCallback.is(button)) {
-      return { kind: 'callback', text: button.text, data: [...button.data] };
+    if (Api.InlineButtonTypeCallback.is(type)) {
+      return { kind: 'callback', text: button.text, data: [...type.data] };
     }
-    if (Api.KeyboardButtonCopy.is(button)) {
-      return { kind: 'copy', text: button.text, copyText: button.copyText };
+    if (Api.InlineButtonTypeCopy.is(type)) {
+      return { kind: 'copy', text: button.text, copyText: type.copyText };
     }
-    if (Api.KeyboardButtonSwitchInline.is(button)) {
+    if (Api.InlineButtonTypeSwitchInline.is(type)) {
       return {
         kind: 'switch-inline',
         text: button.text,
-        query: button.query,
-        samePeer: Boolean(button.samePeer),
+        query: type.query,
+        samePeer: Boolean(type.samePeer),
         ...(botUsername ? { botUsername } : {}),
       };
     }
-    if (Api.KeyboardButtonUserProfile.is(button)) {
-      return { kind: 'url', text: button.text, url: `tg://user?id=${button.userId}` };
+    if (Api.InlineButtonTypeUserProfile.is(type)) {
+      return { kind: 'url', text: button.text, url: `tg://user?id=${type.userId}` };
     }
     return { kind: 'unsupported', text: button.text };
   }
@@ -4437,7 +4537,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   function mapRichMessage(message: Tl.TypeRichMessage | undefined) {
     if (!Api.RichMessage.is(message)) return undefined;
     return {
-      blocks: message.blocks.flatMap((block) => mapRichBlock(block)),
+      blocks: message.blocks.flatMap((block) => mapRichBlock(block, message.documents)),
       rtl: Boolean(message.rtl),
       partial: Boolean(message.part),
     };
@@ -4452,6 +4552,20 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     return '';
   }
   function mapRichText(text: Tl.TypeRichText): RichText {
+    if (Api.TextButton.is(text))
+      return {
+        kind: 'button',
+        child: mapRichText(text.text),
+        button: mapBotButton(
+          Api.KeyboardInlineButton({ text: richTextValue(text.text), type: text.type }),
+        ),
+      };
+    if (Api.TextTonAddress.is(text))
+      return {
+        kind: 'link',
+        child: mapRichText(text.text),
+        url: `ton://transfer/${richTextValue(text.text)}`,
+      };
     if (Api.TextPlain.is(text)) return { kind: 'text', text: text.text };
     if (Api.TextEmpty.is(text)) return { kind: 'text', text: '' };
     if (Api.TextConcat.is(text)) {
@@ -4530,7 +4644,35 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       ...(Api.TextEmpty.is(caption.credit) ? {} : { credit: mapRichText(caption.credit) }),
     };
   }
-  function mapRichBlock(block: Tl.TypePageBlock): RichBlock[] {
+  function mapRichBlock(
+    block: Tl.TypePageBlock,
+    documents: readonly Tl.TypeDocument[] = [],
+  ): RichBlock[] {
+    if (Api.PageBlockButtonRow.is(block))
+      return [
+        {
+          kind: 'buttons',
+          align: block.alignRight ? 'right' : block.alignCenter ? 'center' : 'left',
+          buttons: block.buttons.map((button) =>
+            mapBotButton(
+              Api.KeyboardInlineButton({ text: richTextValue(button.text), type: button.type }),
+            ),
+          ),
+        },
+      ];
+    if (Api.PageBlockDocument.is(block)) {
+      const document = documents.find((item) => item.id === block.documentId);
+      const media = document ? mapMedia(Api.MessageMediaDocument({ document })) : undefined;
+      return [
+        {
+          kind: 'media',
+          mediaKind: 'file',
+          id: block.documentId.toString(),
+          ...(media ? { attachment: { ...media, kind: 'file' as const } } : {}),
+          caption: mapRichCaption(block.caption),
+        },
+      ];
+    }
     const textRole = Api.PageBlockTitle.is(block)
       ? ('title' as const)
       : Api.PageBlockSubtitle.is(block)
@@ -4599,7 +4741,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
             ...('text' in item
               ? { text: mapRichText(item.text) }
               : 'blocks' in item
-                ? { blocks: item.blocks.flatMap((child) => mapRichBlock(child)) }
+                ? { blocks: item.blocks.flatMap((child) => mapRichBlock(child, documents)) }
                 : {}),
           })),
         },
@@ -4610,6 +4752,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         {
           kind: 'quote',
           blocks: [{ kind: 'text', role: 'paragraph', text: mapRichText(block.text) }],
+          expandable: Boolean(block.collapsed),
           ...(Api.TextEmpty.is(block.caption) ? {} : { caption: mapRichText(block.caption) }),
         },
       ];
@@ -4629,7 +4772,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         {
           kind: 'quote',
           expandable: true,
-          blocks: block.blocks.flatMap((child) => mapRichBlock(child)),
+          blocks: block.blocks.flatMap((child) => mapRichBlock(child, documents)),
           ...(Api.TextEmpty.is(block.caption) ? {} : { caption: mapRichText(block.caption) }),
         },
       ];
@@ -4639,7 +4782,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         {
           kind: 'details',
           title: mapRichText(block.title),
-          blocks: block.blocks.flatMap((child) => mapRichBlock(child)),
+          blocks: block.blocks.flatMap((child) => mapRichBlock(child, documents)),
           open: Boolean(block.open),
         },
       ];
@@ -4649,6 +4792,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         {
           kind: 'table',
           ...(Api.TextEmpty.is(block.title) ? {} : { title: mapRichText(block.title) }),
+          compact: Boolean(block.compact),
           bordered: Boolean(block.bordered),
           striped: Boolean(block.striped),
           rows: block.rows.map((row) =>
@@ -4665,14 +4809,14 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       ];
     }
     if (Api.PageBlockCover.is(block)) {
-      return [{ kind: 'group', mode: 'cover', blocks: mapRichBlock(block.cover) }];
+      return [{ kind: 'group', mode: 'cover', blocks: mapRichBlock(block.cover, documents) }];
     }
     if (Api.PageBlockCollage.is(block) || Api.PageBlockSlideshow.is(block)) {
       return [
         {
           kind: 'group',
           mode: Api.PageBlockCollage.is(block) ? 'collage' : 'slideshow',
-          blocks: block.items.flatMap((child) => mapRichBlock(child)),
+          blocks: block.items.flatMap((child) => mapRichBlock(child, documents)),
           caption: mapRichCaption(block.caption),
         },
       ];
@@ -4721,7 +4865,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return [
         {
           kind: 'quote',
-          blocks: block.blocks.flatMap((child) => mapRichBlock(child)),
+          blocks: block.blocks.flatMap((child) => mapRichBlock(child, documents)),
           caption: { kind: 'link', child: { kind: 'text', text: block.author }, url: block.url },
         },
       ];
@@ -5658,6 +5802,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
   }
   function clearRuntimeCaches() {
     state.messageMedia.clear();
+    state.richMessageMedia.clear();
     state.linkPreviewPhotos.clear();
     state.stickerDocuments.clear();
     state.wallpaperDocuments.clear();
@@ -5959,6 +6104,8 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     deleteDialog,
     setPinnedMessage,
     setTyping,
+    stopLiveDraft,
+    queryWidget,
     sendText,
     sendContact,
     sendPoll,

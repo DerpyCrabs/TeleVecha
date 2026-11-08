@@ -376,11 +376,13 @@ export interface TvBugMessageV2 {
   formats?: TvBugTextFormatV2[] | undefined;
   richMessage?: TvBugRichMessageV2 | undefined;
   contentDiagnostic?: MessageContentDiagnostic | undefined;
+  widget?: { width: number; height: number; isCopy: boolean } | undefined;
   pinned?: boolean | undefined;
   cacheEpoch?: number | undefined;
 }
 
 export type TvBugRichTextV2 =
+  | { kind: 'button'; child: TvBugRichTextV2; button: TvBugBotKeyboardV2['rows'][number][number] }
   | { kind: 'text'; text: TvBugTextV2 }
   | { kind: 'concat'; children: TvBugRichTextV2[] }
   | {
@@ -405,6 +407,11 @@ export type TvBugRichTextV2 =
   | { kind: 'date'; child: TvBugRichTextV2; timestamp: number };
 
 export type TvBugRichBlockV2 =
+  | {
+      kind: 'buttons';
+      buttons: TvBugBotKeyboardV2['rows'][number];
+      align: 'left' | 'center' | 'right';
+    }
   | { kind: 'text'; role: Extract<RichBlock, { kind: 'text' }>['role']; text: TvBugRichTextV2 }
   | { kind: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6; text: TvBugRichTextV2 }
   | { kind: 'pre'; text: TvBugRichTextV2; language?: TvBugTextV2 | undefined }
@@ -451,12 +458,14 @@ export type TvBugRichBlockV2 =
         }>
       >;
       bordered?: boolean | undefined;
+      compact?: boolean | undefined;
       striped?: boolean | undefined;
     }
   | { kind: 'math'; source: TvBugTextV2 }
   | {
       kind: 'media';
-      mediaKind: 'photo' | 'video' | 'audio' | 'embed' | 'map';
+      mediaKind: 'photo' | 'video' | 'audio' | 'embed' | 'map' | 'file';
+      attachment?: TvBugMediaV2 | undefined;
       id?: string | undefined;
       url?: string | undefined;
       caption?: { text: TvBugRichTextV2; credit?: TvBugRichTextV2 | undefined };
@@ -1411,6 +1420,9 @@ function hydrateMessage(message: TvBugMessageV2, epoch: number): CachedMessage {
           },
         }
       : {}),
+    ...(message.widget
+      ? { widget: { ...message.widget, html: '', canQuery: false, backgroundQuery: false } }
+      : {}),
     ...(message.contentDiagnostic
       ? { contentDiagnostic: sanitizeMessageContentDiagnostic(message.contentDiagnostic) }
       : {}),
@@ -1555,6 +1567,12 @@ function hydrateRichMessage(message: TvBugRichMessageV2): RichMessage {
 
 function hydrateRichText(text: TvBugRichTextV2): RichText {
   switch (text.kind) {
+    case 'button':
+      return {
+        kind: 'button',
+        child: hydrateRichText(text.child),
+        button: hydrateKeyboard({ kind: 'inline', rows: [[text.button]] }).rows[0]![0]!,
+      };
     case 'text':
       return { kind: 'text', text: text.text.value };
     case 'concat':
@@ -1589,6 +1607,12 @@ function hydrateRichText(text: TvBugRichTextV2): RichText {
 
 function hydrateRichBlock(block: TvBugRichBlockV2): RichBlock {
   switch (block.kind) {
+    case 'buttons':
+      return {
+        kind: 'buttons',
+        align: block.align,
+        buttons: hydrateKeyboard({ kind: 'inline', rows: [block.buttons] }).rows[0]!,
+      };
     case 'text':
       return { kind: 'text', role: block.role, text: hydrateRichText(block.text) };
     case 'heading':
@@ -1648,6 +1672,7 @@ function hydrateRichBlock(block: TvBugRichBlockV2): RichBlock {
           })),
         ),
         ...(block.bordered !== undefined ? { bordered: block.bordered } : {}),
+        ...(block.compact !== undefined ? { compact: block.compact } : {}),
         ...(block.striped !== undefined ? { striped: block.striped } : {}),
       };
     case 'math':
@@ -1656,6 +1681,19 @@ function hydrateRichBlock(block: TvBugRichBlockV2): RichBlock {
       return {
         kind: 'media',
         mediaKind: block.mediaKind,
+        ...(block.attachment
+          ? {
+              attachment: {
+                kind: block.attachment.kind,
+                name: block.attachment.name.value,
+                mimeType: block.attachment.mimeType,
+                ...(block.attachment.byteSize !== undefined
+                  ? { size: block.attachment.byteSize }
+                  : {}),
+                ...(block.attachment.cacheKey ? { cacheKey: block.attachment.cacheKey } : {}),
+              },
+            }
+          : {}),
         ...(block.id ? { id: block.id } : {}),
         ...(block.url ? { url: block.url } : {}),
         ...(block.caption
@@ -1988,6 +2026,15 @@ class StateSanitizer {
       ...(message.links ? { links: message.links.map((link) => this.sanitizeLink(link)) } : {}),
       ...(message.linkPreview
         ? { linkPreview: this.sanitizeLinkPreview(message.linkPreview) }
+        : {}),
+      ...(message.widget
+        ? {
+            widget: {
+              width: finiteNumber(message.widget.width, 'widget.width'),
+              height: finiteNumber(message.widget.height, 'widget.height'),
+              isCopy: message.widget.isCopy,
+            },
+          }
         : {}),
       ...(message.contentDiagnostic
         ? { contentDiagnostic: sanitizeMessageContentDiagnostic(message.contentDiagnostic) }
@@ -2457,6 +2504,12 @@ class StateSanitizer {
   private sanitizeRichText(text: RichText, depth: number): TvBugRichTextV2 {
     assertNestingDepth(depth);
     switch (text.kind) {
+      case 'button':
+        return {
+          kind: 'button',
+          child: this.sanitizeRichText(text.child, depth + 1),
+          button: this.sanitizeKeyboard({ kind: 'inline', rows: [[text.button]] }).rows[0]![0]!,
+        };
       case 'text':
         return { kind: 'text', text: sanitizeTvBugText(text.text) };
       case 'concat':
@@ -2514,6 +2567,12 @@ class StateSanitizer {
   private sanitizeRichBlock(block: RichBlock, depth: number): TvBugRichBlockV2 {
     assertNestingDepth(depth);
     switch (block.kind) {
+      case 'buttons':
+        return {
+          kind: 'buttons',
+          align: block.align,
+          buttons: this.sanitizeKeyboard({ kind: 'inline', rows: [block.buttons] }).rows[0]!,
+        };
       case 'text':
         return {
           kind: 'text',
@@ -2584,6 +2643,7 @@ class StateSanitizer {
             })),
           ),
           ...(block.bordered !== undefined ? { bordered: block.bordered } : {}),
+          ...(block.compact !== undefined ? { compact: block.compact } : {}),
           ...(block.striped !== undefined ? { striped: block.striped } : {}),
         };
       case 'math':
@@ -2592,6 +2652,7 @@ class StateSanitizer {
         return {
           kind: 'media',
           mediaKind: block.mediaKind,
+          ...(block.attachment ? { attachment: this.sanitizeMedia(block.attachment) } : {}),
           ...(block.id ? { id: this.aliases.get('rich-media', block.id) } : {}),
           ...(block.url ? { url: this.safeUrl(block.url) } : {}),
           ...(block.caption

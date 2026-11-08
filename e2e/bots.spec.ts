@@ -650,3 +650,74 @@ test('keeps callback alerts visible until dismissed', async ({ page }) => {
   await alert.getByRole('button', { name: 'OK', exact: true }).click();
   await expect(alert).toHaveCount(0);
 });
+
+test('stops a streamed answer and preserves its text only when requested by the bot', async ({
+  page,
+}) => {
+  await openReady(page);
+  await page.getByRole('textbox', { name: 'Search chats' }).fill('helper');
+  await page.getByTestId('peer-search-result').filter({ hasText: 'Fixture Helper Bot' }).click();
+  await page.getByRole('button', { name: 'Start bot' }).click();
+  await expect(page.getByTestId('inline-bot-keyboard')).toBeVisible();
+  await page.evaluate(() =>
+    window.__televechaFixture!.emit({
+      type: 'live-draft',
+      draft: {
+        id: 'u:606:0:5',
+        peerId: 'u:606',
+        text: 'Partial answer',
+        canStop: true,
+        keepOnStop: true,
+      },
+    }),
+  );
+  const draft = page.getByTestId('bot-live-draft');
+  await expect(draft.getByRole('button', { name: 'Stop generating' })).toBeVisible();
+  await draft.getByRole('button', { name: 'Stop generating' }).click();
+  await expect(draft).toContainText('Partial answer');
+  await expect(draft).toHaveAttribute('aria-busy', 'false');
+  await expect(draft.getByText('Generating…', { exact: true })).toHaveCount(0);
+  await page.evaluate(() => {
+    window.__televechaFixture!.emit({
+      type: 'live-draft',
+      draft: { id: 'u:606:0:5', peerId: 'u:606', text: 'Temporary', canStop: true },
+    });
+    window.__televechaFixture!.emit({ type: 'live-draft-stopped', id: 'u:606:0:5' });
+  });
+  await expect(draft).toHaveCount(0);
+});
+
+test('honors layer 233 force-reply on an inline keyboard without showing a reply panel', async ({
+  page,
+}) => {
+  await openReady(page);
+  await page
+    .getByTestId('chat-list')
+    .getByRole('button', { name: /Fixture Group/ })
+    .click();
+  await page.evaluate(() =>
+    window.__televechaFixture!.emit({
+      type: 'new-message',
+      pts: 11,
+      ptsCount: 1,
+      message: {
+        id: 13,
+        peerId: 'g:303',
+        senderId: 'u:404',
+        text: 'Reply to this prompt',
+        date: Math.floor(Date.now() / 1000),
+        outgoing: false,
+        botKeyboard: {
+          kind: 'inline',
+          forceReply: true,
+          rows: [[{ kind: 'copy', text: 'Copy prompt', copyText: 'prompt' }]],
+        },
+      },
+    }),
+  );
+  await expect(page.getByTestId('composer-reply')).toContainText('Reply to this prompt');
+  await expect(
+    page.getByTestId('inline-bot-keyboard').getByRole('button', { name: 'Copy prompt' }),
+  ).toBeVisible();
+  await expect(page.getByTestId('reply-bot-keyboard')).toHaveCount(0);
+});

@@ -1,3 +1,4 @@
+import { zlibSync, strToU8 } from 'fflate';
 import { SecureRandom, Digest, Kdf } from 'effect/crypto';
 import { Effect, Fiber, PubSub, Stream } from 'effect';
 import * as Socket from 'effect/socket/Socket';
@@ -6,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CreateMtprotoClientOptions, MtprotoClient } from '../mtproto';
 import { updateEvent, type MtprotoClientEvent } from '../mtproto/events';
 import { createMtprotoError } from '../mtproto/errors';
-import { Api, createTl } from '../mtproto/tl';
+import { Api, createTl, encodeTl, decodeTl } from '../mtproto/tl';
 import { makeMemoryCacheStore } from '../persistence/memoryStore';
 import { createWebTelegramTransport } from './webTelegramTransport';
 
@@ -64,6 +65,182 @@ const withTransport = <A, E>(
   );
 
 describe('web Telegram transport', () => {
+  it('decodes rich document pairs and downloads each document by its own identity', () => {
+    const documents = [1n, 2n].map((id) =>
+      Api.Document({
+        id,
+        accessHash: id + 100n,
+        fileReference: new Uint8Array([Number(id)]),
+        date: 1,
+        dcId: 2,
+        size: 3n,
+        mimeType: 'text/plain',
+        attributes: [
+          Api.DocumentAttributeFilename({ fileName: id === 1n ? 'aaa.txt' : 'bbb.txt' }),
+        ],
+      }),
+    );
+    const source = Api.Message({
+      id: 42,
+      peerId: Api.PeerUser({ userId: 101n }),
+      date: 1,
+      message: '',
+      richMessage: Api.RichMessage({
+        documents,
+        photos: [],
+        blocks: documents.map((document, index) =>
+          Api.PageBlockDocument({
+            documentId: document.id,
+            caption: Api.PageCaption({
+              text: Api.TextPlain({ text: index ? 'БББ' : 'AAA' }),
+              credit: Api.TextEmpty(),
+            }),
+          }),
+        ),
+      }),
+      replyMarkup: Api.ReplyInlineMarkup({
+        forceReply: true,
+        rows: [
+          Api.KeyboardInlineButtonRow({
+            buttons: [
+              Api.KeyboardInlineButton({
+                text: 'Back',
+                type: Api.InlineButtonTypeCallback({ data: new Uint8Array([7]) }),
+              }),
+              Api.KeyboardInlineButton({
+                text: 'Copy',
+                type: Api.InlineButtonTypeCopy({ copyText: 'value' }),
+              }),
+            ],
+          }),
+        ],
+      }),
+    });
+    const decoded = decodeTl(encodeTl(source));
+    expect(decoded).toEqual(source);
+    const download = vi.fn((media: unknown) => {
+      if (!Api.MessageMediaDocument.is(media) || !Api.Document.is(media.document))
+        throw Error('Wrong download target');
+      return Effect.succeed(new Uint8Array([Number(media.document.id), 0, 0]));
+    });
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const page = yield* transport.getHistory(
+              { id: 'u:101', kind: 'user', accessHash: '1' },
+              10,
+            );
+            const message = page.messages[0]!;
+            expect(message.botKeyboard?.forceReply).toBe(true);
+            expect(message.botKeyboard?.rows[0]).toEqual([
+              { kind: 'callback', text: 'Back', data: [7] },
+              { kind: 'copy', text: 'Copy', copyText: 'value' },
+            ]);
+            expect(message.richMessage?.blocks).toHaveLength(2);
+            for (const [index, block] of message.richMessage!.blocks.entries()) {
+              expect(block).toMatchObject({
+                kind: 'media',
+                mediaKind: 'file',
+                attachment: { name: index ? 'bbb.txt' : 'aaa.txt', size: 3 },
+                caption: { text: { text: index ? 'БББ' : 'AAA' } },
+              });
+              if (block.kind !== 'media' || !block.attachment) throw Error('Missing attachment');
+              const blob = yield* transport.downloadMedia({ ...message, media: block.attachment });
+              expect(new Uint8Array(yield* Effect.promise(() => blob.arrayBuffer()))[0]).toBe(
+                index + 1,
+              );
+            }
+            expect(download).toHaveBeenCalledTimes(2);
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({
+              downloadMedia: download,
+              invoke: (() =>
+                Effect.succeed(
+                  Api.messages.Messages({ messages: [source], topics: [], users: [], chats: [] }),
+                )) as MtprotoClient['invoke'],
+            }),
+          ),
+      ),
+    );
+  });
+
+  it('decodes widget payloads and sends message-scoped data queries and stop-draft actions', () => {
+    const peer = { id: 'u:101', kind: 'user' as const, accessHash: '1' };
+    const source = Api.Message({
+      id: 43,
+      peerId: Api.PeerUser({ userId: 101n }),
+      date: 1,
+      message: '',
+      media: Api.MessageMediaWidget({
+        width: 320,
+        height: 160,
+        canQuery: true,
+        payload: zlibSync(strToU8('<p>Hello widget</p>')),
+        chatData: 'chat state',
+        publicData: 'public state',
+        publicDataHash: 1n,
+      }),
+    });
+    expect(decodeTl(encodeTl(source))).toEqual(source);
+    const calls: unknown[] = [];
+    return Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            const page = yield* transport.getHistory(peer, 10);
+            expect(page.messages[0]?.widget).toMatchObject({
+              html: '<p>Hello widget</p>',
+              width: 320,
+              height: 160,
+              canQuery: true,
+              isCopy: false,
+              chatData: 'chat state',
+              publicData: 'public state',
+            });
+            expect(page.messages[0]?.contentDiagnostic?.outcome).toBe('mapped');
+            expect(yield* transport.queryWidget(peer, 43, 'ping')).toBe('pong');
+            yield* transport.stopLiveDraft(peer, '123', 7);
+            expect(calls).toContainEqual(
+              Api.messages.GetBotWidgetQueryAnswer({
+                peer: Api.InputPeerUser({ userId: 101n, accessHash: 1n }),
+                msgId: 43,
+                queryType: Api.WidgetQueryTypeData({}),
+                data: strToU8('ping'),
+              }),
+            );
+            expect(calls).toContainEqual(
+              Api.messages.SetTyping({
+                peer: Api.InputPeerUser({ userId: 101n, accessHash: 1n }),
+                topMsgId: 7,
+                action: Api.SendMessageStopDraftAction({ randomId: 123n }),
+              }),
+            );
+          }),
+        () =>
+          Effect.succeed(
+            clientDouble({
+              invoke: ((request: unknown) => {
+                calls.push(request);
+                if (Api.messages.GetBotWidgetQueryAnswer.is(request))
+                  return Effect.succeed(
+                    createTl('messages.botWidgetQueryAnswer', { result: 'pong' }),
+                  );
+                if (Api.messages.SetTyping.is(request)) return Effect.succeed(true);
+                return Effect.succeed(
+                  Api.messages.Messages({ messages: [source], topics: [], users: [], chats: [] }),
+                );
+              }) as MtprotoClient['invoke'],
+            }),
+          ),
+      ),
+    );
+  });
+
   it('retains source content evidence for unsupported messages and grouped TXT files', () => {
     const messages = [
       Api.Message({

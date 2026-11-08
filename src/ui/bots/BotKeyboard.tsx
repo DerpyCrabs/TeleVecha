@@ -26,7 +26,9 @@ export const BotKeyboard = view<BotKeyboardProps, never>((props, _send) => {
               <button
                 type="button"
                 disabled={
-                  props.disabled || Boolean(props.busyButton) || button.kind === 'unsupported'
+                  props.disabled ||
+                  Boolean(props.busyButton) ||
+                  ['unsupported', 'disabled'].includes(button.kind)
                 }
                 aria-busy={props.busyButton === key()}
                 title={

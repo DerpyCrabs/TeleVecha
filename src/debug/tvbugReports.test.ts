@@ -242,7 +242,7 @@ describe('browser debug report recorder', () => {
       networkReplay: false,
       media: 'synthetic',
     });
-    expect(bundle.manifest.producer.telegramLayer).toBe(228);
+    expect(bundle.manifest.producer.telegramLayer).toBe(233);
     detach();
     const detached = await Effect.runPromise(recorder.prepare());
     expect(

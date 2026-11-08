@@ -3061,6 +3061,8 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       deleteDialog,
       setPinnedMessage,
       setTyping,
+      stopLiveDraft: () => Effect.void,
+      queryWidget: (_peer, _messageId, data) => Effect.succeed(`Pong: ${data}`),
       sendText,
       sendContact,
       sendPoll,

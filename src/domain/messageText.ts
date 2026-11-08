@@ -38,6 +38,7 @@ function blockToPlainText(block: RichBlock): string {
   if (block.kind === 'text' || block.kind === 'heading' || block.kind === 'pre') {
     return richTextToPlainText(block.text);
   }
+  if (block.kind === 'buttons') return block.buttons.map((button) => button.text).join(' · ');
   if (block.kind === 'divider') return '---';
   if (block.kind === 'anchor') return '';
   if (block.kind === 'math') return block.source;

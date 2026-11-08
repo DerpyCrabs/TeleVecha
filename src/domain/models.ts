@@ -29,6 +29,7 @@ export interface ChatSummary {
 export type MessageStatus = 'sending' | 'sent' | 'read' | 'failed';
 
 export interface ChatMessage {
+  widget?: import('../telegram/types').TelegramWidget | undefined;
   contact?: TelegramContact | undefined;
   poll?: TelegramPoll | undefined;
   id: string;
@@ -75,6 +76,7 @@ export interface ChatMessage {
               | 'switch-inline'
               | 'web-app'
               | 'simple-web-app'
+              | 'disabled'
               | 'unsupported';
             text: string;
             url?: string | undefined;

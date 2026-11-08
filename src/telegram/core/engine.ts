@@ -1,3 +1,4 @@
+import { LAYER } from '../mtproto/tl/types';
 import type { SavedDialogsOffset } from '../savedMessages';
 import type { AdminLogRequest } from '../adminLog';
 import type {
@@ -2256,6 +2257,39 @@ function makeMessagingEngineModule(
       }),
     );
   });
+  const queryWidget = Effect.fn('MessagingEngine.queryWidget')(function* (
+    peerId: string,
+    messageId: number,
+    data: string,
+  ) {
+    const peer = currentSnapshot().dialogs.find(({ peer }) => peer.id === peerId)?.peer;
+    const bytes = new TextEncoder().encode(data);
+    if (!peer || !telegramTransport.queryWidget || bytes.length < 1 || bytes.length > 64)
+      return yield* Effect.fail(new Error('Widget request is unavailable.'));
+    return yield* runTelegramOperation(
+      () => telegramTransport.queryWidget!(peer, messageId, data),
+      'Widget request',
+    );
+  });
+  const stopLiveDraft = Effect.fn('MessagingEngine.stopLiveDraft')(function* (id: string) {
+    const draft = currentSnapshot().liveDrafts?.find((item) => item.id === id);
+    const peer =
+      draft && currentSnapshot().dialogs.find(({ peer }) => peer.id === draft.peerId)?.peer;
+    if (!draft?.canStop || !peer || !telegramTransport.stopLiveDraft) return;
+    yield* runTelegramOperation(
+      () => telegramTransport.stopLiveDraft!(peer, id.split(':').at(-1)!, draft.topicId),
+      'Stopping bot response',
+    );
+    yield* patch({
+      liveDrafts: (currentSnapshot().liveDrafts ?? []).flatMap((item) =>
+        item.id !== id
+          ? [item]
+          : item.keepOnStop
+            ? [{ ...item, stopped: true, canStop: false }]
+            : [],
+      ),
+    });
+  });
   const setTyping = Effect.fn('MessagingEngine.setTyping')(function* (
     peer: TelegramPeer,
     kind?: TelegramActivityKind,
@@ -2962,7 +2996,13 @@ function makeMessagingEngineModule(
           const refreshed = context.find(({ id }) => id === message.id);
           if (!refreshed) return yield* Effect.fail(firstError);
           const blob = yield* runTransportWithDeadline(
-            () => telegramTransport.downloadMedia(refreshed, { ...options }),
+            () =>
+              telegramTransport.downloadMedia(
+                message.richMessage && message.media
+                  ? { ...refreshed, media: message.media }
+                  : refreshed,
+                { ...options },
+              ),
             MEDIA_DELIVERY_TIMEOUT_MS,
             'Media download timed out after 5 minutes.',
             'media-download',
@@ -4906,9 +4946,12 @@ function makeMessagingEngineModule(
             .filter(
               (message) =>
                 message.id > 0 &&
-                !message.contentDiagnostic &&
+                (!message.contentDiagnostic ||
+                  (message.contentDiagnostic.outcome === 'server-unsupported' &&
+                    message.contentDiagnostic.layer < LAYER)) &&
                 !message.text &&
                 !message.media &&
+                !message.widget &&
                 !message.richMessage &&
                 !message.contact &&
                 !message.poll &&
@@ -5891,6 +5934,29 @@ function makeMessagingEngineModule(
       }
       return;
     }
+    if (update.type === 'widget-data') {
+      const message =
+        histories.loaded(update.peerId)?.messages.find(({ id }) => id === update.messageId) ??
+        (yield* cacheStore.loadMessage(update.peerId, update.messageId));
+      if (message?.widget)
+        yield* applyUpdate(
+          {
+            type: 'edit-message',
+            pts: 0,
+            ptsCount: 0,
+            message: {
+              ...message,
+              widget: {
+                ...message.widget,
+                ...(update.publicData !== undefined ? { publicData: update.publicData } : {}),
+                ...(update.chatData !== undefined ? { chatData: update.chatData } : {}),
+              },
+            },
+          },
+          true,
+        );
+      return;
+    }
     if (update.type === 'poll-changed') {
       const candidates = new Map<string, TelegramMessage>();
       for (const peerId of histories.peerIds())
@@ -5930,6 +5996,18 @@ function makeMessagingEngineModule(
       );
       return;
     }
+    if (update.type === 'live-draft-stopped') {
+      yield* patch({
+        liveDrafts: (currentSnapshot().liveDrafts ?? []).flatMap((draft) =>
+          draft.id !== update.id
+            ? [draft]
+            : draft.keepOnStop
+              ? [{ ...draft, stopped: true, canStop: false }]
+              : [],
+        ),
+      });
+      return;
+    }
     if (update.type === 'live-draft') {
       const draft = update.draft;
       const drafts = currentSnapshot().liveDrafts ?? [];
@@ -5945,7 +6023,9 @@ function makeMessagingEngineModule(
         30_000,
         Effect.gen(function* () {
           yield* patch({
-            liveDrafts: (currentSnapshot().liveDrafts ?? []).filter(({ id }) => id !== draft.id),
+            liveDrafts: (currentSnapshot().liveDrafts ?? []).filter(
+              (item) => item.id !== draft.id || item.stopped,
+            ),
           });
         }),
       );
@@ -7533,6 +7613,8 @@ function makeMessagingEngineModule(
     deleteDialog: deleteDialog,
     setPinnedMessage: setPinnedMessage,
     setTyping: setTyping,
+    stopLiveDraft,
+    queryWidget,
     loadOlderConversationView: loadOlderConversationView,
     retryConversationView: retryConversationView,
     setDraft: setDraft,

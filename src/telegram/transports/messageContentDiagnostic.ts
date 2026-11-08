@@ -13,6 +13,7 @@ export function describeMessageContent(
   const rich = source.richMessage;
   const mappedRichBlocks = mapped.richMessage?.blocks.length ?? 0;
   const hasContent = Boolean(
+    mapped.widget ||
     mapped.text ||
     mapped.media ||
     mapped.contact ||
@@ -41,6 +42,7 @@ export function describeMessageContent(
         ? 'server-unsupported'
         : source.media &&
             source.media._ !== 'messageMediaEmpty' &&
+            !mapped.widget &&
             !mapped.media &&
             !mapped.contact &&
             !mapped.poll &&

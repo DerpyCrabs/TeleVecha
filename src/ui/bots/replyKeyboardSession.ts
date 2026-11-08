@@ -64,7 +64,21 @@ export function createReplyKeyboardSession(options: {
     });
   };
   const refresh = () => {
-    const current = visible();
+    const inline =
+      options.snapshot().activePeerId === options.activePeerId()
+        ? options
+            .snapshot()
+            .messages.slice()
+            .reverse()
+            .find(
+              (message) => message.botKeyboard?.kind === 'inline' && message.botKeyboard.forceReply,
+            )
+        : undefined;
+    const reply = visible();
+    const current =
+      inline && (!reply || inline.id > reply.messageId)
+        ? { message: inline, messageId: inline.id, keyboard: inline.botKeyboard! }
+        : reply;
     if (!current?.keyboard.forceReply) return;
     const key = `${options.activePeerId()}:${current.messageId}`;
     if (handledForceReplies.has(key) || options.reply() || options.editing()) return;

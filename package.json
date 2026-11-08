@@ -28,6 +28,8 @@
     "@effectweb/lucide": "0.15.0",
     "@effectweb/query": "0.15.0",
     "@noble/ciphers": "^2.4.0",
+    "@telegram/widget-sandbox": "file:vendor/telegram-widget-sandbox-0.6.0.tgz",
+    "@telegram/widget-sandbox-quickjs": "file:vendor/telegram-widget-sandbox-quickjs-0.32.0-fork.tgz",
     "effect": "4.1.0",
     "effectweb": "0.15.0",
     "fflate": "^0.8.3",
@@ -54,6 +56,9 @@
     "vite-plus": "1.4.0"
   },
   "overrides": {
+    "htmlparser2": "10.1.0",
+    "linkedom": "0.18.13",
+    "parse5": "8.0.1",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0"
   },
   "engines": {

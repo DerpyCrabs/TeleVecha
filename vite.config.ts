@@ -1,3 +1,4 @@
+import { widgetSandbox } from '@telegram/widget-sandbox/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite-plus';
 import { effectwebLint } from '@effectweb/compiler/lint-preset';
@@ -31,10 +32,46 @@ export default defineConfig({
     'import.meta.env.VITE_TELEVECHA_COMMIT': JSON.stringify(revision.commit),
     'import.meta.env.VITE_TELEVECHA_SOURCE_MODIFIED': JSON.stringify(revision.modified ?? null),
   },
-  plugins: [effectweb(), tailwindcss()],
+  plugins: [
+    effectweb(),
+    tailwindcss(),
+    {
+      ...widgetSandbox(),
+      // Isolate only the dedicated widget viewer; bot Mini Apps keep their existing context.
+      config: () => ({
+        worker: { format: 'es' },
+        optimizeDeps: { exclude: ['@telegram/widget-sandbox-quickjs'] },
+      }),
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url?.startsWith('/assets/') || req.url?.includes('/@telegram/widget-sandbox/')) {
+            res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+          }
+          if (req.url?.split('?')[0] === '/widget.html') {
+            res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+            res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+          }
+          next();
+        });
+      },
+      configurePreviewServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url?.startsWith('/assets/') || req.url?.includes('/@telegram/widget-sandbox/')) {
+            res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+          }
+          if (req.url?.split('?')[0] === '/widget.html') {
+            res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+            res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+          }
+          next();
+        });
+      },
+    },
+  ],
   build: {
     target: 'es2022',
     rollupOptions: {
+      input: { main: 'index.html', widget: 'widget.html' },
       output: {
         manualChunks(id) {
           if (id.includes('/src/telegram/mtproto/')) return 'telegram';

@@ -37,63 +37,68 @@ afterEach(() => {
 });
 
 describe('MessagingEngine', () => {
-  it('rechecks legacy empty cached messages without reloading the conversation head', () =>
-    Effect.runPromise(
-      withEngine((engine, transport, cache) =>
-        Effect.gen(function* () {
-          yield* engine.start(credentials);
-          const dialog = engine.snapshot().dialogs.find(({ peer }) => peer.id === 'u:101')!;
-          const page = yield* transport.getHistory(dialog.peer, 50);
-          const epoch = yield* cache.loadEpoch();
-          const legacy = {
-            id: page.messages[0]!.id,
-            peerId: dialog.peer.id,
-            senderId: dialog.peer.id,
-            text: '',
-            date: page.messages[0]!.date,
-            outgoing: false,
-            cacheEpoch: epoch,
-          };
-          const contentDiagnostic = describeMessageContent(
-            Api.Message({
-              id: legacy.id,
-              peerId: Api.PeerUser({ userId: 101n }),
-              date: 1,
-              message: '',
-              media: createTl('messageMediaUnsupported', {}),
-            }),
-            legacy,
-          );
-          const remote = { ...legacy, contentDiagnostic };
-          yield* cache.putMessages([
-            ...page.messages
-              .filter(({ id }) => id !== legacy.id)
-              .map((message) => ({ ...message, cacheEpoch: epoch })),
-            legacy,
-          ]);
-          const head = vi.spyOn(transport, 'getHistory');
-          const around = vi
-            .spyOn(transport, 'getHistoryAround')
-            .mockReturnValue(Effect.succeed({ messages: [remote] }));
-          yield* engine.loadConversationView(dialog.peer.id);
-          yield* Effect.promise(() =>
-            vi.waitFor(async () => {
-              expect(
-                (await Effect.runPromise(cache.loadMessage(dialog.peer.id, legacy.id)))
-                  ?.contentDiagnostic,
-              ).toEqual(contentDiagnostic);
-            }),
-          );
-          expect(around).toHaveBeenCalledWith(dialog.peer, legacy.id, 3);
-          expect(head).not.toHaveBeenCalled();
-          const reopened = yield* engine.loadConversationView(dialog.peer.id);
-          expect(reopened.messages.find(({ id }) => id === legacy.id)?.contentDiagnostic).toEqual(
-            contentDiagnostic,
-          );
-          expect(around).toHaveBeenCalledTimes(1);
-        }),
+  it.each([false, true])(
+    'rechecks cached unsupported messages without reloading the conversation head (old layer: %s)',
+    (oldLayer) =>
+      Effect.runPromise(
+        withEngine((engine, transport, cache) =>
+          Effect.gen(function* () {
+            yield* engine.start(credentials);
+            const dialog = engine.snapshot().dialogs.find(({ peer }) => peer.id === 'u:101')!;
+            const page = yield* transport.getHistory(dialog.peer, 50);
+            const epoch = yield* cache.loadEpoch();
+            const legacy = {
+              id: page.messages[0]!.id,
+              peerId: dialog.peer.id,
+              senderId: dialog.peer.id,
+              text: '',
+              date: page.messages[0]!.date,
+              outgoing: false,
+              cacheEpoch: epoch,
+            };
+            const contentDiagnostic = describeMessageContent(
+              Api.Message({
+                id: legacy.id,
+                peerId: Api.PeerUser({ userId: 101n }),
+                date: 1,
+                message: '',
+                media: createTl('messageMediaUnsupported', {}),
+              }),
+              legacy,
+            );
+            const remote = { ...legacy, contentDiagnostic };
+            yield* cache.putMessages([
+              ...page.messages
+                .filter(({ id }) => id !== legacy.id)
+                .map((message) => ({ ...message, cacheEpoch: epoch })),
+              oldLayer
+                ? { ...legacy, contentDiagnostic: { ...contentDiagnostic, layer: 228 } }
+                : legacy,
+            ]);
+            const head = vi.spyOn(transport, 'getHistory');
+            const around = vi
+              .spyOn(transport, 'getHistoryAround')
+              .mockReturnValue(Effect.succeed({ messages: [remote] }));
+            yield* engine.loadConversationView(dialog.peer.id);
+            yield* Effect.promise(() =>
+              vi.waitFor(async () => {
+                expect(
+                  (await Effect.runPromise(cache.loadMessage(dialog.peer.id, legacy.id)))
+                    ?.contentDiagnostic,
+                ).toEqual(contentDiagnostic);
+              }),
+            );
+            expect(around).toHaveBeenCalledWith(dialog.peer, legacy.id, 3);
+            expect(head).not.toHaveBeenCalled();
+            const reopened = yield* engine.loadConversationView(dialog.peer.id);
+            expect(reopened.messages.find(({ id }) => id === legacy.id)?.contentDiagnostic).toEqual(
+              contentDiagnostic,
+            );
+            expect(around).toHaveBeenCalledTimes(1);
+          }),
+        ),
       ),
-    ));
+  );
 
   it('reads earlier group history without replacing the open conversation and caches the original peer', () =>
     Effect.runPromise(

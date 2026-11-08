@@ -1146,6 +1146,37 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                             layout.album.filter((item) => item.body.trim()).length === 1 ? (
                               <MessageBody
                                 message={caption}
+                                queryWidget={(data) =>
+                                  runEffect(
+                                    engine.queryWidget(
+                                      message.peerId ?? activeChatId,
+                                      Number(message.id),
+                                      data,
+                                    ),
+                                  )
+                                }
+                                richMedia={{
+                                  press: canUseLiveCommands
+                                    ? (button) =>
+                                        runInBackground(
+                                          bot.press(
+                                            button,
+                                            message.id,
+                                            `rich:${button.text}`,
+                                            Number(message.id),
+                                          ),
+                                        )
+                                    : undefined,
+                                  protected: message.protected,
+                                  load: (media, progress) => {
+                                    const source = snapshot.messages.find(
+                                      (candidate) => String(candidate.id) === message.id,
+                                    );
+                                    return source
+                                      ? mediaAssets.loadMedia({ ...source, media }, progress)
+                                      : Effect.fail(new Error('Attachment data is unavailable.'));
+                                  },
+                                }}
                                 botCommands={Boolean(activeChat.bot)}
                                 previewPhoto={
                                   message.linkPreview?.hasPhoto
@@ -1558,6 +1589,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                         : null)(messageContextMenu!)
                   : null}
                 <LiveDrafts
+                  onStop={(id) => runInBackground(runEffect(engine.stopLiveDraft(id)))}
                   drafts={(snapshot.liveDrafts ?? []).filter(
                     (draft) =>
                       draft.peerId === activeChatId && draft.topicId === model.activeTopic?.id,

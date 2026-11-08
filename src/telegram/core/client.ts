@@ -41,6 +41,8 @@ export const messagingCapabilities = [
   'setActiveConversationVisibility',
   'setDraft',
   'setTyping',
+  'stopLiveDraft',
+  'queryWidget',
   'sendDraft',
   'sendAttachments',
   'sendSticker',

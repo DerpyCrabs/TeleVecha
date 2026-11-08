@@ -5,17 +5,17 @@ runtime.
 
 ## Pinned official sources
 
-The layer 228 application schema comes from Telegram's official TDLib repository at commit
-[`b768eb2911f494c0678f4a4ff2c4a0529cb3cc6e`](https://github.com/tdlib/td/commit/b768eb2911f494c0678f4a4ff2c4a0529cb3cc6e),
-whose commit title is `Update layer to 228`:
+The layer 233 application schema comes from Telegram's official TDLib repository at commit
+[`562a82abf952fdaf808aca67a1dc5e2698aa0dd3`](https://github.com/tdlib/td/commit/562a82abf952fdaf808aca67a1dc5e2698aa0dd3),
+whose commit title is `Update layer to 233`:
 
-- [`telegram_api.tl`](https://raw.githubusercontent.com/tdlib/td/b768eb2911f494c0678f4a4ff2c4a0529cb3cc6e/td/generate/scheme/telegram_api.tl),
-  SHA-256 `921a58e71f2baebb840609366c506fb92ffac8db3c5bb832423aacd7cd6817cf`
-- [`mtproto_api.tl`](https://raw.githubusercontent.com/tdlib/td/b768eb2911f494c0678f4a4ff2c4a0529cb3cc6e/td/generate/scheme/mtproto_api.tl),
+- [`telegram_api.tl`](https://raw.githubusercontent.com/tdlib/td/562a82abf952fdaf808aca67a1dc5e2698aa0dd3/td/generate/scheme/telegram_api.tl),
+  SHA-256 `89bf71464239646c233f0a2a3d77512c9be08e4a63eab362afba0b721f69a26d`
+- [`mtproto_api.tl`](https://raw.githubusercontent.com/tdlib/td/562a82abf952fdaf808aca67a1dc5e2698aa0dd3/td/generate/scheme/mtproto_api.tl),
   SHA-256 `bde4942be06dc112dfc655e2a8aa5163a4e3aa0d859d7840cfc76ec3a00654c4`
 
 TDLib is distributed under the Boost Software License 1.0. The pinned
-[`LICENSE_1_0.txt`](https://raw.githubusercontent.com/tdlib/td/b768eb2911f494c0678f4a4ff2c4a0529cb3cc6e/LICENSE_1_0.txt)
+[`LICENSE_1_0.txt`](https://raw.githubusercontent.com/tdlib/td/562a82abf952fdaf808aca67a1dc5e2698aa0dd3/LICENSE_1_0.txt)
 has SHA-256 `c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566`.
 The required statement is included beside these inputs as the
 [Boost Software License 1.0](LICENSE).
@@ -39,7 +39,7 @@ TL code block used for the check has SHA-256
 Telegram's `core.telegram.org/schema` and `core.telegram.org/schema/json` endpoints exposed layer
 223 when this snapshot was prepared on 2026-08-29. The canonical JSON response had SHA-256
 `287817f49fea78191c5f4342ad683ba2aed6c3bc2acc89757fc64f68ea24d846`. Those endpoints cannot by
-themselves reproduce layer 228, so the immutable official TDLib commit is the structural source.
+themselves reproduce layer 233, so the immutable official TDLib commit is the structural source.
 
 ## Canonicalization
 
@@ -59,14 +59,13 @@ files and write deterministic TL:
 
 The committed canonical files are:
 
-- `api-layer-228.tl`, SHA-256
-  `12c867591a6fd12d0478bafd774c089d73db5ebcbcc4984b301613cc84125133`
+- `api-layer-233.tl`, SHA-256
+  `9f90084f34e7a686cc8a741fd8a4fa0f00f0ccdcc03b592d49c46d0fffca5b7c`
 - `mtproto.tl`, SHA-256
-  `d4da4054b4e3d3c12436a7b26cafab7ea21fd126a56d211a4a68e1a26bd114ba`
+  `d0c36bc9fcdf0a382c952a3ad94ab7fd9811c71e906756ce2a3e75b2ddb3029b`
 
-The runtime catalog contains 1,683 constructors, 77 selected methods, and one bare MTProto message.
-Compared with the previous catalog, only `null`, `p_q_inner_data`, and `p_q_inner_data_temp` were
-removed. The generated public `Api` factories and `Tl` types are unchanged.
+The runtime catalog includes all constructors and the methods used by the application.
+Layer 233 adds rich document blocks and separates reply and inline keyboard button types.
 
 ## Refresh and checks
 

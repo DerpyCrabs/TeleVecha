@@ -209,7 +209,19 @@ export interface TelegramContact {
   avatarId?: string | undefined;
 }
 
+export interface TelegramWidget {
+  html: string;
+  width: number;
+  height: number;
+  canQuery: boolean;
+  isCopy: boolean;
+  backgroundQuery: boolean;
+  chatData?: string | undefined;
+  publicData?: string | undefined;
+}
+
 export interface TelegramMessage {
+  widget?: TelegramWidget | undefined;
   id: number;
   peerId: string;
   peer?: TelegramPeer | undefined;
@@ -306,6 +318,7 @@ export type TelegramBotButtonKind =
   | 'switch-inline'
   | 'web-app'
   | 'simple-web-app'
+  | 'disabled'
   | 'unsupported';
 
 export interface TelegramBotButton {
@@ -668,6 +681,9 @@ export interface TelegramDownloadOptions {
 }
 
 export interface TelegramLiveDraft {
+  canStop?: boolean | undefined;
+  keepOnStop?: boolean | undefined;
+  stopped?: boolean | undefined;
   id: string;
   peerId: string;
   topicId?: number | undefined;
@@ -679,6 +695,16 @@ export interface TelegramLiveDraft {
 
 export type TransportUpdate =
   | { type: 'live-draft'; draft: TelegramLiveDraft }
+  | { type: 'live-draft-stopped'; id: string }
+  | {
+      type: 'widget-data';
+      peerId: string;
+      messageId: number;
+      publicData?: string | undefined;
+      chatData?: string | undefined;
+      pts: number;
+      ptsCount: number;
+    }
   | {
       type: 'read-message-contents';
       expectedReactionVersion?: number | undefined;
@@ -1120,6 +1146,12 @@ export interface TelegramTransport {
     pinned: boolean,
   ): TransportEffect<TransportMutationResult>;
   setTyping(peer: TelegramPeer, kind?: TelegramActivityKind): TransportEffect<void>;
+  queryWidget?(
+    peer: TelegramPeer,
+    messageId: number,
+    data: string,
+  ): TransportEffect<string | undefined>;
+  stopLiveDraft?(peer: TelegramPeer, randomId: string, topicId?: number): TransportEffect<void>;
   updatePoll?(
     peer: TelegramPeer,
     messageId: number,

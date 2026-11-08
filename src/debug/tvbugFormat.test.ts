@@ -168,6 +168,74 @@ function manifest() {
 }
 
 describe('.tvbug snapshot format', () => {
+  it('exports new rich files and buttons without exposing widget code or state', () => {
+    const message = sourceMessage();
+    message.richMessage = {
+      blocks: [
+        {
+          kind: 'media',
+          mediaKind: 'file',
+          id: 'PRIVATE-ID',
+          attachment: {
+            kind: 'file',
+            name: 'PRIVATE-FILE.txt',
+            mimeType: 'text/plain',
+            size: 3,
+            cacheKey: 'document:PRIVATE-ID',
+          },
+          caption: { text: { kind: 'text', text: 'PRIVATE-CAPTION' } },
+        },
+        {
+          kind: 'buttons',
+          align: 'center',
+          buttons: [
+            { kind: 'disabled', text: 'PRIVATE-BUTTON' },
+            { kind: 'copy', text: 'Copy', copyText: 'PRIVATE-COPY' },
+          ],
+        },
+        {
+          kind: 'text',
+          role: 'paragraph',
+          text: {
+            kind: 'button',
+            child: { kind: 'text', text: 'PRIVATE-INLINE' },
+            button: { kind: 'callback', text: 'Press', data: [1, 2, 3] },
+          },
+        },
+      ],
+    };
+    message.widget = {
+      html: '<script>PRIVATE-CODE</script>',
+      width: 320,
+      height: 160,
+      canQuery: true,
+      isCopy: false,
+      backgroundQuery: true,
+      publicData: 'PRIVATE-PUBLIC',
+      chatData: 'PRIVATE-CHAT',
+    };
+    const state = sanitizeTvBugState({ messages: [message], dialogs: [sourceDialog(message)] });
+    const bundle = parseTvBugBundle(
+      createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] }),
+    );
+    expect(JSON.stringify(bundle)).not.toContain('PRIVATE-');
+    const restored = hydrateTvBugState(bundle.snapshot).messages[0]!;
+    expect(restored.richMessage?.blocks[0]).toMatchObject({
+      kind: 'media',
+      mediaKind: 'file',
+      attachment: { kind: 'file', size: 3 },
+    });
+    expect(restored.richMessage?.blocks[1]).toMatchObject({ kind: 'buttons', align: 'center' });
+    expect(restored.widget).toEqual({
+      width: 320,
+      height: 160,
+      isCopy: false,
+      html: '',
+      canQuery: false,
+      backgroundQuery: false,
+    });
+  });
+
   it.each(['text', 'unsupported', 'document'] as const)(
     'exports actual mapper diagnostics for %s messages, including dialog previews',
     (kind) => {

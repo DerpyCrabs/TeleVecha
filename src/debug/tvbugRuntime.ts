@@ -253,6 +253,8 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
       setActiveConversationVisibility: () => Effect.void,
       setDraft: () => Effect.void,
       setTyping: () => Effect.void,
+      stopLiveDraft: () => Effect.void,
+      queryWidget: () => Effect.succeed(undefined),
       sendDraft: () => Effect.void,
       sendAttachments: () => Effect.void,
       sendContact: () => Effect.succeed(undefined),

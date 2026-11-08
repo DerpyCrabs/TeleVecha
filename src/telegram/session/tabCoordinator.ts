@@ -157,6 +157,10 @@ const invokeEngineCommand = (
       );
     case 'setDraft':
       return engine.setDraft(...(args as Parameters<MessagingEngine['setDraft']>));
+    case 'queryWidget':
+      return engine.queryWidget(...(args as Parameters<MessagingEngine['queryWidget']>));
+    case 'stopLiveDraft':
+      return engine.stopLiveDraft(...(args as Parameters<MessagingEngine['stopLiveDraft']>));
     case 'setTyping':
       return engine.setTyping(...(args as Parameters<MessagingEngine['setTyping']>));
     case 'sendDraft':
@@ -624,6 +628,7 @@ const BotButtonSchema = Schema.Struct({
     'switch-inline',
     'web-app',
     'simple-web-app',
+    'disabled',
     'unsupported',
   ]),
   text: Schema.String,
@@ -826,6 +831,18 @@ const MessageSchema = Schema.Struct({
   links: Schema.optional(Schema.Array(LinkSchema)),
   linkPreview: Schema.optional(LinkPreviewSchema),
   formats: Schema.optional(Schema.Array(TextFormatSchema)),
+  widget: Schema.optional(
+    Schema.Struct({
+      html: Schema.String,
+      width: Schema.Number,
+      height: Schema.Number,
+      canQuery: Schema.Boolean,
+      isCopy: Schema.Boolean,
+      backgroundQuery: Schema.Boolean,
+      chatData: Schema.optional(Schema.String),
+      publicData: Schema.optional(Schema.String),
+    }),
+  ),
   contentDiagnostic: Schema.optional(MessageContentDiagnosticSchema),
   richMessage: Schema.optional(RichMessageValueSchema),
   pinned: Schema.optional(Schema.Boolean),
@@ -955,6 +972,9 @@ const AccountSnapshotSchema = Schema.Struct({
         id: Schema.String,
         peerId: Schema.String,
         topicId: Schema.optional(Schema.Number),
+        canStop: Schema.optional(Schema.Boolean),
+        keepOnStop: Schema.optional(Schema.Boolean),
+        stopped: Schema.optional(Schema.Boolean),
         text: Schema.String,
         formats: Schema.optional(Schema.Array(TextFormatSchema)),
         links: Schema.optional(
@@ -1121,6 +1141,8 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   setActiveConversationVisibility: { readiness: 'workspace' },
   setDraft: { readiness: 'workspace', concurrent: true, surfaceError: true },
   setTyping: { readiness: 'workspace', concurrent: true },
+  stopLiveDraft: { readiness: 'workspace', concurrent: true },
+  queryWidget: { readiness: 'workspace', concurrent: true },
   sendDraft: { readiness: 'workspace', concurrent: true, surfaceError: true },
   sendAttachments: { readiness: 'workspace', concurrent: true, surfaceError: true },
   updatePoll: { readiness: 'workspace', concurrent: true, surfaceError: true },
@@ -1538,6 +1560,8 @@ function errorMessage(error: unknown) {
     getConversationSharedMedia: remote('getConversationSharedMedia'),
     setDraft: remote('setDraft'),
     setTyping: remote('setTyping'),
+    stopLiveDraft: remote('stopLiveDraft'),
+    queryWidget: remote('queryWidget'),
     sendDraft: remote('sendDraft'),
     sendAttachments: remote('sendAttachments'),
     sendSticker: remote('sendSticker'),

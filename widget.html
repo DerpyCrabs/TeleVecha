@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Telegram widget</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self'; font-src 'self' data:; frame-src 'self' blob:;"
+    />
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #fff;
+        color: #222;
+        font: 15px system-ui;
+      }
+      #status {
+        color: #777;
+      }
+      #widget {
+        width: 100%;
+        min-height: 80px;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #17212b;
+          color: #fff;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <p id="status" role="status">Loading widget…</p>
+    <main id="widget"></main>
+    <script type="module" src="/src/ui/bots/widgetViewer.ts"></script>
+  </body>
+</html>

@@ -1,3 +1,4 @@
+import type { TelegramMedia, TelegramBotButton } from '../telegram/types';
 type RichStyledTextKind =
   | 'bold'
   | 'italic'
@@ -20,6 +21,7 @@ export type RichText =
   | RichStyledText
   | { kind: 'link'; child: RichText; url: string }
   | { kind: 'command'; child: RichText; command: string }
+  | { kind: 'button'; child: RichText; button: TelegramBotButton }
   | { kind: 'anchor'; child: RichText; name: string }
   | { kind: 'customEmoji'; alt: string; documentId: string }
   | { kind: 'math'; source: string }
@@ -49,6 +51,7 @@ export interface RichTableCell {
 }
 
 export type RichBlock =
+  | { kind: 'buttons'; buttons: readonly TelegramBotButton[]; align: 'left' | 'center' | 'right' }
   | {
       kind: 'text';
       role:
@@ -86,12 +89,14 @@ export type RichBlock =
       title?: RichText | undefined;
       rows: readonly (readonly RichTableCell[])[];
       bordered?: boolean | undefined;
+      compact?: boolean | undefined;
       striped?: boolean | undefined;
     }
   | { kind: 'math'; source: string }
   | {
       kind: 'media';
-      mediaKind: 'photo' | 'video' | 'audio' | 'embed' | 'map';
+      mediaKind: 'photo' | 'video' | 'audio' | 'embed' | 'map' | 'file';
+      attachment?: TelegramMedia | undefined;
       id?: string | undefined;
       url?: string | undefined;
       caption?: RichCaption | undefined;

@@ -351,6 +351,11 @@ export const EarlierGroupHistory = component<Props, State, Message>(
                 ) : null}
                 <MessageBody
                   message={presented}
+                  richMedia={{
+                    protected: message.protected,
+                    load: (media, progress) =>
+                      model.props.media.loadMedia({ ...message, media }, progress),
+                  }}
                   previewPhoto={
                     message.linkPreview?.hasPhoto
                       ? model.props.queries.previewPhoto(message.peerId, String(message.id))

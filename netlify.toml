@@ -9,3 +9,14 @@ NODE_VERSION = "24.20.0"
 from = "/*"
 to = "/index.html"
 status = 200
+
+[[headers]]
+for = "/widget.html"
+[headers.values]
+Cross-Origin-Opener-Policy = "same-origin"
+Cross-Origin-Embedder-Policy = "require-corp"
+
+[[headers]]
+for = "/assets/*"
+[headers.values]
+Cross-Origin-Embedder-Policy = "require-corp"
