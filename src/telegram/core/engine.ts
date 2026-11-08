@@ -4897,59 +4897,100 @@ function makeMessagingEngineModule(
   }
   const scheduleCachedHistoryRepair = Effect.fn('MessagingEngine.scheduleCachedHistoryRepair')(
     function* (dialog: TelegramDialog, messages: readonly TelegramMessage[]) {
-      if (!currentSnapshot().online || !cachedHistoryNeedsRepair(dialog, messages)) return;
+      if (!currentSnapshot().online) return;
+      const repairHead = cachedHistoryNeedsRepair(dialog, messages);
+      // Old caches predate source diagnostics. Re-read only genuinely empty messages;
+      // a current sync cursor does not cause Telegram to resend their original content.
+      const missingContent = telegramTransport.getHistoryAround
+        ? messages
+            .filter(
+              (message) =>
+                message.id > 0 &&
+                !message.contentDiagnostic &&
+                !message.text &&
+                !message.media &&
+                !message.richMessage &&
+                !message.contact &&
+                !message.poll &&
+                !message.service &&
+                !message.linkPreview,
+            )
+            .slice(-5)
+        : [];
+      if (!repairHead && missingContent.length === 0) return;
       const peerId = dialog.peer.id;
       const session = sessionScope;
       const accountId = activeAccountId;
       const historyVersion = histories.version(peerId);
       const requestedCacheEpoch = currentCacheEpoch;
       yield* forkBackgroundTask(() =>
-        resourceCache.load(`history-repair:${peerId}`, () => {
-          return Effect.gen(function* () {
-            const requestRevision = messageRevisions.capture();
-            const page = yield* runTelegramOperation(
-              () => telegramTransport.getHistory(dialog.peer, HISTORY_LIMIT, undefined),
-              `Repairing ${dialog.title}`,
-            );
-            if (
-              requestedCacheEpoch !== currentCacheEpoch ||
-              !isHistoryOperationCurrent(peerId, historyVersion, session, accountId)
-            ) {
-              return;
-            }
-            yield* queueDialogStateOperation(() => {
-              return Effect.gen(function* () {
-                if (
-                  requestedCacheEpoch !== currentCacheEpoch ||
-                  !isHistoryOperationCurrent(peerId, historyVersion, session, accountId)
-                ) {
-                  return;
-                }
-                const fetched = messageRevisions.filter(
-                  peerId,
-                  page.messages.map((message) => ({ ...message, cacheEpoch: requestedCacheEpoch })),
-                  requestRevision,
+        resourceCache.load(
+          `history-repair:${peerId}:${missingContent.map(({ id }) => id).join(',')}`,
+          () => {
+            return Effect.gen(function* () {
+              const requestRevision = messageRevisions.capture();
+              const page = repairHead
+                ? yield* runTelegramOperation(
+                    () => telegramTransport.getHistory(dialog.peer, HISTORY_LIMIT, undefined),
+                    `Repairing ${dialog.title}`,
+                  )
+                : {
+                    messages: [] as TelegramMessage[],
+                    hasOlder: histories.loaded(peerId)?.hasOlderMessages ?? true,
+                  };
+              for (const target of missingContent) {
+                if (page.messages.some(({ id }) => id === target.id)) continue;
+                const context = yield* runTelegramOperation(
+                  () => telegramTransport.getHistoryAround!(dialog.peer, target.id, 3),
+                  `Checking message content in ${dialog.title}`,
                 );
-                yield* cacheStore.putMessages(fetched);
-                if (!isHistoryOperationCurrent(peerId, historyVersion, session, accountId)) return;
-                const current = histories.loaded(peerId)?.messages ?? [];
-                const merged = messageRevisions.merge(peerId, current, fetched, requestRevision);
-                rememberHistory(
-                  peerId,
-                  { messages: merged, hasOlderMessages: page.hasOlder },
-                  'newest',
-                );
-                for (const message of fetched) {
-                  yield* publishConversationEvent({
-                    type: 'message-upsert',
-                    message,
-                    insertIfMissing: true,
-                  });
-                }
+                const resolved = context.messages.find(({ id }) => id === target.id);
+                if (resolved) page.messages.push(resolved);
+              }
+              if (
+                requestedCacheEpoch !== currentCacheEpoch ||
+                !isHistoryOperationCurrent(peerId, historyVersion, session, accountId)
+              ) {
+                return;
+              }
+              yield* queueDialogStateOperation(() => {
+                return Effect.gen(function* () {
+                  if (
+                    requestedCacheEpoch !== currentCacheEpoch ||
+                    !isHistoryOperationCurrent(peerId, historyVersion, session, accountId)
+                  ) {
+                    return;
+                  }
+                  const fetched = messageRevisions.filter(
+                    peerId,
+                    page.messages.map((message) => ({
+                      ...message,
+                      cacheEpoch: requestedCacheEpoch,
+                    })),
+                    requestRevision,
+                  );
+                  yield* cacheStore.putMessages(fetched);
+                  if (!isHistoryOperationCurrent(peerId, historyVersion, session, accountId))
+                    return;
+                  const current = histories.loaded(peerId)?.messages ?? [];
+                  const merged = messageRevisions.merge(peerId, current, fetched, requestRevision);
+                  rememberHistory(
+                    peerId,
+                    { messages: merged, hasOlderMessages: page.hasOlder },
+                    'newest',
+                  );
+                  for (const message of fetched) {
+                    yield* publishConversationEvent({
+                      type: 'message-upsert',
+                      message,
+                      insertIfMissing: true,
+                    });
+                  }
+                });
               });
             });
-          });
-        }),
+          },
+        ),
       );
     },
   );
