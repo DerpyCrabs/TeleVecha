@@ -87,6 +87,10 @@ export function createConversationViewport(options: ConversationViewportOptions)
   let anchorViewportTop = 0;
   let touchY: number | undefined;
   let lastPresentScrollTop = 0;
+  let presentScrollHeight = 0;
+  let presentClientHeight = 0;
+  const presentGeometryUnchanged = (scroller: HTMLDivElement) =>
+    scroller.scrollHeight === presentScrollHeight && scroller.clientHeight === presentClientHeight;
   const atPresent = (scroller: HTMLDivElement) => {
     const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     if (distance <= 2) return true;
@@ -157,6 +161,8 @@ export function createConversationViewport(options: ConversationViewportOptions)
   const pinPresent = (scroller: HTMLDivElement) => {
     scroller.scrollTop = scroller.scrollHeight;
     lastPresentScrollTop = scroller.scrollTop;
+    presentScrollHeight = scroller.scrollHeight;
+    presentClientHeight = scroller.clientHeight;
   };
   const applyEffects = (
     effects: ConversationViewportEffect[],
@@ -187,9 +193,12 @@ export function createConversationViewport(options: ConversationViewportOptions)
       geometryDirty = true;
       // ResizeObserver may run before the scroll event. Respect a position
       // already moved away from the tail instead of undoing that movement.
+      // Changed geometry can clamp scrollTop without user input (e.g. opening
+      // a chat while panels/media settle). Let layout reconciliation handle it.
       if (
         scroller &&
         followingPresent() &&
+        presentGeometryUnchanged(scroller) &&
         scroller.scrollTop < lastPresentScrollTop - 2 &&
         !atPresent(scroller)
       ) {
@@ -212,7 +221,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
   };
   const attach = (scroller: HTMLDivElement, content: HTMLDivElement) => {
     const handleScroll = () => {
-      if (followingPresent() && !atPresent(scroller)) {
+      if (followingPresent() && presentGeometryUnchanged(scroller) && !atPresent(scroller)) {
         // Observe the actual position, including keyboard, scrollbar and
         // accessibility scrolling. Never pull a scroll event back to the tail.
         dispatch({ type: 'user-left-present' }, scroller);
