@@ -2707,6 +2707,8 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       });
     function getMessageReadReceipts(peer: TelegramPeer, _messageId: number) {
       stats.getMessageReadReceipts += 1;
+      if (scenario === 'unread-receipts')
+        return Effect.succeed<TelegramReadReceipts>({ state: 'unread', people: [] });
       return Effect.succeed<TelegramReadReceipts>({
         state: 'available',
         people: (peer.kind === 'user'

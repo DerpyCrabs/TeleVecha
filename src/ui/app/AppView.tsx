@@ -1408,31 +1408,6 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 </button>
                               ) : (
                                 <>
-                                  {target.outgoing &&
-                                  !target.service &&
-                                  activeDialog &&
-                                  !activeDialog.bot &&
-                                  (activeDialog.peer.kind !== 'channel' ||
-                                    activeDialog.permissions?.canViewMembers) ? (
-                                    <ReadReceiptMenuItem
-                                      identity={`${activeDialog.peer.id}:${target.id}`}
-                                      privateChat={activeDialog.peer.kind === 'user'}
-                                      online={online}
-                                      media={mediaAssets}
-                                      load={() =>
-                                        activeDialog
-                                          ? engine.getMessageReadReceipts(
-                                              activeDialog.peer,
-                                              Number(target.id),
-                                            )
-                                          : Effect.fail(new Error('Conversation unavailable'))
-                                      }
-                                      open={(result) => {
-                                        setMessageContextMenu(undefined);
-                                        model.setReadReceipts(result);
-                                      }}
-                                    />
-                                  ) : null}
                                   {canQueueMessage ? (
                                     <button
                                       role="menuitem"
@@ -1581,6 +1556,31 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                     >
                                       <Trash2 size={15} /> Delete
                                     </button>
+                                  ) : null}
+                                  {target.outgoing &&
+                                  !target.service &&
+                                  activeDialog &&
+                                  !activeDialog.bot &&
+                                  (activeDialog.peer.kind !== 'channel' ||
+                                    activeDialog.permissions?.canViewMembers) ? (
+                                    <ReadReceiptMenuItem
+                                      identity={`${activeDialog.peer.id}:${target.id}`}
+                                      privateChat={activeDialog.peer.kind === 'user'}
+                                      online={online}
+                                      media={mediaAssets}
+                                      load={() =>
+                                        activeDialog
+                                          ? engine.getMessageReadReceipts(
+                                              activeDialog.peer,
+                                              Number(target.id),
+                                            )
+                                          : Effect.fail(new Error('Conversation unavailable'))
+                                      }
+                                      open={(result) => {
+                                        setMessageContextMenu(undefined);
+                                        model.setReadReceipts(result);
+                                      }}
+                                    />
                                   ) : null}
                                 </>
                               )}

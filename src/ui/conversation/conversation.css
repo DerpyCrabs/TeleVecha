@@ -2350,12 +2350,13 @@ article.message[data-selection-active] .message-sender-avatar {
 .message-context-menu .message-read-status {
   width: 100%;
   font-size: 0.75rem;
-  padding-bottom: 0.65rem;
-  margin-bottom: 0.2rem;
-  border-bottom: 1px solid var(--line);
+  padding-top: 0.65rem;
+  margin-top: 0.2rem;
+  border-top: 1px solid var(--line);
   border-radius: 0;
 }
 .message-context-menu .message-read-status:disabled {
+  background: transparent;
   opacity: 1;
   color: var(--muted);
   cursor: default;
