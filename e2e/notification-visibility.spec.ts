@@ -49,59 +49,136 @@ for (const width of [1280, 375]) {
   });
 }
 
-for (const kind of ['mention', 'reaction'] as const) {
-  test(`jumps to an older unread ${kind} and acknowledges it only after showing it`, async ({
-    page,
-  }) => {
-    await openReady(page, '/?chat=u%3A101');
-    await page.evaluate((kind) => {
-      const runtime = [...window.__televechaRuntimes!.values()][0]!;
-      const dialog = runtime.engine
-        .snapshot()
-        .dialogs.find((dialog) => dialog.peer.id === 'u:101')!;
-      const message = {
-        id: 5,
-        peerId: dialog.peer.id,
-        peer: dialog.peer,
-        senderId: kind === 'reaction' ? 'self' : 'u:101',
-        text: 'Older unread notification target',
-        date: 1_700_000_005,
-        outgoing: kind === 'reaction',
-        unreadMention: kind === 'mention',
-        mediaUnread: kind === 'mention',
-        unreadReaction: kind === 'reaction',
-        ...(kind === 'reaction'
-          ? { reactions: [{ emoji: '👍', count: 1, chosen: false }] }
-          : { replyToId: 4 }),
-      };
-      window.__televechaFixture!.setMessages([message]);
-      window.__televechaFixture!.emit({
-        type: 'dialog-changed',
-        dialog: {
-          ...dialog,
-          [kind === 'mention' ? 'unreadMentionsCount' : 'unreadReactionsCount']: 1,
-        },
+for (const width of [1280, 375]) {
+  for (const loaded of [false, true]) {
+    for (const kind of ['mention', 'reaction'] as const) {
+      test(`keeps ${loaded ? 'loaded' : 'fetched'} unread ${kind} visible after acknowledgement and new messages at ${width}px`, async ({
+        page,
+      }) => {
+        await openReady(page, '/?chat=u%3A101');
+        await page.setViewportSize({ width, height: 800 });
+        await page.evaluate(
+          ({ kind, loaded }) => {
+            const runtime = [...window.__televechaRuntimes!.values()][0]!;
+            const dialog = runtime.engine
+              .snapshot()
+              .dialogs.find((dialog) => dialog.peer.id === 'u:101')!;
+            const message = {
+              id: loaded ? 40 : 5,
+              peerId: dialog.peer.id,
+              peer: dialog.peer,
+              senderId: kind === 'reaction' ? 'self' : 'u:101',
+              text: 'Older unread notification target',
+              date: 1_700_000_005,
+              outgoing: kind === 'reaction',
+              unreadMention: kind === 'mention',
+              mediaUnread: kind === 'mention',
+              unreadReaction: kind === 'reaction',
+              ...(kind === 'reaction'
+                ? { reactions: [{ emoji: '👍', count: 1, chosen: false }] }
+                : { replyToId: 4 }),
+            };
+            window.__televechaFixture!.setMessages([message]);
+            if (loaded)
+              window.__televechaFixture!.emit({
+                type: 'edit-message',
+                message,
+                pts: 11,
+                ptsCount: 1,
+              });
+            window.__televechaFixture!.emit({
+              type: 'dialog-changed',
+              dialog: {
+                ...dialog,
+                [kind === 'mention' ? 'unreadMentionsCount' : 'unreadReactionsCount']: 1,
+              },
+            });
+          },
+          { kind, loaded },
+        );
+        const button = page.getByRole('button', {
+          name:
+            kind === 'mention'
+              ? 'Unread replies and mentions: 1. Go to message'
+              : 'Unread reactions: 1. Go to message',
+        });
+        await expect(button).toBeVisible();
+        expect(
+          await page.evaluate(() => window.__televechaFixture!.stats.readMessageContents),
+        ).toEqual([]);
+        await button.click();
+        const targetId = loaded ? 40 : 5;
+        const target = page.locator(
+          `article[data-message-id="${targetId}"]${kind === 'reaction' ? ' .reaction' : ''}`,
+        );
+        await expect(target).toBeInViewport();
+        await expect
+          .poll(() => page.evaluate(() => window.__televechaFixture!.stats.readMessageContents))
+          .toEqual([{ peerId: 'u:101', messageIds: [targetId] }]);
+        await expect(button).toHaveCount(0);
+        await expect(target).toBeInViewport();
+        const position = await target.evaluate((element) => element.getBoundingClientRect().top);
+        await page.evaluate(
+          ({ targetId, loaded, kind }) => {
+            const fixture = window.__televechaFixture!;
+            const source = [...window.__televechaRuntimes!.values()][0]!.engine
+              .snapshot()
+              .messages.find(({ id }) => id === targetId)!;
+            // The read acknowledgement is followed by a message edit and a new arrival.
+            fixture.emit({
+              type: 'edit-message',
+              pts: loaded ? 12 : 11,
+              ptsCount: 1,
+              message: {
+                ...source,
+                text:
+                  kind === 'reaction'
+                    ? Array(30).fill('Edited reaction target').join('\n')
+                    : 'Edited reply target',
+              },
+            });
+            fixture.emit({
+              type: 'new-message',
+              pts: loaded ? 13 : 12,
+              ptsCount: 1,
+              message: {
+                id: 181,
+                peerId: 'u:101',
+                senderId: 'u:101',
+                text: Array(20).fill('New message after acknowledgement').join('\n'),
+                date: 1_700_003_181,
+                outgoing: false,
+              },
+            });
+          },
+          { targetId, loaded, kind },
+        );
+        await expect(page.locator('article[data-message-id="181"]')).toBeAttached();
+        // Include highlight removal and subsequent render/scroll events, not just the first reveal.
+        await expect(page.locator(`article[data-message-id="${targetId}"]`)).not.toHaveClass(
+          /message-target/,
+        );
+        await expect(target).toBeInViewport();
+        expect(
+          Math.abs(
+            (await target.evaluate((element) => element.getBoundingClientRect().top)) - position,
+          ),
+        ).toBeLessThan(3);
+        await page.screenshot({ path: `/tmp/notification-${kind}-${loaded}-${width}.png` });
+        await page.getByRole('button', { name: 'Jump to present', exact: true }).click();
+        await expect
+          .poll(() =>
+            page
+              .getByTestId('message-scroller')
+              .evaluate(
+                (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+              ),
+          )
+          .toBeLessThanOrEqual(2);
       });
-    }, kind);
-    const button = page.getByRole('button', {
-      name:
-        kind === 'mention'
-          ? 'Unread replies and mentions: 1. Go to message'
-          : 'Unread reactions: 1. Go to message',
-    });
-    await expect(button).toBeVisible();
-    expect(await page.evaluate(() => window.__televechaFixture!.stats.readMessageContents)).toEqual(
-      [],
-    );
-    await button.click();
-    await expect(page.locator('article[data-message-id="5"]')).toBeInViewport();
-    await expect
-      .poll(() => page.evaluate(() => window.__televechaFixture!.stats.readMessageContents))
-      .toEqual([{ peerId: 'u:101', messageIds: [5] }]);
-    await expect(button).toHaveCount(0);
-  });
+    }
+  }
 }
-
 for (const width of [1280, 375]) {
   test(`reconciles a stale loaded reaction and shows reactions beneath tall messages at ${width}px`, async ({
     page,
@@ -216,5 +293,58 @@ for (const width of [1280, 375]) {
       [],
     );
     await expect(page.locator('article[data-message-id="80"]')).toBeInViewport();
+  });
+}
+
+for (const width of [1280, 375]) {
+  test(`visits two unread reactions in order and stays on the last one after the indicator disappears at ${width}px`, async ({
+    page,
+  }) => {
+    await openReady(page, '/?chat=u%3A101');
+    await page.setViewportSize({ width, height: 800 });
+    await page.evaluate(() => {
+      const snapshot = [...window.__televechaRuntimes!.values()][0]!.engine.snapshot();
+      const dialog = snapshot.dialogs.find(({ peer }) => peer.id === 'u:101')!;
+      window.__televechaFixture!.setMessages(
+        [5, 40].map((id) => ({
+          id,
+          peerId: 'u:101',
+          peer: dialog.peer,
+          senderId: 'self',
+          text: `Reaction target ${id}`,
+          date: 1_700_000_000 + id,
+          outgoing: true,
+          unreadReaction: true,
+          reactions: [{ emoji: '👍', count: 1, chosen: false }],
+        })),
+      );
+      window.__televechaFixture!.emit({
+        type: 'dialog-changed',
+        dialog: { ...dialog, unreadReactionsCount: 2 },
+      });
+    });
+    for (const [index, id] of [5, 40].entries()) {
+      await page
+        .getByRole('button', { name: `Unread reactions: ${2 - index}. Go to message` })
+        .click();
+      const target = page.locator(`article[data-message-id="${id}"] .reaction`);
+      await expect(target).toBeInViewport();
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__televechaFixture!.stats.readMessageContents.flatMap(
+              ({ messageIds }) => messageIds,
+            ),
+          ),
+        )
+        .toEqual([5, 40].slice(0, index + 1));
+      await expect(page.locator(`article[data-message-id="${id}"]`)).not.toHaveClass(
+        /message-target/,
+      );
+      await expect(target).toBeInViewport();
+    }
+    await expect(page.getByRole('button', { name: /Unread reactions:/ })).toHaveCount(0);
+    await expect(page.locator('article[data-message-id="40"] .reaction')).toBeInViewport();
+    await expect(page.getByRole('button', { name: 'Jump to present', exact: true })).toBeVisible();
   });
 }

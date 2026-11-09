@@ -74,6 +74,10 @@ export function createConversationViewport(options: ConversationViewportOptions)
   const jumpVisible = () => source.model().mode === 'history';
   const ready = () => source.model().phase === 'ready';
   let positionedPeer = '';
+  // Explicit navigation owns the viewport until the user scrolls or jumps away.
+  // Scroll events from rendering/acknowledgement must not resume tail-following.
+  let targetLocked = false;
+  let lockedTarget: { element: HTMLElement; offset: number } | undefined;
   let prependHeight: number | undefined;
   let resizeObserver: ResizeObserver | undefined;
   let mutationObserver: MutationObserver | undefined;
@@ -135,6 +139,13 @@ export function createConversationViewport(options: ConversationViewportOptions)
     anchorViewportTop = viewportTop;
   };
   const preserveReadingAnchor = (scroller: HTMLDivElement) => {
+    if (targetLocked && lockedTarget?.element.isConnected) {
+      scroller.scrollTop +=
+        lockedTarget.element.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top -
+        lockedTarget.offset;
+      return;
+    }
     // DOM order remains the fallback priority even for hidden or overlapping rows.
     let anchor: ReadingAnchorPoint | undefined;
     for (let index = anchorIndex; index < readingAnchors.length; index++) {
@@ -189,6 +200,20 @@ export function createConversationViewport(options: ConversationViewportOptions)
     event: ConversationViewportEvent,
     scroller: HTMLDivElement | undefined = options.scroller(),
   ) {
+    if ((event.type === 'conversation-empty' || event.type === 'peer-positioned') && lockedTarget)
+      return;
+    if (
+      event.type === 'peer-reset' ||
+      event.type === 'jump-to-present' ||
+      event.type === 'user-left-present'
+    ) {
+      targetLocked = false;
+      lockedTarget = undefined;
+    }
+    if (event.type === 'viewport-scrolled' && targetLocked) {
+      options.reportVisibility();
+      return;
+    }
     if (event.type === 'geometry-changed' || event.type === 'content-changed') {
       geometryDirty = true;
       // ResizeObserver may run before the scroll event. Respect a position
@@ -215,8 +240,14 @@ export function createConversationViewport(options: ConversationViewportOptions)
     wasEmpty = empty;
   };
   const readHistory = (scroller: HTMLDivElement) => {
-    if (!followingPresent()) return;
+    if (!followingPresent() && !targetLocked) return;
+    targetLocked = false;
+    lockedTarget = undefined;
     options.cancelMessageOpen();
+    if (!followingPresent()) {
+      captureReadingAnchors(scroller);
+      return;
+    }
     dispatch({ type: 'user-left-present' }, scroller);
   };
   const attach = (scroller: HTMLDivElement, content: HTMLDivElement) => {
@@ -226,7 +257,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
         // accessibility scrolling. Never pull a scroll event back to the tail.
         dispatch({ type: 'user-left-present' }, scroller);
       }
-      if (!followingPresent() && atPresent(scroller)) {
+      if (!followingPresent() && !targetLocked && atPresent(scroller)) {
         options.dismissUnreadMarker();
         dispatch({ type: 'present-visible' }, scroller);
       }
@@ -236,12 +267,13 @@ export function createConversationViewport(options: ConversationViewportOptions)
       }
     };
     const handleWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) readHistory(scroller);
+      if (event.deltaY < 0 || (targetLocked && event.deltaY !== 0)) readHistory(scroller);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
         ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ||
-        (event.key === ' ' && event.shiftKey)
+        (event.key === ' ' && event.shiftKey) ||
+        (targetLocked && ['ArrowDown', 'PageDown', 'End', ' '].includes(event.key))
       ) {
         readHistory(scroller);
       }
@@ -251,7 +283,13 @@ export function createConversationViewport(options: ConversationViewportOptions)
         touchY = event.clientY;
         return;
       }
-      if (event.button === 1) readHistory(scroller);
+      if (
+        event.button === 1 ||
+        (targetLocked &&
+          event.clientX >=
+            scroller.getBoundingClientRect().left + scroller.clientLeft + scroller.clientWidth)
+      )
+        readHistory(scroller);
     };
     const handlePointerMove = (event: PointerEvent) => {
       if (event.pointerType !== 'touch' || touchY === undefined || event.clientY === touchY) return;
@@ -322,7 +360,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
     if (!stillCurrent() || positionedPeer === peerId) return;
     positionedPeer = peerId;
     queueMicrotask(() => {
-      if (options.activePeerId() !== peerId || !stillCurrent()) return;
+      if (options.activePeerId() !== peerId || !stillCurrent() || targetLocked) return;
       const scroller = options.scroller();
       const unread =
         unreadAfterId === undefined
@@ -391,11 +429,18 @@ export function createConversationViewport(options: ConversationViewportOptions)
       `article[data-message-id="${CSS.escape(message.id)}"]`,
     );
     if (!target) return false;
+    positionedPeer = options.activePeerId();
+    targetLocked = true;
+    lockedTarget = undefined;
     // A fetched target can change height before ResizeObserver has refreshed
     // the row geometry. Anchor the new position against the current layout.
     geometryDirty = true;
     dispatch({ type: 'history-target-opened' }, scroller);
     target.scrollIntoView({ block: 'center' });
+    lockedTarget = {
+      element: target,
+      offset: target.getBoundingClientRect().top - scroller.getBoundingClientRect().top,
+    };
     captureReadingAnchors(scroller);
     dispatch({ type: 'viewport-scrolled' }, scroller);
     return true;
@@ -403,11 +448,18 @@ export function createConversationViewport(options: ConversationViewportOptions)
   const reveal = (target: HTMLElement) => {
     const scroller = options.scroller();
     if (!scroller?.contains(target)) return false;
+    positionedPeer = options.activePeerId();
+    targetLocked = true;
+    lockedTarget = undefined;
     // A fetched target can change height before ResizeObserver has refreshed
     // the row geometry. Anchor the new position against the current layout.
     geometryDirty = true;
     dispatch({ type: 'history-target-opened' }, scroller);
     target.scrollIntoView({ block: 'center' });
+    lockedTarget = {
+      element: target,
+      offset: target.getBoundingClientRect().top - scroller.getBoundingClientRect().top,
+    };
     captureReadingAnchors(scroller);
     dispatch({ type: 'viewport-scrolled' }, scroller);
     return true;
