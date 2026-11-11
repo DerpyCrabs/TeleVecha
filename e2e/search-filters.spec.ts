@@ -63,3 +63,37 @@ for (const width of [375, 768, 1280]) {
     } else await expect(search).toBeVisible();
   });
 }
+
+for (const width of [375, 660, 1280]) {
+  test(`chat header search expands a collapsed sidebar and restores it at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('televecha:left-sidebar-width', '72');
+      localStorage.setItem('televecha:details-open', 'false');
+    });
+    await openReady(page, '/?chat=u%3A101');
+    await page.setViewportSize({ width, height: 800 });
+    await page.getByRole('button', { name: 'Search messages', exact: true }).click();
+    const panel = page.locator('.search-panel');
+    const query = panel.getByRole('searchbox', { name: 'Message search query' });
+    await expect(query).toBeFocused();
+    expect((await panel.boundingBox())!.width).toBeGreaterThanOrEqual(
+      width <= 650 ? width : Math.min(320, width - 360),
+    );
+    expect((await query.boundingBox())!.width).toBeGreaterThan(150);
+    await query.fill('Fixture');
+    await query.press('Enter');
+    await expect(panel.locator('.search-results')).toContainText('Fixture');
+    await page.screenshot({ path: testInfo.outputPath('expanded-chat-search.png') });
+    await panel.getByRole('button', { name: 'Close search', exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('televecha:left-sidebar-width'))).toBe(
+      '72',
+    );
+    if (width > 650)
+      await expect
+        .poll(async () => (await page.getByTestId('chat-sidebar').boundingBox())!.width)
+        .toBe(72);
+  });
+}

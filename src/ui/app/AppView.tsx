@@ -177,6 +177,10 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
   const forwardingMessage = model.forwardingMessage;
   const forwardMessage = model.forwardMessage;
   const searchOpen = model.searchOpen;
+  const expandedSidebar =
+    searchOpen ||
+    Boolean(model.savedSidebar && model.savedInfo) ||
+    Boolean(model.forumSidebar && model.activeDialog?.forum);
   const sharedMediaKind = model.sharedMediaKind;
   const setSharedMediaKind = model.setSharedMediaKind;
   const deleteTarget = model.deleteTarget;
@@ -287,10 +291,13 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
         class="app-grid h-full"
         classList={{
           'details-visible': detailsOpen,
+          'expanded-sidebar-visible': expandedSidebar,
           'mobile-sidebar-visible': mobileSidebarOpen,
           'resizing-left-sidebar': resizingLeftSidebar,
         }}
-        style={{ '--left-sidebar-width': `${effectiveLeftSidebarWidth}px` }}
+        style={{
+          '--left-sidebar-width': `${expandedSidebar ? Math.max(320, effectiveLeftSidebarWidth) : effectiveLeftSidebarWidth}px`,
+        }}
       >
         {searchOpen ? (
           <SearchPanel

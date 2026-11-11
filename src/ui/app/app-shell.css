@@ -7,6 +7,9 @@
 .app-grid.details-visible {
   grid-template-columns: var(--left-sidebar-width, 320px) minmax(0, 1fr) minmax(250px, 288px);
 }
+.app-grid.expanded-sidebar-visible {
+  transition: none;
+}
 .app-grid.resizing-left-sidebar {
   cursor: col-resize;
   user-select: none;

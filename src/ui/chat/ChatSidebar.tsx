@@ -1,6 +1,8 @@
 import AtSign from '@effectweb/lucide/icons/at-sign';
 import Heart from '@effectweb/lucide/icons/heart';
 import Menu from '@effectweb/lucide/icons/menu';
+import MessagesSquare from '@effectweb/lucide/icons/messages-square';
+import Users from '@effectweb/lucide/icons/users';
 import Bookmark from '@effectweb/lucide/icons/bookmark';
 import { CreateChatDialog } from '../groups/CreateChatDialog';
 import type { ChatCreationApi } from '../../telegram/chatManagement';
@@ -42,6 +44,13 @@ import type { ChatDirectory } from './chatDirectory';
 import { describeUnreadCount, formatUnreadCount, normalizeUnreadCount } from './unreadCount';
 const commandPeers = 'peers';
 const commandContextUser = 'context-user';
+
+const filterLabels = {
+  all: 'All',
+  unread: 'Unread',
+  groups: 'Groups',
+  archived: 'Archived',
+} as const;
 
 type ChatFilter = 'all' | 'unread' | 'groups' | 'archived' | `folder:${number}`;
 const CHAT_ROW_HEIGHT = 64;
@@ -505,18 +514,27 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
               class="shrink-0 rounded-full px-3 py-1.5"
               classList={{
                 'bg-[var(--accent-soft)] text-[var(--accent)]': model.filter === value,
+                '!grid !size-11 place-items-center !p-0': compact(),
                 'hover:bg-white/5': model.filter !== value,
               }}
+              title={filterLabels[value]}
+              aria-label={filterLabels[value]}
               aria-pressed={model.filter === value}
               onClick={() => send({ type: 'Filter', value: value })}
             >
-              {value === 'all'
-                ? 'All'
-                : value === 'unread'
-                  ? 'Unread'
-                  : value === 'groups'
-                    ? 'Groups'
-                    : 'Archived'}
+              {compact() ? (
+                value === 'all' ? (
+                  <MessagesSquare size={20} />
+                ) : value === 'unread' ? (
+                  <Mail size={20} />
+                ) : value === 'groups' ? (
+                  <Users size={20} />
+                ) : (
+                  <Archive size={20} />
+                )
+              ) : (
+                filterLabels[value]
+              )}
             </button>
           ))}
           {list(idRows(model.folders), (folder) => (
@@ -525,6 +543,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
               classList={{
                 'bg-[var(--accent-soft)] text-[var(--accent)]':
                   model.filter === `folder:${folder.id}`,
+                '!grid !size-11 place-items-center !p-0': compact(),
               }}
               title={folder.title}
               aria-label={folder.title}

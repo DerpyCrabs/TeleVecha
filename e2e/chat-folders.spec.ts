@@ -96,3 +96,37 @@ test('opens a folder invitation from a message without leaving the conversation'
   await expect(modal).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Shared', exact: true })).toBeVisible();
 });
+
+test('folder filters fit the compact sidebar and remain identifiable', async ({
+  page,
+}, testInfo) => {
+  await openReady(page);
+  await page.getByRole('button', { name: 'Edit chat folders', exact: true }).click();
+  const modal = page.getByRole('dialog', { name: 'Chat Folders', exact: true });
+  await modal.getByRole('button', { name: 'Create New Folder' }).click();
+  await modal.getByLabel('Folder name', { exact: true }).fill('Work');
+  await modal.getByRole('button', { name: 'Included Chats' }).click();
+  await modal.getByRole('checkbox', { name: 'Groups', exact: true }).check();
+  await modal.getByRole('button', { name: 'Done', exact: true }).click();
+  await modal.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(modal.getByRole('button', { name: /Work.*Groups/ })).toBeVisible();
+  await modal.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  const separator = page.getByRole('separator', { name: 'Resize chat list' });
+  await separator.focus();
+  await separator.press('Home');
+  const sidebar = page.getByTestId('chat-sidebar');
+  await expect.poll(async () => (await sidebar.boundingBox())!.width).toBe(72);
+  const filters = sidebar.locator('.chat-filters');
+  for (const name of ['All', 'Unread', 'Groups', 'Archived', 'Work']) {
+    const button = filters.getByRole('button', { name, exact: true });
+    const box = (await button.boundingBox())!;
+    const panel = (await sidebar.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(panel.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(panel.x + panel.width);
+    await expect(button).toHaveAttribute('title', name);
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+  }
+  await expect(chatButton(page, /Fixture Group/)).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('compact-folders.png') });
+});
