@@ -237,7 +237,7 @@ export const EarlierGroupHistory = component<Props, State, Message>(
           event: (event) => send({ type: 'Event', event }),
         })}
       />
-      {model.busy ? (
+      {model.busy && model.messages.length === 0 ? (
         <p class="history-loader" role="status">
           Loading earlier messages…
         </p>
@@ -250,9 +250,17 @@ export const EarlierGroupHistory = component<Props, State, Message>(
           </button>
         </div>
       ) : null}
-      {model.more && !model.busy && !model.error ? (
-        <button class="message-window-control" onClick={() => send({ type: 'More' })}>
-          Load older messages
+      {model.more && model.messages.length > 0 && !model.error ? (
+        <button
+          class="message-window-control"
+          disabled={model.busy}
+          onClick={() => send({ type: 'More' })}
+        >
+          {model.busy ? (
+            <span role="status">Loading earlier messages…</span>
+          ) : (
+            'Load older messages'
+          )}
         </button>
       ) : null}
       {list(

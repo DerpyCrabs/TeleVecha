@@ -1204,7 +1204,8 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   terminateSession: { readiness: 'account' },
   setSessionTtl: { readiness: 'account' },
   getPollVotes: { readiness: 'account', concurrent: true, coalesce: true },
-  getMessageReadReceipts: { readiness: 'account', concurrent: true, coalesce: true },
+  // The engine coalesces receipts by read revision, so a read update can supersede an old request.
+  getMessageReadReceipts: { readiness: 'account', concurrent: true },
   getReactionPeople: { readiness: 'account', concurrent: true, coalesce: true },
   toggleReaction: { readiness: 'account', concurrent: true, surfaceError: true },
   retryPendingSend: { readiness: 'workspace', concurrent: true, surfaceError: true },

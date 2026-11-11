@@ -1384,10 +1384,10 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                               aria-label="Message actions"
                               style={{
                                 left:
-                                  menu.x > viewportWidth - 190
+                                  menu.x > viewportWidth - 272
                                     ? 'auto'
                                     : `${Math.max(8, menu.x)}px`,
-                                right: menu.x > viewportWidth - 190 ? '8px' : 'auto',
+                                right: menu.x > viewportWidth - 272 ? '8px' : 'auto',
                                 top:
                                   menu.y > model.viewportHeight / 2
                                     ? 'auto'
@@ -1564,18 +1564,18 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   (activeDialog.peer.kind !== 'channel' ||
                                     activeDialog.permissions?.canViewMembers) ? (
                                     <ReadReceiptMenuItem
-                                      identity={`${activeDialog.peer.id}:${target.id}`}
                                       privateChat={activeDialog.peer.kind === 'user'}
                                       online={online}
                                       media={mediaAssets}
-                                      load={() =>
-                                        activeDialog
-                                          ? engine.getMessageReadReceipts(
-                                              activeDialog.peer,
-                                              Number(target.id),
-                                            )
-                                          : Effect.fail(new Error('Conversation unavailable'))
-                                      }
+                                      source={model.queries.readReceipts(
+                                        activeDialog.peer.id,
+                                        Number(target.id),
+                                        String(
+                                          (snapshot.dialogs.find(
+                                            (dialog) => dialog.peer.id === activeDialog.peer.id,
+                                          )?.readOutboxMaxId ?? 0) >= Number(target.id),
+                                        ),
+                                      )}
                                       open={(result) => {
                                         setMessageContextMenu(undefined);
                                         model.setReadReceipts(result);

@@ -45,6 +45,7 @@ function hostFor(search: Search): SearchPanelProps {
     Context.make(QueryLoaders, {
       searchMessages: search,
       reactionPeople: unused,
+      readReceipts: unused,
       customEmoji: unused,
       previewPhoto: unused,
       sharedMedia: unused,

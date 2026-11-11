@@ -1,5 +1,5 @@
-import { component, domBinding, list, view, type Send, type Transition } from 'effectweb';
-import { Effect } from 'effect';
+import { available, observe, list, view, type Source } from 'effectweb';
+import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import CheckCheck from '@effectweb/lucide/icons/check-check';
 import ChevronRight from '@effectweb/lucide/icons/chevron-right';
 import type { TelegramReadParticipant, TelegramReadReceipts } from '../../telegram/types';
@@ -24,55 +24,12 @@ const unavailableText: Record<Exclude<TelegramReadReceipts['state'], 'available'
   unavailable: 'Read receipts are unavailable',
 };
 interface Props {
-  identity: string;
   privateChat: boolean;
   online: boolean;
-  load: () => Effect.Effect<TelegramReadReceipts, unknown>;
+  source: Source<AsyncResult.AsyncResult<TelegramReadReceipts, unknown>>;
   open: (result: TelegramReadReceipts) => void;
   media: MediaAssets;
 }
-interface State {
-  mounted: boolean;
-  requested: string;
-  data: TelegramReadReceipts | undefined;
-  failed: boolean;
-}
-type Model = State & { readonly props: Props };
-type Message =
-  | { type: 'Load' }
-  | { type: 'Loaded'; identity: string; data: TelegramReadReceipts | undefined };
-function request(model: Model): Transition<Model, Message> {
-  const identity = model.props.identity;
-  if (!model.mounted || !model.props.online || model.requested === identity) return { model };
-  return {
-    model: { ...model, requested: identity, data: undefined, failed: false },
-    cancel: model.requested ? [['read-receipts', model.requested]] : [],
-    commands: [
-      {
-        key: ['read-receipts', identity],
-        policy: 'replace',
-        effect: Effect.suspend(model.props.load).pipe(
-          Effect.matchCause({
-            onSuccess: (data) => ({ type: 'Loaded', identity, data }) as const,
-            onFailure: () => ({ type: 'Loaded', identity, data: undefined }) as const,
-          }),
-        ),
-      },
-    ],
-  };
-}
-function acquireReadStatus(_element: HTMLElement, input: () => Send<Message>) {
-  let notified: Send<Message> | undefined;
-  const update = () => {
-    const send = input();
-    if (notified === send) return;
-    notified = send;
-    send({ type: 'Load' });
-  };
-  update();
-  return { update, dispose: () => {} };
-}
-const readStatusMount = (send: Send<Message>) => domBinding(send, acquireReadStatus);
 const PersonAvatar = view<{
   person: TelegramReadParticipant;
   media: MediaAssets;
@@ -96,41 +53,30 @@ const PersonAvatar = view<{
     }
   />
 ));
-export const ReadReceiptMenuItem = component<Props, State, Message>(
-  {
-    init: () => ({ mounted: false, requested: '', data: undefined, failed: false }),
-    receive: request,
-    update: (model, message) =>
-      message.type === 'Load'
-        ? request({ ...model, mounted: true })
-        : message.identity !== model.requested
-          ? { model }
-          : { model: { ...model, data: message.data, failed: !message.data } },
-  },
-  view((model, send) => {
-    const result = model.data;
-    const canOpen =
-      result?.state === 'available' && !model.props.privateChat && result.people.length > 0;
-    const label = !model.props.online
-      ? 'Read receipts unavailable offline'
-      : model.failed
-        ? 'Read receipts unavailable'
-        : !result
-          ? 'Checking read status…'
-          : result.state !== 'available'
-            ? unavailableText[result.state]
-            : model.props.privateChat
-              ? `Read ${readAtLabel(result.people[0]!.readAt)}`
-              : `Read by ${result.people.length}`;
+export const ReadReceiptMenuItem = view<Props>((props) =>
+  observe(props.source, (state) => {
+    const result = available(state);
+    const canOpen = result?.state === 'available' && !props.privateChat && result.people.length > 0;
+    const label =
+      !props.online && !result
+        ? 'Read receipts unavailable offline'
+        : !result && AsyncResult.isFailure(state)
+          ? 'Read receipts unavailable'
+          : !result
+            ? 'Checking read status…'
+            : result.state !== 'available'
+              ? unavailableText[result.state]
+              : props.privateChat
+                ? `Read ${readAtLabel(result.people[0]!.readAt)}`
+                : `Read by ${result.people.length}`;
     return (
       <button
         role="menuitem"
         class="message-read-status"
-        use={readStatusMount(send)}
         disabled={!canOpen}
         title={label}
         onClick={() => {
-          if (canOpen && result) model.props.open(result);
+          if (canOpen && result) props.open(result);
         }}
       >
         <CheckCheck size={16} />
@@ -139,12 +85,7 @@ export const ReadReceiptMenuItem = component<Props, State, Message>(
           <>
             <span class="read-avatar-stack" aria-hidden="true">
               {list(idRows(result.people.slice(0, 3)), (person) => (
-                <PersonAvatar
-                  person={person}
-                  media={model.props.media}
-                  online={model.props.online}
-                  small
-                />
+                <PersonAvatar person={person} media={props.media} online={props.online} small />
               ))}
             </span>
             <ChevronRight size={14} />

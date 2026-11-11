@@ -543,6 +543,42 @@ describe('MessagingEngine', () => {
       ),
     ));
 
+  it('shares read-receipt requests and persists results across engine recreation', () =>
+    Effect.runPromise(
+      withEngine((engine, transport, cache) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          yield* engine.loadConversationView('u:101');
+          const peer = { id: 'u:101', kind: 'user' as const };
+          const original = transport.getMessageReadReceipts!;
+          const read = vi
+            .spyOn(transport, 'getMessageReadReceipts')
+            .mockImplementation((...args) => original(...args).pipe(Effect.delay(10)));
+          const results = yield* Effect.all(
+            [engine.getMessageReadReceipts(peer, 80), engine.getMessageReadReceipts(peer, 80)],
+            { concurrency: 'unbounded' },
+          );
+          expect(results[0]).toEqual(results[1]);
+          expect(read).toHaveBeenCalledTimes(1);
+          expect(yield* engine.getMessageReadReceipts(peer, 80)).toEqual(results[0]);
+          expect(read).toHaveBeenCalledTimes(1);
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const next = yield* makeMessagingEngine(transport, cache, { manageTabLease: false });
+              yield* next.start(credentials);
+              yield* next.loadConversationView('u:101');
+              expect(yield* next.getMessageReadReceipts(peer, 80)).toEqual(results[0]);
+              expect(read).toHaveBeenCalledTimes(1);
+            }).pipe(Effect.provide(MessagingEngineLayer), Effect.provide(BrowserCrypto.layer)),
+          );
+          const stored = yield* cache.loadMetadata<{ result: unknown }>(
+            'message-read-receipts:u:101:80',
+          );
+          expect(stored?.value.result).toEqual(results[0]);
+        }),
+      ),
+    ));
+
   it('persists contact cards before sending and retains them in conversation history', () =>
     Effect.runPromise(
       withEngine((engine, transport, cache) =>

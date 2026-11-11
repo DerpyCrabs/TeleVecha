@@ -2349,6 +2349,9 @@ article.message[data-selection-active] .message-sender-avatar {
 
 .message-context-menu .message-read-status {
   width: 100%;
+  height: 2.75rem;
+  min-width: 0;
+  white-space: nowrap;
   font-size: 0.75rem;
   padding-top: 0.65rem;
   margin-top: 0.2rem;
@@ -2363,6 +2366,9 @@ article.message[data-selection-active] .message-sender-avatar {
 }
 .message-read-status > span:first-of-type {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .read-avatar-stack {
   display: flex;

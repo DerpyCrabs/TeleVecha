@@ -266,6 +266,15 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   publication.watch(state);
   // Loaders read the latest snapshot and media services when a query runs, not when it is defined.
   const queryLoaders: QueryLoaders = {
+    readReceipts: (peerId, messageId) =>
+      Effect.suspend(() => {
+        const peer = state
+          .model()
+          .snapshot.dialogs.find((dialog) => dialog.peer.id === peerId)?.peer;
+        return peer
+          ? engine.getMessageReadReceipts(peer, messageId)
+          : Effect.fail(new Error('Conversation unavailable'));
+      }),
     reactionPeople: (peerId, messageId, emoji) =>
       Effect.suspend(() => {
         const peer = state

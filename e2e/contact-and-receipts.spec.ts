@@ -144,3 +144,110 @@ for (const width of [375, 1280]) {
     });
   }
 }
+
+for (const width of [375, 1280]) {
+  test(`read receipt loading does not move menu items and reopening uses cache at ${width}px`, async ({
+    page,
+  }) => {
+    await openReady(page, '/?chat=u%3A101&scenario=slow-unread-receipts');
+    await page.setViewportSize({ width, height: 800 });
+    await page.evaluate(() =>
+      window.__televechaFixture!.emit({
+        type: 'new-message',
+        pts: 11,
+        ptsCount: 1,
+        message: {
+          id: 901,
+          peerId: 'u:101',
+          senderId: 'self',
+          text: 'Stable receipt menu',
+          date: Math.floor(Date.now() / 1000),
+          outgoing: true,
+        },
+      }),
+    );
+    const message = page.locator('article[data-message-id="901"]');
+    await message.click({ button: 'right' });
+    const menu = page.getByRole('menu', { name: 'Message actions' });
+    const reply = menu.getByRole('menuitem', { name: 'Reply', exact: true });
+    await expect(menu.locator('.message-read-status')).toContainText('Checking');
+    const before = await reply.boundingBox();
+    await expect(menu.locator('.message-read-status')).toContainText('Not read yet');
+    expect(await reply.boundingBox()).toEqual(before);
+    await page.keyboard.press('Escape');
+    await message.click({ button: 'right' });
+    await expect(menu.locator('.message-read-status')).toContainText('Not read yet');
+    expect(await page.evaluate(() => window.__televechaFixture!.stats.getMessageReadReceipts)).toBe(
+      1,
+    );
+    await page.screenshot({ path: `/tmp/stable-receipt-menu-${width}.png` });
+  });
+}
+
+test('read receipt cache survives reload and refreshes when the outgoing read boundary changes', async ({
+  page,
+}) => {
+  await openReady(page, '/?chat=u%3A101');
+  const message = page.locator('article[data-message-id="80"]');
+  await message.click({ button: 'right' });
+  const status = page
+    .getByRole('menu', { name: 'Message actions' })
+    .locator('.message-read-status');
+  await expect(status).toContainText(/^Read /);
+  expect(await page.evaluate(() => window.__televechaFixture!.stats.getMessageReadReceipts)).toBe(
+    1,
+  );
+  await openReady(page, '/?chat=u%3A101');
+  await message.click({ button: 'right' });
+  await expect(status).toContainText(/^Read /);
+  expect(await page.evaluate(() => window.__televechaFixture!.stats.getMessageReadReceipts)).toBe(
+    0,
+  );
+  await page.keyboard.press('Escape');
+  await page.evaluate(() =>
+    window.__televechaFixture!.emit({
+      type: 'read-history',
+      peerId: 'u:101',
+      direction: 'outbox',
+      maxMessageId: 80,
+      pts: 11,
+      ptsCount: 1,
+    }),
+  );
+  await expect(message.locator('.message-status-read')).toHaveCount(1);
+  await message.click({ button: 'right' });
+  await expect(status).toContainText(/^Read /);
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture!.stats.getMessageReadReceipts))
+    .toBe(1);
+});
+
+test('a read update supersedes an in-flight receipt request without moving the menu', async ({
+  page,
+}) => {
+  await openReady(page, '/?chat=u%3A101&scenario=slow-read-receipts');
+  await expect(page.locator('article[data-message-id="80"] .message-status-read')).toHaveCount(0);
+  await page.locator('article[data-message-id="80"]').click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Message actions' });
+  await expect(menu.locator('.message-read-status')).toContainText('Checking');
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture!.stats.getMessageReadReceipts))
+    .toBe(1);
+  const before = await menu.boundingBox();
+  await page.evaluate(() =>
+    window.__televechaFixture!.emit({
+      type: 'read-history',
+      peerId: 'u:101',
+      direction: 'outbox',
+      maxMessageId: 80,
+      pts: 11,
+      ptsCount: 1,
+    }),
+  );
+  await expect(page.locator('article[data-message-id="80"] .message-status-read')).toHaveCount(1);
+  await expect
+    .poll(() => page.evaluate(() => window.__televechaFixture!.stats.getMessageReadReceipts))
+    .toBe(2);
+  await expect(menu.locator('.message-read-status')).toContainText(/^Read /);
+  expect(await menu.boundingBox()).toEqual(before);
+});

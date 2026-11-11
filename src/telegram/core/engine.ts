@@ -4492,7 +4492,36 @@ function makeMessagingEngineModule(
       (yield* cacheStore.loadMessage(peer.id, messageId));
     if (!message?.outgoing || message.service || !telegramTransport.getMessageReadReceipts)
       return { state: 'unavailable', people: [] };
-    return yield* telegramTransport.getMessageReadReceipts(peer, messageId);
+    const key = `message-read-receipts:${peer.id}:${messageId}`;
+    const session = sessionScope;
+    const accountId = activeAccountId;
+    const generation = metadataGeneration;
+    const readRevision = () =>
+      (currentSnapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)?.readOutboxMaxId ??
+        0) >= messageId;
+    const revision = readRevision();
+    return yield* resourceCache.load(`${key}:${revision}`, () =>
+      Effect.gen(function* () {
+        const cached = yield* readMetadata<{ revision: boolean; result: TelegramReadReceipts }>(
+          key,
+        );
+        if (
+          cached &&
+          (!currentSnapshot().online ||
+            (cached.value.revision === revision && metadataIsFresh(cached.savedAt, 60_000)))
+        )
+          return cached.value.result;
+        if (!currentSnapshot().online) return { state: 'unavailable' as const, people: [] };
+        const result = yield* telegramTransport.getMessageReadReceipts!(peer, messageId);
+        if (
+          isOperationCurrent(session, accountId) &&
+          generation === metadataGeneration &&
+          readRevision() === revision
+        )
+          yield* writeMetadata(key, { revision, result });
+        return result;
+      }),
+    );
   });
   const getReactionPeople = Effect.fn('MessagingEngine.getReactionPeople')(function* (
     peer: TelegramPeer,

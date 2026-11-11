@@ -10,6 +10,7 @@ import {
 import type {
   SharedMediaKind,
   TelegramMessage,
+  TelegramReadReceipts,
   TelegramReactionPeople,
   TelegramSearchOffset,
   TelegramSearchPage,
@@ -22,6 +23,7 @@ export interface CustomEmojiAsset {
 
 /** Reads that views observe through the query cache. The app controller implements them. */
 export interface QueryLoaders {
+  readReceipts(peerId: string, messageId: number): Effect.Effect<TelegramReadReceipts, unknown>;
   reactionPeople(
     peerId: string,
     messageId: number,
@@ -48,6 +50,12 @@ export const QueryLoaders = Context.Service<QueryLoaders>('ui/QueryLoaders');
 const optional = <A>(load: Effect.Effect<A, unknown>) =>
   load.pipe(Effect.catch(() => Effect.succeed(undefined)));
 
+export const readReceiptsQuery = query({
+  name: 'message-read-receipts',
+  staleTime: 60_000,
+  load: (args: { peerId: string; messageId: number; revision: string }) =>
+    Effect.flatMap(QueryLoaders, (loaders) => loaders.readReceipts(args.peerId, args.messageId)),
+});
 export const reactionPeopleQuery = query({
   name: 'reaction-people',
   // `revision` is part of identity only: a changed reaction count loads the list again.
@@ -117,6 +125,8 @@ export function pageMessages(
 /** View-facing sources and page actions over one cache. Equal arguments share one source. */
 export function querySources(cache: QueryCache<QueryLoaders>) {
   return {
+    readReceipts: (peerId: string, messageId: number, revision: string) =>
+      querySource(cache, readReceiptsQuery, { peerId, messageId, revision }),
     reactionPeople: (peerId: string, messageId: number, emoji: string, revision: string) =>
       querySource(cache, reactionPeopleQuery, { peerId, messageId, emoji, revision }),
     customEmoji: (documentId: string) => querySource(cache, customEmojiQuery, documentId),

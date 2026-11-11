@@ -1160,6 +1160,17 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       beforeMessageId?: number,
     ) {
       stats.getHistory += 1;
+      if (
+        scenario === 'held-earlier-history' &&
+        peer.kind === 'group' &&
+        beforeMessageId !== undefined &&
+        !scenarioHistoryHeld.has('earlier')
+      ) {
+        scenarioHistoryHeld.add('earlier');
+        pendingHistory = yield* Deferred.make<void>();
+        yield* Deferred.await(pendingHistory);
+        pendingHistory = undefined;
+      }
       if (nextHistoryFailure?.peerId === peer.id) {
         const failure = nextHistoryFailure;
         nextHistoryFailure = undefined;
@@ -2707,8 +2718,10 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       });
     function getMessageReadReceipts(peer: TelegramPeer, _messageId: number) {
       stats.getMessageReadReceipts += 1;
-      if (scenario === 'unread-receipts')
-        return Effect.succeed<TelegramReadReceipts>({ state: 'unread', people: [] });
+      if (scenario === 'unread-receipts' || scenario === 'slow-unread-receipts')
+        return Effect.succeed<TelegramReadReceipts>({ state: 'unread', people: [] }).pipe(
+          Effect.delay(scenario === 'slow-unread-receipts' ? 400 : 0),
+        );
       return Effect.succeed<TelegramReadReceipts>({
         state: 'available',
         people: (peer.kind === 'user'
@@ -2729,7 +2742,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
           avatarId: `fixture-${person.id}`,
           readAt: Math.floor(Date.now() / 1000) - 60 * (index + 1),
         })),
-      });
+      }).pipe(Effect.delay(scenario === 'slow-read-receipts' ? 400 : 0));
     }
     function setReaction(peer: TelegramPeer, messageId: number, emoji?: string) {
       return Effect.sync(() => {

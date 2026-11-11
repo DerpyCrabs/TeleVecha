@@ -28,6 +28,9 @@
   padding: 0.3rem;
   box-shadow: 0 14px 36px rgb(0 0 0 / 0.42);
 }
+.message-context-menu {
+  width: min(16rem, calc(100vw - 1rem));
+}
 .message-context-menu button,
 .chat-context-menu button {
   display: flex;
