@@ -175,6 +175,8 @@ const invokeEngineCommand = (
       return engine.sendContact(...(args as Parameters<MessagingEngine['sendContact']>));
     case 'sendSticker':
       return engine.sendSticker(...(args as Parameters<MessagingEngine['sendSticker']>));
+    case 'forwardMessages':
+      return engine.forwardMessages(...(args as Parameters<MessagingEngine['forwardMessages']>));
     case 'forwardMessage':
       return engine.forwardMessage(...(args as Parameters<MessagingEngine['forwardMessage']>));
     case 'editMessage':
@@ -925,6 +927,25 @@ const PendingSendSchema = Schema.Struct({
     Schema.Struct({
       fromPeer: PeerSchema,
       messageId: Schema.Number,
+      messages: Schema.optional(
+        Schema.Array(
+          Schema.Struct({
+            messageId: Schema.Number,
+            randomId: Schema.String,
+            mediaKind: Schema.optional(
+              Schema.Literals([
+                'photo',
+                'video',
+                'round-video',
+                'voice',
+                'animation',
+                'sticker',
+                'file',
+              ]),
+            ),
+          }),
+        ),
+      ),
       options: Schema.optional(
         Schema.Struct({
           topMessageId: Schema.optional(Schema.Number),
@@ -1149,6 +1170,7 @@ const commandPolicies: Record<RemoteMethod, CommandPolicy> = {
   sendPoll: { readiness: 'workspace', concurrent: true, surfaceError: true },
   sendContact: { readiness: 'workspace', concurrent: true, surfaceError: true },
   sendSticker: { readiness: 'workspace', concurrent: true, surfaceError: true },
+  forwardMessages: { readiness: 'workspace', concurrent: true, surfaceError: true },
   forwardMessage: { readiness: 'workspace', concurrent: true, surfaceError: true },
   editMessage: { readiness: 'account', concurrent: true, surfaceError: true },
   deleteMessage: { readiness: 'account', concurrent: true, surfaceError: true },
@@ -1570,6 +1592,7 @@ function errorMessage(error: unknown) {
     sendPoll: remote('sendPoll'),
     updatePoll: remote('updatePoll'),
     forwardMessage: remote('forwardMessage'),
+    forwardMessages: remote('forwardMessages'),
     editMessage: remote('editMessage'),
     deleteMessage: remote('deleteMessage'),
     getReactionPeople: remote('getReactionPeople'),

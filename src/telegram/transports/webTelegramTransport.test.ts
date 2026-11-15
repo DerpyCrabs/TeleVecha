@@ -1727,6 +1727,108 @@ describe('web Telegram transport', () => {
       ),
   );
 
+  it.each([false, true])(
+    'correlates all forwarded album results (missing member: %s)',
+    async (missing) => {
+      const result = Api.Updates({
+        date: 1,
+        seq: 1,
+        users: [],
+        chats: [],
+        updates: [
+          Api.UpdateMessageID({ id: 102, randomId: 124n }),
+          Api.UpdateMessageID({ id: 101, randomId: 123n }),
+          ...[102, 101]
+            .filter((id) => !missing || id !== 102)
+            .map((id) =>
+              Api.UpdateNewMessage({
+                pts: id,
+                ptsCount: 1,
+                message: Api.Message({
+                  id,
+                  out: true,
+                  peerId: Api.PeerUser({ userId: 2n }),
+                  date: 1,
+                  message: id === 102 ? 'Caption' : '',
+                  groupedId: 99n,
+                }),
+              }),
+            ),
+        ],
+      });
+      const invoke = vi.fn((request: unknown) =>
+        Api.messages.ForwardMessages.is(request)
+          ? Effect.succeed(result)
+          : Effect.succeed(
+              Api.messages.Messages({ messages: [], users: [], chats: [], topics: [] }),
+            ),
+      );
+      await Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              const sent = yield* transport
+                .forwardMessages(
+                  { id: 'u:1', kind: 'user', accessHash: '10' },
+                  { id: 'u:2', kind: 'user', accessHash: '20' },
+                  [
+                    { messageId: 41, randomId: '123' },
+                    { messageId: 42, randomId: '124' },
+                  ],
+                )
+                .pipe(Effect.result);
+              if (missing) {
+                expect(sent._tag).toBe('Failure');
+              } else {
+                expect(sent._tag).toBe('Success');
+                if (sent._tag === 'Success')
+                  expect(sent.success.messages).toMatchObject([
+                    { id: 101, randomId: '123', groupedId: '99' },
+                    { id: 102, randomId: '124', groupedId: '99', text: 'Caption' },
+                  ]);
+              }
+            }),
+          () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+        ),
+      );
+    },
+  );
+
+  it('forwards album members in one RPC with one random ID per member', async () => {
+    const invoke = vi.fn((_request: unknown) =>
+      Effect.fail(createMtprotoError('transport', 'Test stops at RPC')),
+    );
+    await Effect.runPromise(
+      withTransport(
+        (transport) =>
+          Effect.gen(function* () {
+            yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+            yield* transport
+              .forwardMessages(
+                { id: 'u:1', kind: 'user', accessHash: '10' },
+                { id: 'u:2', kind: 'user', accessHash: '20' },
+                [
+                  { messageId: 41, randomId: '123' },
+                  { messageId: 42, randomId: '124' },
+                ],
+                { hideCaption: true, topMessageId: 7 },
+              )
+              .pipe(Effect.result);
+          }),
+        () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+      ),
+    );
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke.mock.calls[0]?.[0]).toMatchObject({
+      id: [41, 42],
+      randomId: [123n, 124n],
+      dropAuthor: true,
+      dropMediaCaptions: true,
+      topMsgId: 7,
+    });
+  });
+
   it.each([
     [undefined, undefined, undefined],
     [{ hideAuthor: true }, true, undefined],

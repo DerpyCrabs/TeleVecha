@@ -1,3 +1,4 @@
+import { firstUnreadRow } from './messageGroups';
 import { program } from 'effectweb';
 import { Effect } from 'effect';
 import type {
@@ -14,6 +15,7 @@ const commandDom = 'dom';
 interface ConversationMessage {
   id: string;
   outgoing: boolean;
+  groupedId?: string | undefined;
 }
 interface ConversationViewportOptions {
   scroller: () => HTMLDivElement | undefined;
@@ -363,11 +365,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
       if (options.activePeerId() !== peerId || !stillCurrent() || targetLocked) return;
       const scroller = options.scroller();
       const unread =
-        unreadAfterId === undefined
-          ? undefined
-          : options
-              .messages()
-              .find((message) => !message.outgoing && Number(message.id) > unreadAfterId);
+        unreadAfterId === undefined ? undefined : firstUnreadRow(options.messages(), unreadAfterId);
       const selector = unread ? `[data-unread-message-id="${CSS.escape(unread.id)}"]` : undefined;
       const target = selector ? scroller?.querySelector<HTMLElement>(selector) : undefined;
       if (!scroller || !target) {

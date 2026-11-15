@@ -50,6 +50,13 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
         ? Object.freeze({
             fromPeer: Object.freeze({ ...pending.forward.fromPeer }),
             messageId: pending.forward.messageId,
+            ...(pending.forward.messages
+              ? {
+                  messages: Object.freeze(
+                    pending.forward.messages.map((message) => Object.freeze({ ...message })),
+                  ),
+                }
+              : {}),
             ...(pending.forward.options
               ? { options: Object.freeze({ ...pending.forward.options }) }
               : {}),

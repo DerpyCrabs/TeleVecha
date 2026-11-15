@@ -1,3 +1,4 @@
+import { firstUnreadRow } from '../conversation/messageGroups';
 import { type SavedDialog, type SavedMessagesInfo } from '../../telegram/savedMessages';
 import { forumDraftKey, type TelegramForumTopic } from '../../telegram/forums';
 import type { TelegramConversationEvent } from '../../telegram/types';
@@ -142,6 +143,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
           reactionPickerMessageId: '',
           messageContextMenu: undefined,
           forwardingMessage: undefined,
+          forwardingWholeAlbum: true,
           forwardRecipientOpen: false,
           forwardDraft: undefined,
           sharingContact: undefined,
@@ -224,8 +226,11 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     selectionBusy: boolean;
     pendingActionId: string;
     reactionPickerMessageId: string;
-    messageContextMenu: { messageId: string; x: number; y: number } | undefined;
+    messageContextMenu:
+      | { messageId: string; x: number; y: number; wholeAlbum?: boolean }
+      | undefined;
     forwardingMessage: ChatMessage | undefined;
+    forwardingWholeAlbum: boolean;
     forwardRecipientOpen: boolean;
     forwardDraft:
       | {
@@ -785,9 +790,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
   const initialUnreadMessageId = selectors.select(() => {
     const unreadAfterId = state.model().initialUnreadAfterId;
     if (unreadAfterId === undefined) return undefined;
-    return activeMessages().find(
-      (message) => !message.outgoing && Number(message.id) > unreadAfterId,
-    )?.id;
+    return firstUnreadRow(activeMessages(), unreadAfterId)?.id;
   });
   const pendingSendForMessage = (messageId: string) =>
     state
@@ -2081,14 +2084,21 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     let remaining = draft.messages;
     try {
       if (!(await runEffect(composer.sendPending()))) return;
-      for (const message of draft.messages) {
+      while (remaining.length) {
+        const message = remaining[0]!;
+        const batch = message.groupedId
+          ? remaining.filter((candidate) => candidate.groupedId === message.groupedId)
+          : [message];
         await runEffect(
-          engine.forwardMessage(draft.source, draft.target, Number(message.id), {
-            ...draft.options,
-            topMessageId: state.model().activeTopic?.id,
-          }),
+          engine.forwardMessages(
+            draft.source,
+            draft.target,
+            batch.map(({ id }) => Number(id)),
+            { ...draft.options, topMessageId: state.model().activeTopic?.id },
+          ),
         );
-        remaining = remaining.filter(({ id }) => id !== message.id);
+        const sent = new Set(batch.map(({ id }) => id));
+        remaining = remaining.filter(({ id }) => !sent.has(id));
       }
     } catch {
       state.send({
@@ -2129,17 +2139,29 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     if (result && !state.model().snapshot.dialogs.some(({ peer }) => peer.id === result.peer.id)) {
       await runEffect(engine.addPeer(result));
     }
+    const messages =
+      message.groupedId && state.model().forwardingWholeAlbum
+        ? activeMessages().filter((candidate) => candidate.groupedId === message.groupedId)
+        : [message];
+    if (
+      !messages.length ||
+      messages.some((message) => !messageCapabilitiesForUi(message).canForward)
+    )
+      return;
     const targetDialog = state.model().snapshot.dialogs.find(({ peer }) => peer.id === to.id);
     if (
-      (targetDialog && !canSendMessageToDialog(targetDialog, message)) ||
-      (result?.permissions && !canSendMessageToPermissions(result.permissions, message))
+      messages.some(
+        (message) =>
+          (targetDialog && !canSendMessageToDialog(targetDialog, message)) ||
+          (result?.permissions && !canSendMessageToPermissions(result.permissions, message)),
+      )
     ) {
       return;
     }
     const source = state
       .model()
       .snapshot.dialogs.find(({ peer }) => peer.id === conversation.peerId)?.peer;
-    if (source) await stageForward(source, to, [message], options);
+    if (source) await stageForward(source, to, messages, options);
   };
   const centerMessageWindow = (messageId: number) => {
     const index = activeMessages().findIndex(({ id }) => id === String(messageId));
@@ -2297,7 +2319,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       }
     }
   };
-  const openMessageActions = (message: ChatMessage, event: MouseEvent) => {
+  const openMessageActions = (message: ChatMessage, event: MouseEvent, wholeAlbum = true) => {
     const pending = pendingSendForMessage(message.id);
     if (message.service || (!pending && !Number.isSafeInteger(Number(message.id)))) return;
     if (!pending && event.target instanceof HTMLImageElement) return;
@@ -2313,6 +2335,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       type: 'Changed',
       changes: {
         messageContextMenu: {
+          wholeAlbum,
           messageId: message.id,
           x: event.clientX || anchor?.right || 8,
           y: event.clientY || anchor?.bottom || 8,
@@ -2762,11 +2785,11 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     composer,
     setMessageContextMenu: (
       value:
-        | { messageId: string; x: number; y: number }
+        | { messageId: string; x: number; y: number; wholeAlbum?: boolean }
         | undefined
         | ((
-            previous: { messageId: string; x: number; y: number } | undefined,
-          ) => { messageId: string; x: number; y: number } | undefined),
+            previous: { messageId: string; x: number; y: number; wholeAlbum?: boolean } | undefined,
+          ) => { messageId: string; x: number; y: number; wholeAlbum?: boolean } | undefined),
     ) =>
       state.send({
         type: 'Changed',
@@ -2784,10 +2807,12 @@ export const createAppController = Effect.fn('createAppController')(function* (p
         | ChatMessage
         | undefined
         | ((previous: ChatMessage | undefined) => ChatMessage | undefined),
+      wholeAlbum = true,
     ) =>
       state.send({
         type: 'Changed',
         changes: {
+          forwardingWholeAlbum: wholeAlbum,
           forwardingMessage:
             typeof value === 'function' ? value(state.model().forwardingMessage) : value,
         },

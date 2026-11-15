@@ -307,6 +307,10 @@ function makeMessagingEngineModule(
             : permissions.canSendMedia,
       );
     }
+    if (pending.forward?.messages)
+      return pending.forward.messages.every(({ mediaKind }) =>
+        canSendMediaKindToPermissions(permissions, mediaKind),
+      );
     const source = pending.forward
       ? histories
           .loaded(pending.forward.fromPeer.id)
@@ -4760,35 +4764,48 @@ function makeMessagingEngineModule(
       });
     });
   });
-  const forwardMessage = Effect.fn('MessagingEngine.forwardMessage')(function* (
+  const forwardMessages = Effect.fn('MessagingEngine.forwardMessages')(function* (
     fromPeer: TelegramPeer,
     toPeer: TelegramPeer,
-    messageId: number,
+    messageIds: readonly number[],
     options?: TelegramForwardOptions,
   ) {
-    const source =
-      histories.loaded(fromPeer.id)?.messages.find(({ id }) => id === messageId) ??
-      (yield* cacheStore.loadMessage(fromPeer.id, messageId));
-    if (!source) {
-      return yield* Effect.fail(
-        new Error('The message is no longer available in the local conversation history.'),
-      );
-    }
-    const sourceDialog = dialogForPeer(fromPeer.id);
-    if (sourceDialog && !messageCapabilities(sourceDialog, source).canForward) {
-      return yield* Effect.fail(
-        new Error(`Forwarding this message is not available in ${sourceDialog.title}.`),
-      );
-    }
-    const targetDialog = dialogForPeer(toPeer.id);
-    if (
-      (!targetDialog && toPeer.kind !== 'user') ||
-      (targetDialog && !canSendMessageToDialog(targetDialog, source))
-    ) {
-      return yield* Effect.fail(
-        new Error(`Sending messages is not available in ${targetDialog?.title ?? 'this chat'}.`),
-      );
-    }
+    const ids = [...new Set(messageIds)].sort((a, b) => a - b);
+    if (!ids.length || ids.length > 100 || ids.some((id) => !Number.isSafeInteger(id) || id <= 0))
+      return yield* Effect.fail(new Error('Forward between 1 and 100 valid messages.'));
+    const sources = yield* Effect.forEach(ids, (messageId) =>
+      Effect.gen(function* () {
+        const source =
+          histories.loaded(fromPeer.id)?.messages.find(({ id }) => id === messageId) ??
+          (yield* cacheStore.loadMessage(fromPeer.id, messageId));
+        if (!source)
+          return yield* Effect.fail(
+            new Error('The message is no longer available in the local conversation history.'),
+          );
+        const sourceDialog = dialogForPeer(fromPeer.id);
+        if (sourceDialog && !messageCapabilities(sourceDialog, source).canForward)
+          return yield* Effect.fail(
+            new Error(`Forwarding this message is not available in ${sourceDialog.title}.`),
+          );
+        const targetDialog = dialogForPeer(toPeer.id);
+        if (
+          (!targetDialog && toPeer.kind !== 'user') ||
+          (targetDialog && !canSendMessageToDialog(targetDialog, source))
+        )
+          return yield* Effect.fail(
+            new Error(
+              `Sending messages is not available in ${targetDialog?.title ?? 'this chat'}.`,
+            ),
+          );
+        return source;
+      }),
+    );
+    const messages = yield* Effect.forEach(sources, (source) =>
+      Effect.gen(function* () {
+        return { messageId: source.id, randomId: yield* randomId(), mediaKind: source.media?.kind };
+      }),
+    );
+    const source = sources.find((source) => source.text) ?? sources[0]!;
     const pending = sendQueue.create({
       id: yield* randomUuid(),
       accountId: activeAccountId ?? cachedAccountId,
@@ -4798,18 +4815,25 @@ function makeMessagingEngineModule(
           ? { messageId: options.topMessageId, topMessageId: options.topMessageId }
           : undefined,
       text: options?.hideCaption && source.media ? '' : source.text,
-      randomId: yield* randomId(),
+      randomId: messages[0]!.randomId,
       createdAt: Date.now(),
       attempts: 0,
       forward: {
         fromPeer,
-        messageId,
+        messageId: ids[0]!,
         options,
-        ...(source.media ? { mediaKind: source.media.kind } : {}),
+        ...(messages.length > 1 ? { messages } : {}),
+        ...(sources[0]!.media ? { mediaKind: sources[0]!.media!.kind } : {}),
       },
     });
     yield* enqueuePending(pending);
   });
+  const forwardMessage = (
+    fromPeer: TelegramPeer,
+    toPeer: TelegramPeer,
+    messageId: number,
+    options?: TelegramForwardOptions,
+  ) => forwardMessages(fromPeer, toPeer, [messageId], options);
   const downloadAndCacheAvatar = Effect.fn('MessagingEngine.downloadAndCacheAvatar')(function* (
     cacheKey: string,
     peer: TelegramPeer,
@@ -5700,7 +5724,8 @@ function makeMessagingEngineModule(
       const pending = currentSnapshot().pending.find(
         (send) =>
           send.randomId === update.randomId ||
-          send.album?.attachments.some(({ randomId }) => randomId === update.randomId),
+          send.album?.attachments.some(({ randomId }) => randomId === update.randomId) ||
+          send.forward?.messages?.some(({ randomId }) => randomId === update.randomId),
       );
       if (!pending) return;
       const key = `${pending.peer.id}:${update.messageId}`;
@@ -6728,6 +6753,15 @@ function makeMessagingEngineModule(
                   );
               return { sentMessages: [result.message], updateBatches: result.updateBatches };
             }
+            if (attempting.forward?.messages) {
+              const result = yield* transport.forwardMessages(
+                attempting.forward.fromPeer,
+                attempting.peer,
+                attempting.forward.messages,
+                attempting.forward.options,
+              );
+              return { sentMessages: result.messages, updateBatches: result.updateBatches };
+            }
             if (attempting.forward) {
               const result = yield* transport.forwardMessage(
                 attempting.forward.fromPeer,
@@ -7747,6 +7781,7 @@ function makeMessagingEngineModule(
     deleteMessage: deleteMessage,
     editMessage: editMessage,
     forwardMessage: forwardMessage,
+    forwardMessages,
     retryPendingSend: retryPendingSend,
     cancelPendingSend: cancelPendingSend,
     retryOutbox: retryOutbox,

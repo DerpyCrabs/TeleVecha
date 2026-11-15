@@ -50,6 +50,7 @@ export const messagingCapabilities = [
   'sendPoll',
   'updatePoll',
   'forwardMessage',
+  'forwardMessages',
   'editMessage',
   'deleteMessage',
   'toggleReaction',

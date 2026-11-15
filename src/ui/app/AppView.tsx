@@ -1077,7 +1077,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                   : Effect.fail(new Error('Album media is unavailable.'));
                               }}
                               openActions={(albumMessage, event) =>
-                                openMessageActions(albumMessage, event)
+                                openMessageActions(albumMessage, event, false)
                               }
                               openPreview={(albumMessage, preview) =>
                                 openImageViewer(albumMessage, preview, layout.album)
@@ -1504,7 +1504,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                       role="menuitem"
                                       onClick={() => {
                                         setMessageContextMenu(undefined);
-                                        setForwardingMessage(target);
+                                        setForwardingMessage(target, menu.wholeAlbum ?? true);
                                       }}
                                     >
                                       <Forward size={15} /> Forward
@@ -1784,7 +1784,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                       : () => {
                           const target = message();
                           setMediaViewer(undefined);
-                          setForwardingMessage(target);
+                          setForwardingMessage(target, false);
                         }
                   }
                   edit={
@@ -1948,7 +1948,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                   const readOutboxMaxId =
                     snapshot.dialogs.find(({ peer }) => peer.id === message.peerId)
                       ?.readOutboxMaxId ?? 0;
-                  setForwardingMessage(presentMessage(message, readOutboxMaxId));
+                  setForwardingMessage(presentMessage(message, readOutboxMaxId), false);
                 }}
                 deleteMessage={(message) => {
                   if (!telegramMessageCapabilitiesForUi(message).canDelete) return;

@@ -2860,8 +2860,9 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       const source = messages.get(fromPeer.id)?.find(({ id }) => id === messageId);
       if (!source)
         return yield* Effect.fail(createMtprotoError('transport', 'Fixture message was not found'));
-      const message = {
+      const message: TelegramMessage = {
         ...source,
+        groupedId: undefined,
         text: options?.hideCaption && source.media ? '' : source.text,
         formats: options?.hideCaption && source.media ? [] : source.formats,
         forwardedFrom:
@@ -2883,6 +2884,29 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       };
       messages.set(toPeer.id, [...(messages.get(toPeer.id) ?? []), message]);
       return { message };
+    });
+    const forwardMessages = Effect.fn('FixtureTransport.forwardMessages')(function* (
+      fromPeer: TelegramPeer,
+      toPeer: TelegramPeer,
+      items: readonly { messageId: number; randomId: string }[],
+      options?: TelegramForwardOptions,
+    ) {
+      const groups = new Map(
+        items.map(({ messageId }) => [
+          messageId,
+          messages.get(fromPeer.id)?.find(({ id }) => id === messageId)?.groupedId,
+        ]),
+      );
+      const sent = yield* Effect.forEach(items, ({ messageId, randomId }) =>
+        Effect.gen(function* () {
+          const result = yield* forwardMessage(fromPeer, toPeer, messageId, randomId, options);
+          const group = groups.get(messageId);
+          if (group) result.message.groupedId = `forward:${items[0]!.randomId}:${group}`;
+          return result.message;
+        }),
+      );
+      stats.forwardMessage -= items.length - 1;
+      return { messages: sent };
     });
     window.__televechaFixture = {
       stats,
@@ -3650,6 +3674,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       deleteMessages,
       editMessage,
       forwardMessage,
+      forwardMessages,
       updates: Stream.fromPubSub(updateHub),
     } satisfies TelegramTransport;
   },

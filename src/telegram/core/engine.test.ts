@@ -607,6 +607,35 @@ describe('MessagingEngine', () => {
       ),
     ));
 
+  it('persists an album forward as one retryable batch with stable random IDs', () =>
+    Effect.runPromise(
+      withEngine((engine, transport, cache) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          yield* engine.loadConversationView('u:101');
+          const peer = { id: 'u:101', kind: 'user' } as const;
+          const save = vi.spyOn(cache, 'commitOutbox');
+          const forward = vi.spyOn(transport, 'forwardMessages');
+          forward.mockReturnValueOnce(Effect.fail(createMtprotoError('transport', 'Offline')));
+          yield* engine
+            .forwardMessages(peer, peer, [78, 79], { hideAuthor: true })
+            .pipe(Effect.result);
+          const pending = engine.snapshot().pending[0]!;
+          expect(pending.forward?.messages).toHaveLength(2);
+          const saved = save.mock.calls[0]?.[0];
+          expect((Array.isArray(saved) ? saved[0] : saved)?.forward?.messages).toEqual(
+            pending.forward?.messages,
+          );
+          const firstAttempt = forward.mock.calls[0];
+          yield* engine.retryPendingSend(pending.id);
+          expect(forward.mock.calls[1]).toEqual(firstAttempt);
+          expect(engine.snapshot().pending).toEqual([]);
+          const delivered = yield* engine.loadConversationView('u:101');
+          expect(delivered.messages.filter(({ id }) => id > 80)).toHaveLength(2);
+        }),
+      ),
+    ));
+
   it('carries forwarding privacy options through the durable queue to the transport', () =>
     Effect.runPromise(
       withEngine((engine, transport, cache) =>

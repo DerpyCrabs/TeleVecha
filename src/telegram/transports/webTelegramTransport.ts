@@ -3215,6 +3215,60 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       );
     return { message: fallback, updateBatches };
   });
+  const forwardMessages = Effect.fn('WebTelegramTransport.forwardMessages')(function* (
+    fromPeer: TelegramPeer,
+    toPeer: TelegramPeer,
+    messages: readonly { messageId: number; randomId: string }[],
+    options?: TelegramForwardOptions,
+  ) {
+    const result = yield* (yield* getClient).invoke(
+      Api.messages.ForwardMessages({
+        ...(options?.hideAuthor || options?.hideCaption ? { dropAuthor: true as const } : {}),
+        ...(options?.hideCaption ? { dropMediaCaptions: true as const } : {}),
+        fromPeer: toInputPeer(fromPeer),
+        id: messages.map(({ messageId }) => messageId),
+        randomId: messages.map(({ randomId }) => telegramLong(randomId)),
+        toPeer: toInputPeer(toPeer),
+        ...(options?.topMessageId !== undefined ? { topMsgId: options.topMessageId } : {}),
+      }),
+    );
+    const returned = messagesFromUpdates(result)
+      .map((message) => mapMessage(message))
+      .filter(
+        (message): message is TelegramMessage => message?.peerId === toPeer.id && message.outgoing,
+      )
+      .sort((a, b) => a.id - b.id);
+    const assigned =
+      Api.Updates.is(result) || Api.UpdatesCombined.is(result)
+        ? new Map(
+            result.updates.flatMap((update) =>
+              Api.UpdateMessageID.is(update)
+                ? [[update.randomId.toString(), update.id] as const]
+                : [],
+            ),
+          )
+        : new Map<string, number>();
+    const sentMessages = yield* Effect.forEach(messages, ({ randomId }, index) =>
+      Effect.gen(function* () {
+        const id = assigned.get(randomId);
+        const message =
+          id !== undefined
+            ? (returned.find((message) => message.id === id) ?? (yield* getMessageById(toPeer, id)))
+            : returned.length === messages.length
+              ? returned[index]
+              : undefined;
+        if (!message)
+          return yield* Effect.fail(
+            createMtprotoError(
+              'protocol',
+              'Telegram accepted the forward but returned an incomplete message list.',
+            ),
+          );
+        return { ...message, randomId };
+      }),
+    );
+    return { messages: sentMessages, updateBatches: toUpdateBatches(result, sentMessages) };
+  });
   const forwardMessage = Effect.fn('WebTelegramTransport.forwardMessage')(function* (
     fromPeer: TelegramPeer,
     toPeer: TelegramPeer,
@@ -6155,6 +6209,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     deleteMessages,
     editMessage,
     forwardMessage,
+    forwardMessages,
     updates: Stream.fromPubSub(updateHub),
   } satisfies TelegramTransport;
 });

@@ -262,6 +262,7 @@ export function createTvBugSnapshotClient(bundle: TvBugBundleV2): EffectMessagin
       updatePoll: () => Effect.succeed(undefined),
       sendSticker: () => Effect.void,
       forwardMessage: () => Effect.succeed(undefined),
+      forwardMessages: () => Effect.succeed(undefined),
       editMessage: () =>
         Effect.fail(
           new MessagingError({

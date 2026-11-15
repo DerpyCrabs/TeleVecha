@@ -1286,6 +1286,12 @@ export interface TelegramTransport {
     formats?: readonly TelegramTextFormat[],
     replacement?: EditMediaOptions,
   ): TransportEffect<EditMessageResult>;
+  forwardMessages(
+    fromPeer: TelegramPeer,
+    toPeer: TelegramPeer,
+    messages: readonly { messageId: number; randomId: string }[],
+    options?: TelegramForwardOptions,
+  ): TransportEffect<SendAlbumResult>;
   forwardMessage(
     fromPeer: TelegramPeer,
     toPeer: TelegramPeer,
@@ -1374,6 +1380,13 @@ export interface PendingSend {
     | {
         fromPeer: TelegramPeer;
         messageId: number;
+        messages?:
+          | readonly {
+              messageId: number;
+              randomId: string;
+              mediaKind?: TelegramMedia['kind'] | undefined;
+            }[]
+          | undefined;
         mediaKind?: TelegramMedia['kind'] | undefined;
         options?: TelegramForwardOptions | undefined;
       }
