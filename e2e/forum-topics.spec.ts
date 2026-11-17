@@ -48,6 +48,8 @@ for (const width of [1280, 375])
       animations: 'disabled',
     });
     await topics.getByRole('button', { name: 'Manage Design', exact: true }).click();
+    // A focus refresh can arrive while the topic menu is open.
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await topics.getByRole('menuitem', { name: 'Close topic', exact: true }).click();
     await expect(topics.getByRole('button', { name: /Design.*Closed topic/ })).toBeVisible();
     await topics.getByRole('button', { name: /Design.*Closed topic/ }).click();

@@ -193,7 +193,5 @@ function acquirePreview(canvas: HTMLCanvasElement, input: () => PreviewInput) {
   };
 }
 
-export const imageEditorPreview = (input: PreviewInput) => ({
-  ...domBinding(input, acquirePreview),
-  identity: input.file,
-});
+export const imageEditorPreview = (input: PreviewInput) =>
+  domBinding(input, acquirePreview, { identity: input.file });

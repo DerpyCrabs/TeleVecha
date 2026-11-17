@@ -129,6 +129,7 @@ interface ChatSidebarProps {
 }
 type ContextUser = NonNullable<ReturnType<ChatDirectory['cachedDetails']>>;
 type ChatSidebarState = {
+  dialogsById: ReadonlyMap<string, TelegramDialog>;
   folders: TelegramChatFolder[];
   foldersOpen: boolean;
   createOpen: boolean;
@@ -294,9 +295,18 @@ function acquireList(element: HTMLDivElement, input: () => ListInput) {
   };
 }
 const listMount = (input: ListInput) => domBinding(input, acquireList);
+function indexDialogs(dialogs: readonly TelegramDialog[]): ReadonlyMap<string, TelegramDialog> {
+  const index = new Map<string, TelegramDialog>();
+  for (const dialog of dialogs) {
+    if (!index.has(dialog.peer.id)) index.set(dialog.peer.id, dialog);
+  }
+  return index;
+}
+
 export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSidebarMessage>(
   {
-    init: () => ({
+    init: (props) => ({
+      dialogsById: indexDialogs(props.dialogs),
       peers: [],
       folders: [],
       foldersOpen: false,
@@ -315,6 +325,10 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
     receive: (model, previous) =>
       refreshSidebar({
         ...model,
+        dialogsById:
+          model.props.dialogs === previous.dialogs
+            ? model.dialogsById
+            : indexDialogs(model.props.dialogs),
         contextMenu:
           model.props.activeChatId !== previous.activeChatId ? undefined : model.contextMenu,
       }),
@@ -392,8 +406,9 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
     const searchingPeers = model.peersLoading;
     const peerSearchFailed = model.peersError;
     const contextUser = () =>
-      props.dialogs.find((dialog) => dialog.peer.id === model.contextMenu?.chatId)?.userDetails ??
-      model.contextUser;
+      (model.contextMenu
+        ? model.dialogsById.get(model.contextMenu.chatId)?.userDetails
+        : undefined) ?? model.contextUser;
     const peerResource = { refetch: () => send({ type: 'RetrySearch' }) };
     const archivedChats = (() => props.chats.filter((chat) => chat.archived))();
     const archivedUnreadCount = (() =>
@@ -408,7 +423,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
           !term ||
           `${chat.title} ${chat.username ?? ''} ${chat.preview}`.toLocaleLowerCase().includes(term);
         if (selectedFolder) {
-          const dialog = props.dialogs.find((dialog) => dialog.peer.id === chat.id);
+          const dialog = model.dialogsById.get(chat.id);
           return Boolean(matchesQuery && dialog && folderContains(selectedFolder, dialog));
         }
         const matchesArchive = archiveOpen() ? Boolean(chat.archived) : !chat.archived;
@@ -651,7 +666,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
               aria-setsize={filteredChats.length}
             >
               <Avatar
-                identity={`${chat.id}:${props.dialogs.find((dialog) => dialog.peer.id === chat.id)?.avatarId ?? 'none'}`}
+                identity={`${chat.id}:${model.dialogsById.get(chat.id)?.avatarId ?? 'none'}`}
                 initials={chat.initials}
                 color={chat.color}
                 online={chat.presence === 'online'}

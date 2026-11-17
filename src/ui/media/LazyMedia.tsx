@@ -80,10 +80,9 @@ export const LazyMedia = component<Props, State, Message>(
   view((model, send) => (
     <span
       class={model.props.class}
-      use={{
-        ...domBinding({ send, root: model.props.rootSelector }, observe),
+      use={domBinding({ send, root: model.props.rootSelector }, observe, {
         identity: model.props.rootSelector,
-      }}
+      })}
     >
       {model.source ? (
         model.props.mimeType === 'application/x-tgsticker' ? (

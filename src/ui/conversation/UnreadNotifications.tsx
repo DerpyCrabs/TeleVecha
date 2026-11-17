@@ -25,18 +25,18 @@ type Message =
   | { type: 'MarkAll' }
   | { type: 'Menu'; open: boolean }
   | { type: 'Finished'; error: string };
-const notificationMenu = (close: () => void) =>
-  domBinding(close, (root: HTMLElement, input) => {
-    const release = activateFocusScope({ root, close: () => input()(), modal: false });
-    const dismiss = (event: PointerEvent) => {
-      if (event.target instanceof Node && !root.parentElement?.contains(event.target)) input()();
-    };
-    document.addEventListener('pointerdown', dismiss);
-    return () => {
-      release();
-      document.removeEventListener('pointerdown', dismiss);
-    };
-  });
+function acquireNotificationMenu(root: HTMLElement, input: () => () => void) {
+  const release = activateFocusScope({ root, close: () => input()(), modal: false });
+  const dismiss = (event: PointerEvent) => {
+    if (event.target instanceof Node && !root.parentElement?.contains(event.target)) input()();
+  };
+  document.addEventListener('pointerdown', dismiss);
+  return () => {
+    release();
+    document.removeEventListener('pointerdown', dismiss);
+  };
+}
+const notificationMenu = (close: () => void) => domBinding(close, acquireNotificationMenu);
 
 function acquireNotificationPress(root: HTMLButtonElement, input: () => () => void) {
   let timer: ReturnType<typeof setTimeout> | undefined;

@@ -78,7 +78,7 @@ export const ForumTopics = component<Props, State, Message>(
     update: (model, message) => {
       const peer = model.props.dialog.peer;
       const run = (effect: Effect.Effect<Message, unknown>, key = 'mutation') => ({
-        model: { ...model, busy: true, error: '', menu: undefined },
+        model: { ...model, busy: true, error: '', menu: key === 'load' ? model.menu : undefined },
         commands: [
           {
             key: ['forum', peer.id, key],

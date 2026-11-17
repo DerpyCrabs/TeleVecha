@@ -183,10 +183,8 @@ function observeVisibility(element: HTMLElement, input: () => Send<MediaAttachme
   observer.observe(element);
   return () => observer.disconnect();
 }
-const visibilityMount = (send: Send<MediaAttachmentMessage>) => ({
-  ...domBinding(send, observeVisibility),
-  identity: send,
-});
+const visibilityMount = (send: Send<MediaAttachmentMessage>) =>
+  domBinding(send, observeVisibility, { identity: send });
 function pause(video: HTMLVideoElement) {
   video.pause();
   video.currentTime = 0;
