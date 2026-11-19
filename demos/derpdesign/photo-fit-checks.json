@@ -1,0 +1,23 @@
+{
+  "steps": [
+    {
+      "action": "assert",
+      "selector": "article[data-message-id='1'] .media-visual[data-photo-fit='cover']"
+    },
+    {
+      "action": "assert",
+      "selector": "article[data-message-id='2'] .media-visual[data-photo-fit='contain']"
+    },
+    {
+      "action": "assert",
+      "selector": "article[data-message-id='3'] .media-visual[data-photo-fit='contain']"
+    },
+    { "action": "click", "selector": "[aria-label='Open tower-narrow.jpg fullscreen preview']" },
+    {
+      "action": "assert",
+      "selector": ".media-viewer img[alt='tower-narrow.jpg']",
+      "styles": { "object-fit": "contain" }
+    },
+    { "action": "key", "key": "Escape" }
+  ]
+}

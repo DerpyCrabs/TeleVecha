@@ -58,7 +58,7 @@ const peers: TelegramPeer[] = [
   { id: 'u:505', kind: 'user', accessHash: '5' },
 ];
 
-const messages = new Map<string, TelegramMessage[]>([
+const initialMessages = new Map<string, TelegramMessage[]>([
   [
     peers[0]!.id,
     Array.from({ length: 80 }, (_, index): TelegramMessage => {
@@ -368,6 +368,7 @@ declare global {
       stats: FixtureStats;
       emit(update: TransportUpdate): void;
       setMessages(values: TelegramMessage[]): void;
+      receiveMessage(message: Omit<TelegramMessage, 'id'>): void;
       releaseConnect(): void;
       releaseSend(): void;
       releaseUpload(): void;
@@ -389,48 +390,6 @@ declare global {
       releaseSharedMediaCounts(): void;
     };
   }
-}
-
-function fixtureDialog(peer: TelegramPeer, title: string, color: string): TelegramDialog {
-  const history = messages.get(peer.id) ?? [];
-  const topMessage = history.at(-1);
-  return {
-    peer,
-    ...(peer.kind === 'channel' ? { channelPts: cursor.pts } : {}),
-    title,
-    initials: title
-      .split(' ')
-      .map((word) => word[0])
-      .join(''),
-    color,
-    archived: false,
-    topMessageId: topMessage?.id ?? 0,
-    topMessage,
-    unreadCount: 2,
-    readInboxMaxId: Math.max(0, (topMessage?.id ?? 0) - 2),
-    readOutboxMaxId: 0,
-    muted: false,
-    pinned: false,
-    permissions: {
-      canSendMessages: true,
-      canSendMedia: true,
-      canSendStickers: true,
-      canSendGifs: true,
-      canPinMessages: true,
-      canEditMessages: peer.kind !== 'user',
-      canDeleteMessages: true,
-      canDeleteForEveryone: true,
-      canDeleteChat: peer.kind === 'group',
-      canDeleteChannel: peer.kind === 'channel',
-      canLeave: peer.kind !== 'user',
-      canViewMembers: peer.kind !== 'user',
-      canManageInvites: peer.kind !== 'user',
-      canManageChat: peer.kind !== 'user',
-      ...(peer.kind === 'user' ? {} : { memberCount: 2 }),
-    },
-    hasAvatar: true,
-    avatarId: `fixture-${peer.id}`,
-  };
 }
 
 function fixtureVoiceBlob(duration: number = 2) {
@@ -530,7 +489,60 @@ function fixtureMp4Blob() {
 }
 
 export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTransport.make')(
-  function* () {
+  function* (gallery?: {
+    chats: readonly {
+      peer: TelegramPeer;
+      title: string;
+      color: string;
+      history: TelegramMessage[];
+    }[];
+    afterSend?: (message: TelegramMessage) => void;
+    asset: (media: TelegramMedia, options?: TelegramDownloadOptions) => Promise<Blob> | undefined;
+  }) {
+    const messages = gallery ? new Map(initialMessages) : initialMessages;
+    for (const chat of gallery?.chats ?? []) messages.set(chat.peer.id, chat.history);
+    function fixtureDialog(peer: TelegramPeer, title: string, color: string): TelegramDialog {
+      const history = messages.get(peer.id) ?? [];
+      const topMessage = history.at(-1);
+      return {
+        peer,
+        ...(peer.kind === 'channel' ? { channelPts: cursor.pts } : {}),
+        title,
+        initials: title
+          .split(' ')
+          .map((word) => word[0]?.toUpperCase())
+          .join(''),
+        color,
+        archived: false,
+        topMessageId: topMessage?.id ?? 0,
+        topMessage,
+        unreadCount: 2,
+        readInboxMaxId: Math.max(0, (topMessage?.id ?? 0) - 2),
+        readOutboxMaxId: 0,
+        muted: false,
+        pinned: false,
+        permissions: {
+          canSendMessages: true,
+          canSendMedia: true,
+          canSendStickers: true,
+          canSendGifs: true,
+          canPinMessages: true,
+          canEditMessages: peer.kind !== 'user',
+          canDeleteMessages: true,
+          canDeleteForEveryone: true,
+          canDeleteChat: peer.kind === 'group',
+          canDeleteChannel: peer.kind === 'channel',
+          canLeave: peer.kind !== 'user',
+          canViewMembers: peer.kind !== 'user',
+          canManageInvites: peer.kind !== 'user',
+          canManageChat: peer.kind !== 'user',
+          ...(peer.kind === 'user' ? {} : { memberCount: 2 }),
+        },
+        hasAvatar: true,
+        avatarId: `fixture-${peer.id}`,
+      };
+    }
+
     const updateHub = yield* PubSub.bounded<TransportUpdateBatch>(256);
     const controls = yield* Queue.unbounded<
       | { readonly _tag: 'emit'; readonly update: TransportUpdate }
@@ -993,6 +1005,13 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         stats.getDialogs += 1;
         return {
           dialogs: [
+            ...(gallery?.chats.map(({ peer, title, color }) => ({
+              ...fixtureDialog(peer, title, color),
+              hasAvatar: false,
+              avatarId: undefined,
+              unreadCount: 0,
+              readInboxMaxId: messages.get(peer.id)?.at(-1)?.id ?? 0,
+            })) ?? []),
             ...createdDialogs,
             {
               ...fixtureDialog(peers[0]!, 'Alice Fixture', '#7c5cff'),
@@ -1882,6 +1901,10 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
           ?.filter(({ kind }) => kind === 'textUrl')
           .map(({ offset, length, url }) => ({ offset, length, url })),
       };
+      if (gallery) {
+        messages.set(peer.id, [...(messages.get(peer.id) ?? []), message]);
+        gallery.afterSend?.(message);
+      }
       return { message };
     });
     const sendFile = Effect.fn('FixtureTransport.sendFile')(function* (
@@ -2022,6 +2045,12 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
         return yield* Effect.never;
       }
       const media = message.media ?? message.linkPreview?.media;
+      const asset = media && gallery?.asset(media, options);
+      if (asset)
+        return yield* Effect.tryPromise({
+          try: () => asset,
+          catch: () => createMtprotoError('transport', 'Demo media unavailable'),
+        });
       if (media?.kind === 'voice') return fixtureVoiceBlob(media.duration);
       if (media?.kind === 'round-video') return fixtureMp4Blob();
       if (media?.mimeType === 'application/x-tgsticker') return fixtureTgsBlob();
@@ -2910,6 +2939,15 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
     });
     window.__televechaFixture = {
       stats,
+      receiveMessage: (sample) => {
+        const history = messages.get(sample.peerId) ?? [];
+        const message = { ...sample, id: (history.at(-1)?.id ?? 0) + 1 };
+        messages.set(message.peerId, [...history, message]);
+        Queue.offerUnsafe(controls, {
+          _tag: 'emit',
+          update: { type: 'new-message', message, pts: ++fixturePts, ptsCount: 1 },
+        });
+      },
       setMessages: (values) => {
         for (const value of values)
           messages.set(

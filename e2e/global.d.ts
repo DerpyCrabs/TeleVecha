@@ -85,6 +85,7 @@ interface Window {
     };
     emit(update: import('../src/telegram/types').TransportUpdate): void;
     setMessages(values: import('../src/telegram/types').TelegramMessage[]): void;
+    receiveMessage(message: Omit<import('../src/telegram/types').TelegramMessage, 'id'>): void;
     releaseConnect(): void;
     releaseSend(): void;
     releaseUpload(): void;

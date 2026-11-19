@@ -1,0 +1,23 @@
+{
+  "steps": [
+    { "action": "type", "selector": "[aria-label='Message']", "text": "Request flight update." },
+    { "action": "key", "key": "Enter" },
+    {
+      "action": "assert",
+      "selector": "article.outgoing[data-message-id='3']",
+      "contains": "Request flight update."
+    },
+    {
+      "action": "assert",
+      "selector": "article.incoming[data-message-id='4']",
+      "contains": "Tracking acquired."
+    },
+    { "action": "type", "selector": "[aria-label='Message']", "text": "Copy, thank you." },
+    { "action": "key", "key": "Enter" },
+    {
+      "action": "assert",
+      "selector": "article.incoming[data-message-id='6']",
+      "contains": "The upper stage is in view."
+    }
+  ]
+}

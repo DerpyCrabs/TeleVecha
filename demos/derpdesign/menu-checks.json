@@ -1,0 +1,11 @@
+{
+  "steps": [
+    { "action": "assert", "selector": ".composer-attach-menu:not([inert])" },
+    { "action": "click", "selector": "[aria-label='Attach files']" },
+    { "action": "assert", "selector": ".composer-attach-menu:not([inert])", "exists": false },
+    { "action": "click", "selector": "[aria-label='Attach files']" },
+    { "action": "assert", "selector": ".composer-attach-menu:not([inert])" },
+    { "action": "key", "key": "Escape" },
+    { "action": "assert", "selector": ".composer-attach-menu:not([inert])", "exists": false }
+  ]
+}

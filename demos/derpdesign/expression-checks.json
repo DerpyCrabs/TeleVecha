@@ -1,0 +1,16 @@
+{
+  "steps": [
+    { "action": "click", "selector": ".expression-tabs button:nth-child(2)" },
+    { "action": "assert", "selector": ".gif-picker" },
+    { "action": "click", "selector": ".expression-tabs button:nth-child(3)" },
+    { "action": "click", "selector": ".sticker-pack-tabs button:nth-child(2)" },
+    {
+      "action": "assert",
+      "selector": ".sticker-pack-tabs button:nth-child(2)[aria-pressed='true']"
+    },
+    { "action": "key", "key": "Escape" },
+    { "action": "assert", "selector": ".expression-popup-host:not([inert])", "exists": false },
+    { "action": "click", "selector": "[aria-label='Choose emoji, GIF, or sticker']" },
+    { "action": "assert", "selector": ".expression-popup-host:not([inert]) .expression-picker" }
+  ]
+}

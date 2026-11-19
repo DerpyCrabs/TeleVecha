@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "action": "click",
+      "selector": "[data-album-size='5'] [aria-label='Open horizon.jpg fullscreen preview']"
+    },
+    { "action": "assert", "selector": "[role='dialog'][aria-label='Media preview: horizon.jpg']" },
+    { "action": "click", "selector": "[aria-label='Next attachment']" },
+    { "action": "assert", "selector": "[role='dialog'] video[aria-label='crew.webm']" },
+    { "action": "key", "key": "Escape" },
+    { "action": "assert", "selector": ".media-viewer", "exists": false },
+    { "action": "capture", "label": "album-after-viewer" }
+  ]
+}
