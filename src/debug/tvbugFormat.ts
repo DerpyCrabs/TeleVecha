@@ -317,6 +317,7 @@ export interface TvBugPeerV2 {
 }
 
 export interface TvBugMediaV2 {
+  spoiler?: boolean | undefined;
   kind: TelegramMedia['kind'];
   name: TvBugTextV2;
   mimeType: string;
@@ -339,6 +340,13 @@ export interface TvBugTextFormatV2 {
 }
 
 export interface TvBugMessageV2 {
+  savedPeerId?: string | undefined;
+  topicId?: number | undefined;
+  reactionsAsTags?: boolean | undefined;
+  protected?: boolean | undefined;
+  unreadReaction?: boolean | undefined;
+  unreadMention?: boolean | undefined;
+  mediaUnread?: boolean | undefined;
   id: number;
   peerId: string;
   senderId: string;
@@ -547,6 +555,12 @@ export interface TvBugBotKeyboardV2 {
 }
 
 export interface TvBugDialogV2 {
+  unreadReactionsCount?: number | undefined;
+  unreadMentionsCount?: number | undefined;
+  unreadMark?: boolean | undefined;
+  protectedContent?: boolean | undefined;
+  broadcast?: boolean | undefined;
+  forum?: boolean | undefined;
   peer: TvBugPeerV2;
   transient?: boolean | undefined;
   channelPts?: number | undefined;
@@ -579,6 +593,9 @@ export interface TvBugDialogV2 {
 }
 
 export interface TvBugPendingAttachmentV2 {
+  duration?: number | undefined;
+  height?: number | undefined;
+  width?: number | undefined;
   name: TvBugTextV2;
   mimeType: string;
   byteSize: number;
@@ -599,7 +616,9 @@ export interface TvBugPendingSendV2 {
   attempts: number;
   lastError?: 'recorded-send-failure' | undefined;
   uploadProgress?: number | undefined;
-  reply?: { messageId: number; quoteText?: TvBugTextV2 | undefined } | undefined;
+  reply?:
+    | { messageId: number; topMessageId?: number | undefined; quoteText?: TvBugTextV2 | undefined }
+    | undefined;
   formats?: TvBugTextFormatV2[] | undefined;
   sticker?: {
     id: string;
@@ -1270,6 +1289,16 @@ function rebaseCacheTimestamp(savedAt: number, hydrationNow: number) {
 
 function hydrateDialog(dialog: TvBugDialogV2, epoch: number): CachedDialog {
   return {
+    ...(dialog.unreadReactionsCount !== undefined
+      ? { unreadReactionsCount: dialog.unreadReactionsCount }
+      : {}),
+    ...(dialog.unreadMentionsCount !== undefined
+      ? { unreadMentionsCount: dialog.unreadMentionsCount }
+      : {}),
+    ...(dialog.unreadMark !== undefined ? { unreadMark: dialog.unreadMark } : {}),
+    ...(dialog.protectedContent !== undefined ? { protectedContent: dialog.protectedContent } : {}),
+    ...(dialog.broadcast !== undefined ? { broadcast: dialog.broadcast } : {}),
+    ...(dialog.forum !== undefined ? { forum: dialog.forum } : {}),
     peer: { ...dialog.peer },
     ...(dialog.transient !== undefined ? { transient: dialog.transient } : {}),
     ...(dialog.channelPts !== undefined ? { channelPts: dialog.channelPts } : {}),
@@ -1312,6 +1341,13 @@ function hydrateDialog(dialog: TvBugDialogV2, epoch: number): CachedDialog {
 
 function hydrateMessage(message: TvBugMessageV2, epoch: number): CachedMessage {
   return {
+    ...(message.savedPeerId !== undefined ? { savedPeerId: message.savedPeerId } : {}),
+    ...(message.topicId !== undefined ? { topicId: message.topicId } : {}),
+    ...(message.reactionsAsTags !== undefined ? { reactionsAsTags: message.reactionsAsTags } : {}),
+    ...(message.protected !== undefined ? { protected: message.protected } : {}),
+    ...(message.unreadReaction !== undefined ? { unreadReaction: message.unreadReaction } : {}),
+    ...(message.unreadMention !== undefined ? { unreadMention: message.unreadMention } : {}),
+    ...(message.mediaUnread !== undefined ? { mediaUnread: message.mediaUnread } : {}),
     id: message.id,
     peerId: message.peerId,
     senderId: message.senderId,
@@ -1354,6 +1390,8 @@ function hydrateMessage(message: TvBugMessageV2, epoch: number): CachedMessage {
       ? {
           media: {
             kind: message.media.kind,
+            ...(message.media.spoiler !== undefined ? { spoiler: message.media.spoiler } : {}),
+
             name: message.media.name.value,
             mimeType: message.media.mimeType,
             ...(message.media.byteSize !== undefined ? { size: message.media.byteSize } : {}),
@@ -1397,6 +1435,10 @@ function hydrateMessage(message: TvBugMessageV2, epoch: number): CachedMessage {
               ? {
                   media: {
                     kind: message.linkPreview.media.kind,
+                    ...(message.linkPreview.media.spoiler !== undefined
+                      ? { spoiler: message.linkPreview.media.spoiler }
+                      : {}),
+
                     name: message.linkPreview.media.name.value,
                     mimeType: message.linkPreview.media.mimeType,
                     ...(message.linkPreview.media.byteSize !== undefined
@@ -1497,6 +1539,9 @@ function hydratePending(send: TvBugPendingSendV2): PendingSend {
     ...(send.reply
       ? {
           reply: {
+            ...(send.reply.topMessageId !== undefined
+              ? { topMessageId: send.reply.topMessageId }
+              : {}),
             messageId: send.reply.messageId,
             ...(send.reply.quoteText ? { quoteText: send.reply.quoteText.value } : {}),
           },
@@ -1527,7 +1572,6 @@ function hydratePending(send: TvBugPendingSendV2): PendingSend {
             attachments: send.album.attachments.map((attachment, index) => ({
               ...hydrateAttachment(attachment),
               randomId: attachment.randomId ?? `${send.album!.id}:random:${index + 1}`,
-              sendAs: 'media' as const,
             })),
           },
         }
@@ -1537,6 +1581,9 @@ function hydratePending(send: TvBugPendingSendV2): PendingSend {
 
 function hydrateAttachment(attachment: TvBugPendingAttachmentV2) {
   return {
+    ...(attachment.duration !== undefined ? { duration: attachment.duration } : {}),
+    ...(attachment.height !== undefined ? { height: attachment.height } : {}),
+    ...(attachment.width !== undefined ? { width: attachment.width } : {}),
     blob: createSizedBlob(attachment.byteSize, attachment.mimeType),
     name: attachment.name.value,
     mimeType: attachment.mimeType,
@@ -1685,6 +1732,10 @@ function hydrateRichBlock(block: TvBugRichBlockV2): RichBlock {
           ? {
               attachment: {
                 kind: block.attachment.kind,
+                ...(block.attachment.spoiler !== undefined
+                  ? { spoiler: block.attachment.spoiler }
+                  : {}),
+
                 name: block.attachment.name.value,
                 mimeType: block.attachment.mimeType,
                 ...(block.attachment.byteSize !== undefined
@@ -1902,6 +1953,28 @@ class StateSanitizer {
   private sanitizeDialog(dialog: TelegramDialog | CachedDialog): TvBugDialogV2 {
     const peerId = dialog.peer.id;
     return {
+      ...(dialog.unreadReactionsCount !== undefined
+        ? {
+            unreadReactionsCount: finiteNonNegativeInteger(
+              dialog.unreadReactionsCount,
+              'dialog.unreadReactionsCount',
+            ),
+          }
+        : {}),
+      ...(dialog.unreadMentionsCount !== undefined
+        ? {
+            unreadMentionsCount: finiteNonNegativeInteger(
+              dialog.unreadMentionsCount,
+              'dialog.unreadMentionsCount',
+            ),
+          }
+        : {}),
+      ...(dialog.unreadMark !== undefined ? { unreadMark: Boolean(dialog.unreadMark) } : {}),
+      ...(dialog.protectedContent !== undefined
+        ? { protectedContent: Boolean(dialog.protectedContent) }
+        : {}),
+      ...(dialog.broadcast !== undefined ? { broadcast: Boolean(dialog.broadcast) } : {}),
+      ...(dialog.forum !== undefined ? { forum: Boolean(dialog.forum) } : {}),
       peer: this.sanitizePeer(dialog.peer),
       ...(dialog.transient !== undefined ? { transient: dialog.transient } : {}),
       ...(dialog.channelPts !== undefined
@@ -1955,6 +2028,23 @@ class StateSanitizer {
   private sanitizeMessage(message: TelegramMessage | CachedMessage): TvBugMessageV2 {
     const text = sanitizeTvBugText(message.text);
     return {
+      ...(message.savedPeerId !== undefined
+        ? { savedPeerId: this.peerId(message.savedPeerId) }
+        : {}),
+      ...(message.topicId !== undefined
+        ? { topicId: this.messageId(message.peerId, message.topicId) }
+        : {}),
+      ...(message.reactionsAsTags !== undefined
+        ? { reactionsAsTags: Boolean(message.reactionsAsTags) }
+        : {}),
+      ...(message.protected !== undefined ? { protected: Boolean(message.protected) } : {}),
+      ...(message.unreadReaction !== undefined
+        ? { unreadReaction: Boolean(message.unreadReaction) }
+        : {}),
+      ...(message.unreadMention !== undefined
+        ? { unreadMention: Boolean(message.unreadMention) }
+        : {}),
+      ...(message.mediaUnread !== undefined ? { mediaUnread: Boolean(message.mediaUnread) } : {}),
       id: this.messageId(message.peerId, message.id),
       peerId: this.peerId(message.peerId),
       senderId: this.peerId(message.senderId),
@@ -2052,6 +2142,8 @@ class StateSanitizer {
 
   private sanitizeMedia(media: TelegramMedia): TvBugMediaV2 {
     return {
+      ...(media.spoiler !== undefined ? { spoiler: Boolean(media.spoiler) } : {}),
+
       kind: media.kind,
       name: sanitizeTvBugText(media.name),
       mimeType: sanitizeMimeType(media.mimeType),
@@ -2206,6 +2298,9 @@ class StateSanitizer {
       ...(send.reply
         ? {
             reply: {
+              ...(send.reply.topMessageId !== undefined
+                ? { topMessageId: this.messageId(send.peer.id, send.reply.topMessageId) }
+                : {}),
               messageId: this.messageId(send.peer.id, send.reply.messageId),
               ...(send.reply.quoteText
                 ? { quoteText: sanitizeTvBugText(send.reply.quoteText) }
@@ -2298,6 +2393,15 @@ class StateSanitizer {
   ): TvBugPendingAttachmentV2 {
     if (!attachment) throw new TvBugFormatError('Missing pending attachment.');
     return {
+      ...(attachment.duration !== undefined
+        ? { duration: finiteNonNegativeNumber(attachment.duration, 'attachment.duration') }
+        : {}),
+      ...(attachment.height !== undefined
+        ? { height: finiteNonNegativeNumber(attachment.height, 'attachment.height') }
+        : {}),
+      ...(attachment.width !== undefined
+        ? { width: finiteNonNegativeNumber(attachment.width, 'attachment.width') }
+        : {}),
       name: sanitizeTvBugText(attachment.name),
       mimeType: sanitizeMimeType(attachment.mimeType),
       byteSize: finiteNonNegativeInteger(attachment.blob.size, 'attachment size'),

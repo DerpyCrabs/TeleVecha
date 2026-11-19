@@ -796,3 +796,90 @@ describe('.tvbug snapshot format', () => {
     expect(() => parseTvBugBundle(zipSync(extraFiles))).toThrow(/Unexpected file/u);
   });
 });
+
+describe('conversation fidelity after export and import', () => {
+  const restore = (
+    message: TelegramMessage,
+    dialog = sourceDialog(message),
+    send = sourcePending(),
+  ) => {
+    const state = sanitizeTvBugState({ messages: [message], dialogs: [dialog], pending: [send] });
+    return hydrateTvBugState(
+      parseTvBugBundle(createTvBugBundle({ manifest: manifest(), snapshot: state, trace: [] }))
+        .snapshot,
+    );
+  };
+  it('retains the unread markers and counters needed for notification navigation', () => {
+    const m = { ...sourceMessage(), mediaUnread: true, unreadMention: true, unreadReaction: true };
+    const state = restore(m, {
+      ...sourceDialog(m),
+      unreadMentionsCount: 1,
+      unreadReactionsCount: 1,
+    });
+    expect(state.messages[0]).toMatchObject({
+      mediaUnread: true,
+      unreadMention: true,
+      unreadReaction: true,
+    });
+    expect(state.dialogs[0]).toMatchObject({ unreadMentionsCount: 1, unreadReactionsCount: 1 });
+  });
+  it('retains forwarding restrictions', () => {
+    const m = { ...sourceMessage(), protected: true };
+    const state = restore(m, { ...sourceDialog(m), protectedContent: true });
+    expect(state.messages[0]?.protected && state.dialogs[0]?.protectedContent).toBe(true);
+  });
+  it('keeps forum messages in their original topic', () => {
+    const m = { ...sourceMessage(), topicId: 25 };
+    const state = restore(m, { ...sourceDialog(m), forum: true, broadcast: false });
+    expect(state.messages[0]?.topicId).toBe(25);
+    expect(state.dialogs[0]).toMatchObject({ forum: true, broadcast: false });
+  });
+  it('keeps saved tags associated with their anonymized source', () => {
+    const m = { ...sourceMessage(), savedPeerId: secretSenderId, reactionsAsTags: true };
+    const hit = restore(m).messages[0]!;
+    expect(hit).toMatchObject({ savedPeerId: hit.senderId, reactionsAsTags: true });
+    expect(hit.senderId).not.toBe(secretSenderId);
+  });
+  it('keeps media spoilers concealed', () => {
+    const m = sourceMessage();
+    expect(
+      restore({ ...m, media: { ...m.media!, spoiler: true } }).messages[0]?.media?.spoiler,
+    ).toBe(true);
+  });
+  it('preserves manually marked unread chats with no unread messages', () => {
+    const m = sourceMessage();
+    expect(
+      restore(m, { ...sourceDialog(m), unreadCount: 0, unreadMark: true }).dialogs[0]?.unreadMark,
+    ).toBe(true);
+  });
+  it('keeps a file album in document mode', () => {
+    const m = sourceMessage(),
+      send = sourcePending();
+    const album = {
+      attachments: [{ ...send.attachment!, randomId: 'private-random', sendAs: 'file' as const }],
+    };
+    expect(
+      restore(m, sourceDialog(m), { ...send, attachment: undefined, album }).pending[0]?.album
+        ?.attachments[0]?.sendAs,
+    ).toBe('file');
+  });
+  it('restores pending video dimensions and duration without the original bytes', () => {
+    const m = sourceMessage(),
+      send = sourcePending();
+    const metadata = { width: 640, height: 480, duration: 4.5 };
+    expect(
+      restore(m, sourceDialog(m), {
+        ...send,
+        attachment: { ...send.attachment!, mimeType: 'video/mp4', ...metadata },
+      }).pending[0]?.attachment,
+    ).toMatchObject(metadata);
+  });
+  it('keeps the destination topic of a queued reply', () => {
+    const m = sourceMessage(),
+      send = sourcePending();
+    expect(
+      restore(m, sourceDialog(m), { ...send, reply: { messageId: 100, topMessageId: 25 } })
+        .pending[0]?.reply?.topMessageId,
+    ).toBe(25);
+  });
+});
