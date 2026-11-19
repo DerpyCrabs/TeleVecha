@@ -247,3 +247,27 @@ describe('MemoryCacheStore', () => {
     expect(await run(ordinary.loadTransportSession)).toBeUndefined();
   });
 });
+
+it('isolates nested draft details returned by loadWorkspace', async () => {
+  const store = makeMemoryCacheStore({
+    draftDetails: { p: { formats: [], reply: { messageId: 1, preview: 'old' } } },
+  });
+  (await Effect.runPromise(store.loadWorkspace())).draftDetails.p!.reply!.preview = 'changed';
+  expect((await Effect.runPromise(store.loadWorkspace())).draftDetails.p!.reply!.preview).toBe(
+    'old',
+  );
+});
+
+it('applies last-write-wins for duplicate outbox keys in a batch like IndexedDB', async () => {
+  const store = makeMemoryCacheStore();
+  await Effect.runPromise(store.commitOutbox([send('one', 1), send('one', 2)]));
+  expect(await Effect.runPromise(store.loadOutbox())).toEqual([send('one', 2)]);
+});
+
+it('replaces repeated history keys with their final version like IndexedDB', async () => {
+  const store = makeMemoryCacheStore();
+  const first = message(peer, 1),
+    edited = { ...first, text: 'edited' };
+  await Effect.runPromise(store.replaceMessages(peer.id, [first, edited]));
+  expect(await Effect.runPromise(store.loadMessage(peer.id, 1))).toEqual(edited);
+});

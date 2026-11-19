@@ -44,9 +44,12 @@ function blockToPlainText(block: RichBlock): string {
   if (block.kind === 'math') return block.source;
   if (block.kind === 'author') return richTextToPlainText(block.author);
   if (block.kind === 'list') {
+    let ordinal = block.start ?? (block.reversed ? block.items.length : 1);
     return block.items
-      .map((item, index) => {
-        const marker = item.marker ?? (block.ordered ? `${(block.start ?? 1) + index}.` : '-');
+      .map((item) => {
+        ordinal = item.value ?? ordinal;
+        const marker = item.marker ?? (block.ordered ? `${ordinal}.` : '-');
+        ordinal += block.reversed ? -1 : 1;
         return listItemToPlainText(item, marker);
       })
       .join('\n');
@@ -81,5 +84,7 @@ export function richBlocksToPlainText(blocks: readonly RichBlock[]): string {
 export function messageTextForClipboard(
   message: Pick<ChatMessage, 'body' | 'richMessage'>,
 ): string {
-  return message.richMessage ? richBlocksToPlainText(message.richMessage.blocks) : message.body;
+  return message.richMessage
+    ? richBlocksToPlainText(message.richMessage.blocks) || message.body
+    : message.body;
 }

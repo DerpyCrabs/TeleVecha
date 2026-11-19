@@ -166,3 +166,42 @@ describe('PendingSendQueue coordination', () => {
       ),
     ));
 });
+
+it('reserves storage for both upload data and preview blobs', () =>
+  Effect.runPromise(
+    withQueue((queue) =>
+      Effect.sync(() => {
+        const attachment = {
+          blob: new Blob(['original']),
+          preview: new Blob(['preview']),
+          name: 'video',
+          mimeType: 'video/mp4',
+          asSticker: false,
+          sendAs: 'media' as const,
+        };
+        expect(queue.blobBytes({ ...pending('video'), attachment })).toBe(15);
+        expect(
+          queue.blobBytes({
+            ...pending('album'),
+            album: { attachments: [{ ...attachment, randomId: '1' }] },
+          }),
+        ).toBe(15);
+      }),
+    ),
+  ));
+
+it('preserves assigned FIFO order when legacy sends have intermediate timestamps', () =>
+  Effect.runPromise(
+    withQueue((queue) =>
+      Effect.gen(function* () {
+        const restored = yield* queue.restore([
+          { ...pending('second'), queueOrder: 2, createdAt: 1 },
+          { ...pending('legacy'), createdAt: 2 },
+          { ...pending('first'), queueOrder: 1, createdAt: 3 },
+        ]);
+        expect(restored.findIndex((s) => s.id === 'first')).toBeLessThan(
+          restored.findIndex((s) => s.id === 'second'),
+        );
+      }),
+    ),
+  ));

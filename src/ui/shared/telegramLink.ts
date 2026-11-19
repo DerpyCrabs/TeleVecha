@@ -52,6 +52,7 @@ export function parseTelegramLink(value: string): TelegramLinkTarget | undefined
     return undefined;
   }
   if (url.username || url.password || url.port) return undefined;
+  if (url.protocol === 'tg:' && url.pathname && url.pathname !== '/') return undefined;
   const chatInvite = chatInviteHash(value);
   if (chatInvite) return { chatInvite };
   const folderInvite = folderInviteSlug(value);
@@ -127,6 +128,7 @@ export function parseTelegramLink(value: string): TelegramLinkTarget | undefined
   if (!username && !peerId) return undefined;
   const messageId = positiveId(post);
   const topicId = positiveId(thread);
+  if (peerId && !messageId) return undefined;
   if (thread !== null && thread !== undefined && (!topicId || !messageId)) return undefined;
   for (const key of url.searchParams.keys())
     if (url.searchParams.getAll(key).length !== 1) return undefined;

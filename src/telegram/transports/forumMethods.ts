@@ -51,21 +51,29 @@ export function forumMethods(context: {
       return message ? [message] : [];
     });
     const last = topics.at(-1);
+    const nextOffset =
+      last && result.topics.length === 50
+        ? {
+            topicId: last.id,
+            messageId: last.topMessage,
+            date: result.orderByCreateDate
+              ? last.date
+              : (messages.find((message) => message.id === last.topMessage)?.date ?? last.date),
+          }
+        : undefined;
     return {
       topics: topics.map(mapTopic),
       messages,
       count: result.count,
       ...context.rights(peer),
       nextOffset:
-        last && result.topics.length === 50
-          ? {
-              topicId: last.id,
-              messageId: last.topMessage,
-              date: result.orderByCreateDate
-                ? last.date
-                : (messages.find((message) => message.id === last.topMessage)?.date ?? last.date),
-            }
-          : undefined,
+        nextOffset &&
+        offset &&
+        nextOffset.date === offset.date &&
+        nextOffset.topicId === offset.topicId &&
+        nextOffset.messageId === offset.messageId
+          ? undefined
+          : nextOffset,
     };
   });
   const deleteForumTopic = Effect.fn('Forums.delete')(function* (

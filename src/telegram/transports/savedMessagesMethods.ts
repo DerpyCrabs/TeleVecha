@@ -66,9 +66,9 @@ export function savedMessagesMethods(context: {
       (page): page is Tl.messages.SavedDialogs | Tl.messages.SavedDialogsSlice =>
         !!page && page._ !== 'messages.savedDialogsNotModified',
     );
-    for (const page of pages) context.remember(page.users, page.chats);
+    for (const page of [...pages].reverse()) context.remember(page.users, page.chats);
     const messages = new Map<number, TelegramMessage>();
-    for (const page of pages)
+    for (const page of [...pages].reverse())
       for (const raw of page.messages) {
         const message = context.message(raw);
         if (message) messages.set(message.id, message);
@@ -111,8 +111,17 @@ export function savedMessagesMethods(context: {
           }
         : undefined;
     return {
-      dialogs: [...new Map(dialogs.map((dialog) => [dialog.peer.id, dialog])).values()],
-      nextOffset,
+      dialogs: dialogs.filter(
+        (dialog, index) => dialogs.findIndex((item) => item.peer.id === dialog.peer.id) === index,
+      ),
+      nextOffset:
+        nextOffset &&
+        offset &&
+        nextOffset.peer.id === offset.peer.id &&
+        nextOffset.messageId === offset.messageId &&
+        nextOffset.date === offset.date
+          ? undefined
+          : nextOffset,
     };
   });
   const getSavedHistory = Effect.fn('SavedMessages.history')(function* (

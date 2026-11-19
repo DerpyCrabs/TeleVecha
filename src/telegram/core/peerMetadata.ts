@@ -52,14 +52,15 @@ export function makePeerMetadata<Value, Error>(
       const capturedVersion = current.version;
       return yield* requests.load(cacheKey(peerId), () =>
         options.load(peerId).pipe(
-          Effect.tap((value) =>
-            Effect.sync(() => {
-              if (cacheScope === capturedScope && current.version === capturedVersion) {
-                current.loaded = true;
-                current.value = value;
-              }
-            }),
-          ),
+          Effect.map((value) => {
+            if (cacheScope !== capturedScope || current.version !== capturedVersion)
+              return undefined;
+            if (!current.loaded) {
+              current.loaded = true;
+              current.value = value;
+            }
+            return current.value;
+          }),
           Effect.tapError((error) => options.onFailure('load', error)),
           Effect.catch(() => Effect.succeed(undefined)),
         ),

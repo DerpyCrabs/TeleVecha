@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   parseChatAppearanceCache,
+  parseStickerPacksCache,
+  serializeStickerPacksCache,
   parseStickerListCache,
   serializeChatAppearanceCache,
   serializeStickerListCache,
@@ -33,4 +35,17 @@ describe('metadataCache', () => {
       value: undefined,
     });
   });
+});
+
+it('preserves pack management metadata in persistent cache', () => {
+  const pack = {
+    id: '12',
+    accessHash: '13',
+    title: 'Cats',
+    shortName: 'cats',
+    installed: true,
+    count: 25,
+    stickers: [],
+  };
+  expect(parseStickerPacksCache(serializeStickerPacksCache([pack]))).toEqual([pack]);
 });

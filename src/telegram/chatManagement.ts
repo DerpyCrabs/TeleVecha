@@ -66,6 +66,7 @@ export function chatInviteHash(value: string): string | undefined {
     ].includes(url.hostname) &&
     !url.search
   ) {
+    if (/^\/\+\d+\/?$/.test(url.pathname)) return undefined;
     const match = /^\/(?:\+|joinchat\/)([A-Za-z0-9_-]+)\/?$/.exec(url.pathname);
     hash = match?.[1];
   }

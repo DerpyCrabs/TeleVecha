@@ -32,7 +32,6 @@ export function makeVersionIndex() {
     clear(domain?: VersionDomain) {
       if (!domain) {
         versions.clear();
-        sequence = 0;
         return;
       }
       const prefix = `${domain}\u0000`;

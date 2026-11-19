@@ -86,3 +86,26 @@ describe('message text for the clipboard', () => {
     );
   });
 });
+
+it('copies the available fallback when rich blocks contain only media', () => {
+  expect(
+    messageTextForClipboard({
+      body: 'caption',
+      richMessage: { blocks: [{ kind: 'media', mediaKind: 'photo' }] },
+    }),
+  ).toBe('caption');
+});
+
+it('copies ordered list numbering including reversed lists and explicit item values', () => {
+  const text = { kind: 'text' as const, text: 'line' };
+  expect(
+    richBlocksToPlainText([
+      {
+        kind: 'list',
+        ordered: true,
+        reversed: true,
+        items: [{ text }, { text, value: 7 }, { text }],
+      },
+    ]),
+  ).toBe('3. line\n7. line\n6. line');
+});

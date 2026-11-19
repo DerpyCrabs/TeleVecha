@@ -33,7 +33,7 @@ export interface SavedTags {
 }
 export function savedReactionValid(reaction: string) {
   return reaction.startsWith('custom:')
-    ? /^custom:[1-9][0-9]{0,18}$/.test(reaction)
+    ? /^custom:[1-9][0-9]{0,18}$/.test(reaction) && BigInt(reaction.slice(7)) <= 0x7fffffffffffffffn
     : reaction.trim().length > 0 && reaction.length <= 64;
 }
 export function savedDraftKey(selfId: string, source?: TelegramPeer) {

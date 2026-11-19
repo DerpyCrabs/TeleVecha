@@ -126,3 +126,27 @@ describe('peer metadata', () => {
       ),
     ));
 });
+
+it('does not let an older disk read replace freshly remembered metadata', () =>
+  run(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const release = yield* Deferred.make<{ value: string; savedAt: number }>();
+        const started = yield* Deferred.make<void>();
+        const requests = yield* makeResourceCache();
+        const metadata = makePeerMetadata<string, never>('pins', requests, {
+          load: () =>
+            Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          save: () => Effect.void,
+          remove: () => Effect.void,
+          onFailure: () => Effect.void,
+        });
+        const reading = yield* metadata.cached('p').pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+        yield* metadata.remember('p', 'new');
+        yield* Deferred.succeed(release, { value: 'old', savedAt: 1 });
+        expect((yield* Fiber.join(reading))?.value).toBe('new');
+        expect(metadata.current('p')?.value).toBe('new');
+      }),
+    ),
+  ));

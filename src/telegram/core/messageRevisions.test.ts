@@ -47,3 +47,11 @@ describe('message revisions', () => {
     expect(revisions.filter('peer', [message(1), message(2)], request)).toHaveLength(2);
   });
 });
+
+it('rejects a delayed response from before a cache reset', () => {
+  const revisions = createMessageRevisions();
+  const before = revisions.capture();
+  revisions.record('peer', 1);
+  revisions.clear();
+  expect(revisions.filter('peer', [message(1)], before)).toEqual([]);
+});

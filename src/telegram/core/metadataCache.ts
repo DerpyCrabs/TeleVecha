@@ -20,6 +20,10 @@ const StoredSticker = Schema.Struct({
   inlineResultId: Schema.optionalKey(Schema.String),
 });
 const StoredStickerPack = Schema.Struct({
+  accessHash: Schema.optionalKey(Schema.String),
+  shortName: Schema.optionalKey(Schema.String),
+  installed: Schema.optionalKey(Schema.Boolean),
+  count: Schema.optionalKey(Schema.Number),
   id: Schema.String,
   title: Schema.String,
   stickers: Schema.Array(StoredSticker),

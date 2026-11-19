@@ -13,6 +13,7 @@ export function createMessageRevisions(capacity: number = 5_000) {
 
   return {
     capture: () => revision,
+    accepted,
     record(peerId: string, messageId: number) {
       revision += 1;
       const key = messageKey(peerId, messageId);
@@ -42,6 +43,9 @@ export function createMessageRevisions(capacity: number = 5_000) {
       }
       return [...merged.values()].sort((left, right) => left.id - right.id);
     },
-    clear: () => mutations.clear(),
+    clear() {
+      mutations.clear();
+      floor = ++revision;
+    },
   };
 }

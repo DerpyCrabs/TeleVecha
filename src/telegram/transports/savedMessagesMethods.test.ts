@@ -202,3 +202,49 @@ it('omits the true-only pin flag when unpinning a saved chat', async () => {
   await Effect.runPromise(methods(invoke).pinSavedDialog(source, false));
   expect(invoke.mock.calls[0]?.[0]).not.toHaveProperty('pinned');
 });
+
+it('uses the newer pinned response when the source was pinned between the two reads', async () => {
+  const invoke = (request: unknown) => {
+    const pinned = Api.messages.GetPinnedSavedDialogs.is(request);
+    const topMessage = pinned ? 31 : 30;
+    return Effect.succeed(
+      createTl('messages.savedDialogs', {
+        dialogs: [
+          createTl('savedDialog', { peer: Api.PeerUser({ userId: 2n }), topMessage, pinned }),
+        ],
+        messages: [rawMessage(topMessage)],
+        users: [],
+        chats: [],
+      }),
+    );
+  };
+  const page = await Effect.runPromise(methods(invoke).getSavedDialogs());
+  expect(page.dialogs).toHaveLength(1);
+  expect(page.dialogs[0]).toMatchObject({ pinned: true, topMessage: { id: 31 } });
+});
+
+it('stops when Telegram repeats the saved-dialog pagination cursor', async () => {
+  const invoke = () =>
+    Effect.succeed(
+      createTl('messages.savedDialogsSlice', {
+        count: 100,
+        dialogs: Array.from({ length: 50 }, (_, i) =>
+          createTl('savedDialog', {
+            peer: Api.PeerUser({ userId: BigInt(i + 2) }),
+            topMessage: 100 - i,
+          }),
+        ),
+        messages: Array.from({ length: 50 }, (_, i) => rawMessage(100 - i)),
+        chats: [],
+        users: [],
+      }),
+    );
+  const page = await Effect.runPromise(
+    methods(invoke).getSavedDialogs({
+      peer: { id: 'u:51', kind: 'user' },
+      messageId: 51,
+      date: 1051,
+    }),
+  );
+  expect(page.nextOffset).toBeUndefined();
+});

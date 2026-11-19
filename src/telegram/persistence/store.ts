@@ -1,3 +1,4 @@
+import { orderPending } from '../pendingOrder';
 import { Effect, Exit, Schema } from 'effect';
 import { type DBSchema, type IDBPDatabase, openDB } from 'idb';
 
@@ -850,17 +851,7 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
   });
   const loadOutbox = Effect.fn('IndexedDbCacheStore.loadOutbox')(function* () {
     const sends = yield* idbRequest(() => databaseHandle.getAllFromIndex('outbox', 'byCreatedAt'));
-    return sends.sort((left, right) => {
-      if (
-        left.peer.id === right.peer.id &&
-        left.queueOrder !== undefined &&
-        right.queueOrder !== undefined &&
-        left.queueOrder !== right.queueOrder
-      ) {
-        return left.queueOrder - right.queueOrder;
-      }
-      return left.createdAt - right.createdAt || left.id.localeCompare(right.id);
-    });
+    return orderPending(sends);
   });
   const commitOutbox = Effect.fn('IndexedDbCacheStore.commitOutbox')(function* (
     sends: PendingSend | PendingSend[],

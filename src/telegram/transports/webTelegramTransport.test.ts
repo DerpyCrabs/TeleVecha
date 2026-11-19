@@ -3238,3 +3238,39 @@ it('uploads files as documents and sends them in one server media group', async 
     invoke.mock.calls.filter(([request]) => Api.messages.SendMultiMedia.is(request)),
   ).toHaveLength(1);
 });
+
+it('continues search past service messages using the last returned ID', () => {
+  const invoke = () =>
+    Effect.succeed(
+      Api.messages.Messages({
+        topics: [],
+        users: [],
+        chats: [],
+        messages: [3, 2, 1].map((id) =>
+          Api.MessageService({
+            id,
+            peerId: Api.PeerChat({ chatId: 303n }),
+            date: 100,
+            action: Api.MessageActionPinMessage({}),
+          }),
+        ),
+      }),
+    );
+  return Effect.runPromise(
+    withTransport(
+      (transport) =>
+        Effect.gen(function* () {
+          yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+          const page = yield* transport.searchMessages(
+            '',
+            { id: 'g:303', kind: 'group' },
+            2,
+            undefined,
+            { topicId: 10 },
+          );
+          expect(page.nextOffset?.messageId).toBe(2);
+        }),
+      () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+    ),
+  );
+});

@@ -749,6 +749,7 @@ function makeMessagingEngineModule(
 
     const historyVersion = histories.version(peerId);
     const requestedCacheEpoch = currentCacheEpoch;
+    const cacheRevision = messageRevisions.capture();
     let cached: CachedMessage[] = [];
     yield* Effect.gen(function* () {
       cached = (yield* cacheStore.loadMessages(peerId, HISTORY_LIMIT)).filter(
@@ -765,12 +766,13 @@ function makeMessagingEngineModule(
     if (requestedCacheEpoch !== currentCacheEpoch || histories.version(peerId) !== historyVersion) {
       return undefined;
     }
+    if (cacheRevision !== messageRevisions.capture()) return undefined;
     if (cached.length > 0) {
       const messages = sortMessages(cached);
       const oldestId = messages[0]?.id;
       if (oldestId !== undefined) histories.setOffset(peerId, oldestId);
       rememberHistory(peerId, { messages, hasOlderMessages: true }, 'newest');
-      yield* scheduleCachedHistoryRepair(dialog, messages);
+      yield* scheduleCachedHistoryRepair(dialog, messages, true);
       return projectConversationView(peerId);
     }
 
@@ -811,14 +813,14 @@ function makeMessagingEngineModule(
           if (!isHistoryOperationCurrent(peerId, historyVersion, session, accountId)) {
             return false;
           }
-          const loaded = histories.loaded(peerId)?.messages ?? [];
-          const current = sortMessages([
-            ...new Map(loaded.map((message) => [message.id, message])).values(),
-          ]);
+          const current =
+            histories.loaded(peerId)?.messages ??
+            (requestRevision !== messageRevisions.capture()
+              ? (yield* cacheStore.loadMessages(peerId, HISTORY_LIMIT)).filter(
+                  (message) => message.cacheEpoch === requestedCacheEpoch,
+                )
+              : []);
           const sortedMessages = messageRevisions.merge(peerId, current, fetched, requestRevision);
-          if (page.channelPts !== undefined) {
-            yield* patchChannelPts(peerId, page.channelPts);
-          }
           if (page.nextBeforeMessageId !== undefined) {
             histories.setOffset(peerId, page.nextBeforeMessageId);
           } else {
@@ -1026,16 +1028,45 @@ function makeMessagingEngineModule(
     if (loaded !== undefined) return loaded;
     return pinnedMessageCache.current(dialog.peer.id)?.value ?? cached?.value ?? [];
   });
-  function cacheSearchMessages(page: TelegramSearchPage) {
-    if (page.messages.length === 0) return Effect.void;
-    return cacheStore
-      .putMessages(page.messages.map((message) => ({ ...message, cacheEpoch: currentCacheEpoch })))
-      .pipe(
-        Effect.catch((error) =>
-          reportFailure('cache', 'Could not cache Telegram search results.', error),
-        ),
-      );
-  }
+  const restoreSearchPage = Effect.fn('MessagingEngine.restoreSearchPage')(function* (
+    page: TelegramSearchPage,
+  ) {
+    const messages: TelegramMessage[] = [];
+    for (const hit of page.messages) {
+      const current = yield* cacheStore.loadMessage(hit.peerId, hit.id);
+      if (current?.cacheEpoch === currentCacheEpoch) messages.push(current);
+    }
+    return { ...page, messages };
+  });
+  const storeSearchPage = Effect.fn('MessagingEngine.storeSearchPage')(function* (
+    page: TelegramSearchPage,
+    key: string,
+    revision: number,
+    session: Scope.Closeable | undefined,
+    accountId: string | undefined,
+    epoch: number,
+  ) {
+    return yield* queueDialogStateOperation(() =>
+      Effect.gen(function* () {
+        if (!isOperationCurrent(session, accountId) || epoch !== currentCacheEpoch)
+          return { messages: [], hasMore: false };
+        const messages = page.messages.filter((message) =>
+          messageRevisions.accepted(message.peerId, message.id, revision),
+        );
+        const accepted = { ...page, messages };
+        if (messages.length)
+          yield* cacheStore
+            .putMessages(messages.map((message) => ({ ...message, cacheEpoch: epoch })))
+            .pipe(
+              Effect.catch((error) =>
+                reportFailure('cache', 'Could not cache Telegram search results.', error),
+              ),
+            );
+        yield* writeMetadata(key, accepted);
+        return accepted;
+      }),
+    );
+  });
   const getConversationSharedMedia = Effect.fn('MessagingEngine.getConversationSharedMedia')(
     function* (peer: TelegramPeer, kind: SharedMediaKind, offset?: TelegramSearchOffset) {
       const cacheKey = queryMetadataKey('shared-media', [
@@ -1045,26 +1076,18 @@ function makeMessagingEngineModule(
         offset?.peer?.id,
         offset?.rate,
       ]);
+      const session = sessionScope,
+        accountId = activeAccountId,
+        epoch = currentCacheEpoch;
+      const revision = messageRevisions.capture();
       const cached = yield* readMetadata<TelegramSearchPage>(cacheKey);
-      if (cached && !currentSnapshot().online) {
-        return cached.value;
-      }
-      if (!currentSnapshot().online || !activeAccountId) {
-        return cached?.value ?? { messages: [], hasMore: false };
-      }
+      if (!currentSnapshot().online || !activeAccountId)
+        return cached ? yield* restoreSearchPage(cached.value) : { messages: [], hasMore: false };
       const page = yield* runTelegramOperation(
         () => telegramTransport.getSharedMedia(peer, kind, 100, offset),
         'Loading shared media',
       );
-      yield* Effect.all(
-        [
-          page.channelPts === undefined ? Effect.void : setChannelPts(peer.id, page.channelPts),
-          cacheSearchMessages(page),
-          writeMetadata(cacheKey, page),
-        ],
-        { discard: true },
-      );
-      return page;
+      return yield* storeSearchPage(page, cacheKey, revision, session, accountId, epoch);
     },
   );
   const getUnreadNotifications = Effect.fn('MessagingEngine.getUnreadNotifications')(function* (
@@ -1073,10 +1096,17 @@ function makeMessagingEngineModule(
   ) {
     const session = sessionScope;
     const accountId = activeAccountId;
-    if (!telegramTransport.getUnreadNotifications || !currentSnapshot().online)
-      return (histories.loaded(peer.id)?.messages ?? []).filter((message) =>
+    if (!telegramTransport.getUnreadNotifications || !currentSnapshot().online) {
+      const cached = (yield* cacheStore.loadMessages(peer.id)).filter(
+        (message) => message.cacheEpoch === currentCacheEpoch,
+      );
+      const messages = new Map(cached.map((message) => [message.id, message as TelegramMessage]));
+      for (const message of histories.loaded(peer.id)?.messages ?? [])
+        messages.set(message.id, message);
+      return sortMessages([...messages.values()]).filter((message) =>
         kind === 'mention' ? message.unreadMention : message.unreadReaction,
       );
+    }
     const dialogVersion = versions.current('dialog', peer.id);
     const requestRevision = messageRevisions.capture();
     const result = yield* runTelegramOperation(
@@ -1139,6 +1169,7 @@ function makeMessagingEngineModule(
       const term = query.trim();
       if (
         !term &&
+        (global || filters?.topicId === undefined) &&
         !filters?.kind &&
         !filters?.fromPeer &&
         !filters?.minDate &&
@@ -1167,27 +1198,19 @@ function makeMessagingEngineModule(
             ? JSON.stringify([...filters.savedReactions].sort())
             : undefined,
       ]);
+      const session = sessionScope,
+        accountId = activeAccountId,
+        epoch = currentCacheEpoch;
+      const revision = messageRevisions.capture();
       const cached = yield* readMetadata<TelegramSearchPage>(cacheKey);
-      if (cached && !currentSnapshot().online) {
-        return cached.value;
-      }
-      if (!currentSnapshot().online || !activeAccountId) {
-        return cached?.value ?? { messages: [], hasMore: false };
-      }
+      if (!currentSnapshot().online || !activeAccountId)
+        return cached ? yield* restoreSearchPage(cached.value) : { messages: [], hasMore: false };
       const page = yield* runTelegramOperation(
         () =>
           telegramTransport.searchMessages(term, global ? undefined : peer, 50, offset, filters),
         'Searching messages',
       );
-      yield* Effect.all(
-        [
-          page.channelPts === undefined ? Effect.void : setChannelPts(peer.id, page.channelPts),
-          cacheSearchMessages(page),
-          writeMetadata(cacheKey, page),
-        ],
-        { discard: true },
-      );
-      return page;
+      return yield* storeSearchPage(page, cacheKey, revision, session, accountId, epoch);
     },
   );
   const searchPeers = Effect.fn('MessagingEngine.searchPeers')(function* (query: string) {
@@ -1250,6 +1273,46 @@ function makeMessagingEngineModule(
       );
     return result;
   });
+  const loadScopedHistoryPage = Effect.fn('MessagingEngine.loadScopedHistoryPage')(function* (
+    load: () => Effect.Effect<
+      import('../types').HistoryPage,
+      import('../mtproto/errors').MtprotoError
+    >,
+    description: string,
+  ) {
+    const session = sessionScope,
+      accountId = activeAccountId,
+      epoch = currentCacheEpoch;
+    const revision = messageRevisions.capture();
+    const page = yield* runTelegramOperation(load, description);
+    return yield* queueDialogStateOperation(() =>
+      Effect.gen(function* () {
+        if (!isOperationCurrent(session, accountId) || epoch !== currentCacheEpoch)
+          return yield* Effect.fail(new Error('The account or message history changed.'));
+        const fresh = page.messages.filter((m) =>
+          messageRevisions.accepted(m.peerId, m.id, revision),
+        );
+        if (fresh.length)
+          yield* cacheStore
+            .putMessages(fresh.map((m) => ({ ...m, cacheEpoch: epoch })))
+            .pipe(
+              Effect.catch((error) =>
+                reportFailure('cache', 'Could not cache the message history.', error),
+              ),
+            );
+        const messages: TelegramMessage[] = [];
+        for (const message of page.messages) {
+          if (messageRevisions.accepted(message.peerId, message.id, revision))
+            messages.push(message);
+          else {
+            const edited = yield* cacheStore.loadMessage(message.peerId, message.id);
+            if (edited?.cacheEpoch === epoch) messages.push(edited);
+          }
+        }
+        return { ...page, messages };
+      }),
+    );
+  });
   const getReplies = Effect.fn('MessagingEngine.getReplies')(function* (
     peer: TelegramPeer,
     rootId: number,
@@ -1257,18 +1320,10 @@ function makeMessagingEngineModule(
   ) {
     if (!telegramTransport.getReplies)
       return yield* Effect.fail(new Error('Comments are unavailable.'));
-    const session = sessionScope,
-      accountId = activeAccountId,
-      epoch = currentCacheEpoch;
-    const page = yield* runTelegramOperation(
+    return yield* loadScopedHistoryPage(
       () => telegramTransport.getReplies!(peer, rootId, 50, beforeMessageId),
       'Loading replies',
     );
-    if (isOperationCurrent(session, accountId) && epoch === currentCacheEpoch)
-      yield* cacheStore
-        .putMessages(page.messages.map((message) => ({ ...message, cacheEpoch: epoch })))
-        .pipe(Effect.catch((error) => reportFailure('cache', 'Could not cache replies.', error)));
-    return page;
   });
   const addPeer = Effect.fn('MessagingEngine.addPeer')(function* (
     result: TelegramPeerSearchResult,
@@ -1376,9 +1431,6 @@ function makeMessagingEngineModule(
                   .pipe(Effect.map(({ messages, channelPts }) => ({ messages, channelPts }))),
           `Opening a message in ${dialog.title}`,
         );
-        if (contextPage.channelPts !== undefined) {
-          yield* setChannelPts(message.peerId, contextPage.channelPts);
-        }
         const context = contextPage.messages;
         if (!isHistoryOperationCurrent(message.peerId, historyVersion, session, accountId)) {
           return { conversation, found: false };
@@ -1488,7 +1540,7 @@ function makeMessagingEngineModule(
           telegramTransport.getHistory(dialog.peer, HISTORY_LIMIT, currentGap.newerMinMessageId),
         `Loading messages in ${dialog.title}`,
       );
-      if (page.messages.length === 0 && page.hasOlder) {
+      if (page.hasOlder && !page.messages.some(({ id }) => id < currentGap.newerMinMessageId)) {
         return yield* Effect.fail(
           new Error('Telegram returned no progress while loading this message gap.'),
         );
@@ -2374,9 +2426,6 @@ function makeMessagingEngineModule(
           `Loading older messages from ${dialog.title}`,
         );
         if (!isHistoryOperationCurrent(peerId, historyVersion, session, accountId)) return;
-        if (page.channelPts !== undefined) {
-          yield* setChannelPts(peerId, page.channelPts);
-        }
         const fetched = messageRevisions.filter(
           peerId,
           page.messages.map((message) => ({ ...message, cacheEpoch: currentCacheEpoch })),
@@ -2961,9 +3010,6 @@ function makeMessagingEngineModule(
                 () => telegramTransport.getHistory(dialog.peer, HISTORY_LIMIT, undefined),
                 `Refreshing media in ${dialog.title}`,
               ).pipe(Effect.map(({ messages, channelPts }) => ({ messages, channelPts })));
-          if (contextPage.channelPts !== undefined) {
-            yield* setChannelPts(message.peerId, contextPage.channelPts);
-          }
           const context = contextPage.messages;
           if (!isOperationCurrent(session, accountId)) return yield* Effect.fail(firstError);
           const fetched = messageRevisions.filter(
@@ -2983,12 +3029,6 @@ function makeMessagingEngineModule(
                 histories.mode(message.peerId) ?? 'newest',
               ),
             }));
-          } else {
-            rememberHistory(
-              message.peerId,
-              { messages: fetched, hasOlderMessages: fetched.some(({ id }) => id > 1) },
-              'newest',
-            );
           }
           for (const refreshed of fetched) {
             yield* publishConversationEvent({
@@ -3799,7 +3839,7 @@ function makeMessagingEngineModule(
       if (cached) return cached.value;
       const messages = (yield* cacheStore.loadMessagesBefore(
         peer.id,
-        beforeMessageId ?? 2147483647,
+        beforeMessageId ?? 2147483648,
         51,
       )).filter((message) => message.cacheEpoch === epoch);
       if (!messages.length)
@@ -3833,17 +3873,10 @@ function makeMessagingEngineModule(
   ) {
     if (!telegramTransport.getSavedHistory)
       return yield* Effect.fail(new Error('Saved history is unavailable.'));
-    const session = sessionScope,
-      accountId = activeAccountId,
-      epoch = currentCacheEpoch;
-    const page = yield* telegramTransport.getSavedHistory(source, 50, beforeMessageId);
-    if (isOperationCurrent(session, accountId) && epoch === currentCacheEpoch)
-      yield* cacheStore
-        .putMessages(page.messages.map((message) => ({ ...message, cacheEpoch: epoch })))
-        .pipe(
-          Effect.catch((error) => reportFailure('cache', 'Could not cache saved messages.', error)),
-        );
-    return page;
+    return yield* loadScopedHistoryPage(
+      () => telegramTransport.getSavedHistory!(source, 50, beforeMessageId),
+      'Loading saved messages',
+    );
   });
   const getSavedTags = Effect.fn('MessagingEngine.savedTags')(function* (source?: TelegramPeer) {
     if (!telegramTransport.getSavedTags)
@@ -4989,9 +5022,19 @@ function makeMessagingEngineModule(
     return false;
   }
   const scheduleCachedHistoryRepair = Effect.fn('MessagingEngine.scheduleCachedHistoryRepair')(
-    function* (dialog: TelegramDialog, messages: readonly TelegramMessage[]) {
+    function* (
+      dialog: TelegramDialog,
+      messages: readonly TelegramMessage[],
+      fromDisk: boolean = false,
+    ) {
       if (!currentSnapshot().online) return;
-      const repairHead = cachedHistoryNeedsRepair(dialog, messages);
+      // A restored channel page can contain the latest message while missing earlier
+      // updates. Reconcile its tail once on restore, including legitimate deleted-ID gaps.
+      const repairHead =
+        cachedHistoryNeedsRepair(dialog, messages) ||
+        (fromDisk &&
+          dialog.peer.kind === 'channel' &&
+          messages.some(({ id }, index) => index > 0 && id > messages[index - 1]!.id + 1));
       // Old caches predate source diagnostics. Re-read only genuinely empty messages;
       // a current sync cursor does not cause Telegram to resend their original content.
       const missingContent = telegramTransport.getHistoryAround
@@ -5816,12 +5859,6 @@ function makeMessagingEngineModule(
             histories.mode(message.peerId) ?? 'newest',
           ),
         }));
-      } else {
-        rememberHistory(
-          message.peerId,
-          { messages: [message], hasOlderMessages: message.id > 1 },
-          'newest',
-        );
       }
       yield* updateDialogHead(message, isNewMessage);
       if (publish) {

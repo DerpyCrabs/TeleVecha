@@ -32,6 +32,54 @@ const emptyState = (): PeerHistoryState => ({ version: 0, gaps: [] });
 const sortMessages = <T extends TelegramMessage>(messages: T[]) =>
   [...messages].sort((left, right) => left.id - right.id);
 
+const normalizeGaps = (gaps: TelegramHistoryGap[]) => {
+  const unique = new Map<string, TelegramHistoryGap>();
+  for (const gap of gaps) {
+    if (gap.olderMaxMessageId + 1 >= gap.newerMinMessageId) continue;
+    unique.set(`${gap.olderMaxMessageId}:${gap.newerMinMessageId}`, gap);
+  }
+  return [...unique.values()].sort(
+    (left, right) => left.newerMinMessageId - right.newerMinMessageId,
+  );
+};
+
+export function gapsAfterInsertion(gaps: TelegramHistoryGap[], id: number) {
+  if (!gaps.some((gap) => gap.olderMaxMessageId < id && id < gap.newerMinMessageId)) return gaps;
+  return normalizeGaps(
+    gaps.flatMap((gap) =>
+      gap.olderMaxMessageId < id && id < gap.newerMinMessageId
+        ? [
+            { ...gap, newerMinMessageId: id },
+            { ...gap, olderMaxMessageId: id },
+          ]
+        : [gap],
+    ),
+  );
+}
+
+/** Gap controls refer to surviving messages on either side of an unloaded range. */
+export function gapsAfterDeletion(
+  gaps: TelegramHistoryGap[],
+  messages: TelegramMessage[],
+  deleted: ReadonlySet<number>,
+) {
+  if (!gaps.some((gap) => deleted.has(gap.olderMaxMessageId) || deleted.has(gap.newerMinMessageId)))
+    return gaps;
+  return normalizeGaps(
+    gaps.flatMap((gap) => {
+      const older = deleted.has(gap.olderMaxMessageId)
+        ? messages.filter(({ id }) => id < gap.olderMaxMessageId).at(-1)?.id
+        : gap.olderMaxMessageId;
+      const newer = deleted.has(gap.newerMinMessageId)
+        ? messages.find(({ id }) => id > gap.newerMinMessageId)?.id
+        : gap.newerMinMessageId;
+      return older !== undefined && newer !== undefined
+        ? [{ olderMaxMessageId: older, newerMinMessageId: newer }]
+        : [];
+    }),
+  );
+}
+
 export function createPeerHistories() {
   const peers = new Map<string, PeerHistoryState>();
   const get = (peerId: string) => peers.get(peerId) ?? emptyState();
@@ -42,17 +90,6 @@ export function createPeerHistories() {
   };
   const dropRuntimeData = (peerId: string, keepVersion: number) => {
     peers.set(peerId, { version: keepVersion, gaps: [] });
-  };
-
-  const normalizeGaps = (gaps: TelegramHistoryGap[]) => {
-    const unique = new Map<string, TelegramHistoryGap>();
-    for (const gap of gaps) {
-      if (gap.olderMaxMessageId + 1 >= gap.newerMinMessageId) continue;
-      unique.set(`${gap.olderMaxMessageId}:${gap.newerMinMessageId}`, gap);
-    }
-    return [...unique.values()].sort(
-      (left, right) => left.newerMinMessageId - right.newerMinMessageId,
-    );
   };
 
   const finalizeBound = (
@@ -130,7 +167,7 @@ export function createPeerHistories() {
     const loaded = [...peers].filter(([, state]) => state.loaded);
     while (loaded.length > MAX_LOADED_HISTORIES) {
       const [peerId, state] = loaded.shift()!;
-      dropRuntimeData(peerId, state.version);
+      dropRuntimeData(peerId, state.version + 1);
     }
   };
   const touch = (peerId: string) => {
@@ -151,7 +188,29 @@ export function createPeerHistories() {
     updateLoaded(peerId: string, change: (history: LoadedHistory) => LoadedHistory) {
       const loaded = get(peerId).loaded;
       if (!loaded) return;
-      update(peerId, (state) => ({ ...state, loaded: change(loaded) }));
+      const next = change(loaded);
+      if (
+        loaded.messages[0] &&
+        next.messages[0] &&
+        next.messages.length >= MAX_MESSAGES_PER_HISTORY &&
+        next.messages[0].id > loaded.messages[0].id
+      )
+        next.hasOlderMessages = true;
+      if (next.messages.length < loaded.messages.length && get(peerId).gaps.length) {
+        const retained = new Set(next.messages.map(({ id }) => id));
+        const removed = new Set(
+          loaded.messages.map(({ id }) => id).filter((id) => !retained.has(id)),
+        );
+        setGaps(peerId, gapsAfterDeletion(get(peerId).gaps, next.messages, removed));
+      }
+      if (get(peerId).gaps.length) {
+        const previousIds = new Set(loaded.messages.map(({ id }) => id));
+        let gaps = get(peerId).gaps;
+        for (const { id } of next.messages)
+          if (!previousIds.has(id)) gaps = gapsAfterInsertion(gaps, id);
+        if (gaps !== get(peerId).gaps) setGaps(peerId, gaps);
+      }
+      update(peerId, (state) => ({ ...state, loaded: next }));
     },
     remember(peerId: string, history: LoadedHistory, mode?: HistoryMode) {
       const resolvedMode = mode ?? get(peerId).mode ?? 'newest';
@@ -159,6 +218,8 @@ export function createPeerHistories() {
         ...history,
         messages: boundMessages(peerId, history.messages, resolvedMode),
       };
+      const first = loaded.messages[0];
+      if (first && history.messages.some(({ id }) => id < first.id)) loaded.hasOlderMessages = true;
       update(peerId, (state) => ({ ...state, loaded, mode: resolvedMode }));
       touch(peerId);
       evictInactive();
@@ -240,7 +301,8 @@ export function createPeerHistories() {
         );
         if (!isAlreadySplit && immediateNewer !== undefined) {
           gaps.push({ olderMaxMessageId: rangeMaximum, newerMinMessageId: immediateNewer });
-        } else if (!isAlreadySplit && immediateOlder !== undefined) {
+        }
+        if (!isAlreadySplit && immediateOlder !== undefined) {
           gaps.push({ olderMaxMessageId: immediateOlder, newerMinMessageId: rangeMinimum });
         }
       }
@@ -265,7 +327,10 @@ export function createPeerHistories() {
         undefined,
       );
       const replacement =
-        pageOldestId !== undefined && pageOldestId > current.olderMaxMessageId
+        hasOlder &&
+        pageOldestId !== undefined &&
+        pageOldestId < current.newerMinMessageId &&
+        pageOldestId > current.olderMaxMessageId
           ? { ...current, newerMinMessageId: pageOldestId }
           : undefined;
       const next = get(peerId).gaps.flatMap((gap) => {
@@ -276,7 +341,9 @@ export function createPeerHistories() {
           return [gap];
         }
         if (replacement) return [replacement];
-        return pageOldestId === undefined && hasOlder ? [gap] : [];
+        return hasOlder && (pageOldestId === undefined || pageOldestId >= current.newerMinMessageId)
+          ? [gap]
+          : [];
       });
       return setGaps(peerId, next);
     },

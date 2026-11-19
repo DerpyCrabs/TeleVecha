@@ -5772,10 +5772,10 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return { messages, hasMore: false, ...(channelPts === undefined ? {} : { channelPts }) };
     }
 
-    let last: Tl.Message | undefined;
+    let last: Tl.Message | Tl.MessageService | undefined;
     for (let index = rawMessages.length - 1; index >= 0; index -= 1) {
       const candidate = rawMessages[index];
-      if (Api.Message.is(candidate)) {
+      if (Api.Message.is(candidate) || Api.MessageService.is(candidate)) {
         last = candidate;
         break;
       }

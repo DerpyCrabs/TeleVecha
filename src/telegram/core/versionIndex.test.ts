@@ -25,3 +25,11 @@ describe('version index', () => {
     expect(versions.current('reaction', 'u:1:7')).toBe(41);
   });
 });
+
+it('prevents an old mutation finalizer from deleting the first token after a reset', () => {
+  const index = makeVersionIndex();
+  const old = index.next('mutation', 'mute');
+  index.clear();
+  index.next('mutation', 'mute');
+  expect(index.delete('mutation', 'mute', old)).toBe(false);
+});

@@ -1,3 +1,4 @@
+import { gapsAfterDeletion, gapsAfterInsertion } from '../core/peerHistories';
 import { messageInSavedDialog } from '../savedMessages';
 import { messageInTopic } from '../forums';
 import type { ConversationViewSnapshot, EngineSnapshot, TelegramConversationEvent } from '../types';
@@ -12,15 +13,22 @@ export function applyConversationChange<View extends ConversationViewSnapshot>(
   const peerId = view.activePeerId;
   if (!peerId) return view;
   let messages = view.messages;
+  let historyGaps = view.historyGaps;
   let pinnedMessages = view.pinnedMessages;
   if (event.type === 'message-upsert') {
+    if (event.message.peerId !== peerId) return view;
     if (
-      event.message.peerId !== peerId ||
       (view.activeTopicId !== undefined && !messageInTopic(event.message, view.activeTopicId)) ||
       (view.activeSavedPeer !== undefined &&
         !messageInSavedDialog(event.message, view.activeSavedPeer.id))
-    )
-      return view;
+    ) {
+      if (![...messages, ...pinnedMessages].some(({ id }) => id === event.message.id)) return view;
+      return {
+        ...view,
+        messages: messages.filter(({ id }) => id !== event.message.id),
+        pinnedMessages: pinnedMessages.filter(({ id }) => id !== event.message.id),
+      };
+    }
     const messageId = event.message.id;
     const known = messages.some(({ id }) => id === messageId);
     const newestId = messages.at(-1)?.id ?? 0;
@@ -32,6 +40,7 @@ export function applyConversationChange<View extends ConversationViewSnapshot>(
         (gap) => gap.olderMaxMessageId < messageId && messageId < gap.newerMinMessageId,
       );
     if (known || event.insertIfMissing || messageId > newestId || insideLoadedRange) {
+      historyGaps = gapsAfterInsertion(historyGaps, messageId);
       messages = [...messages.filter(({ id }) => id !== messageId), event.message].sort(
         (left, right) => left.id - right.id,
       );
@@ -45,6 +54,7 @@ export function applyConversationChange<View extends ConversationViewSnapshot>(
     const deleted = new Set(event.messageIds);
     messages = messages.filter(({ id }) => !deleted.has(id));
     pinnedMessages = pinnedMessages.filter(({ id }) => !deleted.has(id));
+    historyGaps = gapsAfterDeletion(historyGaps, messages, deleted);
   } else {
     if (event.peerId !== peerId) return view;
     pinnedMessages = view.activeSavedPeer
@@ -55,7 +65,7 @@ export function applyConversationChange<View extends ConversationViewSnapshot>(
   }
   return messages === view.messages && pinnedMessages === view.pinnedMessages
     ? view
-    : { ...view, messages, pinnedMessages };
+    : { ...view, messages, pinnedMessages, historyGaps };
 }
 
 interface VisibilityReport {

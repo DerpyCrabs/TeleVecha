@@ -1,3 +1,4 @@
+import { orderPending } from '../pendingOrder';
 import { Cause, Effect, Fiber, FiberMap, Option } from 'effect';
 
 import type { CacheStore } from '../persistence/store';
@@ -76,7 +77,7 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
   const restore = Effect.fn('PendingSendQueue.restore')(function* (pending: PendingSend[]) {
     nextOrders.clear();
     const byPeer = new Map<string, PendingSend[]>();
-    for (const send of pending) {
+    for (const send of orderPending(pending)) {
       const sends = byPeer.get(send.peer.id) ?? [];
       sends.push(send);
       byPeer.set(send.peer.id, sends);
@@ -84,16 +85,6 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
     const restored: PendingSend[] = [];
     const migrations: PendingSend[] = [];
     for (const [peerId, sends] of byPeer) {
-      sends.sort((left, right) => {
-        if (
-          left.queueOrder !== undefined &&
-          right.queueOrder !== undefined &&
-          left.queueOrder !== right.queueOrder
-        ) {
-          return left.queueOrder - right.queueOrder;
-        }
-        return left.createdAt - right.createdAt || left.id.localeCompare(right.id);
-      });
       let lastOrder = 0;
       for (const send of sends) {
         const queueOrder =
@@ -111,13 +102,7 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
       concurrency: 'unbounded',
       discard: true,
     });
-    return restored.sort((left, right) => {
-      if (left.peer.id === right.peer.id) {
-        const queueDifference = (left.queueOrder ?? 0) - (right.queueOrder ?? 0);
-        if (queueDifference !== 0) return queueDifference;
-      }
-      return left.createdAt - right.createdAt || left.id.localeCompare(right.id);
-    });
+    return orderPending(restored);
   });
 
   const create = (pending: PendingSend) => {
@@ -126,14 +111,15 @@ export const makePendingSendQueue = Effect.fn('PendingSendQueue.make')(function*
     return capture({ ...pending, queueOrder });
   };
 
-  const blobBytes = (pending: PendingSend) =>
-    pending.attachment
-      ? pending.attachment.blob.size
-      : (pending.album?.attachments.reduce(
-          (total, attachment) => total + attachment.blob.size,
-          0,
-        ) ?? 0);
-
+  const blobBytes = (pending: PendingSend) => {
+    const attachments = pending.attachment
+      ? [pending.attachment]
+      : (pending.album?.attachments ?? []);
+    return attachments.reduce(
+      (total, item) => total + item.blob.size + (item.preview?.size ?? 0),
+      0,
+    );
+  };
   const queueWrite = <Value, Error, Requirements>(
     peerId: string,
     work: Effect.Effect<Value, Error, Requirements>,

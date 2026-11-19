@@ -37,6 +37,213 @@ afterEach(() => {
 });
 
 describe('MessagingEngine', () => {
+  it.each(['replies', 'saved'] as const)(
+    'keeps a concurrent edit when %s history arrives late',
+    (kind) =>
+      Effect.runPromise(
+        withEngine((engine, transport, cache) =>
+          Effect.gen(function* () {
+            yield* engine.start(credentials);
+            const dialog = engine.snapshot().dialogs.find((d) => d.peer.id === 'u:101')!;
+            const original = dialog.topMessage!;
+            const edit = { ...original, text: 'edited during history load' };
+            const cursor = (yield* cache.loadCursor())!;
+            const response = Effect.gen(function* () {
+              window.__televechaFixture!.emit({
+                type: 'edit-message',
+                message: edit,
+                pts: cursor.pts + 1,
+                ptsCount: 1,
+              });
+              yield* Effect.promise(() =>
+                vi.waitFor(async () =>
+                  expect(
+                    (await Effect.runPromise(cache.loadMessage(edit.peerId, edit.id)))?.text,
+                  ).toBe(edit.text),
+                ),
+              );
+              return { messages: [original], hasOlder: false };
+            });
+            vi.spyOn(
+              transport,
+              kind === 'replies' ? 'getReplies' : 'getSavedHistory',
+            ).mockReturnValue(response);
+            const page = yield* kind === 'replies'
+              ? engine.getReplies(dialog.peer, 1)
+              : engine.getSavedHistory(dialog.peer);
+            expect((yield* cache.loadMessage(edit.peerId, edit.id))?.text).toBe(edit.text);
+            expect(page.messages[0]?.text).toBe(edit.text);
+          }),
+        ),
+      ),
+  );
+  it.each(['topic', 'deleted-search', 'unread', 'oldest-offset', 'delayed-search'] as const)(
+    'preserves message query semantics for %s',
+    (scenario) =>
+      Effect.runPromise(
+        withEngine((engine, transport, cache) =>
+          Effect.gen(function* () {
+            yield* engine.start(credentials);
+            const dialog = engine.snapshot().dialogs.find(({ peer }) => peer.id === 'c:202')!;
+            const message = {
+              ...dialog.topMessage!,
+              text: 'needle',
+              unreadMention: true,
+              topicId: 42,
+              cacheEpoch: yield* cache.loadEpoch(),
+            };
+            const source = { kind: 'group' as const, id: 'g:303' };
+            const page = { messages: [message], hasMore: false };
+            const search = vi
+              .spyOn(transport, 'searchMessages')
+              .mockReturnValue(Effect.succeed(page));
+            if (scenario === 'topic') {
+              expect(
+                (yield* engine.searchConversationMessages(dialog.peer, '', false, undefined, {
+                  topicId: 42,
+                })).messages,
+              ).toEqual([message]);
+              return;
+            }
+            if (scenario === 'delayed-search') {
+              const edited = { ...message, text: 'needle edited' };
+              search.mockImplementation(() =>
+                Effect.gen(function* () {
+                  window.__televechaFixture!.emit({
+                    type: 'edit-message',
+                    channelScoped: true,
+                    message: edited,
+                    pts: dialog.channelPts! + 1,
+                    ptsCount: 1,
+                  });
+                  yield* Effect.promise(() =>
+                    vi.waitFor(async () =>
+                      expect(
+                        (await Effect.runPromise(cache.loadMessage(message.peerId, message.id)))
+                          ?.text,
+                      ).toBe(edited.text),
+                    ),
+                  );
+                  return page;
+                }),
+              );
+              yield* engine.searchConversationMessages(dialog.peer, 'needle', false);
+              expect((yield* cache.loadMessage(message.peerId, message.id))?.text).toBe(
+                edited.text,
+              );
+              return;
+            }
+            yield* cache.putMessage(message);
+            if (scenario === 'oldest-offset')
+              yield* cache.putMessage({ ...message, peerId: source.id, id: 2147483647 });
+            if (scenario === 'deleted-search') {
+              yield* engine.searchConversationMessages(dialog.peer, 'needle', false);
+              yield* cache.deleteMessages(message.peerId, [message.id]);
+            }
+            window.__televechaFixture!.emit({ type: 'connection-state', connected: false });
+            yield* Effect.promise(() =>
+              vi.waitFor(() => expect(engine.snapshot().online).toBe(false)),
+            );
+            if (scenario === 'unread')
+              expect(
+                (yield* engine.getUnreadNotifications(dialog.peer, 'mention')).map((m) => m.id),
+              ).toContain(message.id);
+            if (scenario === 'oldest-offset')
+              expect(
+                (yield* engine.getEarlierGroupHistory(source)).messages.map((m) => m.id),
+              ).toContain(2147483647);
+            if (scenario === 'deleted-search')
+              expect(
+                (yield* engine.searchConversationMessages(dialog.peer, 'needle', false)).messages,
+              ).toEqual([]);
+          }),
+        ),
+      ),
+  );
+  it('opens the whole disk history after a live update to a closed channel', () =>
+    Effect.runPromise(
+      withEngine((engine, _transport, cache) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          const dialog = engine.snapshot().dialogs.find(({ peer }) => peer.id === 'c:202')!;
+          const old = dialog.topMessage!;
+          yield* cache.putMessage({ ...old, cacheEpoch: yield* cache.loadEpoch() });
+          const message = { ...old, id: old.id + 1 };
+          window.__televechaFixture!.emit({
+            type: 'new-message',
+            channelScoped: true,
+            pts: dialog.channelPts! + 1,
+            ptsCount: 1,
+            message,
+          });
+          yield* Effect.promise(() =>
+            vi.waitFor(() =>
+              expect(
+                engine.snapshot().dialogs.find(({ peer }) => peer.id === dialog.peer.id)
+                  ?.topMessageId,
+              ).toBe(message.id),
+            ),
+          );
+          const view = yield* engine.loadConversationView(dialog.peer.id);
+          expect(view.messages.map(({ id }) => id)).toEqual([old.id, message.id]);
+        }),
+      ),
+    ));
+
+  it.each(Array.from({ length: 17 }, (_, mask) => mask))(
+    'reconciles channel cache subset %i without consuming pending update PTS',
+    (mask) =>
+      Effect.runPromise(
+        withEngine((engine, transport, cache) =>
+          Effect.gen(function* () {
+            yield* engine.start(credentials);
+            const dialog = engine.snapshot().dialogs.find(({ peer }) => peer.id === 'c:202')!;
+            const last = dialog.topMessage!;
+            const epoch = yield* cache.loadEpoch();
+            const messages = Array.from({ length: 6 }, (_, i) => ({
+              ...last,
+              id: last.id - 5 + i,
+              cacheEpoch: epoch,
+              text: String(i),
+            }));
+            const page = { messages, hasOlder: false, channelPts: dialog.channelPts! + 2 };
+            vi.spyOn(transport, 'getHistory').mockReturnValue(Effect.succeed(page));
+            const cached = messages.filter(
+              (_, i) => i === 0 || i === 5 || (mask & (1 << (i - 1))) !== 0,
+            );
+            if (mask < 16) yield* cache.putMessages(cached);
+            yield* engine.loadConversationView(dialog.peer.id);
+            yield* Effect.promise(() =>
+              vi.waitFor(async () => {
+                const actual = await Effect.runPromise(cache.loadMessages(dialog.peer.id, 50));
+                expect(actual.map(({ id }) => id).sort((a, b) => a - b)).toEqual(
+                  messages.map(({ id }) => id),
+                );
+              }),
+            );
+            expect(
+              engine.snapshot().dialogs.find(({ peer }) => peer.id === dialog.peer.id)?.channelPts,
+            ).toBe(dialog.channelPts);
+            const delayed = { ...last, id: last.id + 1, outgoing: false, text: 'delayed incoming' };
+            window.__televechaFixture!.emit({
+              type: 'new-message',
+              channelScoped: true,
+              pts: dialog.channelPts! + 1,
+              ptsCount: 1,
+              message: delayed,
+            });
+            yield* Effect.promise(() =>
+              vi.waitFor(async () => {
+                expect(
+                  await Effect.runPromise(cache.loadMessage(dialog.peer.id, delayed.id)),
+                ).toMatchObject(delayed);
+              }),
+            );
+          }),
+        ),
+      ),
+  );
+
   it.each([false, true])(
     'rechecks cached unsupported messages without reloading the conversation head (old layer: %s)',
     (oldLayer) =>

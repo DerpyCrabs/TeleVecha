@@ -181,3 +181,64 @@ it('isolates saved sources during live updates and superseded history requests',
   expect(old.complete(view)).toBeUndefined();
   expect(next.complete(nextView)?.messages).toEqual([other]);
 });
+
+it('removes a known message and pin when a topic edit moves it out of the selected topic', () => {
+  const item = { ...message(101), topicId: 10 };
+  const view = { ...conversation(), activeTopicId: 10, messages: [item], pinnedMessages: [item] };
+  const changed = applyConversationChange(view, {
+    type: 'message-upsert',
+    message: { ...item, topicId: 20 },
+  });
+  expect(changed.messages).toEqual([]);
+  expect(changed.pinnedMessages).toEqual([]);
+});
+
+it('keeps the gap action attached to the surviving row after a live deletion', () => {
+  const view = {
+    ...conversation(1, 2, 9, 10),
+    historyGaps: [{ olderMaxMessageId: 2, newerMinMessageId: 9 }],
+  };
+  expect(
+    applyConversationChange(view, { type: 'messages-delete', peerId: 'peer-1', messageIds: [9] })
+      .historyGaps,
+  ).toEqual([{ olderMaxMessageId: 2, newerMinMessageId: 10 }]);
+});
+
+it('tracks the remaining holes for every delivery order of a four-message gap', () => {
+  function check(view: ReturnType<typeof conversation>, missing: number[]) {
+    const ids = view.messages.map((m) => m.id);
+    const expected = ids
+      .slice(1)
+      .flatMap((id, i) =>
+        id > ids[i]! + 1 ? [{ olderMaxMessageId: ids[i]!, newerMinMessageId: id }] : [],
+      );
+    expect(view.historyGaps).toEqual(expected);
+    for (const id of missing)
+      check(
+        applyConversationChange(view, {
+          type: 'message-upsert',
+          message: message(id),
+          insertIfMissing: true,
+        }),
+        missing.filter((other) => other !== id),
+      );
+  }
+  check(
+    { ...conversation(1, 6), historyGaps: [{ olderMaxMessageId: 1, newerMinMessageId: 6 }] },
+    [2, 3, 4, 5],
+  );
+});
+
+it('coalesces adjacent holes when their shared boundary is deleted', () => {
+  const view = {
+    ...conversation(1, 4, 7),
+    historyGaps: [
+      { olderMaxMessageId: 1, newerMinMessageId: 4 },
+      { olderMaxMessageId: 4, newerMinMessageId: 7 },
+    ],
+  };
+  expect(
+    applyConversationChange(view, { type: 'messages-delete', peerId: 'peer-1', messageIds: [4] })
+      .historyGaps,
+  ).toEqual([{ olderMaxMessageId: 1, newerMinMessageId: 7 }]);
+});

@@ -114,7 +114,9 @@ describe('Conversation', () => {
     await Effect.runPromise(conversation.searchGifs('cat'));
     expect(host.searchGifs).toHaveBeenCalledWith(peer, 'cat');
 
+    const delayed = conversation.loadOlder();
     current = snapshot('u:2');
+    await expect.soft(Effect.runPromise(delayed)).rejects.toThrow('no longer selected');
     await Effect.runPromise(conversation.sendDraft('still addressed to Mira'));
     expect(sendDraft).toHaveBeenLastCalledWith(
       peer,
@@ -124,6 +126,10 @@ describe('Conversation', () => {
     );
     await expect(Effect.runPromise(conversation.loadOlder())).rejects.toThrow('no longer selected');
     const topic = makeConversation(host, peer, 42);
+    await Effect.runPromise(topic.sharedMedia('photos'));
+    expect
+      .soft(host.searchConversationMessages)
+      .toHaveBeenLastCalledWith(peer, '', false, undefined, { kind: 'photos', topicId: 42 });
     await Effect.runPromise(topic.setDraft('Topic draft'));
     expect(host.setDraft).toHaveBeenLastCalledWith('u:1/topic/42', 'Topic draft', undefined);
     await Effect.runPromise(topic.sendDraft('Topic reply', { messageId: 77 }));

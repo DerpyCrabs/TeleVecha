@@ -129,7 +129,7 @@ export function makeConversation(
     topicId === undefined
       ? reply
       : { ...reply, messageId: reply?.messageId ?? topicId, topMessageId: topicId };
-  const requireSelectedView = () => {
+  const requireSelectedView = Effect.suspend(() => {
     const snapshot = host.snapshot();
     if (
       snapshot.activePeerId !== peerId ||
@@ -144,7 +144,7 @@ export function makeConversation(
       );
     }
     return Effect.void;
-  };
+  });
 
   return {
     peer,
@@ -196,19 +196,19 @@ export function makeConversation(
       return host.openMessageInConversationView(message).pipe(Effect.map(({ found }) => found));
     },
     loadOlder() {
-      return requireSelectedView().pipe(
+      return requireSelectedView.pipe(
         Effect.andThen(host.loadOlderConversationView(peerId)),
         Effect.asVoid,
       );
     },
     retryHistory() {
-      return requireSelectedView().pipe(
+      return requireSelectedView.pipe(
         Effect.andThen(host.retryConversationView(peerId)),
         Effect.asVoid,
       );
     },
     loadGap(gap: TelegramHistoryGap) {
-      return requireSelectedView().pipe(
+      return requireSelectedView.pipe(
         Effect.andThen(host.loadHistoryGapConversationView(peerId, gap)),
         Effect.asVoid,
       );
@@ -234,7 +234,9 @@ export function makeConversation(
     sharedMedia(kind: SharedMediaKind, offset?: TelegramSearchOffset) {
       return savedPeer
         ? host.searchConversationMessages(peer, '', false, offset, { kind, savedPeer })
-        : host.getConversationSharedMedia(peer, kind, offset);
+        : topicId !== undefined
+          ? host.searchConversationMessages(peer, '', false, offset, { kind, topicId })
+          : host.getConversationSharedMedia(peer, kind, offset);
     },
     forwardTo: (target: TelegramPeer, messageId: number, options?: TelegramForwardOptions) =>
       host.forwardMessage(peer, target, messageId, options),

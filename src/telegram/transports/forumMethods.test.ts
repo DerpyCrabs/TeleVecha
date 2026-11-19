@@ -137,3 +137,26 @@ it('finishes all server deletion pages before confirming removal', async () => {
   });
   expect(page).toBe(2);
 });
+
+it('does not offer the same forum page again when the cursor stops moving', async () => {
+  const api = methods(() =>
+    Effect.succeed(
+      createTl('messages.forumTopics', {
+        count: 100,
+        orderByCreateDate: true,
+        topics: Array.from({ length: 50 }, (_, i) => topic(i + 1)),
+        messages: [],
+        chats: [],
+        users: [],
+        pts: 0,
+      }),
+    ),
+  );
+  expect(
+    (
+      await Effect.runPromise(
+        api.getForumTopics(peer, '', { date: 150, messageId: 1050, topicId: 50 }),
+      )
+    ).nextOffset,
+  ).toBeUndefined();
+});

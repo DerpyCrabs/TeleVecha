@@ -1,3 +1,4 @@
+import { orderPending } from '../pendingOrder';
 import { Effect } from 'effect';
 import { type DraftReservation, type LatestStateCache, type TimedCacheValue } from './store';
 import type {
@@ -184,7 +185,7 @@ export interface MemoryCacheStoreInitialState {
         accountId: storedAccountId,
         dialogs: clone(storedDialogs),
         drafts: Object.fromEntries(storedDrafts),
-        draftDetails: Object.fromEntries(storedDraftDetails),
+        draftDetails: clone(Object.fromEntries(storedDraftDetails)),
         draftRevisions: Object.fromEntries(storedDraftRevisions),
         pending: sortedPending(),
         epoch: storedEpoch,
@@ -243,10 +244,12 @@ export interface MemoryCacheStoreInitialState {
   }
   function replaceMessages(peerId: string, messages: CachedMessage[]) {
     return Effect.sync(() => {
-      const replacements = clone(messages);
+      const replacements = new Map(
+        clone(messages).map((message) => [messageKey(message.peerId, message.id), message]),
+      );
       storedMessages = [
         ...storedMessages.filter((message) => message.peerId !== peerId),
-        ...replacements,
+        ...replacements.values(),
       ];
     });
   }
@@ -366,7 +369,11 @@ export interface MemoryCacheStoreInitialState {
   }
   function commitOutbox(sends: PendingSend | PendingSend[], draft?: DraftReservation) {
     return Effect.sync(() => {
-      const batch = clone(Array.isArray(sends) ? sends : [sends]);
+      const batch = [
+        ...new Map(
+          clone(Array.isArray(sends) ? sends : [sends]).map((send) => [send.id, send]),
+        ).values(),
+      ];
       if (batch.length === 0) return;
 
       const ids = new Set(batch.map(({ id }) => id));
@@ -403,17 +410,7 @@ export interface MemoryCacheStoreInitialState {
     });
   }
   function sortedPending() {
-    return clone(storedPending).sort((left, right) => {
-      if (
-        left.peer.id === right.peer.id &&
-        left.queueOrder !== undefined &&
-        right.queueOrder !== undefined &&
-        left.queueOrder !== right.queueOrder
-      ) {
-        return left.queueOrder - right.queueOrder;
-      }
-      return left.createdAt - right.createdAt || left.id.localeCompare(right.id);
-    });
+    return orderPending(clone(storedPending));
   }
   return {
     get loadTransportSession() {

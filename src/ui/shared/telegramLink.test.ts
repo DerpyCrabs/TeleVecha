@@ -151,3 +151,11 @@ describe('private chat invitations', () => {
     'https://t.me/joinchat/',
   ])('rejects malformed invitation %s', (url) => expect(parseTelegramLink(url)).toBeUndefined());
 });
+
+it.each([
+  'https://t.me/+15551234567',
+  'tg://privatepost?channel=123',
+  'tg://resolve/other?domain=example',
+])('leaves unsupported targets to the default Telegram handler: %s', (url) => {
+  expect(parseTelegramLink(url)).toBeUndefined();
+});
