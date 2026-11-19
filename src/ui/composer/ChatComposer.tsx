@@ -1,3 +1,4 @@
+import { PointMenu, ToggleMenu, menuAtPoint } from '../shared/menuSurface';
 import { BotControls, type BotControlsProps } from '../bots/BotControls';
 import { BotKeyboard } from '../bots/BotKeyboard';
 import Keyboard from '@effectweb/lucide/icons/keyboard';
@@ -140,9 +141,6 @@ function clearFileControl(element: HTMLInputElement) {
 function transferName(stem: string) {
   return `${stem}-${Date.now()}`;
 }
-function formatMenuPosition(x: number, y: number) {
-  return { x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - 310) };
-}
 function visibilityCommand(props: ChatComposerProps, open: boolean): Command<ChatComposerMessage> {
   return {
     key: commandExpressionVisibility,
@@ -183,7 +181,7 @@ function insertAtSelection(model: ChatComposerModel, emoji: string) {
 function acquireComposer(element: HTMLElement, input: () => Send<ChatComposerMessage>) {
   const send = input();
   send({ type: 'Mounted', element });
-  const popup = () => element.querySelector<HTMLElement>('.expression-popup-host');
+  const popup = () => element.querySelector<HTMLElement>('.expression-popup-host:not([inert])');
   const trigger = () =>
     element.querySelector<HTMLElement>('[aria-label="Choose emoji, GIF, or sticker"]');
   const dismiss = (event: PointerEvent) => {
@@ -207,7 +205,7 @@ function acquireComposer(element: HTMLElement, input: () => Send<ChatComposerMes
       event.preventDefault();
       event.stopImmediatePropagation();
       send({ type: 'Dismiss', restoreFocus: true });
-    } else if (element.querySelector('.composer-format-menu')) {
+    } else if (element.querySelector('.composer-format-menu:not([inert])')) {
       event.preventDefault();
       event.stopImmediatePropagation();
       send({ type: 'Fields', fields: { formatMenu: undefined } });
@@ -477,46 +475,49 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
         use={composerMount(send)}
         class="chat-composer relative shrink-0 border-t border-line bg-panel p-3"
       >
-        {model.expressionOpen ? (
-          <div class="expression-popup-host">
-            <ExpressionPicker
-              tab={model.expressionTab}
-              packActions={props.expressions}
-              stickerSearch={props.expressions.stickerSearch}
-              setTab={selectExpressionTab}
-              stickersLoading={props.expressions.stickerLoading}
-              stickerError={props.expressions.stickerError}
-              retryStickers={props.expressions.retryStickers}
-              setStickerFavorite={props.expressions.setStickerFavorite}
-              gifsLoading={props.expressions.gifLoading}
-              gifError={props.expressions.gifError}
-              gifs={props.expressions.gifs}
-              packs={props.expressions.stickerPacks}
-              insertEmoji={insertEmoji}
-              canSend={props.enabled}
-              canSendGifs={props.canSendGifs}
-              canSendStickers={props.canSendStickers}
-              load={(sticker) => props.media.loadSticker(sticker)}
-              stickerUrl={(sticker) => props.media.stickerUrl(sticker)}
-              sendSticker={(sticker) => {
-                if (!props.canSendStickers) return;
-                closeExpression();
-                void props.expressions.sendSticker(sticker).catch(() => undefined);
-              }}
-              sendGif={(gif) => {
-                if (!props.canSendGifs) return;
-                closeExpression();
-                void props.expressions.sendGif(gif).catch(() => undefined);
-              }}
-              gifSearch={
-                props.expressions.gifPeer
-                  ? (text) => props.expressions.gifSearch(props.expressions.gifPeer!, text)
-                  : undefined
-              }
-              retryGifs={props.expressions.retryGifs}
-            />
-          </div>
-        ) : null}
+        <ToggleMenu
+          value={model.expressionOpen || undefined}
+          render={(_, closing) => (
+            <div class="expression-popup-host" inert={closing} aria-hidden={closing || undefined}>
+              <ExpressionPicker
+                tab={model.expressionTab}
+                packActions={props.expressions}
+                stickerSearch={props.expressions.stickerSearch}
+                setTab={selectExpressionTab}
+                stickersLoading={props.expressions.stickerLoading}
+                stickerError={props.expressions.stickerError}
+                retryStickers={props.expressions.retryStickers}
+                setStickerFavorite={props.expressions.setStickerFavorite}
+                gifsLoading={props.expressions.gifLoading}
+                gifError={props.expressions.gifError}
+                gifs={props.expressions.gifs}
+                packs={props.expressions.stickerPacks}
+                insertEmoji={insertEmoji}
+                canSend={props.enabled}
+                canSendGifs={props.canSendGifs}
+                canSendStickers={props.canSendStickers}
+                load={(sticker) => props.media.loadSticker(sticker)}
+                stickerUrl={(sticker) => props.media.stickerUrl(sticker)}
+                sendSticker={(sticker) => {
+                  if (!props.canSendStickers) return;
+                  closeExpression();
+                  void props.expressions.sendSticker(sticker).catch(() => undefined);
+                }}
+                sendGif={(gif) => {
+                  if (!props.canSendGifs) return;
+                  closeExpression();
+                  void props.expressions.sendGif(gif).catch(() => undefined);
+                }}
+                gifSearch={
+                  props.expressions.gifPeer
+                    ? (text) => props.expressions.gifSearch(props.expressions.gifPeer!, text)
+                    : undefined
+                }
+                retryGifs={props.expressions.retryGifs}
+              />
+            </div>
+          )}
+        />
         {props.forwardDraft ? <ForwardDraft {...props.forwardDraft} /> : null}
         {props.composer.reply
           ? ((reply) => (
@@ -635,43 +636,46 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
               >
                 <Smile size={20} />
               </button>
-              {model.formatMenu
-                ? ((position) => (
-                    <div
-                      class="composer-format-menu"
-                      role="menu"
-                      aria-label="Message formatting"
-                      style={{ left: `${position.x}px`, top: `${position.y}px` }}
-                    >
-                      {list(
-                        sequence([
-                          ['bold', 'Bold'],
-                          ['italic', 'Italic'],
-                          ['underline', 'Underline'],
-                          ['strike', 'Strikethrough'],
-                          ['code', 'Monospace'],
-                          ['spoiler', 'Spoiler'],
-                          ['blockquote', 'Quote'],
-                          ['textUrl', 'Create link'],
-                        ] as const),
-                        (_item) => {
-                          const [kind, label] = _item;
-                          return (
-                            <button
-                              role="menuitem"
-                              onClick={() => {
-                                applyFormat(kind);
-                                send({ type: 'Fields', fields: { formatMenu: undefined } });
-                              }}
-                            >
-                              <FormattingIcon kind={kind} /> {label}
-                            </button>
-                          );
-                        },
-                      )}
-                    </div>
-                  ))(model.formatMenu!)
-                : null}
+              <PointMenu
+                value={model.formatMenu}
+                render={(position, closing) => (
+                  <div
+                    class="menu-surface composer-format-menu"
+                    inert={closing}
+                    aria-hidden={closing || undefined}
+                    role="menu"
+                    aria-label="Message formatting"
+                    use={menuAtPoint(position)}
+                  >
+                    {list(
+                      sequence([
+                        ['bold', 'Bold'],
+                        ['italic', 'Italic'],
+                        ['underline', 'Underline'],
+                        ['strike', 'Strikethrough'],
+                        ['code', 'Monospace'],
+                        ['spoiler', 'Spoiler'],
+                        ['blockquote', 'Quote'],
+                        ['textUrl', 'Create link'],
+                      ] as const),
+                      (_item) => {
+                        const [kind, label] = _item;
+                        return (
+                          <button
+                            role="menuitem"
+                            onClick={() => {
+                              applyFormat(kind);
+                              send({ type: 'Fields', fields: { formatMenu: undefined } });
+                            }}
+                          >
+                            <FormattingIcon kind={kind} /> {label}
+                          </button>
+                        );
+                      },
+                    )}
+                  </div>
+                )}
+              />
               {props.replyKeyboardAvailable ? (
                 <button
                   class="composer-icon-button"
@@ -829,7 +833,7 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
                   setExpressionOpen(false);
                   send({
                     type: 'Fields',
-                    fields: { formatMenu: { ...formatMenuPosition(event.clientX, event.clientY) } },
+                    fields: { formatMenu: { x: event.clientX, y: event.clientY } },
                   });
                 }}
                 placeholder={props.placeholder || 'Write a message'}
@@ -837,45 +841,54 @@ export const ChatComposer = component<ChatComposerProps, ChatComposerState, Chat
                 readOnly={!props.enabled}
               />
               <div class="composer-attach-area">
-                {model.attachmentMenuOpen ? (
-                  <div class="composer-attach-menu" role="group" aria-label="Attach">
-                    <button
-                      type="button"
-                      disabled={!props.canSendMedia}
-                      onClick={(event) => {
-                        pickFiles(event, 'media');
-                        send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
-                      }}
+                <ToggleMenu
+                  value={model.attachmentMenuOpen || undefined}
+                  render={(_, closing) => (
+                    <div
+                      class="menu-surface composer-attach-menu"
+                      inert={closing}
+                      aria-hidden={closing || undefined}
+                      role="group"
+                      aria-label="Attach"
                     >
-                      <Image size={20} /> Photo or video
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!props.canSendMedia}
-                      onClick={(event) => {
-                        pickFiles(event, 'file');
-                        send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
-                      }}
-                    >
-                      <FileText size={20} />
-                      File
-                    </button>
-                    {props.sendPoll && !props.composer.editing ? (
                       <button
                         type="button"
-                        disabled={!props.canSendPolls}
-                        onClick={() =>
-                          send({
-                            type: 'Fields',
-                            fields: { attachmentMenuOpen: false, pollOpen: true },
-                          })
-                        }
+                        disabled={!props.canSendMedia}
+                        onClick={(event) => {
+                          pickFiles(event, 'media');
+                          send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
+                        }}
                       >
-                        <ChartNoAxesColumn size={20} /> Poll
+                        <Image size={20} /> Photo or video
                       </button>
-                    ) : null}
-                  </div>
-                ) : null}
+                      <button
+                        type="button"
+                        disabled={!props.canSendMedia}
+                        onClick={(event) => {
+                          pickFiles(event, 'file');
+                          send({ type: 'Fields', fields: { attachmentMenuOpen: false } });
+                        }}
+                      >
+                        <FileText size={20} />
+                        File
+                      </button>
+                      {props.sendPoll && !props.composer.editing ? (
+                        <button
+                          type="button"
+                          disabled={!props.canSendPolls}
+                          onClick={() =>
+                            send({
+                              type: 'Fields',
+                              fields: { attachmentMenuOpen: false, pollOpen: true },
+                            })
+                          }
+                        >
+                          <ChartNoAxesColumn size={20} /> Poll
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                />
                 <button
                   class="composer-icon-button"
                   title="Attach files or create a poll"

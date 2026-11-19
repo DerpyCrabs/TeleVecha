@@ -22,6 +22,29 @@ import {
 } from './mediaPresentation';
 const commandDisplay = 'display';
 const commandOriginal = 'original';
+function fitChatPhoto(frame: HTMLElement, input: () => { width: number; height: number }) {
+  if (!frame.parentElement?.parentElement?.matches('article.message')) return;
+  const update = () => {
+    const { width, height } = input();
+    if (!width || !height) return;
+    const ratio = width / height;
+    frame.style.setProperty('--photo-min-height', ratio > 1 && width >= 192 ? '100px' : '0px');
+    const box = frame.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    // Telegram Desktop's DecideFrameResize permits vertical cropping only
+    // when at least three quarters of the scaled image remains visible.
+    const scaledHeight = box.width / ratio;
+    frame.dataset.photoFit =
+      scaledHeight >= box.height - 1 && scaledHeight * 0.75 <= box.height + 1 ? 'cover' : 'contain';
+  };
+  // Set the floor before measuring, including when the first render is offscreen.
+  frame.dataset.photoFit = 'contain';
+  const observer = new ResizeObserver(update);
+  observer.observe(frame);
+  update();
+  return { update, dispose: () => observer.disconnect() };
+}
+
 const commandDownload = 'download';
 const commandOpen = 'open';
 
@@ -460,6 +483,11 @@ export const MediaAttachment = component<
       >
         {isImage ? (
           <div
+            use={
+              props.media.kind === 'photo' && props.media.width && props.media.height
+                ? domBinding({ width: props.media.width, height: props.media.height }, fitChatPhoto)
+                : undefined
+            }
             class="media-visual"
             classList={{ 'media-previewable': previewEnabled }}
             role={previewEnabled ? 'button' : undefined}
@@ -473,6 +501,9 @@ export const MediaAttachment = component<
               }
             }}
             style={{
+              '--photo-backdrop': displayUrl
+                ? 'url(' + JSON.stringify(displayUrl) + ')'
+                : undefined,
               'aspect-ratio':
                 props.media.width && props.media.height
                   ? `${props.media.width} / ${props.media.height}`

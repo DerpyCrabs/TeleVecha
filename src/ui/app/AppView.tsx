@@ -1,3 +1,4 @@
+import { createMenuPresence, menuAtPoint } from '../shared/menuSurface';
 import ChevronRight from '@effectweb/lucide/icons/chevron-right';
 import { LiveDrafts } from '../bots/LiveDrafts';
 import { EarlierGroupHistory } from '../groups/EarlierGroupHistory';
@@ -70,6 +71,10 @@ import { Avatar } from '../shared/Avatar';
 import { AuthOverlay } from './AuthOverlay';
 import { SettingsDialog } from './SettingsDialog';
 import type { AppViewModel, RenderedMessage } from './appController';
+const MessageMenu = createMenuPresence<{
+  menu: NonNullable<AppViewModel['messageContextMenu']>;
+  target: ChatMessage;
+}>();
 const messageEntries = collection<RenderedMessage>((entry) => entry.key).from;
 function messageDateTime(timestamp: number | undefined) {
   if (timestamp === undefined) return undefined;
@@ -145,7 +150,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
   const openMessageActions = model.openMessageActions;
   const selectChat = model.selectChat;
   const scrollToReply = model.scrollToReply;
-  const openImageViewer = model.openImageViewer;
+  const openMediaViewer = model.openMediaViewer;
   const canUseLiveCommands = model.canUseLiveCommands;
   const bot = model.bot;
   const pendingActionId = model.pendingActionId;
@@ -172,7 +177,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
   const expressions = model.expressions;
   const editLastMessage = model.editLastMessage;
   const mediaViewer = model.mediaViewer;
-  const navigateImageViewer = model.navigateImageViewer;
+  const navigateMediaViewer = model.navigateMediaViewer;
   const setMediaViewer = model.setMediaViewer;
   const forwardingMessage = model.forwardingMessage;
   const forwardMessage = model.forwardMessage;
@@ -384,18 +389,16 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
           />
         )}
 
-        {mobileSidebarOpen || detailsOpen ? (
-          <button
-            class="mobile-drawer-backdrop"
-            aria-label="Close navigation panel"
-            aria-hidden="true"
-            tabIndex={-1}
-            onClick={() => {
-              setMobileSidebarOpen(false);
-              updateDetailsOpen(false);
-            }}
-          />
-        ) : null}
+        <button
+          class="mobile-drawer-backdrop"
+          aria-label="Close navigation panel"
+          aria-hidden="true"
+          tabIndex={-1}
+          onClick={() => {
+            setMobileSidebarOpen(false);
+            updateDetailsOpen(false);
+          }}
+        />
 
         <section
           use={model.dom.conversationPaneElement}
@@ -1080,7 +1083,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                 openMessageActions(albumMessage, event, false)
                               }
                               openPreview={(albumMessage, preview) =>
-                                openImageViewer(albumMessage, preview, layout.album)
+                                openMediaViewer(albumMessage, preview, layout.album)
                               }
                             />
                           ) : null}
@@ -1143,7 +1146,7 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                                         ? asset.load(progress)
                                         : Effect.fail(new Error('Attachment data is unavailable.'));
                                     }}
-                                    onOpenPreview={(preview) => openImageViewer(message, preview)}
+                                    onOpenPreview={(preview) => openMediaViewer(message, preview)}
                                   />
                                 </>
                               ))(layout.media!)
@@ -1371,7 +1374,10 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                   (model.earlierHistoryStatus === 'empty' ||
                     (model.activeTopic !== undefined && model.activeTopic.id !== 1)) &&
                   activeChatId !== 'empty' ? (
-                  <div class="mx-auto my-auto flex max-w-xs flex-col items-center text-center">
+                  <div
+                    data-empty-conversation=""
+                    class="mx-auto my-auto flex max-w-xs flex-col items-center text-center"
+                  >
                     <div class="mb-4 grid size-14 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
                       <MessageSquareText size={25} />
                     </div>
@@ -1381,220 +1387,196 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                     </p>
                   </div>
                 ) : null}
-                {messageContextMenu
-                  ? ((menu) =>
-                      messageContextTarget
-                        ? ((target) => (
-                            <div
-                              class="message-context-menu"
-                              role="menu"
-                              aria-label="Message actions"
-                              style={{
-                                left:
-                                  menu.x > viewportWidth - 272
-                                    ? 'auto'
-                                    : `${Math.max(8, menu.x)}px`,
-                                right: menu.x > viewportWidth - 272 ? '8px' : 'auto',
-                                top:
-                                  menu.y > model.viewportHeight / 2
-                                    ? 'auto'
-                                    : `${Math.max(8, menu.y)}px`,
-                                bottom:
-                                  menu.y > model.viewportHeight / 2
-                                    ? `${Math.max(8, model.viewportHeight - menu.y)}px`
-                                    : 'auto',
+                <MessageMenu
+                  value={
+                    messageContextMenu && messageContextTarget
+                      ? { menu: messageContextMenu, target: messageContextTarget }
+                      : undefined
+                  }
+                  render={({ menu, target }, closing) => (
+                    <div
+                      class="menu-surface message-context-menu"
+                      inert={closing}
+                      aria-hidden={closing || undefined}
+                      role="menu"
+                      aria-label="Message actions"
+                      use={menuAtPoint(menu)}
+                    >
+                      {pendingSendForMessage(target.id) ? (
+                        <button
+                          class="danger"
+                          role="menuitem"
+                          onClick={() => void model.deleteMessage(target.id, false)}
+                        >
+                          <Trash2 size={15} /> Delete
+                        </button>
+                      ) : (
+                        <>
+                          {canQueueMessage ? (
+                            <button
+                              role="menuitem"
+                              onClick={() => {
+                                const message = target;
+                                setMessageContextMenu(undefined);
+                                model.replyTo(message);
                               }}
                             >
-                              {pendingSendForMessage(target.id) ? (
+                              <Reply size={15} /> Reply
+                            </button>
+                          ) : null}
+                          <button role="menuitem" onClick={() => model.selectMessage(target)}>
+                            <CheckCheck size={15} /> Select
+                          </button>
+                          {target.poll && !pollIsClosed(target.poll) ? (
+                            <>
+                              {pollHasVote(target.poll) &&
+                              !target.poll.quiz &&
+                              !target.poll.revotingDisabled ? (
                                 <button
-                                  class="danger"
                                   role="menuitem"
-                                  onClick={() => void model.deleteMessage(target.id, false)}
-                                >
-                                  <Trash2 size={15} /> Delete
-                                </button>
-                              ) : (
-                                <>
-                                  {canQueueMessage ? (
-                                    <button
-                                      role="menuitem"
-                                      onClick={() => {
-                                        const message = target;
-                                        setMessageContextMenu(undefined);
-                                        model.replyTo(message);
-                                      }}
-                                    >
-                                      <Reply size={15} /> Reply
-                                    </button>
-                                  ) : null}
-                                  <button
-                                    role="menuitem"
-                                    onClick={() => model.selectMessage(target)}
-                                  >
-                                    <CheckCheck size={15} /> Select
-                                  </button>
-                                  {target.poll && !pollIsClosed(target.poll) ? (
-                                    <>
-                                      {pollHasVote(target.poll) &&
-                                      !target.poll.quiz &&
-                                      !target.poll.revotingDisabled ? (
-                                        <button
-                                          role="menuitem"
-                                          disabled={!online}
-                                          onClick={() => {
-                                            setMessageContextMenu(undefined);
-                                            if (activeDialog)
-                                              runInBackground(
-                                                runEffect(
-                                                  engine.updatePoll(
-                                                    activeDialog.peer,
-                                                    Number(target.id),
-                                                    'vote',
-                                                    [],
-                                                  ),
-                                                ),
-                                              );
-                                          }}
-                                        >
-                                          <Reply size={15} />
-                                          Retract vote
-                                        </button>
-                                      ) : null}
-                                      {target.outgoing && !target.forwardedFrom ? (
-                                        <button
-                                          role="menuitem"
-                                          disabled={!online}
-                                          onClick={() => {
-                                            setMessageContextMenu(undefined);
-                                            model.setStopPollTarget(target);
-                                          }}
-                                        >
-                                          <X size={15} />
-                                          Stop poll
-                                        </button>
-                                      ) : null}
-                                    </>
-                                  ) : null}
-                                  {target.media && !target.protected ? (
-                                    <button
-                                      role="menuitem"
-                                      onClick={() => void saveMessageMedia(target)}
-                                    >
-                                      <Copy size={15} /> Save media as
-                                    </button>
-                                  ) : null}
-                                  {target.media?.kind === 'file' ? (
-                                    <button
-                                      role="menuitem"
-                                      onClick={() => void copyMediaFilename(target)}
-                                    >
-                                      <Copy size={15} /> Copy filename
-                                    </button>
-                                  ) : null}
-                                  {messageTextForClipboard(target) ? (
-                                    <button
-                                      role="menuitem"
-                                      onClick={() => void copyMessageText(target)}
-                                    >
-                                      <Copy size={15} /> Copy text
-                                    </button>
-                                  ) : null}
-                                  {messageCapabilitiesForUi(target).canForward ? (
-                                    <button
-                                      role="menuitem"
-                                      onClick={() => {
-                                        setMessageContextMenu(undefined);
-                                        setForwardingMessage(target, menu.wholeAlbum ?? true);
-                                      }}
-                                    >
-                                      <Forward size={15} /> Forward
-                                    </button>
-                                  ) : null}
-                                  {messageCapabilitiesForUi(target).canPin ? (
-                                    <button
-                                      role="menuitem"
-                                      onClick={() => {
-                                        const message = target;
-                                        setMessageContextMenu(undefined);
-                                        const conversation = activeConversation;
-                                        if (conversation) {
-                                          runInBackground(
-                                            runEffect(
-                                              conversation.setPinnedMessage(
-                                                Number(message.id),
-                                                !snapshot.pinnedMessages.some(
-                                                  ({ id }) => id === Number(message.id),
-                                                ),
-                                              ),
-                                            ),
-                                          );
-                                        }
-                                      }}
-                                    >
-                                      <Pin size={15} />
-                                      {snapshot.pinnedMessages.some(
-                                        ({ id }) => id === Number(target.id),
-                                      )
-                                        ? 'Unpin'
-                                        : 'Pin'}
-                                    </button>
-                                  ) : null}
-                                  {messageCapabilitiesForUi(target).canEdit ? (
-                                    <button
-                                      role="menuitem"
-                                      onClick={() => {
-                                        const message = target;
-                                        setMessageContextMenu(undefined);
-                                        composer.beginEdit(message);
-                                      }}
-                                    >
-                                      <Pencil size={15} /> Edit
-                                    </button>
-                                  ) : null}
-                                  {messageCapabilitiesForUi(target).canDelete ? (
-                                    <button
-                                      class="danger"
-                                      role="menuitem"
-                                      onClick={() => {
-                                        const message = target;
-                                        setMessageContextMenu(undefined);
-                                        setDeleteTarget(message);
-                                      }}
-                                    >
-                                      <Trash2 size={15} /> Delete
-                                    </button>
-                                  ) : null}
-                                  {target.outgoing &&
-                                  !target.service &&
-                                  activeDialog &&
-                                  !activeDialog.bot &&
-                                  (activeDialog.peer.kind !== 'channel' ||
-                                    activeDialog.permissions?.canViewMembers) ? (
-                                    <ReadReceiptMenuItem
-                                      privateChat={activeDialog.peer.kind === 'user'}
-                                      online={online}
-                                      media={mediaAssets}
-                                      source={model.queries.readReceipts(
-                                        activeDialog.peer.id,
-                                        Number(target.id),
-                                        String(
-                                          (snapshot.dialogs.find(
-                                            (dialog) => dialog.peer.id === activeDialog.peer.id,
-                                          )?.readOutboxMaxId ?? 0) >= Number(target.id),
+                                  disabled={!online}
+                                  onClick={() => {
+                                    setMessageContextMenu(undefined);
+                                    if (activeDialog)
+                                      runInBackground(
+                                        runEffect(
+                                          engine.updatePoll(
+                                            activeDialog.peer,
+                                            Number(target.id),
+                                            'vote',
+                                            [],
+                                          ),
                                         ),
-                                      )}
-                                      open={(result) => {
-                                        setMessageContextMenu(undefined);
-                                        model.setReadReceipts(result);
-                                      }}
-                                    />
-                                  ) : null}
-                                </>
+                                      );
+                                  }}
+                                >
+                                  <Reply size={15} />
+                                  Retract vote
+                                </button>
+                              ) : null}
+                              {target.outgoing && !target.forwardedFrom ? (
+                                <button
+                                  role="menuitem"
+                                  disabled={!online}
+                                  onClick={() => {
+                                    setMessageContextMenu(undefined);
+                                    model.setStopPollTarget(target);
+                                  }}
+                                >
+                                  <X size={15} />
+                                  Stop poll
+                                </button>
+                              ) : null}
+                            </>
+                          ) : null}
+                          {target.media && !target.protected ? (
+                            <button role="menuitem" onClick={() => void saveMessageMedia(target)}>
+                              <Copy size={15} /> Save media as
+                            </button>
+                          ) : null}
+                          {target.media?.kind === 'file' ? (
+                            <button role="menuitem" onClick={() => void copyMediaFilename(target)}>
+                              <Copy size={15} /> Copy filename
+                            </button>
+                          ) : null}
+                          {messageTextForClipboard(target) ? (
+                            <button role="menuitem" onClick={() => void copyMessageText(target)}>
+                              <Copy size={15} /> Copy text
+                            </button>
+                          ) : null}
+                          {messageCapabilitiesForUi(target).canForward ? (
+                            <button
+                              role="menuitem"
+                              onClick={() => {
+                                setMessageContextMenu(undefined);
+                                setForwardingMessage(target, menu.wholeAlbum ?? true);
+                              }}
+                            >
+                              <Forward size={15} /> Forward
+                            </button>
+                          ) : null}
+                          {messageCapabilitiesForUi(target).canPin ? (
+                            <button
+                              role="menuitem"
+                              onClick={() => {
+                                const message = target;
+                                setMessageContextMenu(undefined);
+                                const conversation = activeConversation;
+                                if (conversation) {
+                                  runInBackground(
+                                    runEffect(
+                                      conversation.setPinnedMessage(
+                                        Number(message.id),
+                                        !snapshot.pinnedMessages.some(
+                                          ({ id }) => id === Number(message.id),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }}
+                            >
+                              <Pin size={15} />
+                              {snapshot.pinnedMessages.some(({ id }) => id === Number(target.id))
+                                ? 'Unpin'
+                                : 'Pin'}
+                            </button>
+                          ) : null}
+                          {messageCapabilitiesForUi(target).canEdit ? (
+                            <button
+                              role="menuitem"
+                              onClick={() => {
+                                const message = target;
+                                setMessageContextMenu(undefined);
+                                composer.beginEdit(message);
+                              }}
+                            >
+                              <Pencil size={15} /> Edit
+                            </button>
+                          ) : null}
+                          {messageCapabilitiesForUi(target).canDelete ? (
+                            <button
+                              class="danger"
+                              role="menuitem"
+                              onClick={() => {
+                                const message = target;
+                                setMessageContextMenu(undefined);
+                                setDeleteTarget(message);
+                              }}
+                            >
+                              <Trash2 size={15} /> Delete
+                            </button>
+                          ) : null}
+                          {target.outgoing &&
+                          !target.service &&
+                          activeDialog &&
+                          !activeDialog.bot &&
+                          (activeDialog.peer.kind !== 'channel' ||
+                            activeDialog.permissions?.canViewMembers) ? (
+                            <ReadReceiptMenuItem
+                              privateChat={activeDialog.peer.kind === 'user'}
+                              online={online}
+                              media={mediaAssets}
+                              source={model.queries.readReceipts(
+                                activeDialog.peer.id,
+                                Number(target.id),
+                                String(
+                                  (snapshot.dialogs.find(
+                                    (dialog) => dialog.peer.id === activeDialog.peer.id,
+                                  )?.readOutboxMaxId ?? 0) >= Number(target.id),
+                                ),
                               )}
-                            </div>
-                          ))(messageContextTarget!)
-                        : null)(messageContextMenu!)
-                  : null}
+                              open={(result) => {
+                                setMessageContextMenu(undefined);
+                                model.setReadReceipts(result);
+                              }}
+                            />
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  )}
+                />
                 <LiveDrafts
                   onStop={(id) => runInBackground(runEffect(engine.stopLiveDraft(id)))}
                   drafts={(snapshot.liveDrafts ?? []).filter(
@@ -1766,11 +1748,11 @@ export const AppView = view<AppViewModel, never>((model, _send) => {
                   count={viewer.messages.length}
                   loading={viewer.loading}
                   previous={
-                    viewer.index > 0 ? () => void navigateImageViewer(viewer.index - 1) : undefined
+                    viewer.index > 0 ? () => void navigateMediaViewer(viewer.index - 1) : undefined
                   }
                   next={
                     viewer.index < viewer.messages.length - 1
-                      ? () => void navigateImageViewer(viewer.index + 1)
+                      ? () => void navigateMediaViewer(viewer.index + 1)
                       : undefined
                   }
                   download={

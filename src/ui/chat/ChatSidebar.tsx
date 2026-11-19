@@ -1,3 +1,4 @@
+import { createMenuPresence, menuAtPoint } from '../shared/menuSurface';
 import AtSign from '@effectweb/lucide/icons/at-sign';
 import Heart from '@effectweb/lucide/icons/heart';
 import Menu from '@effectweb/lucide/icons/menu';
@@ -16,7 +17,7 @@ import { folderSubscription } from '../folders/folderSubscription';
 import { FolderSettings } from '../folders/FolderSettings';
 import { Dialog } from '../shared/Dialog';
 import FolderCog from '@effectweb/lucide/icons/folder-cog';
-import { list, component, domBinding, sequence, view } from 'effectweb';
+import { list, component, domBinding, domMount, sequence, view } from 'effectweb';
 import { cachedLoad } from '../shared/cachedLoad';
 import { Effect } from 'effect';
 import type { ChatSummary } from '../../domain/models';
@@ -212,10 +213,43 @@ function refreshSidebar(
   }
   return { model: next, commands, cancel };
 }
-function menuPosition(x: number, y: number, height: number) {
-  return { x: Math.min(x, window.innerWidth - 190), y: Math.min(y, window.innerHeight - height) };
-}
+const ChatMenu = createMenuPresence<NonNullable<ChatSidebarState['contextMenu']>>();
 const chatHref = (peerId: string) => `?chat=${encodeURIComponent(peerId)}`;
+const filterEdges = domMount<HTMLDivElement>((element) => {
+  const update = () => {
+    const end = element.scrollWidth - element.clientWidth;
+    element.toggleAttribute('data-overflow-start', element.scrollLeft > 1);
+    element.toggleAttribute('data-overflow-end', end - element.scrollLeft > 1);
+  };
+  const placeIndicator = () => {
+    const selected = element.querySelector<HTMLElement>('button[aria-pressed="true"]');
+    if (!selected) return;
+    element.style.setProperty('--folder-x', selected.offsetLeft + 'px');
+    element.style.setProperty('--folder-y', selected.offsetTop + 'px');
+    element.style.setProperty('--folder-width', selected.offsetWidth + 'px');
+    element.style.setProperty('--folder-height', selected.offsetHeight + 'px');
+  };
+  const layout = () => {
+    update();
+    placeIndicator();
+  };
+  const resize = new ResizeObserver(layout);
+  const children = new MutationObserver(layout);
+  resize.observe(element);
+  children.observe(element, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributeFilter: ['aria-pressed', 'class'],
+  });
+  element.addEventListener('scroll', update, { passive: true });
+  layout();
+  return () => {
+    resize.disconnect();
+    children.disconnect();
+    element.removeEventListener('scroll', update);
+  };
+});
 function scrollFilters(event: WheelEvent & { currentTarget: HTMLElement }) {
   const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
   if (!delta) return;
@@ -228,12 +262,16 @@ interface ListInput {
   filter: ChatFilter;
   activeChatId: string;
   filtered: ChatSummary[];
+  topMessage: TelegramDialog['topMessage'];
   send: Send<ChatSidebarMessage>;
 }
 function acquireList(element: HTMLDivElement, input: () => ListInput) {
   let previousQuery: string | undefined,
     previousFilter: ChatFilter | undefined,
     previousPeer: string | undefined;
+  let listFade: Animation | undefined;
+  let previousIndex = -1;
+  let previousMessageId: number | undefined;
   let disposed = false,
     generation = 0;
   const resize = () =>
@@ -254,9 +292,38 @@ function acquireList(element: HTMLDivElement, input: () => ListInput) {
     const data = input(),
       reset = data.query !== previousQuery || data.filter !== previousFilter,
       select = data.activeChatId !== previousPeer;
+    const index = data.filtered.findIndex((chat) => chat.id === data.activeChatId);
+    const movedAfterSend =
+      !select &&
+      !reset &&
+      index >= 0 &&
+      index < previousIndex &&
+      data.topMessage?.outgoing &&
+      data.topMessage.id > (previousMessageId ?? 0);
+    previousIndex = index;
+    previousMessageId = data.topMessage?.id;
     previousQuery = data.query;
+    if (previousFilter !== undefined && previousFilter !== data.filter) {
+      listFade?.cancel();
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        listFade = element.animate([{ opacity: 0.55 }, { opacity: 1 }], {
+          duration: 160,
+          easing: 'ease-out',
+          id: 'folder-change',
+        });
+      }
+    }
     previousFilter = data.filter;
     previousPeer = data.activeChatId;
+    if (movedAfterSend) {
+      const top = index * CHAT_ROW_HEIGHT;
+      if (top + CHAT_ROW_HEIGHT <= element.scrollTop) {
+        element.scrollTo({
+          top: top + CHAT_ROW_HEIGHT <= element.clientHeight ? 0 : top,
+          behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+        });
+      }
+    }
     if (!reset && !select) return;
     const token = ++generation;
     queueMicrotask(() => {
@@ -288,6 +355,7 @@ function acquireList(element: HTMLDivElement, input: () => ListInput) {
     dispose: () => {
       disposed = true;
       generation++;
+      listFade?.cancel();
       observer.disconnect();
       document.removeEventListener('pointerdown', dismiss);
       document.removeEventListener('keydown', escape);
@@ -517,59 +585,64 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
         </header>
 
         <div
-          class="chat-filters flex items-center gap-2 overflow-x-auto px-4 pb-3 text-xs font-medium text-muted"
+          class="flex min-w-0 items-center gap-1 px-3 pb-2 text-xs font-medium text-muted"
           classList={{
             hidden: compact() && !model.folders.length,
             '!flex-col !px-0 !gap-0': compact(),
           }}
-          onWheel={scrollFilters}
         >
-          {list(sequence(['all', 'unread', 'groups', 'archived'] as const), (value) => (
-            <button
-              class="shrink-0 rounded-full px-3 py-1.5"
-              classList={{
-                'bg-[var(--accent-soft)] text-[var(--accent)]': model.filter === value,
-                '!grid !size-11 place-items-center !p-0': compact(),
-                'hover:bg-white/5': model.filter !== value,
-              }}
-              title={filterLabels[value]}
-              aria-label={filterLabels[value]}
-              aria-pressed={model.filter === value}
-              onClick={() => send({ type: 'Filter', value: value })}
-            >
-              {compact() ? (
-                value === 'all' ? (
-                  <MessagesSquare size={20} />
-                ) : value === 'unread' ? (
-                  <Mail size={20} />
-                ) : value === 'groups' ? (
-                  <Users size={20} />
+          <div
+            class="chat-filters flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+            classList={{ '!flex-col !flex-none': compact() }}
+            use={filterEdges}
+            onWheel={scrollFilters}
+          >
+            {list(sequence(['all', 'unread', 'groups', 'archived'] as const), (value) => (
+              <button
+                class="shrink-0 rounded-full px-2.5 py-1.5 transition-colors duration-150 focus-visible:outline-offset-[-2px]"
+                classList={{
+                  'text-[var(--accent)]': model.filter === value,
+                  '!grid !size-11 place-items-center !p-0': compact(),
+                  'hover:bg-[var(--surface-hover)]': model.filter !== value,
+                }}
+                title={filterLabels[value]}
+                aria-label={filterLabels[value]}
+                aria-pressed={model.filter === value}
+                onClick={() => send({ type: 'Filter', value: value })}
+              >
+                {compact() ? (
+                  value === 'all' ? (
+                    <MessagesSquare size={20} />
+                  ) : value === 'unread' ? (
+                    <Mail size={20} />
+                  ) : value === 'groups' ? (
+                    <Users size={20} />
+                  ) : (
+                    <Archive size={20} />
+                  )
                 ) : (
-                  <Archive size={20} />
-                )
-              ) : (
-                filterLabels[value]
-              )}
-            </button>
-          ))}
-          {list(idRows(model.folders), (folder) => (
-            <button
-              class="shrink-0 rounded-full px-3 py-1.5"
-              classList={{
-                'bg-[var(--accent-soft)] text-[var(--accent)]':
-                  model.filter === `folder:${folder.id}`,
-                '!grid !size-11 place-items-center !p-0': compact(),
-              }}
-              title={folder.title}
-              aria-label={folder.title}
-              aria-pressed={model.filter === `folder:${folder.id}`}
-              onClick={() => send({ type: 'Filter', value: `folder:${folder.id}` })}
-            >
-              {compact()
-                ? folder.emoticon || folder.title.slice(0, 2)
-                : `${folder.emoticon ?? ''} ${folder.title}`}
-            </button>
-          ))}
+                  filterLabels[value]
+                )}
+              </button>
+            ))}
+            {list(idRows(model.folders), (folder) => (
+              <button
+                class="shrink-0 rounded-full px-2.5 py-1.5 transition-colors duration-150 focus-visible:outline-offset-[-2px]"
+                classList={{
+                  'text-[var(--accent)]': model.filter === `folder:${folder.id}`,
+                  '!grid !size-11 place-items-center !p-0': compact(),
+                }}
+                title={folder.title}
+                aria-label={folder.title}
+                aria-pressed={model.filter === `folder:${folder.id}`}
+                onClick={() => send({ type: 'Filter', value: `folder:${folder.id}` })}
+              >
+                {compact()
+                  ? folder.emoticon || folder.title.slice(0, 2)
+                  : `${folder.emoticon ?? ''} ${folder.title}`}
+              </button>
+            ))}
+          </div>
           <button
             class="icon-button shrink-0"
             title="Edit chat folders"
@@ -582,7 +655,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
 
         {compact() && model.filter === 'all' && archivedChats.length > 0 ? (
           <button
-            class="chat-row archived-chats-row relative flex h-16 w-full items-center justify-center border-0 bg-transparent py-[0.55rem] text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
+            class="chat-row archived-chats-row relative flex h-16 w-full items-center justify-center border-0 bg-transparent py-[0.55rem] text-inherit transition-colors duration-150 hover:bg-[var(--surface-subtle)]"
             aria-label={`Archived chats, ${archivedChats.length} ${archivedChats.length === 1 ? 'chat' : 'chats'}${archivedUnreadCount > 0 ? `, ${describeUnreadCount(archivedUnreadCount)}` : ''}`}
             onClick={() => {
               send({ type: 'Filter', value: 'archived' });
@@ -602,6 +675,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
             filter: model.filter,
             activeChatId: props.activeChatId,
             filtered: filteredChats,
+            topMessage: model.dialogsById.get(props.activeChatId)?.topMessage,
             send,
           })}
           class="scroll-area min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -623,11 +697,9 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
               href={chatHref(chat.id)}
               draggable={false}
               role="button"
-              class="chat-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
+              class="chat-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition-colors duration-150 hover:bg-[var(--surface-subtle)]"
               classList={{
                 active: chat.id === props.activeChatId,
-                '!bg-[var(--dialog-selected)] text-white [--muted:rgb(255_255_255/0.85)]':
-                  chat.id === props.activeChatId,
                 '!justify-center !gap-0 !rounded-none !px-0 !py-[0.55rem]': compact(),
               }}
               onClick={(event) => {
@@ -654,10 +726,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
               }}
               onContextMenu={(event) => {
                 event.preventDefault();
-                const menu = {
-                  chatId: chat.id,
-                  ...menuPosition(event.clientX, event.clientY, chat.kind === 'user' ? 245 : 205),
-                };
+                const menu = { chatId: chat.id, x: event.clientX, y: event.clientY };
                 send({ type: 'ContextMenu', value: menu });
               }}
               aria-label={`${chat.title}, ${chat.preview}${chat.lastMessageStatus ? `, last message ${chat.lastMessageStatus}` : ''}${normalizeUnreadCount(chat.unread) > 0 ? `, ${describeUnreadCount(chat.unread)}` : ''}${chat.muted ? ', muted' : ''}`}
@@ -734,7 +803,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
               </p>
               {list(remotePeerRows(visiblePeerResults), (result) => (
                 <button
-                  class="chat-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition duration-100 hover:bg-[var(--surface-subtle)]"
+                  class="chat-row relative flex h-16 w-full items-center gap-3 rounded-[0.55rem] border-0 bg-transparent px-[0.65rem] py-2.5 text-inherit transition-colors duration-150 hover:bg-[var(--surface-subtle)]"
                   classList={{
                     '!justify-center !gap-0 !rounded-none !px-0 !py-[0.55rem]': compact(),
                   }}
@@ -808,114 +877,117 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
               {archiveOpen() && !model.query.trim() ? 'No archived chats' : 'No chats found'}
             </p>
           ) : null}
-          {model.contextMenu
-            ? ((menu) => {
-                const chat = () => props.chats.find(({ id }) => id === menu.chatId);
-                return (
-                  <div
-                    class="chat-context-menu"
-                    role="menu"
-                    aria-label="Chat actions"
-                    style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
+          <ChatMenu
+            value={model.contextMenu}
+            render={(menu, closing) => {
+              const chat = () => props.chats.find(({ id }) => id === menu.chatId);
+              return (
+                <div
+                  class="menu-surface chat-context-menu"
+                  inert={closing}
+                  aria-hidden={closing || undefined}
+                  role="menu"
+                  aria-label="Chat actions"
+                  use={menuAtPoint(menu)}
+                >
+                  <button
+                    role="menuitem"
+                    disabled={!props.online}
+                    onClick={() => {
+                      const selected = chat();
+                      send({ type: 'ContextMenu', value: undefined });
+                      if (selected)
+                        runInBackground(
+                          props.directory.setUnreadMark(
+                            selected.id,
+                            !(selected.unread > 0 || selected.unreadMark),
+                          ),
+                        );
+                    }}
                   >
+                    {chat()?.unread || chat()?.unreadMark ? (
+                      <CheckCheck size={16} />
+                    ) : (
+                      <Mail size={16} />
+                    )}
+                    {chat()?.unread || chat()?.unreadMark ? 'Mark as read' : 'Mark as unread'}
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      const selected = chat();
+                      send({ type: 'ContextMenu', value: undefined });
+                      if (selected)
+                        runInBackground(props.directory.setMuted(selected.id, !selected.muted));
+                    }}
+                  >
+                    <BellOff size={16} />
+                    {chat()?.muted ? 'Unmute' : 'Mute'}
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      const selected = chat();
+                      send({ type: 'ContextMenu', value: undefined });
+                      if (selected)
+                        runInBackground(props.directory.setPinned(selected.id, !selected.pinned));
+                    }}
+                  >
+                    {chat()?.pinned ? <PinOff size={16} /> : <Pin size={16} />}
+                    {chat()?.pinned ? 'Unpin chat' : 'Pin chat'}
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      const selected = chat();
+                      send({ type: 'ContextMenu', value: undefined });
+                      if (selected)
+                        runInBackground(
+                          props.directory.setArchived(selected.id, !selected.archived),
+                        );
+                    }}
+                  >
+                    {chat()?.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+                    {chat()?.archived ? 'Unarchive chat' : 'Archive chat'}
+                  </button>
+                  {chat()?.kind === 'user' ? (
                     <button
                       role="menuitem"
-                      disabled={!props.online}
+                      disabled={!contextUser()}
                       onClick={() => {
                         const selected = chat();
+                        const details = contextUser();
                         send({ type: 'ContextMenu', value: undefined });
-                        if (selected)
+                        if (selected && details)
                           runInBackground(
-                            props.directory.setUnreadMark(
-                              selected.id,
-                              !(selected.unread > 0 || selected.unreadMark),
-                            ),
+                            props.directory.setBlocked(selected.id, !details.blocked),
                           );
                       }}
                     >
-                      {chat()?.unread || chat()?.unreadMark ? (
-                        <CheckCheck size={16} />
-                      ) : (
-                        <Mail size={16} />
-                      )}
-                      {chat()?.unread || chat()?.unreadMark ? 'Mark as read' : 'Mark as unread'}
+                      <Ban size={16} />
+                      {contextUser()
+                        ? contextUser()!.blocked
+                          ? 'Unblock user'
+                          : 'Block user'
+                        : 'Loading…'}
                     </button>
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        const selected = chat();
-                        send({ type: 'ContextMenu', value: undefined });
-                        if (selected)
-                          runInBackground(props.directory.setMuted(selected.id, !selected.muted));
-                      }}
-                    >
-                      <BellOff size={16} />
-                      {chat()?.muted ? 'Unmute' : 'Mute'}
-                    </button>
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        const selected = chat();
-                        send({ type: 'ContextMenu', value: undefined });
-                        if (selected)
-                          runInBackground(props.directory.setPinned(selected.id, !selected.pinned));
-                      }}
-                    >
-                      {chat()?.pinned ? <PinOff size={16} /> : <Pin size={16} />}
-                      {chat()?.pinned ? 'Unpin chat' : 'Pin chat'}
-                    </button>
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        const selected = chat();
-                        send({ type: 'ContextMenu', value: undefined });
-                        if (selected)
-                          runInBackground(
-                            props.directory.setArchived(selected.id, !selected.archived),
-                          );
-                      }}
-                    >
-                      {chat()?.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
-                      {chat()?.archived ? 'Unarchive chat' : 'Archive chat'}
-                    </button>
-                    {chat()?.kind === 'user' ? (
-                      <button
-                        role="menuitem"
-                        disabled={!contextUser()}
-                        onClick={() => {
-                          const selected = chat();
-                          const details = contextUser();
-                          send({ type: 'ContextMenu', value: undefined });
-                          if (selected && details)
-                            runInBackground(
-                              props.directory.setBlocked(selected.id, !details.blocked),
-                            );
-                        }}
-                      >
-                        <Ban size={16} />
-                        {contextUser()
-                          ? contextUser()!.blocked
-                            ? 'Unblock user'
-                            : 'Block user'
-                          : 'Loading…'}
-                      </button>
-                    ) : null}
-                    <button
-                      class="danger"
-                      role="menuitem"
-                      onClick={() => {
-                        const selected = chat();
-                        send({ type: 'ContextMenu', value: undefined });
-                        if (selected) props.requestDelete(selected.id);
-                      }}
-                    >
-                      <Trash2 size={16} />
-                      Delete chat
-                    </button>
-                  </div>
-                );
-              })(model.contextMenu!)
-            : null}
+                  ) : null}
+                  <button
+                    class="danger"
+                    role="menuitem"
+                    onClick={() => {
+                      const selected = chat();
+                      send({ type: 'ContextMenu', value: undefined });
+                      if (selected) props.requestDelete(selected.id);
+                    }}
+                  >
+                    <Trash2 size={16} />
+                    Delete chat
+                  </button>
+                </div>
+              );
+            }}
+          />
         </div>
         {model.createOpen ? (
           <CreateChatDialog
@@ -956,7 +1028,7 @@ export const ChatSidebar = component<ChatSidebarProps, ChatSidebarState, ChatSid
           <nav
             id="sidebar-main-menu"
             popover="auto"
-            class="sidebar-main-menu"
+            class="menu-surface sidebar-main-menu"
             aria-label="Main menu"
           >
             <button

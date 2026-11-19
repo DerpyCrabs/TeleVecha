@@ -18,7 +18,7 @@ import RotateCcw from '@effectweb/lucide/icons/rotate-ccw';
 import Settings from '@effectweb/lucide/icons/settings';
 import X from '@effectweb/lucide/icons/x';
 import { Portal, component, view } from 'effectweb';
-import { modalMount } from '../shared/modalMount';
+import { dismissPanel, modalMount } from '../shared/modalMount';
 import { panelCloseButtonClass, panelHeaderClass } from '../shared/panelStyles';
 import { AppearanceSettings } from '../theme/AppearanceSettings';
 import type { ThemePreferences, ThemePresetId } from '../theme/themePreferences';
@@ -68,17 +68,18 @@ export const SettingsDialog = component<
         <div
           use={modalMount(props.close)}
           class="panel-overlay"
+          data-animate-dismiss=""
           role="presentation"
           tabIndex={-1}
           onPointerDown={(event) =>
             event.target === event.currentTarget &&
             !props.loggingOut &&
             !props.clearingCache &&
-            props.close()
+            dismissPanel(event.currentTarget, props.close)
           }
         >
           <section
-            class="settings-dialog flex w-[min(42rem,calc(100vw-2rem))] max-h-[min(48rem,calc(100dvh-2rem))] flex-col overflow-hidden rounded-2xl border border-[var(--line-strong)] bg-panel shadow-[0_24px_80px_var(--shadow)]"
+            class="settings-dialog flex w-[min(42rem,calc(100vw-2rem))] max-h-[min(48rem,calc(100dvh-2rem))] flex-col overflow-hidden rounded-2xl border border-[var(--line-strong)] bg-panel shadow-[0_8px_32px_var(--shadow)]"
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-title"
@@ -109,7 +110,7 @@ export const SettingsDialog = component<
               <button
                 class={panelCloseButtonClass}
                 disabled={props.loggingOut}
-                onClick={props.close}
+                onClick={(event) => dismissPanel(event.currentTarget, props.close)}
                 aria-label="Close settings"
               >
                 <X size={18} />
@@ -135,21 +136,32 @@ export const SettingsDialog = component<
                 />
               ) : (
                 <>
-                  <button class="settings-navigation-row" onClick={() => send({ page: 'devices' })}>
-                    <Monitor size={22} />
-                    <span>Devices</span>
-                    <ChevronRight size={18} />
-                  </button>
-                  <button class="settings-navigation-row" onClick={() => send({ page: 'privacy' })}>
-                    <Shield size={22} />
-                    <span>Privacy</span>
-                    <ChevronRight size={18} />
-                  </button>
-                  <button class="settings-navigation-row" onClick={() => send({ page: 'folders' })}>
-                    <Folder size={22} />
-                    <span>Chat Folders</span>
-                    <ChevronRight size={18} />
-                  </button>
+                  <nav class="settings-navigation" aria-label="Settings categories">
+                    <button
+                      class="settings-navigation-row"
+                      onClick={() => send({ page: 'devices' })}
+                    >
+                      <Monitor size={22} />
+                      <span>Devices</span>
+                      <ChevronRight size={18} />
+                    </button>
+                    <button
+                      class="settings-navigation-row"
+                      onClick={() => send({ page: 'privacy' })}
+                    >
+                      <Shield size={22} />
+                      <span>Privacy</span>
+                      <ChevronRight size={18} />
+                    </button>
+                    <button
+                      class="settings-navigation-row"
+                      onClick={() => send({ page: 'folders' })}
+                    >
+                      <Folder size={22} />
+                      <span>Chat Folders</span>
+                      <ChevronRight size={18} />
+                    </button>
+                  </nav>
                   <AppearanceSettings
                     preferences={props.appearance}
                     telegramWallpapers={props.telegramWallpapers}

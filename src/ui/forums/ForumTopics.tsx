@@ -1,3 +1,4 @@
+import { ToggleMenu } from '../shared/menuSurface';
 import { component, view, list } from 'effectweb';
 import { Effect } from 'effect';
 import ArrowLeft from '@effectweb/lucide/icons/arrow-left';
@@ -322,49 +323,58 @@ export const ForumTopics = component<Props, State, Message>(
                 <Ellipsis size={18} />
               </button>
             ) : null}
-            {model.menu === topic.id && (model.canManage || topic.own) ? (
-              <div class="forum-topic-menu" role="menu" aria-label={`Manage ${topic.title}`}>
-                <button role="menuitem" onClick={() => send({ type: 'Edit', topic })}>
-                  Edit topic
-                </button>
-                <button
-                  role="menuitem"
-                  disabled={!model.props.online || model.busy}
-                  onClick={() => send({ type: 'Close', topic })}
+            <ToggleMenu
+              value={(model.menu === topic.id && (model.canManage || topic.own)) || undefined}
+              render={(_, closing) => (
+                <div
+                  class="menu-surface forum-topic-menu"
+                  inert={closing}
+                  aria-hidden={closing || undefined}
+                  role="menu"
+                  aria-label={`Manage ${topic.title}`}
                 >
-                  {topic.closed ? 'Reopen topic' : 'Close topic'}
-                </button>
-                {model.canManage ? (
+                  <button role="menuitem" onClick={() => send({ type: 'Edit', topic })}>
+                    Edit topic
+                  </button>
                   <button
                     role="menuitem"
                     disabled={!model.props.online || model.busy}
-                    onClick={() => send({ type: 'Pin', topic })}
+                    onClick={() => send({ type: 'Close', topic })}
                   >
-                    {topic.pinned ? 'Unpin topic' : 'Pin topic'}
+                    {topic.closed ? 'Reopen topic' : 'Close topic'}
                   </button>
-                ) : null}
-                {topic.id !== 1 &&
-                (model.props.dialog.permissions?.canDeleteMessages || topic.own) ? (
-                  <button
-                    role="menuitem"
-                    class="text-red-400"
-                    disabled={!model.props.online || model.busy}
-                    onClick={() => send({ type: 'Delete', topic })}
-                  >
-                    Delete topic
-                  </button>
-                ) : null}
-                {model.canManage && topic.id === 1 ? (
-                  <button
-                    role="menuitem"
-                    disabled={!model.props.online || model.busy}
-                    onClick={() => send({ type: 'Hide', topic })}
-                  >
-                    {topic.hidden ? 'Show topic' : 'Hide topic'}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
+                  {model.canManage ? (
+                    <button
+                      role="menuitem"
+                      disabled={!model.props.online || model.busy}
+                      onClick={() => send({ type: 'Pin', topic })}
+                    >
+                      {topic.pinned ? 'Unpin topic' : 'Pin topic'}
+                    </button>
+                  ) : null}
+                  {topic.id !== 1 &&
+                  (model.props.dialog.permissions?.canDeleteMessages || topic.own) ? (
+                    <button
+                      role="menuitem"
+                      class="text-red-400"
+                      disabled={!model.props.online || model.busy}
+                      onClick={() => send({ type: 'Delete', topic })}
+                    >
+                      Delete topic
+                    </button>
+                  ) : null}
+                  {model.canManage && topic.id === 1 ? (
+                    <button
+                      role="menuitem"
+                      disabled={!model.props.online || model.busy}
+                      onClick={() => send({ type: 'Hide', topic })}
+                    >
+                      {topic.hidden ? 'Show topic' : 'Hide topic'}
+                    </button>
+                  ) : null}
+                </div>
+              )}
+            />
           </div>
         ))}
         {!model.busy && !model.topics.length ? (

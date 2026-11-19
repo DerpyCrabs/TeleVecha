@@ -130,3 +130,30 @@ test('folder filters fit the compact sidebar and remain identifiable', async ({
   await expect(chatButton(page, /Fixture Group/)).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('compact-folders.png') });
 });
+
+test('moves the folder indicator and respects reduced motion', async ({ page }) => {
+  await openReady(page);
+  const filters = page.locator('.chat-filters');
+  const switchTo = (name: string) =>
+    filters.evaluate(async (bar, label) => {
+      const button = bar.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+      button.click();
+      await new Promise(requestAnimationFrame);
+      const list = document.querySelector('[data-testid="chat-list"]')!;
+      return {
+        target: (bar as HTMLElement).style.getPropertyValue('--folder-x'),
+        expected: button.offsetLeft + 'px',
+        duration: getComputedStyle(bar, '::before').transitionDuration,
+        fading: list.getAnimations().some((animation) => animation.id === 'folder-change'),
+      };
+    }, name);
+  const moving = await switchTo('Groups');
+  expect(moving.target).toBe(moving.expected);
+  expect(moving.duration).toContain('0.18s');
+  expect(moving.fading).toBe(true);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const reduced = await switchTo('Unread');
+  expect(reduced.target).toBe(reduced.expected);
+  expect(parseFloat(reduced.duration)).toBeLessThan(0.001);
+  expect(reduced.fading).toBe(false);
+});

@@ -1,3 +1,4 @@
+import { ToggleMenu } from '../shared/menuSurface';
 import { list } from 'effectweb';
 import type { TelegramBotCommand } from '../../telegram/types';
 import { commandRows } from '../collections';
@@ -88,64 +89,73 @@ export const BotControls = view<BotControlsProps, never>((props, _send) => {
           >
             Menu
           </button>
-          {props.menuOpen ? (
-            <div class="bot-command-menu" role="menu" aria-label="Bot commands">
-              {props.appTitle && !props.query ? (
-                <button
-                  class="bot-open-app"
-                  role="menuitem"
-                  disabled={!props.enabled || props.appBusy}
-                  onClick={() => {
-                    props.onCloseMenu();
-                    props.onOpenApp();
-                  }}
-                >
-                  {props.appBusy ? 'Opening…' : props.appTitle}
-                </button>
-              ) : null}
-              {props.isBot && !props.query ? (
-                <button
-                  role="menuitem"
-                  disabled={!props.enabled || props.starting}
-                  onClick={props.onStart}
-                >
-                  <RotateCcw size={15} aria-hidden="true" />
-                  {props.starting ? 'Restarting…' : 'Restart bot'}
-                </button>
-              ) : null}
-              {props.loadingCommands ? <span role="status">Loading commands…</span> : null}
-              {list(
-                commandRows(
-                  props.commands.filter(
-                    (command) =>
-                      !props.query ||
-                      `/${command.command}${command.botUsername ? `@${command.botUsername}` : ''}`
-                        .toLowerCase()
-                        .startsWith(props.query.toLowerCase()),
-                  ),
-                ),
-                (command) => (
+          <ToggleMenu
+            value={props.menuOpen || undefined}
+            render={(_, closing) => (
+              <div
+                class="menu-surface bot-command-menu"
+                inert={closing}
+                aria-hidden={closing || undefined}
+                role="menu"
+                aria-label="Bot commands"
+              >
+                {props.appTitle && !props.query ? (
+                  <button
+                    class="bot-open-app"
+                    role="menuitem"
+                    disabled={!props.enabled || props.appBusy}
+                    onClick={() => {
+                      props.onCloseMenu();
+                      props.onOpenApp();
+                    }}
+                  >
+                    {props.appBusy ? 'Opening…' : props.appTitle}
+                  </button>
+                ) : null}
+                {props.isBot && !props.query ? (
                   <button
                     role="menuitem"
-                    disabled={!props.enabled}
-                    onClick={() => props.onCommand(command)}
+                    disabled={!props.enabled || props.starting}
+                    onClick={props.onStart}
                   >
-                    <strong>
-                      /{command.command}
-                      {!props.isBot && command.botUsername ? `@${command.botUsername}` : ''}
-                    </strong>
-                    <small>
-                      {!props.isBot && command.botName ? `${command.botName} · ` : ''}
-                      {command.description}
-                    </small>
+                    <RotateCcw size={15} aria-hidden="true" />
+                    {props.starting ? 'Restarting…' : 'Restart bot'}
                   </button>
-                ),
-              )}
-              {!props.loadingCommands && props.commands.length === 0 ? (
-                <span>No commands published by this bot.</span>
-              ) : null}
-            </div>
-          ) : null}
+                ) : null}
+                {props.loadingCommands ? <span role="status">Loading commands…</span> : null}
+                {list(
+                  commandRows(
+                    props.commands.filter(
+                      (command) =>
+                        !props.query ||
+                        `/${command.command}${command.botUsername ? `@${command.botUsername}` : ''}`
+                          .toLowerCase()
+                          .startsWith(props.query.toLowerCase()),
+                    ),
+                  ),
+                  (command) => (
+                    <button
+                      role="menuitem"
+                      disabled={!props.enabled}
+                      onClick={() => props.onCommand(command)}
+                    >
+                      <strong>
+                        /{command.command}
+                        {!props.isBot && command.botUsername ? `@${command.botUsername}` : ''}
+                      </strong>
+                      <small>
+                        {!props.isBot && command.botName ? `${command.botName} · ` : ''}
+                        {command.description}
+                      </small>
+                    </button>
+                  ),
+                )}
+                {!props.loadingCommands && props.commands.length === 0 ? (
+                  <span>No commands published by this bot.</span>
+                ) : null}
+              </div>
+            )}
+          />
         </div>
       ) : null}
     </section>

@@ -15,6 +15,7 @@ import './ui/app/panels.css';
 import './ui/app/chrome.css';
 import './ui/app/responsive.css';
 import './ui/bots/bot.css';
+import './ui/shared/styles/menus.css';
 
 const main = Effect.scoped(
   Effect.gen(function* () {

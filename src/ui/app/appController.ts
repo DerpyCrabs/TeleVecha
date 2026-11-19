@@ -894,6 +894,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     if (state.model().activeChatId === peerId && state.model().activeSaved)
       url.searchParams.set('saved', state.model().activeSaved!.peer.id);
     else url.searchParams.delete('saved');
+    if (mode === 'replace' && url.href === window.location.href) return;
     window.history[mode === 'push' ? 'pushState' : 'replaceState']({}, '', url);
   };
   const selectChat = async (
@@ -1365,19 +1366,16 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       );
     return pending?.mimeType.startsWith('video/') ? undefined : mediaAssetFor(messageId);
   };
-  const imageViewerMessages = () =>
-    renderedMessages().filter(
-      (message) => message.media && mediaPresentation(message.media).preview === 'image',
-    );
-  const openImageViewer = (
+  const openMediaViewer = (
     message: ChatMessage,
     preview: MediaPreview,
-    candidates: readonly ChatMessage[] = imageViewerMessages(),
+    album?: readonly ChatMessage[],
   ) => {
-    if (preview.kind !== 'image') return false;
-    const messages = candidates.filter(
-      (candidate) => candidate.media && mediaPresentation(candidate.media).preview === 'image',
-    );
+    if (!album && preview.kind !== 'image') return false;
+    const messages = (album ?? renderedMessages()).filter((candidate) => {
+      const kind = candidate.media && mediaPresentation(candidate.media).preview;
+      return album ? Boolean(kind) : kind === 'image';
+    });
     const index = messages.findIndex(({ id }) => id === message.id);
     state.send({
       type: 'Changed',
@@ -1392,15 +1390,18 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     });
     return true;
   };
-  const navigateImageViewer = async (index: number) => {
+  const navigateMediaViewer = async (index: number) => {
     const current = state.model().mediaViewer;
     const message = current?.messages[index];
     if (!current || !message?.media || current.loading) return;
     state.send({ type: 'Changed', changes: { mediaViewer: { ...current, loading: true } } });
     try {
       const asset = mediaAssetFor(message.id);
-      if (!asset) return;
-      const url = asset.cached() ?? (await runEffect(asset.load()));
+      const kind = mediaPresentation(message.media).preview;
+      if (!asset || !kind) return;
+      const url =
+        asset.cached() ??
+        (await runEffect(kind === 'video' && asset.play ? asset.play() : asset.load()));
       const latest = state.model().mediaViewer;
       if (!latest || latest.messages !== current.messages) return;
       state.send({
@@ -1410,7 +1411,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
             messages: current.messages,
             index,
             loading: false,
-            preview: { kind: 'image', name: message.media.name, url },
+            preview: { kind, name: message.media.name, url },
           },
         },
       });
@@ -2344,7 +2345,9 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     });
     queueMicrotask(() =>
       document
-        .querySelector<HTMLButtonElement>('.message-context-menu [role="menuitem"]:not(:disabled)')
+        .querySelector<HTMLButtonElement>(
+          '.message-context-menu:not([inert]) [role="menuitem"]:not(:disabled)',
+        )
         ?.focus(),
     );
   };
@@ -2768,7 +2771,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
     scrollToReply,
     mediaAssetFor,
     mediaPreviewAssetFor,
-    openImageViewer,
+    openMediaViewer,
     bot,
     pendingSendForMessage,
     retryPendingSend,
@@ -2835,7 +2838,7 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       }),
     expressions,
     editLastMessage,
-    navigateImageViewer,
+    navigateMediaViewer,
     setMediaViewer: (
       value:
         | {

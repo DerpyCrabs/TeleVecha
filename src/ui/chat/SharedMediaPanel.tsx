@@ -32,7 +32,7 @@ import { MediaAttachment } from '../media/MediaAttachment';
 import { MediaViewer } from '../media/MediaViewer';
 import { saveMediaUrl } from '../media/mediaActions';
 import { mediaPresentation } from '../media/mediaPresentation';
-import { modalMount } from '../shared/modalMount';
+import { dismissPanel, modalMount } from '../shared/modalMount';
 import {
   panelClass,
   panelCloseButtonClass,
@@ -273,9 +273,12 @@ const SharedMediaContent = component<
         <div
           use={modalMount(props.close)}
           class="panel-overlay"
+          data-animate-dismiss=""
           role="presentation"
           tabIndex={-1}
-          onPointerDown={(event) => event.target === event.currentTarget && props.close()}
+          onPointerDown={(event) =>
+            event.target === event.currentTarget && dismissPanel(event.currentTarget, props.close)
+          }
         >
           <section
             class={`shared-panel ${panelClass}`}
@@ -287,7 +290,7 @@ const SharedMediaContent = component<
               <strong>{labels[props.initialKind]}</strong>
               <button
                 class={panelCloseButtonClass}
-                onClick={props.close}
+                onClick={(event) => dismissPanel(event.currentTarget, props.close)}
                 aria-label={`Close shared ${props.initialKind}`}
               >
                 <X size={18} />

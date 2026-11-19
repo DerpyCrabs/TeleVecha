@@ -29,11 +29,10 @@
   border-radius: 50%;
   background: var(--accent);
   color: white;
-  transition: 120ms ease;
+  transition: filter 140ms ease;
 }
 .send-button:hover {
   filter: brightness(1.12);
-  transform: translateY(-1px);
 }
 
 .chat-composer {
@@ -73,13 +72,10 @@
   background: var(--surface-raised);
   box-shadow: 0 5px 18px var(--shadow);
   color: var(--text);
-  transition:
-    background 120ms ease,
-    transform 120ms ease;
+  transition: background-color 140ms ease;
 }
 .jump-to-present:hover {
   background: var(--surface-hover);
-  transform: translateY(-1px);
 }
 .conversation-content {
   gap: 0.34rem;
@@ -117,15 +113,25 @@
   color: var(--muted);
 }
 
+.settings-navigation {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--line);
+}
 .settings-navigation-row {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 10px;
   width: 100%;
-  padding: 1rem 1.25rem;
-  min-height: 3.5rem;
+  padding: 6px 10px;
+  min-height: 38px;
+  border-radius: 7px;
+  transition: background-color 140ms ease;
   text-align: left;
-  border-bottom: 1px solid var(--line);
+}
+.settings-navigation-row svg {
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
 }
 .settings-navigation-row span {
   flex: 1;
@@ -440,32 +446,11 @@
 
 .notification-menu {
   position: absolute;
-  right: calc(100% + 0.5rem);
+  right: calc(100% + 8px);
   top: 0;
   width: max-content;
   max-width: calc(100vw - 6rem);
-  padding: 0.35rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 0.75rem;
-  background: var(--surface-raised);
-  box-shadow: 0 5px 18px var(--shadow);
 }
-.notification-menu button {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  min-height: 2.75rem;
-  width: 100%;
-  padding: 0.5rem 0.8rem;
-  border-radius: 0.5rem;
-  color: var(--text);
-  text-align: left;
-}
-.notification-menu button:hover,
-.notification-menu button:focus-visible {
-  background: var(--surface-hover);
-}
-
 .folder-settings {
   padding-bottom: 0.5rem;
 }
@@ -695,25 +680,7 @@
 .forum-topic-options:hover {
   opacity: 1;
 }
-.forum-topic-menu {
-  margin: 0 10px 8px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
-  padding: 4px;
-  box-shadow: 0 5px 16px #0003;
-}
-.forum-topic-menu button {
-  display: block;
-  width: 100%;
-  padding: 9px 12px;
-  border-radius: 6px;
-  text-align: left;
-  font-size: 14px;
-}
-.forum-topic-menu button:hover {
-  background: color-mix(in srgb, var(--ink) 7%, transparent);
-}
+
 .forum-load-more {
   width: 100%;
   padding: 16px;
@@ -1350,20 +1317,51 @@
   color: var(--muted);
   font-size: 13px;
 }
-.group-history-link {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 14px 20px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: transparent;
-  color: var(--accent);
-  text-align: left;
+.detail-actions {
+  padding: 0 6px;
 }
+.detail-actions:has(button) {
+  padding-block: 4px;
+}
+.detail-actions + .detail-actions {
+  padding-top: 0;
+}
+.detail-row,
+.detail-actions .group-history-link {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.875rem;
+  text-align: start;
+  transition: background-color 140ms ease;
+}
+.detail-row > svg,
+.detail-actions .group-history-link > svg {
+  justify-self: center;
+  color: var(--muted);
+}
+.detail-row > b {
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.detail-row:enabled:hover,
 .group-history-link:hover {
-  background: var(--surface-subtle);
+  background: var(--surface-hover);
+}
+.contact-actions {
+  border-block: 1px solid var(--line);
+}
+.detail-row.danger {
+  color: var(--danger, #e36e70);
 }
 .group-history-link span {
   display: grid;
@@ -1375,27 +1373,8 @@
 }
 
 .sidebar-main-menu {
-  inset: auto auto 4.3rem 0.5rem;
-  width: min(15rem, calc(100vw - 1rem));
+  inset: auto auto 4.25rem 8px;
+  width: min(14rem, calc(100vw - 16px));
   margin: 0;
-  padding: 0.35rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 0.75rem;
-  background: var(--surface-raised);
-  color: var(--text);
-  box-shadow: 0 5px 18px var(--shadow);
-}
-.sidebar-main-menu button {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  width: 100%;
-  min-height: 2.75rem;
-  padding: 0.5rem 0.8rem;
-  border-radius: 0.5rem;
-  text-align: left;
-}
-.sidebar-main-menu button:hover,
-.sidebar-main-menu button:focus-visible {
-  background: var(--surface-hover);
+  transform-origin: bottom left;
 }

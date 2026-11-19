@@ -1,6 +1,6 @@
 import X from '@effectweb/lucide/icons/x';
 import { Portal, view, type JSX } from 'effectweb';
-import { modalMount } from './modalMount';
+import { dismissPanel, modalMount } from './modalMount';
 import { panelClass, panelCloseButtonClass, panelHeaderClass } from './panelStyles';
 
 /** One modal lifetime owns focus containment, dismissal and accessible labeling. */
@@ -10,6 +10,7 @@ export const Dialog = view<
     label?: string;
     onClose: () => void;
     closeLabel?: string;
+    animateDismiss?: boolean;
     class?: string;
     children?: JSX.Element;
     footer?: JSX.Element;
@@ -21,9 +22,12 @@ export const Dialog = view<
     <div
       use={modalMount(props.onClose)}
       class="panel-overlay"
+      data-animate-dismiss={props.animateDismiss !== false ? '' : undefined}
       role="presentation"
       tabIndex={-1}
-      onPointerDown={(event) => event.target === event.currentTarget && props.onClose()}
+      onPointerDown={(event) =>
+        event.target === event.currentTarget && dismissPanel(event.currentTarget, props.onClose)
+      }
     >
       <section
         class={props.class ?? panelClass}
@@ -42,7 +46,7 @@ export const Dialog = view<
           )}
           <button
             class={panelCloseButtonClass}
-            onClick={props.onClose}
+            onClick={(event) => dismissPanel(event.currentTarget, props.onClose)}
             aria-label={props.closeLabel ?? 'Close dialog'}
           >
             <X size={18} />

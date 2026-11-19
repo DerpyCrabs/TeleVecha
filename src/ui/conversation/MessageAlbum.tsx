@@ -28,7 +28,8 @@ interface MessageAlbumProps {
 function aspectRatio(message: ChatMessage) {
   const width = message.media?.width;
   const height = message.media?.height;
-  return width && height ? width / height : 1;
+  // Keep each tile large enough to recognise and open, even beside a panorama.
+  return width && height ? Math.max(0.67, Math.min(2, width / height)) : 1;
 }
 function albumRows(messages: readonly ChatMessage[]) {
   if (messages.length === 3) return [messages.slice(0, 1), messages.slice(1)];
@@ -134,15 +135,20 @@ export const MessageAlbum = component<MessageAlbumProps, MessageAlbumState, Mess
         data-album-size={props.messages.length}
       >
         {list(sequence(rows), (row) => (
-          <div class="media-album-row">
+          <div
+            class="media-album-row"
+            style={{
+              'aspect-ratio':
+                files || props.messages.length === 3
+                  ? undefined
+                  : String(row.reduce((sum, item) => sum + aspectRatio(item), 0)),
+            }}
+          >
             {list(idRows(row), (message) => (
               <div
                 class="media-album-item"
                 data-message-id={message.id}
-                style={{
-                  'aspect-ratio': files ? undefined : String(aspectRatio(message)),
-                  'flex-grow': files ? undefined : String(aspectRatio(message)),
-                }}
+                style={{ 'flex-grow': files ? undefined : String(aspectRatio(message)) }}
                 tabIndex={0}
                 aria-label={`Album item ${message.media?.name ?? message.id}. Press Shift+F10 for actions.`}
                 onContextMenu={(event) => {

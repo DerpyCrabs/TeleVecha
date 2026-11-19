@@ -36,37 +36,22 @@
 
 .bot-command-menu {
   position: absolute;
-  bottom: calc(100% + 0.45rem);
+  bottom: calc(100% + 8px);
   left: 0;
   z-index: 30;
-  display: grid;
-  width: min(24rem, calc(100vw - 2rem));
-  max-height: 18rem;
-  overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: 0.75rem;
-  background: var(--surface-raised);
-  padding: 0.4rem;
-  box-shadow: 0 1rem 2rem var(--shadow);
+  width: min(22rem, calc(100vw - 16px));
+  max-height: min(18rem, 60dvh);
+  transform-origin: bottom left;
 }
-
-.bot-command-menu button {
+.menu-surface.bot-command-menu button:has(small) {
   display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 0.1rem 0.5rem;
-  border-radius: 0.45rem;
-  padding: 0.5rem 0.6rem;
-  text-align: left;
-}
-
-.bot-command-menu button:hover {
-  background: var(--surface-hover);
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 2px;
 }
 
 .bot-command-menu button strong,
 .bot-command-menu button small {
-  grid-column: 2;
+  grid-column: 1;
 }
 
 .bot-command-menu button svg {

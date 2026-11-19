@@ -461,7 +461,7 @@ test('renders a single photo with one media canvas instead of nested containers'
   expect(styles.visual.top).toBeCloseTo(styles.message.top, 0);
   expect(styles.visual.right).toBeCloseTo(styles.message.right, 0);
   expect(styles.visual.left).toBeCloseTo(styles.message.left, 0);
-  expect(styles.visual.height).toBe(384);
+  expect(styles.visual.height).toBeCloseTo(384, 2);
   expect(styles.image.background).toBe('rgba(0, 0, 0, 0)');
   expect(styles.image.top).toBeCloseTo(styles.visual.top, 0);
   expect(styles.image.right).toBeCloseTo(styles.visual.right, 0);
@@ -584,8 +584,8 @@ test('keeps decorated and extreme portrait photos free of an outer frame', async
   const extreme = page.locator('article[data-message-id="84"]');
   const extremeImage = extreme.getByRole('img', { name: 'extreme-portrait.jpg' });
   await expect(extremeImage).toBeVisible();
-  await expect(extreme).toHaveClass(/message-media-cropped/u);
-  await expect(extremeImage).toHaveCSS('object-fit', 'cover');
+  await expect(extreme.locator('.media-visual')).toHaveAttribute('data-photo-fit', 'contain');
+  await expect(extremeImage).toHaveCSS('object-fit', 'contain');
   const extremeRatio = await extreme.locator('.media-visual').evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     return bounds.width / bounds.height;
@@ -648,7 +648,7 @@ test('widens an extreme portrait preview when its caption needs more room', asyn
     const media = element.querySelector<HTMLElement>('.media-visual')!;
     return {
       bubbleWidth: element.getBoundingClientRect().width,
-      previewRatio: media.getBoundingClientRect().width / media.getBoundingClientRect().height,
+      previewRatio: media.clientWidth / media.clientHeight,
     };
   });
   expect(geometry.bubbleWidth).toBeGreaterThanOrEqual(380);

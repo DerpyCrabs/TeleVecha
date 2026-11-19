@@ -1,3 +1,4 @@
+import { ToggleMenu } from '../shared/menuSurface';
 import { component, domBinding, list, view } from 'effectweb';
 import CheckCheck from '@effectweb/lucide/icons/check-check';
 import { activateFocusScope } from '../shared/focusScope';
@@ -154,19 +155,24 @@ export const UnreadNotifications = component<Props, State, Message>(
           {model.error}
         </p>
       ) : null}
-      {model.menu ? (
-        <div
-          class="notification-menu"
-          role="menu"
-          aria-label="Notification options"
-          use={notificationMenu(() => send({ type: 'Menu', open: false }))}
-        >
-          <button type="button" role="menuitem" onClick={() => send({ type: 'MarkAll' })}>
-            <CheckCheck size={18} />
-            <span>Mark all as read</span>
-          </button>
-        </div>
-      ) : null}
+      <ToggleMenu
+        value={model.menu || undefined}
+        render={(_, closing) => (
+          <div
+            class="menu-surface notification-menu"
+            inert={closing}
+            aria-hidden={closing || undefined}
+            role="menu"
+            aria-label="Notification options"
+            use={closing ? undefined : notificationMenu(() => send({ type: 'Menu', open: false }))}
+          >
+            <button type="button" role="menuitem" onClick={() => send({ type: 'MarkAll' })}>
+              <CheckCheck size={18} />
+              <span>Mark all as read</span>
+            </button>
+          </div>
+        )}
+      />
       {list(['mention', 'reaction'] as const, (kind) => {
         const count = kind === 'mention' ? model.props.mentions : model.props.reactions;
         const label = kind === 'mention' ? 'Unread replies and mentions' : 'Unread reactions';

@@ -71,13 +71,15 @@ test('renders a generic file with one attachment card', async ({ page }) => {
       wrapperBorder: getComputedStyle(wrapper).borderTopWidth,
       wrapperBackground: getComputedStyle(wrapper).backgroundColor,
       controlBorder: getComputedStyle(control).borderTopWidth,
+      clipping: getComputedStyle(wrapper).overflow,
     };
   });
 
   expect(framing).toEqual({
     wrapperBorder: '0px',
-    wrapperBackground: 'rgba(0, 0, 0, 0)',
-    controlBorder: '1px',
+    wrapperBackground: 'rgba(255, 255, 255, 0.07)',
+    controlBorder: '0px',
+    clipping: 'visible',
   });
 });
 

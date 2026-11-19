@@ -158,7 +158,7 @@ describe('layoutMessages', () => {
     );
 
     expect(layout?.className).toContain('message-media-surface');
-    expect(layout?.className).toContain('message-media-cropped');
+    expect(layout?.className).not.toContain('message-media-cropped');
     expect(layout?.width).toBe('min(12rem, 100%)');
   });
 
@@ -181,7 +181,7 @@ describe('layoutMessages', () => {
       [],
     );
 
-    expect(layout?.className).toContain('message-media-cropped');
+    expect(layout?.className).not.toContain('message-media-cropped');
     expect(layout?.className).toContain('message-captioned-media');
     expect(layout?.width).toBe('min(24rem, 100%)');
   });

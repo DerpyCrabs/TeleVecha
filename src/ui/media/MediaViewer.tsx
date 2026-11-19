@@ -1,3 +1,4 @@
+import { PointMenu, menuAtPoint } from '../shared/menuSurface';
 import ChevronLeft from '@effectweb/lucide/icons/chevron-left';
 import ChevronRight from '@effectweb/lucide/icons/chevron-right';
 import Download from '@effectweb/lucide/icons/download';
@@ -348,32 +349,35 @@ export const MediaViewer = component<MediaViewerProps, MediaViewerState, MediaVi
             ) : null}
           </div>
           {props.caption ? <footer class="media-viewer-caption">{props.caption}</footer> : null}
-          {model.menu
-            ? ((position) => (
-                <div
-                  class="media-viewer-menu"
-                  role="menu"
-                  aria-label="Media actions"
-                  style={{ left: `${position.x}px`, top: `${position.y}px` }}
-                >
-                  {canExport() && props.download ? (
-                    <button role="menuitem" onClick={download}>
-                      <Download size={15} /> Save media as
-                    </button>
-                  ) : null}
-                  {canExport() && props.forward ? (
-                    <button role="menuitem" onClick={props.forward}>
-                      <Forward size={15} /> Forward
-                    </button>
-                  ) : null}
-                  {props.delete ? (
-                    <button role="menuitem" class="danger" onClick={props.delete}>
-                      <Trash2 size={15} /> Delete
-                    </button>
-                  ) : null}
-                </div>
-              ))(model.menu!)
-            : null}
+          <PointMenu
+            value={model.menu}
+            render={(position, closing) => (
+              <div
+                class="menu-surface media-viewer-menu"
+                inert={closing}
+                aria-hidden={closing || undefined}
+                role="menu"
+                aria-label="Media actions"
+                use={menuAtPoint(position)}
+              >
+                {canExport() && props.download ? (
+                  <button role="menuitem" onClick={download}>
+                    <Download size={15} /> Save media as
+                  </button>
+                ) : null}
+                {canExport() && props.forward ? (
+                  <button role="menuitem" onClick={props.forward}>
+                    <Forward size={15} /> Forward
+                  </button>
+                ) : null}
+                {props.delete ? (
+                  <button role="menuitem" class="danger" onClick={props.delete}>
+                    <Trash2 size={15} /> Delete
+                  </button>
+                ) : null}
+              </div>
+            )}
+          />
         </div>
       </Portal>
     );

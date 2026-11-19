@@ -6,6 +6,7 @@ import type { TelegramSticker, TelegramStickerPack } from '../../telegram/types'
 import { emojiRows } from '../collections';
 import Search from '@effectweb/lucide/icons/search';
 import { GifPicker, type GifResults } from './GifPicker';
+import { pickerPageMotion } from './pickerPageMotion';
 import { StickerPicker } from './StickerPicker';
 import { emojiEntries } from './emojiData';
 export type ExpressionTab = 'emoji' | 'gifs' | 'stickers';
@@ -45,7 +46,7 @@ export const ExpressionPicker = component<ExpressionPickerProps, { query: string
     })();
     return (
       <div class="expression-picker" role="dialog" aria-label="Emoji, GIFs and stickers">
-        <nav class="expression-tabs" aria-label="Picker type">
+        <nav class="expression-tabs" data-tab={props.tab} aria-label="Picker type">
           {list(sequence(['emoji', 'gifs', 'stickers'] as const), (tab) => (
             <button
               classList={{ active: props.tab === tab }}
@@ -77,7 +78,7 @@ export const ExpressionPicker = component<ExpressionPickerProps, { query: string
             aria-label="Search expressions"
           />
         </label>
-        <div class="expression-content">
+        <div class="expression-content" use={pickerPageMotion(props.tab)}>
           {props.tab === 'emoji' ? (
             <div class="emoji-grid" aria-label="Emoji">
               {matchingEmoji!.length ? (

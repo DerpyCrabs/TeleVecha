@@ -1,3 +1,4 @@
+import { pickerPageMotion } from './pickerPageMotion';
 import { StickerGrid, StickerImage } from './StickerGrid';
 import { StickerSearchResults, type StickerSearchProps } from './StickerSearchResults';
 import Settings from '@effectweb/lucide/icons/settings';
@@ -135,6 +136,7 @@ export const StickerPicker = component<
             </nav>
             <div
               class="sticker-pack-grid"
+              use={pickerPageMotion(props.query ? 'search' : (activePack()?.id ?? ''))}
               aria-label={
                 props.query ? 'Sticker search results' : activePack()?.title || 'Sticker pack'
               }

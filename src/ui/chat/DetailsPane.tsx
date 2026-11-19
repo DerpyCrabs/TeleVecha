@@ -41,8 +41,6 @@ interface DetailsPaneProps {
   setBlocked: (blocked: boolean) => void;
 }
 export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
-  const detailRowClass =
-    'detail-row grid w-full grid-cols-[1.4rem_1fr_auto] items-center gap-2 rounded-[0.45rem] border-0 bg-transparent px-3 py-3 text-left text-[0.82rem] text-muted hover:bg-[var(--surface-subtle)] [&>span]:text-ink [&>b]:font-medium [&>b]:text-muted';
   const phone = () => {
     const value = props.details.userDetails?.phone;
     return value && !value.startsWith('+') ? `+${value}` : value;
@@ -91,8 +89,8 @@ export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
           <PanelRightClose size={18} />
         </button>
       </header>
-      <div class="scroll-area h-[calc(100%-4rem)] overflow-y-auto">
-        <section class="flex flex-col items-center border-b border-line px-6 py-7 text-center">
+      <div class="scroll-area h-[calc(100%-3.6rem)] overflow-y-auto">
+        <section class="flex flex-col items-center border-b border-line px-5 py-5 text-center">
           <div data-testid="details-avatar">
             <Avatar
               identity={props.avatarIdentity}
@@ -104,23 +102,9 @@ export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
               load={props.online ? () => props.media.loadAvatar(props.chat.id) : undefined}
             />
           </div>
-          <h2 class="mt-4 font-semibold">{props.chat.title}</h2>
+          <h2 class="mt-3 font-semibold">{props.chat.title}</h2>
           <p class="mt-1 text-xs text-[var(--muted)]">{status()}</p>
         </section>
-        {props.openManagement ? (
-          <button class={detailRowClass} onClick={props.openManagement}>
-            <Settings size={18} />
-            <span>{props.chat.kind === 'channel' ? 'Manage channel' : 'Manage group'}</span>
-          </button>
-        ) : null}
-        {props.peer && props.peer.kind !== 'user' ? (
-          <GroupHistoryLink
-            api={props.api}
-            peer={props.peer}
-            online={props.online}
-            open={props.openRelatedGroup}
-          />
-        ) : null}
         {props.chat.kind === 'user' && props.details.userDetails ? (
           <section class="grid gap-4 border-b border-line px-5 py-4 [&_a]:grid [&_a]:gap-1 [&_a]:text-ink [&_a]:no-underline [&_a>span]:text-[#65bff0] [&_div]:grid [&_div]:gap-1 [&_small]:text-xs [&_small]:text-muted [&_.autolink-text]:whitespace-pre-wrap [&_.autolink-text]:[overflow-wrap:anywhere] [&_.autolink-text_a]:inline [&_.autolink-text_a]:text-[#65bff0]">
             {phone() ? (
@@ -153,94 +137,106 @@ export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
             ) : null}
           </section>
         ) : null}
-        <section class="p-2">
+        <section class="detail-actions">
+          {props.openManagement ? (
+            <button class="detail-row" onClick={props.openManagement}>
+              <Settings size={18} />
+              <span>{props.chat.kind === 'channel' ? 'Manage channel' : 'Manage group'}</span>
+            </button>
+          ) : null}
+          {props.peer && props.peer.kind !== 'user' ? (
+            <GroupHistoryLink
+              api={props.api}
+              peer={props.peer}
+              online={props.online}
+              open={props.openRelatedGroup}
+            />
+          ) : null}
+
           <button
-            class={detailRowClass}
+            class="detail-row"
             disabled={!props.conversationReady}
             onClick={() => props.openShared('photos')}
           >
-            <Image size={17} />
+            <Image size={18} />
             <span>Photos</span>
             <b>{props.counts?.photos ?? '…'}</b>
           </button>
           <button
-            class={detailRowClass}
+            class="detail-row"
             disabled={!props.conversationReady}
             onClick={() => props.openShared('videos')}
           >
-            <Video size={17} />
+            <Video size={18} />
             <span>Videos</span>
             <b>{props.counts?.videos ?? '…'}</b>
           </button>
           <button
-            class={detailRowClass}
+            class="detail-row"
             disabled={!props.conversationReady}
             onClick={() => props.openShared('files')}
           >
-            <FileText size={17} />
+            <FileText size={18} />
             <span>Files</span>
             <b>{props.counts?.files ?? '…'}</b>
           </button>
           <button
-            class={detailRowClass}
+            class="detail-row"
             disabled={!props.conversationReady}
             onClick={() => props.openShared('audio')}
           >
-            <Headphones size={17} />
+            <Headphones size={18} />
             <span>Audio files</span>
             <b>{props.counts?.audio ?? '…'}</b>
           </button>
           <button
-            class={detailRowClass}
+            class="detail-row"
             disabled={!props.conversationReady}
             onClick={() => props.openShared('links')}
           >
-            <Link size={17} />
+            <Link size={18} />
             <span>Links</span>
             <b>{props.counts?.links ?? '…'}</b>
           </button>
           <button
-            class={detailRowClass}
+            class="detail-row"
             disabled={!props.conversationReady}
             onClick={() => props.openShared('voice')}
           >
-            <Mic size={17} />
+            <Mic size={18} />
             <span>Voice messages</span>
             <b>{props.counts?.voice ?? '…'}</b>
           </button>
           <button
-            class={detailRowClass}
+            class="detail-row"
             disabled={!props.conversationReady}
             onClick={() => props.openShared('gifs')}
           >
-            <FileImage size={17} />
+            <FileImage size={18} />
             <span>GIFs</span>
             <b>{props.counts?.gifs ?? '…'}</b>
           </button>
         </section>
         {props.chat.kind === 'user' && props.details.userDetails ? (
-          <section
-            class="grid border-y border-line px-2 py-2 [&>button]:grid [&>button]:w-full [&>button]:grid-cols-[1.4rem_minmax(0,1fr)] [&>button]:items-center [&>button]:gap-2 [&>button]:rounded-[0.45rem] [&>button]:border-0 [&>button]:bg-transparent [&>button]:px-3 [&>button]:py-2.5 [&>button]:text-left [&>button]:text-[0.82rem] [&>button]:text-ink [&>button:hover]:bg-[var(--surface-subtle)]"
-            aria-label="Contact actions"
-          >
-            <button onClick={() => void props.details.share()}>
-              <Share2 size={17} />
+          <section class="detail-actions contact-actions" aria-label="Contact actions">
+            <button class="detail-row" onClick={() => void props.details.share()}>
+              <Share2 size={18} />
               <span>Share this contact</span>
             </button>
             {props.details.userDetails?.isContact ? (
               <>
-                <button onClick={props.details.edit}>
-                  <Pencil size={17} />
+                <button class="detail-row" onClick={props.details.edit}>
+                  <Pencil size={18} />
                   <span>Edit contact</span>
                 </button>
-                <button onClick={props.details.remove}>
-                  <Trash2 size={17} />
+                <button class="detail-row" onClick={props.details.remove}>
+                  <Trash2 size={18} />
                   <span>Delete contact</span>
                 </button>
               </>
             ) : null}
             {!props.details.userDetails?.isContact ? (
-              <button onClick={props.details.add}>
+              <button class="detail-row" onClick={props.details.add}>
                 <span aria-hidden="true" class="text-base leading-none">
                   +
                 </span>
@@ -248,18 +244,18 @@ export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
               </button>
             ) : null}
             <button
-              class="!text-red-400"
+              class="detail-row danger"
               disabled={!props.conversationReady}
               onClick={() => props.setBlocked(!props.details.userDetails?.blocked)}
             >
-              <Hand size={17} />
+              <Hand size={18} />
               <span>{props.details.userDetails?.blocked ? 'Unblock user' : 'Block user'}</span>
             </button>
           </section>
         ) : null}
         {props.chat.kind !== 'user' ? (
-          <section class="group-members border-b border-line px-2.5 py-3" aria-label="Members">
-            <header class="flex items-center justify-between px-2 py-1 pb-2.5 text-xs [&>span]:text-muted">
+          <section class="group-members border-b border-line px-1.5 py-3" aria-label="Members">
+            <header class="flex items-center justify-between px-2.5 py-1 pb-2.5 text-xs [&>span]:text-muted">
               <strong>Members</strong>
               <span>
                 {props.details.membersLoading
@@ -270,7 +266,7 @@ export const DetailsPane = view<DetailsPaneProps, never>((props, _send) => {
             {!props.details.membersLoading ? (
               <>
                 {list(peerRows(props.details.members), (member) => (
-                  <div class="group-member grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.55rem] px-2 py-2 hover:bg-[var(--surface-subtle)]">
+                  <div class="group-member grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[0.5rem] px-2.5 py-2 hover:bg-[var(--surface-subtle)]">
                     <Avatar
                       identity={`${member.peer.id}:${member.avatarId ?? 'none'}`}
                       initials={member.initials}

@@ -156,6 +156,7 @@ export function layoutMessages(
       if (album.length > 1) {
         return 'min(24rem, 100%)';
       }
+      if (message.linkPreview) return 'min(22rem, 100%)';
       if (isImageDocument(message)) return 'min(16.75rem, 100%)';
       // Keep the voice waveform usable even when the message has no caption.
       if (message.media?.kind === 'voice') return 'min(20rem, 100%)';
@@ -168,10 +169,15 @@ export function layoutMessages(
       const textWidth = captionedMedia
         ? captionMediaWidth([caption.body, messageAuthor, forwardedFrom?.name, message.replyTo])
         : 0;
+      // Small originals keep their intrinsic size. Captions can still widen the bubble.
+      if (width && height && width < 192 && height < 192) {
+        return `min(max(${width}px, ${textWidth}rem), 100%)`;
+      }
       return `min(${Math.max(photoWidth, textWidth)}rem, 100%)`;
     })();
     const cropped = (() => {
-      if (album.length > 1 || !isVisualMedia(message)) return false;
+      if (album.length > 1 || message.media?.kind === 'photo' || !isVisualMedia(message))
+        return false;
       const width = message.media?.width;
       const height = message.media?.height;
       return Boolean(width && height && width / height < 0.5);

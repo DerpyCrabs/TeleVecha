@@ -313,7 +313,55 @@ export function createConversationViewport(options: ConversationViewportOptions)
     });
     resizeObserver.observe(scroller);
     resizeObserver.observe(content);
+    const tail = () => {
+      let row = content.lastElementChild;
+      while (row && !row.classList.contains('message-flow-row')) row = row.previousElementSibling;
+      return row;
+    };
+    let previousTail = tail();
+    let previousPeer = options.activePeerId();
     mutationObserver = new MutationObserver((records) => {
+      const nextTail = tail();
+      const peer = options.activePeerId();
+      const fromEmpty =
+        !previousTail &&
+        records.some((record) =>
+          [...record.removedNodes].some(
+            (node) => node instanceof HTMLElement && node.hasAttribute('data-empty-conversation'),
+          ),
+        );
+      if (
+        nextTail &&
+        nextTail !== previousTail &&
+        previousPeer === peer &&
+        positionedPeer === peer &&
+        ready() &&
+        followingPresent() &&
+        !targetLocked &&
+        (fromEmpty || previousTail?.parentElement === content) &&
+        !matchMedia('(prefers-reduced-motion: reduce)').matches
+      ) {
+        // Only rows appended beyond the retained tail enter. Prepending history,
+        // changing chats and acknowledging a pending bubble preserve their nodes.
+        for (
+          let row = fromEmpty ? content.firstElementChild : previousTail?.nextElementSibling;
+          row;
+          row = row.nextElementSibling
+        ) {
+          if (row.matches('.message-flow-row:not([hidden])')) {
+            row.animate(
+              [
+                { opacity: 0, translate: '0 10px' },
+                { opacity: 1, translate: '0 0' },
+              ],
+              { id: 'message-arrival', duration: 190, easing: 'cubic-bezier(.2,.75,.25,1)' },
+            );
+          }
+          if (row === nextTail) break;
+        }
+      }
+      previousTail = nextTail;
+      previousPeer = peer;
       if (
         !followingPresent() &&
         prependHeight !== undefined &&

@@ -269,6 +269,7 @@ export const WebAppDialog = component(
         <Dialog
           title={pending.title}
           closeLabel="Close Mini App"
+          animateDismiss={!model.busy && !model.closingConfirmation}
           onClose={close}
           headerLeading={
             model.back ? (
