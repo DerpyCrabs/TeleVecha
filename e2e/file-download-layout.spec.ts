@@ -38,7 +38,7 @@ for (const width of [1326, 390]) {
     const measure = () =>
       album.locator('.media-attachment').evaluateAll((elements) =>
         elements.map((element) => {
-          const button = element.querySelector('button.media-file')!;
+          const button = element.querySelector('.media-file-details')!;
           const title = button.querySelector('strong')!;
           return {
             columns: getComputedStyle(element).gridTemplateColumns,
@@ -57,6 +57,7 @@ for (const width of [1326, 390]) {
     await expect(
       album.getByRole('button', { name: 'Cancel download swarm-home-1.0.0.zip' }),
     ).toBeVisible();
+    await expect(album.getByText('25% downloaded', { exact: true })).toHaveCount(2);
     const during = await measure();
     expect(during).toEqual(before);
     await page.screenshot({ path: `/tmp/archive-during-${width}.png`, animations: 'disabled' });
@@ -71,5 +72,50 @@ for (const width of [1326, 390]) {
     await expect(
       album.getByRole('button', { name: 'Download swarm-home-1.0.0.zip', exact: true }),
     ).toBeEnabled();
+  });
+
+  test(`keeps a long document name readable at ${width}px`, async ({ page }) => {
+    const name = '4000_Essential_English_Words_all_books.zip';
+    await openReady(page, '/?scenario=held-media-download');
+    await selectAlice(page);
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(
+      (name) =>
+        window.__televechaFixture!.emit({
+          type: 'new-message',
+          pts: 11,
+          ptsCount: 1,
+          message: {
+            id: 81,
+            peerId: 'u:101',
+            senderId: 'u:101',
+            date: 1700002000,
+            outgoing: false,
+            text: '',
+            media: { kind: 'file', name, mimeType: 'application/octet-stream', size: 204682035 },
+          },
+        }),
+      name,
+    );
+    const download = page.getByRole('button', { name: `Download ${name}`, exact: true });
+    const attachment = page.locator('.media-attachment').filter({ hasText: name });
+    const rightGap = async (action: typeof download) => {
+      const card = (await attachment.boundingBox())!;
+      const button = (await action.boundingBox())!;
+      return card.x + card.width - button.x - button.width;
+    };
+    expect(Math.abs(await rightGap(download))).toBeLessThan(1);
+    await download.click();
+    const row = page.locator('.message').filter({ hasText: name });
+    await expect(row.getByText('25% downloaded')).toBeVisible();
+    const cancel = row.getByRole('button', { name: `Cancel download ${name}` });
+    const titleBox = (await row.locator('strong').boundingBox())!;
+    const cancelBox = (await cancel.boundingBox())!;
+    expect(Math.abs(await rightGap(cancel))).toBeLessThan(1);
+    expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(cancelBox.x + 1);
+    expect(cancelBox.x + cancelBox.width).toBeLessThanOrEqual(width);
+    await row.screenshot({ path: `/tmp/document-${width}.png` });
+    await cancel.click();
+    await expect(download).toBeEnabled();
   });
 }

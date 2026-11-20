@@ -429,6 +429,10 @@ export const MediaAttachment = component<
     const isInlinePlayer = isRoundVideo || isVoice;
     const displayUrl = model.url || (isImage ? model.previousImageUrl : '');
     const previewKind = presentation.preview;
+    const fileStatus =
+      model.loading && model.downloadProgress !== undefined
+        ? `${Math.round(model.downloadProgress * 100)}% downloaded`
+        : model.error || describeMedia(props.media);
     const previewEnabled =
       Boolean((model.url || isVideo) && previewKind && !props.decorative) &&
       (!props.media.spoiler || model.spoilerRevealed);
@@ -655,21 +659,11 @@ export const MediaAttachment = component<
                   aria-label={`Open ${props.media.name} fullscreen preview`}
                 >
                   <strong>{props.media.name}</strong>
-                  <small>
-                    {model.loading && model.downloadProgress !== undefined
-                      ? `${Math.round(model.downloadProgress! * 100)}% downloaded`
-                      : model.error || describeMedia(props.media)}
-                  </small>
+                  <small>{fileStatus}</small>
                 </button>
               </>
             ) : (
-              <button
-                class="media-file"
-                onClick={() => download()}
-                disabled={model.loading}
-                aria-busy={model.loading}
-                aria-label={`Download ${props.media.name}`}
-              >
+              <div class="media-file-details" aria-busy={model.loading}>
                 <span class="media-file-thumbnail" aria-hidden="true">
                   {model.loading ? (
                     <LoaderCircle class="animate-spin" size={20} />
@@ -679,12 +673,11 @@ export const MediaAttachment = component<
                 </span>
                 <span>
                   <strong>{props.media.name}</strong>
-                  <small>{model.error || describeMedia(props.media)}</small>
+                  <small>{fileStatus}</small>
                 </span>
-                {!props.protected ? <Download size={17} /> : null}
-              </button>
+              </div>
             )}
-            {!model.loading && previewKind && !props.protected ? (
+            {!model.loading && !props.protected ? (
               <button
                 class="media-file-download"
                 onClick={(event) => {
@@ -695,7 +688,7 @@ export const MediaAttachment = component<
                 aria-label={`Download ${props.media.name}`}
               >
                 <Download size={15} />
-                <span>Download</span>
+                {previewKind ? <span>Download</span> : null}
               </button>
             ) : null}
             {model.loading ? (

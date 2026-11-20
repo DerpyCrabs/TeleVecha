@@ -2037,9 +2037,12 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
       }
       if (
         scenario === 'held-media-download' &&
-        ['held-image.png', 'swarm-home-1.0.0.z01', 'swarm-home-1.0.0.zip'].includes(
-          message.media?.name ?? '',
-        )
+        [
+          '4000_Essential_English_Words_all_books.zip',
+          'held-image.png',
+          'swarm-home-1.0.0.z01',
+          'swarm-home-1.0.0.zip',
+        ].includes(message.media?.name ?? '')
       ) {
         if (options?.progress) yield* Effect.sync(() => options.progress!(0.25));
         return yield* Effect.never;
