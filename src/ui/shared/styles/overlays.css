@@ -252,6 +252,8 @@
   object-fit: contain;
 }
 .sticker-pack-grid {
+  /* Fade the scrollport in place above the fixed pack tabs. */
+  --picker-page-offset: 0px;
   display: grid;
   grid-row: 1;
   min-height: 0;

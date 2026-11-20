@@ -13,7 +13,7 @@ function observePage(element: HTMLElement, current: () => string) {
       if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       transition = element.animate(
         [
-          { opacity: 0.3, translate: '0 4px' },
+          { opacity: 0.3, translate: '0 var(--picker-page-offset, 4px)' },
           { opacity: 1, translate: '0 0' },
         ],
         { id: 'picker-page', duration: 155, easing: 'ease-out' },

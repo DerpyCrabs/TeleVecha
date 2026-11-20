@@ -548,6 +548,33 @@ describe('MessagingEngine', () => {
       ),
   );
 
+  it('initializes channel updates when reopening a preview from disk', () =>
+    Effect.runPromise(
+      withEngine((engine, transport, cache) =>
+        Effect.gen(function* () {
+          yield* engine.start(credentials);
+          const peer = yield* engine.resolveUsername('public_fixture_news');
+          const page = yield* transport.getHistory(peer, 50);
+          expect(page.channelPts).toBeDefined();
+          const epoch = yield* cache.loadEpoch();
+          yield* cache.putMessages(
+            page.messages.map((message) => ({ ...message, cacheEpoch: epoch })),
+          );
+          yield* engine.loadConversationView(peer.id);
+          yield* Effect.promise(() =>
+            vi.waitFor(() =>
+              expect(
+                engine.snapshot().dialogs.find((dialog) => dialog.peer.id === peer.id)?.channelPts,
+              ).toBe(page.channelPts),
+            ),
+          );
+          expect((yield* cache.loadDialogs()).some((dialog) => dialog.peer.id === peer.id)).toBe(
+            false,
+          );
+        }),
+      ),
+    ));
+
   it('removes a previously persisted channel preview when membership is corrected', () =>
     Effect.runPromise(
       withEngine((engine, _transport, cache) =>

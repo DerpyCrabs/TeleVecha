@@ -832,6 +832,7 @@ function makeMessagingEngineModule(
             { messages: sortedMessages, hasOlderMessages: page.hasOlder },
             'newest',
           );
+          yield* initializeHistoryChannelPts(peerId, page.channelPts);
           clearHistoryFailure(peerId);
           return true;
         });
@@ -5031,6 +5032,7 @@ function makeMessagingEngineModule(
       // A restored channel page can contain the latest message while missing earlier
       // updates. Reconcile its tail once on restore, including legitimate deleted-ID gaps.
       const repairHead =
+        (dialog.peer.kind === 'channel' && dialog.channelPts === undefined) ||
         cachedHistoryNeedsRepair(dialog, messages) ||
         (fromDisk &&
           dialog.peer.kind === 'channel' &&
@@ -5075,6 +5077,7 @@ function makeMessagingEngineModule(
                   )
                 : {
                     messages: [] as TelegramMessage[],
+                    channelPts: undefined,
                     hasOlder: histories.loaded(peerId)?.hasOlderMessages ?? true,
                   };
               for (const target of missingContent) {
@@ -5118,6 +5121,7 @@ function makeMessagingEngineModule(
                     { messages: merged, hasOlderMessages: page.hasOlder },
                     'newest',
                   );
+                  yield* initializeHistoryChannelPts(peerId, page.channelPts);
                   for (const message of fetched) {
                     yield* publishConversationEvent({
                       type: 'message-upsert',
@@ -5644,6 +5648,16 @@ function makeMessagingEngineModule(
     if (pts !== undefined) yield* setChannelPts(peer.id, pts);
     yield* publishConversationEvent({ type: 'history-reset', peerId: peer.id });
   });
+  // The newest history page can establish a preview's first cursor. Once a cursor
+  // exists, only channel updates and difference recovery may advance it.
+  function initializeHistoryChannelPts(peerId: string, pts: number | undefined) {
+    if (
+      pts === undefined ||
+      currentSnapshot().dialogs.find(({ peer }) => peer.id === peerId)?.channelPts !== undefined
+    )
+      return Effect.void;
+    return patchChannelPts(peerId, pts);
+  }
   const setChannelPts = Effect.fn('MessagingEngine.setChannelPts')(function* (
     peerId: string,
     channelPts: number,
