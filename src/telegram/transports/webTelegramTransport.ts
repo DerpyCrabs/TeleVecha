@@ -1256,7 +1256,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
             maxDate: filters?.maxDate ?? 0,
             offsetId: offset?.messageId ?? 0,
             addOffset: 0,
-            limit: limit + 1,
+            limit,
             maxId: 0,
             minId: 0,
             hash: 0n,
@@ -1283,7 +1283,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
       return { messages: [], hasMore: false };
     }
     rememberEntities(result.users, result.chats);
-    return mapSearchPage(result, limit, !peer);
+    return mapSearchPage(result, limit, !peer, offset);
   });
   const searchMessages = Effect.fn('WebTelegramTransport.searchMessages')(function* (
     query: string,
@@ -5759,16 +5759,14 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
     result: Tl.messages.Messages | Tl.messages.MessagesSlice | Tl.messages.ChannelMessages,
     limit: number,
     global: boolean,
+    offset?: TelegramSearchOffset,
   ): TelegramSearchPage {
     const rawMessages = result.messages.slice(0, limit);
     const messages = rawMessages
       .map((message) => mapMessage(message))
       .filter((message): message is TelegramMessage => Boolean(message));
     const channelPts = Api.messages.ChannelMessages.is(result) ? result.pts : undefined;
-    const hasContinuation = global
-      ? Api.messages.MessagesSlice.is(result) && result.nextRate !== undefined
-      : result.messages.length > limit;
-    if (!hasContinuation) {
+    if (global && !(Api.messages.MessagesSlice.is(result) && result.nextRate !== undefined)) {
       return { messages, hasMore: false, ...(channelPts === undefined ? {} : { channelPts }) };
     }
 
@@ -5780,7 +5778,7 @@ export const createWebTelegramTransport = Effect.fn('telegram.webTransport.make'
         break;
       }
     }
-    if (!last) {
+    if (!last || (!global && offset?.messageId && last.id >= offset.messageId)) {
       return { messages, hasMore: false, ...(channelPts === undefined ? {} : { channelPts }) };
     }
     const nextPeer = global ? mapPeer(last.peerId, state.entities) : undefined;

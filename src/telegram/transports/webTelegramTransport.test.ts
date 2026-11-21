@@ -867,6 +867,57 @@ describe('web Telegram transport', () => {
     },
   );
 
+  it.each(['photos', 'videos', 'files', 'audio', 'links', 'voice', 'gifs'] as const)(
+    'continues capped Telegram search pages for shared %s',
+    (kind) => {
+      const invoke = (request: unknown) => {
+        if (!Api.messages.Search.is(request)) throw new Error('Unexpected RPC');
+        expect(request.limit).toBe(100);
+        const start = request.offsetId || 16001;
+        const messages = Array.from(
+          { length: Math.min(start === 15901 ? 3 : 100, start - 1) },
+          (_, index) =>
+            Api.Message({
+              id: start === 2 ? 2 : start - index - 1,
+              peerId: Api.PeerChat({ chatId: 303n }),
+              date: 1,
+              message: '',
+            }),
+        );
+        return Effect.succeed(
+          Api.messages.MessagesSlice({
+            count: 1,
+            inexact: true,
+            messages,
+            topics: [],
+            users: [],
+            chats: [],
+          }),
+        );
+      };
+      return Effect.runPromise(
+        withTransport(
+          (transport) =>
+            Effect.gen(function* () {
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              const peer = { id: 'g:303', kind: 'group' as const };
+              const first = yield* transport.getSharedMedia(peer, kind, 100);
+              expect(first.nextOffset).toEqual({ messageId: 15901 });
+              const second = yield* transport.getSharedMedia(peer, kind, 100, first.nextOffset);
+              expect(second.nextOffset).toEqual({ messageId: 15898 });
+              const last = yield* transport.getSharedMedia(peer, kind, 100, { messageId: 101 });
+              expect(last.nextOffset).toEqual({ messageId: 1 });
+              const end = yield* transport.getSharedMedia(peer, kind, 100, last.nextOffset);
+              expect(end.hasMore).toBe(false);
+              const repeated = yield* transport.getSharedMedia(peer, kind, 100, { messageId: 2 });
+              expect(repeated.hasMore).toBe(false);
+            }),
+          () => Effect.succeed(clientDouble({ invoke: invoke as MtprotoClient['invoke'] })),
+        ),
+      );
+    },
+  );
+
   it('passes media, sender, dates and pagination to Telegram instead of filtering a loaded page', () => {
     const invoke = vi.fn((_request: unknown) =>
       Effect.succeed(Api.messages.Messages({ messages: [], topics: [], users: [], chats: [] })),
@@ -899,7 +950,7 @@ describe('web Telegram transport', () => {
               maxDate: 1700086399,
               offsetId: 42,
               topMsgId: 10,
-              limit: 51,
+              limit: 50,
             });
             if (Api.messages.Search.is(request))
               expect(Api.InputMessagesFilterPhotos.is(request.filter)).toBe(true);
