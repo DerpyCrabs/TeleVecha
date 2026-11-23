@@ -1,3 +1,4 @@
+import { attachTextSendMotion } from './textSendMotion';
 import { firstUnreadRow } from './messageGroups';
 import { program } from 'effectweb';
 import { Effect } from 'effect';
@@ -318,11 +319,13 @@ export function createConversationViewport(options: ConversationViewportOptions)
       while (row && !row.classList.contains('message-flow-row')) row = row.previousElementSibling;
       return row;
     };
+    const sendMotion = attachTextSendMotion(scroller, tail);
     let previousTail = tail();
     let previousPeer = options.activePeerId();
     mutationObserver = new MutationObserver((records) => {
       const nextTail = tail();
       const peer = options.activePeerId();
+      if (peer !== previousPeer) sendMotion.reset();
       const fromEmpty =
         !previousTail &&
         records.some((record) =>
@@ -348,7 +351,10 @@ export function createConversationViewport(options: ConversationViewportOptions)
           row;
           row = row.nextElementSibling
         ) {
-          if (row.matches('.message-flow-row:not([hidden])')) {
+          if (
+            row.matches('.message-flow-row:not([hidden])') &&
+            !(row === nextTail && sendMotion.animate(row, previousTail))
+          ) {
             row.animate(
               [
                 { opacity: 0, translate: '0 10px' },
@@ -377,6 +383,7 @@ export function createConversationViewport(options: ConversationViewportOptions)
     });
     mutationObserver.observe(content, { childList: true });
     return () => {
+      sendMotion.dispose();
       scroller.removeEventListener('scroll', handleScroll);
       scroller.removeEventListener('wheel', handleWheel);
       scroller.removeEventListener('keydown', handleKeyDown);
