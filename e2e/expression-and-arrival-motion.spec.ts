@@ -60,6 +60,8 @@ test('animates live incoming and outgoing rows once and respects reduced motion'
         seen.add(animation);
         const row = (animation.effect as KeyframeEffect).target;
         const message = row!.querySelector<HTMLElement>('article')!;
+        const flight = document.getAnimations().find((item) => item.id === 'text-send-flight');
+        if (flight) message.dataset.flightDuration = String(flight.effect?.getTiming().duration);
         message.dataset.arrivals = String(Number(message.dataset.arrivals ?? 0) + 1);
       }
     }).observe(content, { childList: true });
@@ -89,6 +91,7 @@ test('animates live incoming and outgoing rows once and respects reduced motion'
   await input.press('Enter');
   const sent = page.locator('article.outgoing').filter({ hasText: 'Outgoing animation check' });
   await expect(sent).toHaveAttribute('data-arrivals', '1');
+  await expect(sent).toHaveAttribute('data-flight-duration', '400');
   await expect(sent).toHaveAttribute('data-message-id', /^\d+$/);
   await expect(sent).toHaveAttribute('data-arrivals', '1');
   await page.emulateMedia({ reducedMotion: 'reduce' });
