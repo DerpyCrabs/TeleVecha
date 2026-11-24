@@ -1291,7 +1291,9 @@ export const createMtprotoSender = Effect.fn('mtproto.sender.make')(function* (
         scheduleFlush();
         // A WebSocket can stay open after its route has stopped delivering
         // packets. A missed pong must close this attempt and restart it.
-        return yield* Effect.raceFirst(receiverCompletion, ping);
+        return yield* options.purpose === 'media'
+          ? receiverCompletion
+          : Effect.raceFirst(receiverCompletion, ping);
       }),
     );
 

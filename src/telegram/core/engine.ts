@@ -28,7 +28,7 @@ import type { TelegramForwardOptions } from '../types';
 import { SecureRandom } from 'effect/crypto';
 import { Deferred, Effect, Exit, Layer, Schedule, Scope, Stream } from 'effect';
 
-import { reportDiagnostic } from './diagnostics';
+import { reportDiagnostic, sendFailureCode } from './diagnostics';
 import {
   canSendMediaKindToPermissions,
   canSendMessageToDialog,
@@ -6950,6 +6950,19 @@ function makeMessagingEngineModule(
             const current =
               currentSnapshot().pending.find(({ id }) => id === attempting.id) ?? attempting;
             const failed = sendQueue.capture({ ...current, lastError: errorMessage(error) });
+            if (current.attachment || current.album) {
+              reportDiagnostic({
+                area: 'outbox',
+                level: 'warn',
+                code: 'media.delivery.failed',
+                message: 'Media delivery failed.',
+                details: {
+                  attempts: current.attempts,
+                  uploadProgress: current.uploadProgress,
+                  code: sendFailureCode(errorMessage(error)),
+                },
+              });
+            }
             yield* cacheStore.commitOutbox(failed);
             if (!isOperationCurrent(session, accountId)) return false;
             if (sendQueue.isCancelled(attempting.id)) {

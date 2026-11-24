@@ -47,6 +47,28 @@ describe('Telegram file transfers', () => {
       }),
     ));
 
+  it('retries the same PNG part on a fresh media connection after transport failure', () =>
+    run(
+      Effect.gen(function* () {
+        const requests: TlObject[] = [];
+        const recoverDc = vi.fn(() => Effect.void);
+        const rpc = rpcDouble((_dcId, request) =>
+          Effect.suspend(() => {
+            requests.push(request);
+            return requests.length === 1
+              ? Effect.fail(createMtprotoError('transport', 'Telegram ping timed out.'))
+              : Effect.succeed(true);
+          }),
+        );
+        const file = new Blob([new Uint8Array(55_702)], { type: 'image/png' });
+        const result = yield* uploadFile({ ...rpc, recoverDc }, { file });
+        expect(recoverDc).toHaveBeenCalledWith(2);
+        expect(requests).toHaveLength(2);
+        expect(requests[1]).toBe(requests[0]);
+        expect(result).toMatchObject({ parts: 1 });
+      }),
+    ));
+
   it('uploads file parts concurrently and reports progress as Effects', () =>
     run(
       Effect.gen(function* () {

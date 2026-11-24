@@ -35,6 +35,7 @@ export interface MtprotoSender {
 }
 
 export interface MtprotoSenderOptions {
+  readonly purpose?: 'api' | 'media';
   readonly dcId: number;
   readonly connection: PacketConnection<
     (SecureRandom.SecureRandom | Digest.Digest | Kdf.Kdf) | Socket.WebSocketConstructor

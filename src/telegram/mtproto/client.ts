@@ -409,6 +409,7 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
     };
     const sender = yield* provideDependencies(
       createMtprotoSender({
+        purpose,
         dcId,
         connection,
         codec,

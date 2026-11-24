@@ -1,3 +1,4 @@
+import { sendFailureCode } from '../telegram/core/diagnostics';
 import {
   sanitizeMessageContentDiagnostic,
   type MessageContentDiagnostic,
@@ -156,6 +157,15 @@ const SAFE_SEMANTIC_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     'table',
     'media',
     'author',
+  ]),
+  errorkind: new Set([
+    'cancelled',
+    'configuration',
+    'crypto',
+    'protocol',
+    'rpc',
+    'session',
+    'transport',
   ]),
   level: new Set(['debug', 'info', 'warn', 'error']),
   mediakind: new Set(['photo', 'video', 'audio', 'embed', 'map']),
@@ -614,7 +624,7 @@ export interface TvBugPendingSendV2 {
   createdAt: number;
   queueOrder?: number | undefined;
   attempts: number;
-  lastError?: 'recorded-send-failure' | undefined;
+  lastError?: ReturnType<typeof sendFailureCode> | undefined;
   uploadProgress?: number | undefined;
   reply?:
     | { messageId: number; topMessageId?: number | undefined; quoteText?: TvBugTextV2 | undefined }
@@ -2291,7 +2301,7 @@ class StateSanitizer {
         ? { queueOrder: finiteInteger(send.queueOrder, 'pending.queueOrder') }
         : { queueOrder: index }),
       attempts: finiteNonNegativeInteger(send.attempts, 'pending.attempts'),
-      ...(send.lastError ? { lastError: 'recorded-send-failure' as const } : {}),
+      ...(send.lastError ? { lastError: sendFailureCode(send.lastError) } : {}),
       ...(send.uploadProgress !== undefined
         ? { uploadProgress: finiteNonNegativeNumber(send.uploadProgress, 'pending.uploadProgress') }
         : {}),

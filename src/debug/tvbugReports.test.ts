@@ -1,3 +1,5 @@
+import { uploadFile } from '../telegram/mtproto/files/upload';
+import { createMtprotoError } from '../telegram/mtproto/errors';
 import { Api, createTl } from '../telegram/mtproto/tl';
 import { describeMessageContent } from '../telegram/transports/messageContentDiagnostic';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -90,6 +92,50 @@ describe('browser debug report recorder', () => {
       expect(
         Object.hasOwn(bundle.snapshot.messages[0]!.contentDiagnostic!, 'documentConstructor'),
       ).toBe(false);
+    } finally {
+      recorder.dispose();
+    }
+  });
+
+  it('exports the failed media RPC and its recovery in the downloadable archive', async () => {
+    const recorder = createBrowserDebugReportRecorder(store());
+    let first = true;
+    try {
+      await Effect.runPromise(
+        uploadFile(
+          {
+            currentDcId: Effect.succeed(2),
+            randomBytes: () => Effect.succeed(new Uint8Array(8)),
+            recoverDc: () => Effect.void,
+            invokeOnDc: <Result>() =>
+              Effect.suspend(() => {
+                if (!first) return Effect.succeed(true as Result);
+                first = false;
+                return Effect.fail(createMtprotoError('transport', 'Telegram ping timed out.'));
+              }),
+          },
+          { file: new Blob([new Uint8Array(55_702)]) },
+        ),
+      );
+      const report = await Effect.runPromise(recorder.prepare());
+      const bundle = parseTvBugBundle(new Uint8Array(await report.file.arrayBuffer()));
+      expect(bundle.trace.map((event) => event.value)).toMatchObject([
+        { code: 'upload.started' },
+        {
+          code: 'upload.part.retry',
+          details: {
+            dcId: 2,
+            part: 0,
+            partCount: 1,
+            byteSize: 55702,
+            method: 'upload.saveFilePart',
+            errorKind: 'transport',
+            code: 'ping-timeout',
+          },
+        },
+        { code: 'upload.part.recovered' },
+        { code: 'upload.completed' },
+      ]);
     } finally {
       recorder.dispose();
     }
