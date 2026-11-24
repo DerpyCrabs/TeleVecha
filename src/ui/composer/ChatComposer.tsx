@@ -123,6 +123,13 @@ const FormattingIcon = view<{ kind: TelegramTextFormat['kind'] }, never>((props,
     <Link2 size={15} />
   ),
 );
+const mediaPickerAccept = [
+  'image/*',
+  'video/*',
+  '.jpg,.jpeg,.png,.gif,.webp,.avif,.heic,.heif,.bmp,.tif,.tiff',
+  '.mov,.qt,.mp4,.m4v,.webm,.mkv,.avi,.mpg,.mpeg,.ogv,.3gp,.3g2,.mts,.m2ts',
+].join(',');
+
 function pickFiles(
   event: MouseEvent & { currentTarget: HTMLButtonElement },
   mode?: 'media' | 'file',
@@ -131,7 +138,7 @@ function pickFiles(
     .closest('footer')
     ?.querySelector<HTMLInputElement>('input[type="file"]');
   if (!input) return;
-  input.accept = mode === 'media' ? 'image/*,video/*' : '';
+  input.accept = mode === 'media' ? mediaPickerAccept : '';
   input.dataset.sendAs = mode ?? '';
   input.click();
 }
