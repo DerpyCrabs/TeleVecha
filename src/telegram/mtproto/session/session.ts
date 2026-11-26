@@ -1,6 +1,6 @@
 import { Effect, Schema, SynchronizedRef } from 'effect';
 
-import { bytesToHex, hexToBytes } from '../bytes';
+import { bytesToHex, equalBytesConstantTime, hexToBytes } from '../bytes';
 import { createMtprotoError, errorMessage, type MtprotoError } from '../errors';
 
 const DataCenterId = Schema.Int.check(
@@ -46,6 +46,10 @@ export interface MtprotoSessionModel {
   readonly setAuthKey: (
     dcId: number,
     key: Uint8Array | undefined,
+  ) => Effect.Effect<void, MtprotoError>;
+  readonly invalidateAuthKey: (
+    dcId: number,
+    rejected: Uint8Array,
   ) => Effect.Effect<void, MtprotoError>;
   readonly delete: Effect.Effect<void, MtprotoError>;
 }
@@ -150,6 +154,14 @@ export const createMtprotoSession = Effect.fn('mtproto.session.make')(function* 
         return { ...current, keys };
       });
     },
+    invalidateAuthKey: (dcId: number, rejected: Uint8Array) =>
+      update((current) => {
+        const stored = current.keys.get(dcId);
+        if (!stored || !equalBytesConstantTime(stored, rejected)) return current;
+        const keys = new Map(current.keys);
+        keys.delete(dcId);
+        return { ...current, keys };
+      }),
     delete: SynchronizedRef.updateEffect(state, (current) =>
       persistence.clear.pipe(Effect.as({ ...current, keys: new Map() })),
     ),

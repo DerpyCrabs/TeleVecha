@@ -385,7 +385,7 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
   const makeSender = Effect.fn('mtproto.client.sender')(function* (key: SenderKey) {
     const { purpose, dcId } = keyParts(key);
     const snapshot = yield* session.snapshot;
-    const storedKey = yield* session.authKey(dcId);
+    let storedKey: Uint8Array | undefined = yield* session.authKey(dcId);
     const authKey = storedKey === undefined ? undefined : yield* createAuthKey(storedKey);
     const dedicatedMedia = purpose === 'media' && storedKey !== undefined;
     const dc = yield* endpoint(dcId, dedicatedMedia);
@@ -407,7 +407,9 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
             Stream.provideService(Socket.WebSocketConstructor, webSocket),
           ),
     };
-    const sender = yield* provideDependencies(
+    const invalidateKey = () =>
+      storedKey ? session.invalidateAuthKey(dcId, storedKey) : Effect.void;
+    const rawSender = yield* provideDependencies(
       createMtprotoSender({
         purpose,
         dcId,
@@ -421,12 +423,26 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
             wire: normalizedHandshakeWire(plain),
             ...(options.now ? { now: options.now } : {}),
           }),
-        onAuthKey: (authorization) => session.setAuthKey(dcId, authorization.authKey.bytes),
-        onAuthKeyInvalidated: () => session.setAuthKey(dcId, undefined),
+        onAuthKey: (authorization) => {
+          storedKey = authorization.authKey.bytes;
+          return session.setAuthKey(dcId, storedKey);
+        },
+        onAuthKeyInvalidated: invalidateKey,
         ...(options.now ? { now: options.now } : {}),
         reconnect: { retries: configuration.connectionRetries },
       }),
     );
+    const sender: MtprotoSender = {
+      ...rawSender,
+      invoke: <Result>(request: TlObject) =>
+        rawSender
+          .invoke<Result>(request)
+          .pipe(
+            Effect.tapError((error) =>
+              rpcErrorMessage(error) === 'AUTH_KEY_DUPLICATED' ? invalidateKey() : Effect.void,
+            ),
+          ),
+    };
     yield* sender.events.pipe(
       Stream.runForEach((event) =>
         session.snapshot.pipe(
@@ -514,6 +530,10 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
                 (rpcMessage === 'SESSION_REVOKED' ||
                   rpcMessage === 'SESSION_EXPIRED' ||
                   rpcMessage === 'AUTH_KEY_UNREGISTERED');
+              if (rpcMessage === 'AUTH_KEY_DUPLICATED') {
+                yield* RcMap.invalidate(senders, key);
+                return yield* Effect.fail(retryRequest(error, 0));
+              }
               if (forgottenAuthKey || expiredMediaSession) {
                 if (dcId !== (yield* session.snapshot).mainDcId) {
                   yield* session.setAuthKey(dcId, undefined);

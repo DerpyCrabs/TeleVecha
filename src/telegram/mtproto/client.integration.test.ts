@@ -1,3 +1,4 @@
+import { createWebTelegramTransport } from '../transports/webTelegramTransport';
 import { BrowserCrypto, BrowserSocket } from '@effect/platform-browser';
 import { Effect, Stream } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
@@ -51,6 +52,62 @@ describe('MTProto client construction', () => {
       );
       expect(dcs).toEqual([2, 4]);
       expect(save).toHaveBeenCalledWith(expect.objectContaining({ mainDcId: 4 }));
+    } finally {
+      create.mockRestore();
+    }
+  });
+
+  it('replaces a duplicated DC key on invokeWithLayer and reaches the sign-in check', async () => {
+    const hasKey: boolean[] = [];
+    const create = vi
+      .spyOn(senderModule, 'createMtprotoSender')
+      .mockImplementation(({ dcId, authKey }) => {
+        hasKey.push(!!authKey);
+        return Effect.succeed({
+          dcId,
+          connected: Effect.succeed(true),
+          events: Stream.empty,
+          invoke: <Result>(request: senderModule.TlObject) => {
+            if (authKey)
+              return Effect.fail(
+                createMtprotoError('rpc', 'AUTH_KEY_DUPLICATED (invokeWithLayer)', {
+                  code: 406,
+                  details: { errorMessage: 'AUTH_KEY_DUPLICATED', request: 'invokeWithLayer' },
+                }),
+              );
+            if (request._ === 'updates.getState')
+              return Effect.fail(
+                createMtprotoError('rpc', 'AUTH_KEY_UNREGISTERED', {
+                  code: 401,
+                  details: { errorMessage: 'AUTH_KEY_UNREGISTERED' },
+                }),
+              );
+            return Effect.succeed({} as Result);
+          },
+        });
+      });
+    const otherKey = 'ac'.repeat(256);
+    const save = vi.fn(() => Effect.void);
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          providePlatform(
+            Effect.gen(function* () {
+              const transport = yield* createWebTelegramTransport({
+                loadTransportSession: Effect.succeed({
+                  mainDcId: 2,
+                  keys: { 2: 'ab'.repeat(256), 4: otherKey },
+                }),
+                saveTransportSession: save,
+              });
+              yield* transport.connect({ apiId: 1, apiHash: 'hash' });
+              expect(yield* transport.isAuthorized()).toBe(false);
+            }),
+          ),
+        ),
+      );
+      expect(hasKey).toEqual([true, false]);
+      expect(save).toHaveBeenCalledWith({ mainDcId: 2, keys: { 4: otherKey } });
     } finally {
       create.mockRestore();
     }
