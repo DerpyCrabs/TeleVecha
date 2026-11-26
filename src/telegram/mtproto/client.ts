@@ -468,9 +468,9 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
   });
 
   const sender = (key: SenderKey) => RcMap.get(senders, key);
-  const invokeWithRetry = <Result>(
+  const withSenderRetry = <Result>(
     initialKey: SenderKey,
-    request: TlObject,
+    operation: (target: MtprotoSender) => Effect.Effect<Result, MtprotoError>,
   ): Effect.Effect<Result, MtprotoError> =>
     Effect.gen(function* () {
       const currentKey = yield* Ref.make(initialKey);
@@ -478,7 +478,10 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
         Effect.gen(function* () {
           const key = yield* Ref.get(currentKey);
           return yield* Effect.scoped(
-            sender(key).pipe(Effect.flatMap((target) => target.invoke<Result>(request))),
+            sender(key).pipe(
+              Effect.tapError(() => RcMap.invalidate(senders, key)),
+              Effect.flatMap(operation),
+            ),
           );
         }).pipe(
           Effect.catch((error) =>
@@ -546,6 +549,8 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
       );
     });
 
+  const invokeWithRetry = <Result>(key: SenderKey, request: TlObject) =>
+    withSenderRetry(key, (target) => target.invoke<Result>(request));
   const mainKey = session.snapshot.pipe(Effect.map((snapshot) => keyFor('api', snapshot.mainDcId)));
   const invoke = <Request extends Tl.AnyRequest>(request: Request) =>
     Effect.gen(function* () {
@@ -565,10 +570,7 @@ export const createMtprotoClient = Effect.fn('mtproto.client.make')(function* (
   const client: MtprotoClient = {
     apiId: options.apiId,
     apiHash: options.apiHash,
-    connect: mainKey.pipe(
-      Effect.flatMap((key) => Effect.scoped(sender(key))),
-      Effect.asVoid,
-    ),
+    connect: mainKey.pipe(Effect.flatMap((key) => withSenderRetry(key, () => Effect.void))),
     connected: mainKey.pipe(
       Effect.flatMap((key) =>
         Effect.scoped(sender(key).pipe(Effect.flatMap((value) => value.connected))),

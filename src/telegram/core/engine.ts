@@ -22,7 +22,7 @@ import { pollDraftError } from '../../domain/poll';
 import type { TelegramPollDraft } from '../types';
 import { mergePollResults, pollHasVote, pollIsClosed } from '../../domain/poll';
 import type { TelegramPollAction } from '../types';
-import { createMtprotoError } from '../mtproto/errors';
+import { createMtprotoError, isMtprotoError } from '../mtproto/errors';
 import type { TelegramContact } from '../types';
 import type { TelegramForwardOptions } from '../types';
 import { SecureRandom } from 'effect/crypto';
@@ -580,6 +580,7 @@ function makeMessagingEngineModule(
             yield* patch({ online: false });
           }
           if (currentSnapshot().dialogs.length > 0) {
+            reportConnectionFailure(error, 'connection.start.failed');
             hasReachedReady = true;
             yield* patch({
               phase: 'ready',
@@ -635,6 +636,7 @@ function makeMessagingEngineModule(
               yield* disconnectTransport().pipe(Effect.ignore);
               yield* patch({ online: false });
               if (currentSnapshot().dialogs.length > 0 || hasReachedReady) {
+                reportConnectionFailure(error, 'connection.retry.failed');
                 yield* patch({
                   phase: 'ready',
                   sync: 'stale',
@@ -7531,6 +7533,27 @@ function makeMessagingEngineModule(
         ),
       ),
     );
+  }
+  function reportConnectionFailure(error: unknown, code: string) {
+    const rpc = isMtprotoError(error) ? error : undefined;
+    const symbol = rpc?.details?.errorMessage;
+    const method = rpc?.details?.request;
+    reportDiagnostic({
+      code,
+      area: 'transport',
+      level: 'warn',
+      message: 'Telegram connection setup failed.',
+      details: {
+        errorKind: rpc?.kind,
+        rpcCode: rpc?.code,
+        ...(typeof symbol === 'string' && /^[A-Z][A-Z_0-9]{1,79}$/u.test(symbol)
+          ? { code: symbol }
+          : {}),
+        ...(typeof method === 'string' && /^[a-zA-Z]+(?:\.[a-zA-Z]+)?$/u.test(method)
+          ? { method }
+          : {}),
+      },
+    });
   }
   function errorMessage(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
