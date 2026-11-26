@@ -12,7 +12,8 @@ test('signs in an existing account with phone and code', async ({ page }) => {
   await request.click();
 
   await expect(page.getByRole('heading', { name: 'Enter the login code' })).toBeVisible();
-  await page.getByRole('textbox', { name: 'Code' }).fill('12345');
+  await expect(page.getByRole('textbox', { name: 'Code' })).toBeFocused();
+  await page.keyboard.type('12345');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByTestId('chat-list')).toBeVisible();
@@ -26,7 +27,8 @@ test('handles two-step verification and allows retry after a wrong password', as
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   await expect(page.getByRole('heading', { name: 'Two-step verification' })).toBeVisible();
-  await page.getByLabel('Password').fill('wrong');
+  await expect(page.getByLabel('Password')).toBeFocused();
+  await page.keyboard.type('wrong');
   await page.getByRole('button', { name: 'Unlock' }).click();
   await expect(
     page.getByText(/Telegram rejected the two-step verification password/),

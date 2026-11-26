@@ -7,7 +7,7 @@ import LoaderCircle from '@effectweb/lucide/icons/loader-circle';
 import Phone from '@effectweb/lucide/icons/phone';
 import RotateCw from '@effectweb/lucide/icons/rotate-cw';
 import ShieldCheck from '@effectweb/lucide/icons/shield-check';
-import { Portal, view, component } from 'effectweb';
+import { Portal, view, component, domBinding } from 'effectweb';
 import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import { modalMount } from '../shared/modalMount';
 interface AuthOverlayProps {
@@ -22,6 +22,7 @@ interface AuthOverlayProps {
   onPassword: (password: string) => Effect.Effect<void, unknown>;
 }
 type AuthStep = 'phone' | 'code' | 'password';
+const focusAuthField = (input: HTMLInputElement) => input.focus({ preventScroll: true });
 const submitClass =
   'mt-[1.2rem] flex w-full items-center justify-center gap-2 rounded-xl border-0 bg-accent p-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45';
 const fieldClass =
@@ -95,7 +96,7 @@ const AuthForm = view<
           autocomplete={form.autocomplete}
           value={props.value}
           onInput={(event) => props.change(event.currentTarget.value)}
-          autofocus
+          use={domBinding(props.step, focusAuthField, { identity: props.step })}
           required
         />
       </label>
@@ -181,7 +182,6 @@ export const AuthOverlay = component(
               </button>
             </div>
           );
-        // Each stage has its own branch lifetime so the new field receives autofocus.
         switch (props.snapshot.authStep) {
           case 'qr':
             return (
