@@ -213,6 +213,13 @@ export function createConversationViewport(options: ConversationViewportOptions)
       targetLocked = false;
       lockedTarget = undefined;
     }
+    // Arrival translations are decorative. A history anchor needs the settled row position.
+    if (event.type === 'user-left-present' && scroller) {
+      for (const animation of scroller.getAnimations({ subtree: true })) {
+        if (animation.id === 'message-arrival') animation.finish();
+      }
+      geometryDirty = true;
+    }
     if (event.type === 'viewport-scrolled' && targetLocked) {
       options.reportVisibility();
       return;

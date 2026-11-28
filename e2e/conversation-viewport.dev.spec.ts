@@ -195,7 +195,7 @@ test('opening scroll events do not strand the first new message at the bottom wh
       viewport.dispose();
     }
   });
-  await page.screenshot({ path: '/tmp/chat-opening-new-messages.png' });
+  await page.screenshot({ path: test.info().outputPath('chat-opening-new-messages.png') });
   expect(result.firstBottom).toBeLessThanOrEqual(2);
   expect(result.distance).toBeLessThanOrEqual(2);
   expect(result.following).toBe(true);
