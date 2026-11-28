@@ -3,7 +3,7 @@ import { expect } from './expect';
 import { openReady, selectAlice } from './helpers';
 
 for (const width of [1326, 390]) {
-  test(`renders and downloads two rich TXT documents at ${width}px`, async ({ page }) => {
+  test(`renders and downloads two rich TXT documents at ${width}px`, async ({ page }, testInfo) => {
     await openReady(page);
     await selectAlice(page);
     await page.setViewportSize({ width, height: 900 });
@@ -48,7 +48,10 @@ for (const width of [1326, 390]) {
       await rich.getByRole('button', { name: `Download ${name}`, exact: true }).click();
       expect((await download).suggestedFilename()).toBe(name);
     }
-    await page.screenshot({ path: `/tmp/rich-documents-${width}.png`, animations: 'disabled' });
+    await page.screenshot({
+      path: testInfo.outputPath(`rich-documents-${width}.png`),
+      animations: 'disabled',
+    });
   });
 }
 

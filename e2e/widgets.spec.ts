@@ -59,7 +59,10 @@ test('runs a widget in the official sandbox without isolating the main messenger
   );
   await expect(popup.getByText('Updated by the bot', { exact: true })).toBeVisible();
   await expect(popup.getByText('Count: 1', { exact: true })).toBeVisible();
-  await popup.screenshot({ path: '/tmp/televecha-widget.png', animations: 'disabled' });
+  await popup.screenshot({
+    path: test.info().outputPath('televecha-widget.png'),
+    animations: 'disabled',
+  });
   expect(errors).toEqual([]);
   await popup.close();
 });

@@ -114,7 +114,7 @@ test('shows the profile and mutes, pins, blocks and deletes from the chat menu',
       .getByRole('menu', { name: 'Chat actions' })
       .getByRole('menuitem', { name: 'Unmute' })
       .click();
-    expect((await fixtureStats(page))?.setMuted).toBe(2);
+    await expect.poll(async () => (await fixtureStats(page))?.setMuted).toBe(2);
   });
   await test.step('pins, unpins, blocks, and unblocks from the chat context menu', async () => {
     const chat = page.getByRole('button', { name: /Alice Fixture/ });
@@ -128,9 +128,8 @@ test('shows the profile and mutes, pins, blocks and deletes from the chat menu',
     await chat.click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Unblock user' }).click();
 
-    const stats = await fixtureStats(page);
-    expect(stats?.setPinnedDialog).toBe(2);
-    expect(stats?.setBlocked).toBe(2);
+    await expect.poll(async () => (await fixtureStats(page))?.setPinnedDialog).toBe(2);
+    await expect.poll(async () => (await fixtureStats(page))?.setBlocked).toBe(2);
   });
   await test.step('confirms chat deletion and removes the deleted chat', async () => {
     const chat = page.getByRole('button', { name: /Alice Fixture/ });

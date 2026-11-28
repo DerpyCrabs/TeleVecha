@@ -185,6 +185,12 @@ test('never renders a server echo beside its optimistic message', async ({ page 
   });
   await expect.poll(async () => (await fixtureStats(page))?.lastSendRandomId).not.toBeUndefined();
 
+  // Measure movement caused by the echo after the deliberate send animation has landed.
+  await bubble.evaluate(async (element) => {
+    const row = element.closest('.message-flow-row')!;
+    await Promise.all(row.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+
   await page.evaluate(() => {
     const fixture = window.__televechaFixture;
     const randomId = fixture?.stats.lastSendRandomId;

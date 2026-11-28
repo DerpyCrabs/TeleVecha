@@ -38,7 +38,10 @@ test('opens a public post internally from text, shows paginated comments and ret
   expect(commentsLayout.below).toBe(true);
   expect(commentsLayout.widthGap).toBeLessThanOrEqual(2);
   expect(commentsLayout.bottomGap).toBeLessThanOrEqual(2);
-  await page.screenshot({ path: '/tmp/comments-strip.png', animations: 'disabled' });
+  await page.screenshot({
+    path: test.info().outputPath('comments-strip.png'),
+    animations: 'disabled',
+  });
   await comments.click();
   const panel = page.getByRole('dialog', { name: 'Comments', exact: true });
   await expect(panel.getByText('Fixture comment 75', { exact: true })).toBeVisible();

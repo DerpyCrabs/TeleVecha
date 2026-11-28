@@ -143,7 +143,7 @@ for (const held of [false, true]) {
           ),
       );
       expect(Math.abs((await earlier(131).boundingBox())!.y - anchorTop)).toBeLessThan(4);
-      await page.screenshot({ path: '/tmp/earlier-history-loading.png' });
+      await page.screenshot({ path: test.info().outputPath('earlier-history-loading.png') });
       await page.evaluate(() => window.__televechaFixture!.releaseHistory());
     }
     await expect(earlier(81)).toHaveCount(1);

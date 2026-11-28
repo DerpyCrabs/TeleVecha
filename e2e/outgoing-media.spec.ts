@@ -64,23 +64,14 @@ test('renders a generic file with one attachment card', async ({ page }) => {
   const message = page.locator('article[data-media-kind="file"]').last();
   await expect(message).toContainText('report.txt');
 
-  const framing = await message.evaluate((article) => {
-    const wrapper = article.querySelector<HTMLElement>(':scope > .media-attachment.media-file')!;
-    const control = wrapper.querySelector<HTMLElement>(':scope > :is(button, a).media-file')!;
-    return {
-      wrapperBorder: getComputedStyle(wrapper).borderTopWidth,
-      wrapperBackground: getComputedStyle(wrapper).backgroundColor,
-      controlBorder: getComputedStyle(control).borderTopWidth,
-      clipping: getComputedStyle(wrapper).overflow,
-    };
-  });
-
-  expect(framing).toEqual({
-    wrapperBorder: '0px',
-    wrapperBackground: 'rgba(255, 255, 255, 0.07)',
-    controlBorder: '0px',
-    clipping: 'visible',
-  });
+  const card = message.locator(':scope > .media-attachment.media-file');
+  await expect(card).toHaveCount(1);
+  await expect(card).toHaveCSS('border-top-width', '0px');
+  await expect(card).toHaveCSS('background-color', 'rgba(255, 255, 255, 0.07)');
+  await expect(card).toHaveCSS('overflow', 'visible');
+  const download = card.locator(':scope > .media-file-download');
+  await expect(download).toHaveCount(1);
+  await expect(download).toHaveCSS('border-top-width', '0px');
 });
 
 test('renders a staged album as one group while its upload is pending', async ({ page }) => {
@@ -551,7 +542,10 @@ for (const width of [1280, 375]) {
       return article.getBoundingClientRect().bottom - caption.getBoundingClientRect().bottom;
     });
     expect(captionBottomSpace).toBeLessThanOrEqual(width === 1280 ? 18 : 34);
-    await page.screenshot({ path: `/tmp/file-caption-${width}.png`, animations: 'disabled' });
+    await page.screenshot({
+      path: test.info().outputPath(`file-caption-${width}.png`),
+      animations: 'disabled',
+    });
     await expect(
       album.locator('..').getByText('Два исходных файла, одна отправка', { exact: true }),
     ).toHaveCount(1);

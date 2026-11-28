@@ -51,7 +51,10 @@ for (const width of [1326, 390]) {
         }),
       );
     const before = await measure();
-    await page.screenshot({ path: `/tmp/archive-before-${width}.png`, animations: 'disabled' });
+    await page.screenshot({
+      path: test.info().outputPath(`archive-before-${width}.png`),
+      animations: 'disabled',
+    });
     await album.getByRole('button', { name: 'Download swarm-home-1.0.0.z01', exact: true }).click();
     await album.getByRole('button', { name: 'Download swarm-home-1.0.0.zip', exact: true }).click();
     await expect(
@@ -60,7 +63,10 @@ for (const width of [1326, 390]) {
     await expect(album.getByText('25% downloaded', { exact: true })).toHaveCount(2);
     const during = await measure();
     expect(during).toEqual(before);
-    await page.screenshot({ path: `/tmp/archive-during-${width}.png`, animations: 'disabled' });
+    await page.screenshot({
+      path: test.info().outputPath(`archive-during-${width}.png`),
+      animations: 'disabled',
+    });
     for (const row of during) {
       expect(row.titleWidth).toBeGreaterThan(80);
       expect(row.buttonWidth).toBeGreaterThan(200);
@@ -114,7 +120,7 @@ for (const width of [1326, 390]) {
     expect(Math.abs(await rightGap(cancel))).toBeLessThan(1);
     expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(cancelBox.x + 1);
     expect(cancelBox.x + cancelBox.width).toBeLessThanOrEqual(width);
-    await row.screenshot({ path: `/tmp/document-${width}.png` });
+    await row.screenshot({ path: test.info().outputPath(`document-${width}.png`) });
     await cancel.click();
     await expect(download).toBeEnabled();
   });

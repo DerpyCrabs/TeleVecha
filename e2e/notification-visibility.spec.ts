@@ -164,7 +164,9 @@ for (const width of [1280, 375]) {
             (await target.evaluate((element) => element.getBoundingClientRect().top)) - position,
           ),
         ).toBeLessThan(3);
-        await page.screenshot({ path: `/tmp/notification-${kind}-${loaded}-${width}.png` });
+        await page.screenshot({
+          path: test.info().outputPath(`notification-${kind}-${loaded}-${width}.png`),
+        });
         await page.getByRole('button', { name: 'Jump to present', exact: true }).click();
         await expect
           .poll(() =>

@@ -65,6 +65,16 @@ test('keeps consecutive messages from the same sender closer together', async ({
     regular.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom)),
   ]);
   expect(compactGap).toBeLessThan(regularGap);
+  await expect(differentSender).toBeVisible();
+  // Measure settled row spacing after the incoming-message transitions finish.
+  await differentSender.evaluate((element) => {
+    const rows = element.closest('.message-scroller') ?? element.parentElement?.parentElement;
+    const animations =
+      rows
+        ?.getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity) ?? [];
+    return Promise.all(animations.map((animation) => animation.finished.catch(() => {})));
+  });
   const actualGaps = await Promise.all([
     first.evaluate(
       (element, next) => next.getBoundingClientRect().top - element.getBoundingClientRect().bottom,

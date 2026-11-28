@@ -103,7 +103,7 @@ for (const width of [375, 1280]) {
   for (const unread of [false, true]) {
     test(`${unread ? 'Unread' : 'Read'} status stays below message actions and has no disabled hover at ${width}px`, async ({
       page,
-    }) => {
+    }, testInfo) => {
       await openReady(page, `/?chat=u%3A101${unread ? '&scenario=unread-receipts' : ''}`);
       await page.setViewportSize({ width, height: 800 });
       await page.evaluate(() =>
@@ -138,7 +138,9 @@ for (const width of [375, 1280]) {
         };
       });
       expect(style).toEqual({ background: 'rgba(0, 0, 0, 0)', top: '1px', bottom: '0px' });
-      await page.screenshot({ path: `/tmp/read-status-menu-${unread}-${width}.png` });
+      await page.screenshot({
+        path: testInfo.outputPath(`read-status-menu-${unread}-${width}.png`),
+      });
       await menu.getByRole('menuitem', { name: 'Reply', exact: true }).click();
       await expect(page.getByTestId('composer-reply')).toContainText('Read status menu target');
     });
@@ -180,7 +182,7 @@ for (const width of [375, 1280]) {
     expect(await page.evaluate(() => window.__televechaFixture!.stats.getMessageReadReceipts)).toBe(
       1,
     );
-    await page.screenshot({ path: `/tmp/stable-receipt-menu-${width}.png` });
+    await page.screenshot({ path: test.info().outputPath(`stable-receipt-menu-${width}.png`) });
   });
 }
 

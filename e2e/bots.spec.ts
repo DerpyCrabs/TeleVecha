@@ -494,12 +494,15 @@ test('repeats message commands without replacing the draft and keeps bot control
   await expect(input).toHaveValue('');
   await expect.poll(async () => (await fixtureStats(page))?.sendText).toBe(count + 2);
   await page.getByRole('button', { name: 'Menu', exact: true }).click();
-  await page.screenshot({ path: '/tmp/televecha-bot-desktop.png' });
+  await page.screenshot({ path: test.info().outputPath('televecha-bot-desktop.png') });
   await input.click();
   await expect(page.getByRole('menu', { name: 'Bot commands' })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('.chat-sidebar')).toBeHidden();
-  await page.screenshot({ path: '/tmp/televecha-bot-mobile.png', animations: 'disabled' });
+  await page.screenshot({
+    path: test.info().outputPath('televecha-bot-mobile.png'),
+    animations: 'disabled',
+  });
   expect(
     await page.locator('.chat-composer').evaluate((el) => el.scrollWidth <= el.clientWidth),
   ).toBe(true);
@@ -547,7 +550,7 @@ test('renders live rich drafts in place and clears them on final delivery or exp
   await expect(draft).toHaveCount(1);
   await expect(draft.getByRole('heading', { name: 'Streaming answer' })).toBeVisible();
   await expect(draft.locator('.katex')).toBeVisible();
-  await page.screenshot({ path: '/tmp/televecha-bot-stream.png' });
+  await page.screenshot({ path: test.info().outputPath('televecha-bot-stream.png') });
   await page.evaluate(() =>
     window.__televechaFixture?.emit({
       type: 'new-message',

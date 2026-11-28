@@ -109,7 +109,10 @@ test('shows mention and reaction badges beside unread counts in wide and compact
   await expect(alice.locator('[title="2 unread replies and mentions"]')).toBeVisible();
   await expect(alice.locator('[title="3 unread reactions"]')).toBeVisible();
   await expect(alice.locator('.chat-unread-badge-trailing')).toHaveClass(/muted/);
-  await page.screenshot({ path: '/tmp/chat-indicators-wide.png', animations: 'disabled' });
+  await page.screenshot({
+    path: test.info().outputPath('chat-indicators-wide.png'),
+    animations: 'disabled',
+  });
   await page.getByRole('separator', { name: 'Resize chat list' }).focus();
   await page.getByRole('separator', { name: 'Resize chat list' }).press('Home');
   const compact = alice.locator('.chat-attention-badges-compact');
@@ -121,7 +124,10 @@ test('shows mention and reaction badges beside unread counts in wide and compact
     return badges.top >= unread.bottom;
   });
   expect(positions).toBe(true);
-  await page.screenshot({ path: '/tmp/chat-indicators-compact.png', animations: 'disabled' });
+  await page.screenshot({
+    path: test.info().outputPath('chat-indicators-compact.png'),
+    animations: 'disabled',
+  });
   await page.evaluate(() => {
     const dialog = [...window.__televechaRuntimes!.values()][0]!.engine
       .snapshot()
@@ -167,6 +173,9 @@ for (const theme of ['night', 'tinted', 'day', 'classic']) {
     await row.evaluate((element) => element.setAttribute('aria-current', 'true'));
     expect(await contrast()).toBeGreaterThanOrEqual(4.5);
     await row.evaluate((element) => element.removeAttribute('aria-current'));
-    await page.screenshot({ path: `/tmp/muted-badge-${theme}.png`, animations: 'disabled' });
+    await page.screenshot({
+      path: test.info().outputPath(`muted-badge-${theme}.png`),
+      animations: 'disabled',
+    });
   });
 }
