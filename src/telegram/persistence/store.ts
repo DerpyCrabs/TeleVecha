@@ -1,5 +1,5 @@
 import { orderPending } from '../pendingOrder';
-import { Effect, Exit, Schema } from 'effect';
+import { Effect, Exit, Scheduler, Schema } from 'effect';
 import { type DBSchema, type IDBPDatabase, openDB } from 'idb';
 
 import type {
@@ -52,6 +52,10 @@ interface AtomicWriteContext<Transaction> {
   readonly request: <Value>(request: Promise<Value>) => Effect.Effect<Value, CacheStoreError>;
 }
 
+// IndexedDB permits the next request only in the same task as transaction creation or
+// the previous request. A cooperative fiber yield can otherwise let the browser commit.
+const withinIdbTransaction = Effect.provideService(Scheduler.PreventSchedulerYield, true);
+
 const runAtomicWrite = <Transaction extends AtomicWriteTransaction, Value>(
   acquire: () => Transaction,
   use: (context: AtomicWriteContext<Transaction>) => Effect.Effect<Value, CacheStoreError>,
@@ -93,7 +97,7 @@ const runAtomicWrite = <Transaction extends AtomicWriteTransaction, Value>(
               // A rejected IndexedDB request may already have aborted the transaction.
             }
           }).pipe(Effect.andThen(idbRequest(() => transaction.done).pipe(Effect.ignore))),
-  );
+  ).pipe(withinIdbTransaction);
 export interface TimedCacheValue<T> {
   value: T;
   savedAt: number;
@@ -414,7 +418,7 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
       ),
       pinnedMessages,
     };
-  });
+  }, withinIdbTransaction);
   function loadTransportSessionInternal() {
     return idbRequest(() => databaseHandle.get('meta', 'transport-session'));
   }
@@ -679,7 +683,7 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
     }
     yield* idbRequest(() => transaction.done);
     return messages.reverse();
-  });
+  }, withinIdbTransaction);
   const loadMessagesBefore = Effect.fn('IndexedDbCacheStore.loadMessagesBefore')(function* (
     peerId: string,
     beforeMessageId: number,
@@ -707,7 +711,7 @@ function makeIndexedDbCacheStoreModule(database: IDBPDatabase<TeleVechaSchema>) 
     }
     yield* idbRequest(() => transaction.done);
     return messages.reverse();
-  });
+  }, withinIdbTransaction);
   const loadMessage = Effect.fn('IndexedDbCacheStore.loadMessage')(function* (
     peerId: string,
     messageId: number,
