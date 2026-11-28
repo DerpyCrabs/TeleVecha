@@ -13,9 +13,9 @@ test('serves the TeleVecha browser identity', async ({ page, request }) => {
   );
 
   const href = await page.locator('link[rel="icon"]').getAttribute('href');
-  expect(href).toBe('/favicon.svg');
+  expect(decodeURIComponent(href ?? '')).toMatch(/<text[^>]*>4<\/text>/u);
 
-  const response = await request.get(href!);
+  const response = await request.get('/favicon.svg');
   expect(response.ok()).toBe(true);
   expect(response.headers()['content-type']).toContain('image/svg+xml');
   expect(await response.text()).toContain('<title>TeleVecha</title>');

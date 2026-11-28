@@ -40,7 +40,27 @@ async function settleLayout() {
     ),
   );
 }
+async function showTabIconPreview() {
+  const header = await element('.sidebar-header');
+  const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (!icon) return;
+  const preview = document.createElement('img');
+  preview.width = 32;
+  preview.height = 32;
+  preview.alt = 'Tab icon';
+  preview.title = 'TeleVecha tab icon';
+  const refresh = () => {
+    preview.src = icon.href;
+  };
+  refresh();
+  header.append(preview);
+  new MutationObserver(refresh).observe(icon, { attributes: true, attributeFilter: ['href'] });
+}
+
 installFixtureLocks();
+if (new URLSearchParams(location.search).get('scenario') === 'gallery-notebook') {
+  showTabIconPreview().catch(console.error);
+}
 await runScenario(async ({ conditions }) => {
   if (mounted) {
     location.replace(initialUrl);

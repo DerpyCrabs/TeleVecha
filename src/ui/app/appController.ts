@@ -1,3 +1,5 @@
+import tabIcon from '../../assets/favicon.svg?raw';
+import { normalizeUnreadCount } from '../chat/unreadCount';
 import { firstUnreadRow } from '../conversation/messageGroups';
 import { type SavedDialog, type SavedMessagesInfo } from '../../telegram/savedMessages';
 import { forumDraftKey, type TelegramForumTopic } from '../../telegram/forums';
@@ -524,6 +526,9 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       });
     return reuseArray(previous, next) as ChatSummary[];
   }, []);
+  const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  const originalIcon = favicon?.href;
+  let tabBadgeLabel: string | undefined;
   const updateAppBadge = whenChanged(
     () => state.model().snapshot.dialogs,
     () => {
@@ -534,6 +539,21 @@ export const createAppController = Effect.fn('createAppController')(function* (p
       const unread = state
         .model()
         .snapshot.dialogs.reduce((total, dialog) => total + Math.max(0, dialog.unreadCount), 0);
+      const audibleUnread = state
+        .model()
+        .snapshot.dialogs.reduce(
+          (total, dialog) => total + (dialog.muted ? 0 : normalizeUnreadCount(dialog.unreadCount)),
+          0,
+        );
+      const label = audibleUnread > 99 ? '99+' : String(audibleUnread);
+      if (favicon && originalIcon && label !== tabBadgeLabel) {
+        tabBadgeLabel = label;
+        const width = label.length === 1 ? 36 : 60;
+        const badge = `<rect x="${64 - width}" y="22" width="${width}" height="42" rx="12" fill="#bc233b"/><text x="${64 - width / 2}" y="56" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="${label.length === 3 ? 30 : 38}" fill="white">${label}</text>`;
+        favicon.href = audibleUnread
+          ? 'data:image/svg+xml,' + encodeURIComponent(tabIcon.replace('</svg>', badge + '</svg>'))
+          : originalIcon;
+      }
       const update =
         unread > 0 ? badgeNavigator.setAppBadge?.(unread) : badgeNavigator.clearAppBadge?.();
       if (update !== undefined) runInBackground(update);

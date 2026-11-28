@@ -1017,7 +1017,7 @@ export const createFixtureTelegramTransport = Effect.fn('telegram.fixtureTranspo
               ...fixtureDialog(peers[0]!, 'Alice Fixture', '#7c5cff'),
               ...(scenario === 'single-unread' ? { unreadCount: 1, readInboxMaxId: 79 } : {}),
             },
-            fixtureDialog(peers[1]!, 'Release Channel', '#4ca184'),
+            { ...fixtureDialog(peers[1]!, 'Release Channel', '#4ca184'), muted: Boolean(gallery) },
             fixtureDialog(peers[2]!, 'Fixture Group', '#b26b3f'),
             ...(['long-history', 'unread-history', 'delayed-history-media'].includes(scenario)
               ? [
