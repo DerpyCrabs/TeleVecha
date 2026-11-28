@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { EngineStateLayer } from '../core/engineState';
 import { CoordinatorTasksLayer } from './coordinatorTasks';
 import { makeTabCoordinator } from './tabCoordinator';
-import type { TelegramMessage } from '../types';
+import type { TelegramConversationEvent, TelegramMessage } from '../types';
 
 const provideCoordinator = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.scoped(effect).pipe(Effect.provide(Layer.merge(EngineStateLayer, CoordinatorTasksLayer)));
@@ -289,6 +289,8 @@ it('retains a live pinned-message update while initial conversation metadata is 
         });
         const entered = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
+        const returned = yield* Deferred.make<void>();
+        let publish!: (event: TelegramConversationEvent) => void;
         const coordinator = yield* makeTabCoordinator({
           key: 'pinned-load-race',
           loadBlob: () => Effect.succeed(undefined),
@@ -296,11 +298,16 @@ it('retains a live pinned-message update while initial conversation metadata is 
             Effect.succeed({
               engine: {
                 ...engine,
+                subscribeConversationEvents: (listener) => {
+                  publish = listener;
+                  return engine.subscribeConversationEvents(listener);
+                },
                 loadConversationPinnedMessages: (peerId: string) =>
                   Effect.gen(function* () {
                     const captured = yield* engine.loadConversationPinnedMessages(peerId);
                     yield* Deferred.succeed(entered, undefined);
                     yield* Deferred.await(release);
+                    yield* Deferred.succeed(returned, undefined);
                     return captured;
                   }),
               },
@@ -311,18 +318,18 @@ it('retains a live pinned-message update while initial conversation metadata is 
         yield* coordinator.client.openConversation('u:101');
         yield* Effect.yieldNow;
         yield* Deferred.await(entered);
-        yield* Effect.sleep(1);
         const pinned = {
           ...coordinator.client.snapshot().messages[0]!,
           text: 'New pin during metadata',
         };
-        yield* coordinator.handleInternalEvent({
-          _tag: 'conversation',
-          event: { type: 'pinned-messages', peerId: 'u:101', messages: [pinned] },
-        });
-        expect(coordinator.client.snapshot().pinnedMessages).toEqual([pinned]);
+        // Use the owner's event queue so the live pin follows metadata events already issued.
+        publish({ type: 'pinned-messages', peerId: 'u:101', messages: [pinned] });
+        yield* Effect.promise(() =>
+          expect.poll(() => coordinator.client.snapshot().pinnedMessages).toEqual([pinned]),
+        );
         yield* Deferred.succeed(release, undefined);
-        yield* Effect.sleep(10);
+        yield* Deferred.await(returned);
+        yield* Effect.yieldNow;
         expect(coordinator.client.snapshot().pinnedMessages).toEqual([pinned]);
       }),
     ).pipe(Effect.provide(MessagingEngineLayer), Effect.provide(BrowserCrypto.layer)),

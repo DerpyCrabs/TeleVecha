@@ -140,6 +140,59 @@ const installChannel = (owner: boolean = false) => {
 };
 
 describe('tab coordinator request and hydration regressions', () => {
+  it('starts a newly elected owner before replaying workspace requests queued during election', () => {
+    installChannel();
+    let signalLeaseRequest!: () => void;
+    let finishElection!: () => void;
+    const leaseRequested = new Promise<void>((resolve) => {
+      signalLeaseRequest = resolve;
+    });
+    const releaseElection = new Promise<void>((resolve) => {
+      finishElection = resolve;
+    });
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (
+          _name: string,
+          _options: unknown,
+          callback: (lock: object) => Promise<void>,
+        ) => {
+          signalLeaseRequest();
+          await releaseElection;
+          await callback({});
+        },
+      },
+    });
+    return Effect.runPromise(
+      provideCoordinator(
+        Effect.gen(function* () {
+          const transport = yield* createFixtureTelegramTransport();
+          const engine = yield* makeMessagingEngine(transport, makeMemoryCacheStore(), {
+            manageTabLease: false,
+          });
+          const connect = vi.spyOn(transport, 'connect');
+          const coordinator = yield* makeTabCoordinator({
+            key: 'election-workspace',
+            createOwner: () => Effect.succeed({ engine, transport }),
+            loadBlob: () => Effect.succeed(undefined),
+          });
+          const startup = yield* coordinator
+            .start({ apiId: 1, apiHash: 'fixture' })
+            .pipe(Effect.forkChild);
+          yield* Effect.promise(() => leaseRequested);
+          const counts = yield* coordinator.client
+            .loadConversationSharedMediaCounts('u:101')
+            .pipe(Effect.forkChild);
+          yield* Effect.yieldNow;
+          finishElection();
+          yield* Fiber.join(startup).pipe(Effect.timeout('1 second'));
+          yield* Fiber.join(counts).pipe(Effect.timeout('1 second'));
+          expect(connect).toHaveBeenCalledTimes(1);
+        }),
+      ).pipe(Effect.provide(MessagingEngineLayer), Effect.provide(BrowserCrypto.layer)),
+    );
+  });
+
   it('preserves byte ranges when forwarding media requests to the owner', () => {
     installChannel(true);
     return Effect.runPromise(

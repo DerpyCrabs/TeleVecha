@@ -195,10 +195,15 @@ test('preserves a follower conversation when it takes ownership', async ({ conte
   const send = second.getByRole('button', { name: 'Send message' });
   await expect(second.getByTestId('conversation-header')).toContainText('Release Channel');
   await expect
-    .poll(() =>
-      second.evaluate(
-        () => window.__televechaRuntimes?.get('fixture:default')?.engine.snapshot().online,
-      ),
+    .poll(
+      () =>
+        second.evaluate(
+          () =>
+            Boolean(window.__televechaFixture) &&
+            window.__televechaRuntimes?.get('fixture:default')?.engine.snapshot().online === true,
+        ),
+      // An abrupt close can require the seven-second lease timeout plus the monitor tick.
+      { timeout: 15_000 },
     )
     .toBe(true);
   await second.getByRole('textbox', { name: 'Message' }).fill('Release survives takeover');

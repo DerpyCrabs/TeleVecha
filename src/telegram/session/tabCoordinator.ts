@@ -2042,7 +2042,6 @@ function errorMessage(error: unknown) {
       Effect.sync(() => announceOwner()),
     );
     announceOwner();
-    yield* flushPendingRequests();
     yield* createdOwner.engine.start(credentials).pipe(
       Effect.tap(() => Deferred.succeed(starting, undefined)),
       Effect.tapError((error) => Deferred.fail(starting, error)),
@@ -2052,6 +2051,9 @@ function errorMessage(error: unknown) {
         }),
       ),
     );
+    // A command retained during promotion can await this engine's workspace readiness.
+    // Start the engine before replaying that command on the newly acquired owner.
+    yield* flushPendingRequests();
   });
   const abandonFailedOwnership = Effect.fn('TabCoordinator.abandonFailedOwnership')(function* (
     error: unknown,
